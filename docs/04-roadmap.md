@@ -35,7 +35,7 @@ individual docs. What remains:
 | 1 — fwextract plumbing | not started (see note below) |
 | 2 — static host-side analysis | **substantially done** |
 | 2b — tracing | not started (not on the critical path) |
-| 3 — transport bring-up | not started |
+| 3 — transport bring-up | **blocked** — see [25](25-bringup-results.md) |
 | 4 — first light | not started |
 | 5 — V4L2 driver | not started |
 
