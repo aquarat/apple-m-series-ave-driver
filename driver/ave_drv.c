@@ -58,17 +58,19 @@ enum ave_stage {
 	AVE_STAGE_REQUEST_IRQ	= 4,
 	AVE_STAGE_POWER_ATTACH	= 5,
 	AVE_STAGE_POWER_ON	= 6,	/* resume only - NO register access */
-	AVE_STAGE_READ_SVE	= 7,	/* first actual register read */
-	AVE_STAGE_FW_ADOPT	= 8,
-	AVE_STAGE_IPC_ALLOC	= 9,
-	AVE_STAGE_START		= 10,
-	AVE_STAGE_MAX		= 10,
+	AVE_STAGE_READ_ASC	= 7,	/* read bank 1 - what Apple touches first */
+	AVE_STAGE_ASC_START	= 8,	/* the four-write start sequence */
+	AVE_STAGE_READ_SVE	= 9,	/* bank 2, only after the IOP is up */
+	AVE_STAGE_FW_ADOPT	= 10,
+	AVE_STAGE_IPC_ALLOC	= 11,
+	AVE_STAGE_START		= 12,
+	AVE_STAGE_MAX		= 12,
 };
 
 static const char * const ave_stage_name[] = {
 	"none", "map-banks", "dma-mask", "get-irq", "request-irq",
-	"power-attach", "power-on", "read-sve-status", "fw-adopt",
-	"ipc-alloc", "start",
+	"power-attach", "power-on", "read-asc-status", "asc-start",
+	"read-sve-status", "fw-adopt", "ipc-alloc", "start",
 };
 
 /* Returns true if this stage should run. Logs the decision either way. */
@@ -412,11 +414,40 @@ static int ave_probe(struct platform_device *pdev)
 	}
 
 	/*
-	 * First actual hardware access in the whole driver. Everything above
-	 * only establishes mappings, handlers and power. The SVE
-	 * interrupt-status register is chosen because reading it has no side
-	 * effects, and because an unpowered block hangs the fabric here.
+	 * First hardware access, and the ordering here is not arbitrary.
+	 *
+	 * A scan of every AVE_Reg::Read32/Write32 call site in the kext shows
+	 * the only unconditional register accesses are bank 1 (the twenty
+	 * AVE_IOP_Start_ and CheckIdle_ variants) and the AVE_SVECtrl methods on
+	 * bank 2 - and every bank 2 user runs only after the IOP has been
+	 * started. AVE_HwC::Init's single access is Read32(bank 5, 0x9c000),
+	 * a device-revision read on a bank ave0 does not even have.
+	 *
+	 * An earlier attempt read bank 2 cold, before touching bank 1 at all,
+	 * and hung the machine with every power domain confirmed on. Apple
+	 * never does that. Bank 1 goes first.
 	 */
+	if (ave_stage(dev, AVE_STAGE_READ_ASC)) {
+		u32 v;
+
+		dev_info(dev, "  reading ASC+0x%x (CPU_STATUS) ...\n",
+			 AVE_ASC_CPU_STATUS);
+		v = ave_read(ave, AVE_BANK_ASC, AVE_ASC_CPU_STATUS);
+		dev_info(dev, "  ASC CPU_STATUS = 0x%08x\n", v);
+		ave_stage_ok(dev, AVE_STAGE_READ_ASC);
+	} else {
+		return 0;
+	}
+
+	if (ave_stage(dev, AVE_STAGE_ASC_START)) {
+		ret = ave_asc_start(ave);
+		if (ret)
+			return dev_err_probe(dev, ret, "ASC start\n");
+		ave_stage_ok(dev, AVE_STAGE_ASC_START);
+	} else {
+		return 0;
+	}
+
 	if (ave_stage(dev, AVE_STAGE_READ_SVE)) {
 		u32 v;
 
