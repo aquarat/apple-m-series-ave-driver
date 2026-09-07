@@ -43,7 +43,10 @@ firmware and device tree.
 | Input pixel formats | NV12-style `420v`/`420f` **and** Interchange (lossless) | Confirmed |
 | Frame size formulas | all four layout primitives transcribed | Confirmed |
 | `420v` @ 1920x1080 | 3,110,400 B; Y stride 1920 @ 0; CbCr stride 1920 @ `0x1FA400` | Confirmed |
-| Stride/plane alignment | none applied by the primitives; taken from IOSurface | Confirmed |
+| **Input stride constraint** | **non-zero multiple of 64 on both planes** (enforced, `-1015`) | Confirmed |
+| Plane count | 2 planes only; a third would alias onto plane 1 | Confirmed |
+| Kext-allocated surfaces | linear blobs, `align_up(size, 16 KB)`, no geometry keys | Confirmed |
+| FwIPC allocator | ChkPool buddy allocator, 64-byte granule and alignment | Confirmed |
 | Encode surface set | 35-slot InfoSet; 19 internal + 7 out allocations | Confirmed |
 | `Recon` @ 1920x1080 | 3,133,440 B; DPB hard max 17 frames | Confirmed |
 | Coded-output size | **not a closed form** — rate-control dependent | Open |
