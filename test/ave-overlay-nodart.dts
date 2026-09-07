@@ -1,0 +1,45 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/*
+ * Reduced test overlay: the AVE node ONLY.
+ *
+ * Deliberately omits the DART and the "iommus" property. apple-dart programs
+ * registers on probe and is the leading suspect for the 2026-09-07 hang
+ * (docs/24); apple-ave needs no IOMMU until it does DMA, which is several
+ * stages away. Reintroduce the DART later as its own experiment, after
+ * resolving why the ADT gives dart-ave0 four reg ranges when every
+ * apple,t6000-dart node in the live tree has one.
+ *
+ * Literal phandles (the base tree has no __symbols__):
+ *   0x13  aic
+ *   0xc4  ps_venc_pipe4
+ *   0xc5  ps_venc_me0
+ *
+ * Compile WITHOUT -@: that flag emits a __symbols__ node the live tree lacks,
+ * and the overlay is then rejected with -EINVAL.
+ */
+/dts-v1/;
+/plugin/;
+
+/ {
+	fragment@0 {
+		target-path = "/soc";
+
+		__overlay__ {
+			#address-cells = <2>;
+			#size-cells = <2>;
+
+			ave0: video-encoder@20d100000 {
+				compatible = "apple,t6001-ave", "apple,ave";
+				reg = <0x2 0x0d100000 0x0 0x45c000>,
+				      <0x2 0x0d800000 0x0 0x800000>,
+				      <0x2 0x0d050000 0x0 0x008000>,
+				      <0x0 0x8e588000 0x0 0x000024>,
+				      <0x2 0x0c000000 0x0 0x1000000>;
+				reg-names = "dpe", "asc", "sve", "unk3", "axi2af";
+				interrupt-parent = <0x13>;
+				interrupts = <0 0 1031 4>;
+				power-domains = <0xc4>, <0xc5>;
+			};
+		};
+	};
+};
