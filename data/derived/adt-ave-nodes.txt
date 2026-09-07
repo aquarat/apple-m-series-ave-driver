@@ -1,0 +1,336 @@
+===== /arm-io/ave0 =====
+  compatible               = ListContainer: 
+    ave2
+  iommu-parent             = 323
+  interrupt-parent         = 130
+  interrupts               = ListContainer: 
+    1031
+    1025
+    1024
+    1027
+    1026
+  reg                      = ListContainer: 
+    Container: 
+        addr = 0x000000020D100000
+        size = 0x000000000045C000
+    Container: 
+        addr = 0x000000020D800000
+        size = 0x0000000000800000
+    Container: 
+        addr = 0x000000020D050000
+        size = 0x0000000000008000
+    Container: 
+        addr = 0x000000008E588000
+        size = 0x0000000000000024
+    Container: 
+        addr = 0x000000020C000000
+        size = 0x0000000001000000
+  clock-gates              = ListContainer: 
+    456
+    457
+    458
+    301
+    302
+    303
+    304
+    300
+    459
+    600
+    602
+  clock-ids                = ListContainer: 
+    350
+  AAPL,phandle             = 321
+  device_type              = ave
+  power-gates              = ListContainer: 
+    456
+    457
+    458
+    301
+    302
+    303
+    304
+    300
+    459
+    600
+    602
+  function-mcc_dataset     = Container: 
+    phandle = 129
+    name = u'M$DS' (total 4)
+    args = ListContainer: 
+  coprovider-group         = ave
+  soc-id                   = t6000
+  name                     = ave0
+
+===== /arm-io/dart-ave0 =====
+  clock-gates              = ListContainer: 
+    508
+  AAPL,phandle             = 322
+  bypass                   = 32768
+  instance                 = b'FPADCPUDART\x00TRADDART\x00\x00\x00\x00UMMSSMMU\x00\x00\x00\x00'
+  remap                    = 1
+  dart-options             = 37
+  filter-data-instance-0   = b'\x00\x00\x00\x00\xf0\x01\x00\x00\xff\xff\xff\xff\xf0\x01\x00\x00\x00\x03\x03\x00\x01\x00\x00\x00\x00\x00\x00\x06\x05\x00\x00\x00\x00\xc0\xc6\x07\x05\x00\x00\x00\x00\x03\x01\x00\x01\x00\x00\x00'
+  name                     = dart-ave0
+  interrupt-parent         = 130
+  compatible               = ListContainer: 
+    dart,t6000
+  interrupts               = ListContainer: 
+    1028
+  page-size                = 16384
+  diag-config              = 2147492096
+  real-time                = None
+  bypass-address           = b'\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00'
+  ioa-parent               = ListContainer: 
+    0x0000000402000000
+    0x0000000000004000
+  vm-base                  = 0
+  smmu-clock-gating        = None
+  error-reflector          = 11040047104
+  device_type              = dart
+  power-gates              = ListContainer: 
+    508
+  reg                      = ListContainer: 
+    Container: 
+        addr = 0x000000020D040000
+        size = 0x0000000000004000
+    Container: 
+        addr = 0x000000020D030000
+        size = 0x0000000000004000
+    Container: 
+        addr = 0x000000020D020000
+        size = 0x0000000000004000
+    Container: 
+        addr = 0x000000020D044000
+        size = 0x0000000000004000
+  sids                     = 32769
+
+===== /arm-io/dart-ave0/mapper-ave0 =====
+  device_type              = dart-mapper
+  compatible               = ListContainer: 
+    iommu-mapper
+  iomd-cache-ttl           = 2000
+  iomd-cache-size          = 512
+  reg                      = 0
+  AAPL,phandle             = 323
+  name                     = mapper-ave0
+
+===== /arm-io/ave1 =====
+  compatible               = ListContainer: 
+    ave2
+  iommu-parent             = 326
+  interrupt-parent         = 130
+  interrupts               = ListContainer: 
+    1041
+    1035
+    1034
+    1037
+    1036
+  reg                      = ListContainer: 
+    Container: 
+        addr = 0x0000000307100000
+        size = 0x000000000045C000
+    Container: 
+        addr = 0x0000000307800000
+        size = 0x0000000000800000
+    Container: 
+        addr = 0x0000000307050000
+        size = 0x0000000000008000
+    Container: 
+        addr = 0x000000008E680260
+        size = 0x0000000000007DC4
+    Container: 
+        addr = 0x0000000306000000
+        size = 0x0000000001000000
+  clock-gates              = ListContainer: 
+    549
+    550
+    551
+    368
+    369
+    370
+    371
+    367
+    552
+    601
+    603
+  clock-ids                = ListContainer: 
+    454
+  AAPL,phandle             = 324
+  device_type              = ave
+  power-gates              = ListContainer: 
+    549
+    550
+    551
+    368
+    369
+    370
+    371
+    367
+    552
+    601
+    603
+  function-mcc_dataset     = Container: 
+    phandle = 129
+    name = u'M$DS' (total 4)
+    args = ListContainer: 
+  coprovider-group         = ave
+  soc-id                   = t6001
+  name                     = ave1
+  sve-id                   = 1
+
+===== /arm-io/dart-ave1 =====
+  clock-gates              = ListContainer: 
+    518
+  AAPL,phandle             = 325
+  bypass                   = 32768
+  instance                 = b'FPADCPUDART\x00TRADDART\x00\x00\x00\x00UMMSSMMU\x00\x00\x00\x00'
+  remap                    = 1
+  dart-options             = 37
+  filter-data-instance-0   = b'\x00\x00\x00\x00\xf0\x01\x00\x00\xff\xff\xff\xff\xf0\x01\x00\x00\x00\x03\x03\x00\x01\x00\x00\x00\x00\x00\x05\r\x04\x00\x00\x00\x00\x90\xc6\r\x04\x00\x00\x00\x00\x03\x01\x00\x01\x00\x00\x00'
+  name                     = dart-ave1
+  interrupt-parent         = 130
+  compatible               = ListContainer: 
+    dart,t6000
+  interrupts               = ListContainer: 
+    1038
+  page-size                = 16384
+  diag-config              = 2147492096
+  real-time                = None
+  bypass-address           = b'\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00'
+  ioa-parent               = ListContainer: 
+    0x0000000502000000
+    0x0000000000004000
+  vm-base                  = 0
+  smmu-clock-gating        = None
+  error-reflector          = 11040047104
+  device_type              = dart
+  power-gates              = ListContainer: 
+    518
+  reg                      = ListContainer: 
+    Container: 
+        addr = 0x0000000307040000
+        size = 0x0000000000004000
+    Container: 
+        addr = 0x0000000307030000
+        size = 0x0000000000004000
+    Container: 
+        addr = 0x0000000307020000
+        size = 0x0000000000004000
+    Container: 
+        addr = 0x0000000307044000
+        size = 0x0000000000004000
+  sids                     = 32769
+
+===== /arm-io/dart-ave1/mapper-ave1 =====
+  device_type              = dart-mapper
+  compatible               = ListContainer: 
+    iommu-mapper
+  iomd-cache-ttl           = 2000
+  iomd-cache-size          = 512
+  reg                      = 0
+  AAPL,phandle             = 326
+  name                     = mapper-ave1
+
+===== /arm-io/avd0 =====
+  compatible               = ListContainer: 
+    avd,t8103
+    avd,t6000
+  clock-ids                = ListContainer: 
+    349
+  interrupt-parent         = 130
+  interrupts               = ListContainer: 
+    1011
+    1012
+  clock-gates              = ListContainer: 
+    460
+    461
+    462
+  iommu-parent             = b'I\x01\x00\x00J\x01\x00\x00K\x01\x00\x00'
+  reg                      = ListContainer: 
+    Container: 
+        addr = 0x0000000086000000
+        size = 0x0000000001404000
+  avd-ads-keytype-version  = 1
+  device_type              = avd
+  avd-version              = 4
+  function-avd_reset       = Container: 
+    phandle = 153
+    name = u'ARST' (total 4)
+    args = ListContainer: 
+        56
+  h264-playback-level      = 42
+  AAPL,phandle             = 327
+  ads-present              = 1
+  decode-samples-per-second = 112387
+  function-mcc_dataset     = Container: 
+    phandle = 129
+    name = u'M$DS' (total 4)
+    args = ListContainer: 
+  coprovider-group         = avd
+  name                     = avd0
+  power-gates              = ListContainer: 
+    460
+    461
+    462
+
+===== /arm-io/dart-avd0 =====
+  compatible               = ListContainer: 
+    dart,t8110
+  page-size                = 16384
+  interrupt-parent         = 130
+  interrupts               = ListContainer: 
+    1018
+  clock-gates              = ListContainer: 
+    502
+  bypass-15                = 8589934592
+  reg                      = ListContainer: 
+    Container: 
+        addr = 0x0000000087010000
+        size = 0x0000000000004000
+  error-reflector          = 11040047104
+  device_type              = dart
+  AAPL,phandle             = 328
+  sid                      = ListContainer: 
+    0x0000000100000000
+    0x0000000F00000002
+  dart-options             = 37
+  vm-base                  = 0
+  diag-config              = 10
+  instance                 = ListContainer: 
+    0x0000000044415254
+    0x0000000054524144
+  power-gates              = ListContainer: 
+    502
+  vm-size                  = 68719411200
+  name                     = dart-avd0
+
+===== /arm-io/dart-avd0/mapper-avd0 =====
+  device_type              = dart-mapper
+  compatible               = ListContainer: 
+    iommu-mapper
+  iomd-cache-ttl           = 2000
+  iomd-cache-size          = 64
+  reg                      = 0
+  AAPL,phandle             = 329
+  name                     = mapper-avd0
+
+===== /arm-io/dart-avd0/mapper-avd0-piodma =====
+  device_type              = dart-mapper
+  compatible               = ListContainer: 
+    iommu-mapper
+  iomd-cache-ttl           = 2000
+  iomd-cache-size          = 64
+  reg                      = 1
+  AAPL,phandle             = 330
+  name                     = mapper-avd0-piodma
+
+===== /arm-io/dart-avd0/mapper-avd0-adsbuf =====
+  device_type              = dart-mapper
+  compatible               = ListContainer: 
+    iommu-mapper
+  iomd-cache-ttl           = 2000
+  iomd-cache-size          = 64
+  reg                      = 2
+  AAPL,phandle             = 331
+  name                     = mapper-avd0-adsbuf
+

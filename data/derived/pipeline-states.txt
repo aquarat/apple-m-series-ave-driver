@@ -1,0 +1,18 @@
+# Contiguous __cstring run used by SendState()/remoteSystemState[].
+# Index is the string's position in the run, i.e. probable enum value.
+
+  0  0x00122a87  INVALID
+  1  0x00122a8f  AVE_READY
+  2  0x00122a99  ENQUEUE
+  3  0x00122aa1  LRME_FS_START
+  4  0x00122aaf  LRME_FS_DONE
+  5  0x00122abc  LRME_RC_START
+  6  0x00122aca  LRME_RC_DONE
+  7  0x00122ad7  PIPE_RESET_READY
+  8  0x00122ae8  PIPE_RESET_DONE
+  9  0x00122af8  PIPE_START
+ 10  0x00122b03  PIPE_DONE
+ 11  0x00122b0d  XC_START
+ 12  0x00122b16  XC_DONE
+ 13  0x00122b1e  CMD_ACK
+ 14  0x00122b26  CMD_READY

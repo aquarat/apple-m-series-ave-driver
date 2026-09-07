@@ -1,0 +1,134 @@
+ave0 {
+    compatible = [ave2]
+    iommu-parent = 323
+    interrupt-parent = 130
+    interrupts = [1031, 1025, 1024, 1027, 1026]
+    reg = [Container: 
+    addr = 0x000000020D100000
+    size = 0x000000000045C000, Container: 
+    addr = 0x000000020D800000
+    size = 0x0000000000800000, Container: 
+    addr = 0x000000020D050000
+    size = 0x0000000000008000, Container: 
+    addr = 0x000000008E588000
+    size = 0x0000000000000024, Container: 
+    addr = 0x000000020C000000
+    size = 0x0000000001000000]
+    clock-gates = [456, 457, 458, 301, 302, 303, 304, 300, 459, 600, 602]
+    clock-ids = [350]
+    AAPL,phandle = 321
+    device_type = ave
+    power-gates = [456, 457, 458, 301, 302, 303, 304, 300, 459, 600, 602]
+    function-mcc_dataset = 129:M$DS()
+    coprovider-group = ave
+    soc-id = t6000
+
+}ave1 {
+    compatible = [ave2]
+    iommu-parent = 326
+    interrupt-parent = 130
+    interrupts = [1041, 1035, 1034, 1037, 1036]
+    reg = [Container: 
+    addr = 0x0000000307100000
+    size = 0x000000000045C000, Container: 
+    addr = 0x0000000307800000
+    size = 0x0000000000800000, Container: 
+    addr = 0x0000000307050000
+    size = 0x0000000000008000, Container: 
+    addr = 0x000000008E680260
+    size = 0x0000000000007DC4, Container: 
+    addr = 0x0000000306000000
+    size = 0x0000000001000000]
+    clock-gates = [549, 550, 551, 368, 369, 370, 371, 367, 552, 601, 603]
+    clock-ids = [454]
+    AAPL,phandle = 324
+    device_type = ave
+    power-gates = [549, 550, 551, 368, 369, 370, 371, 367, 552, 601, 603]
+    function-mcc_dataset = 129:M$DS()
+    coprovider-group = ave
+    soc-id = t6001
+    sve-id = 1
+
+}dart-ave0 {
+    clock-gates = [508]
+    AAPL,phandle = 322
+    bypass = 32768
+    instance = 465041444350554441525400545241444441525400000000554d4d53534d4d5500000000
+    remap = 1
+    dart-options = 37
+    filter-data-instance-0 = 00000000f0010000fffffffff00100000003030001000000000000060500000000c0c607050000000003010001000000
+    interrupt-parent = 130
+    compatible = [dart,t6000]
+    interrupts = [1028]
+    page-size = 16384
+    diag-config = 2147492096
+    real-time = None
+    bypass-address = 0000000000000000000000000000000000000000000000000000000000000200
+    ioa-parent = [0x0000000402000000, 0x0000000000004000]
+    vm-base = 0
+    smmu-clock-gating = None
+    error-reflector = 11040047104
+    device_type = dart
+    power-gates = [508]
+    reg = [Container: 
+    addr = 0x000000020D040000
+    size = 0x0000000000004000, Container: 
+    addr = 0x000000020D030000
+    size = 0x0000000000004000, Container: 
+    addr = 0x000000020D020000
+    size = 0x0000000000004000, Container: 
+    addr = 0x000000020D044000
+    size = 0x0000000000004000]
+    sids = 32769
+
+    mapper-ave0 {
+        device_type = dart-mapper
+        compatible = [iommu-mapper]
+        iomd-cache-ttl = 2000
+        iomd-cache-size = 512
+        reg = 0
+        AAPL,phandle = 323
+
+    }
+}dart-ave1 {
+    clock-gates = [518]
+    AAPL,phandle = 325
+    bypass = 32768
+    instance = 465041444350554441525400545241444441525400000000554d4d53534d4d5500000000
+    remap = 1
+    dart-options = 37
+    filter-data-instance-0 = 00000000f0010000fffffffff001000000030300010000000000050d040000000090c60d040000000003010001000000
+    interrupt-parent = 130
+    compatible = [dart,t6000]
+    interrupts = [1038]
+    page-size = 16384
+    diag-config = 2147492096
+    real-time = None
+    bypass-address = 0000000000000000000000000000000000000000000000000000000000000200
+    ioa-parent = [0x0000000502000000, 0x0000000000004000]
+    vm-base = 0
+    smmu-clock-gating = None
+    error-reflector = 11040047104
+    device_type = dart
+    power-gates = [518]
+    reg = [Container: 
+    addr = 0x0000000307040000
+    size = 0x0000000000004000, Container: 
+    addr = 0x0000000307030000
+    size = 0x0000000000004000, Container: 
+    addr = 0x0000000307020000
+    size = 0x0000000000004000, Container: 
+    addr = 0x0000000307044000
+    size = 0x0000000000004000]
+    sids = 32769
+
+    mapper-ave1 {
+        device_type = dart-mapper
+        compatible = [iommu-mapper]
+        iomd-cache-ttl = 2000
+        iomd-cache-size = 512
+        reg = 0
+        AAPL,phandle = 326
+
+    }
+}
