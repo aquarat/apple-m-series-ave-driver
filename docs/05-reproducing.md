@@ -80,9 +80,26 @@ For disassembly, `llvm-objdump` reads the `MH_PRELOAD` image directly:
 llvm-objdump -d --start-address=0xe66a4 --stop-address=0xe6860 data/blobs/ave_h13c.bin
 ```
 
+## 5. The host side
+
+The kernelcache from the same IPSW carries `AppleAVE2.kext`. See
+[06-kext.md](06-kext.md) for the walkthrough:
+
+```sh
+./.venv/bin/pyimg4 im4p extract -i data/blobs/kernelcache.release.mac13j -o data/blobs/kc.macho
+python3 tools/kext_extract.py data/blobs/kc.macho --list --grep ave
+python3 tools/kext_classmap.py data/derived/kext-symbols.txt
+```
+
+For raw disassembly of kext code, `llvm-objdump` will not resolve
+`__TEXT_EXEC` addresses in the fileset; compute the file offset by hand
+(`va - 0xfffffe0008b34bb0 + 0x1b30bb0` for this kernelcache) and use
+`objdump -D -b binary -m aarch64`.
+
 ## Provenance
 
 - IPSW: `UniversalMac_26.6.2_25G83_Restore.ipsw` (macOS 26.6.2, build 25G83)
 - Machine: MacBook Pro 14" M1 Max, `apple,j314c` / `apple,t6001`
 - Asahi kernel at time of writing: `7.1.6-400.asahi.fc44.aarch64+16k`
 - Firmware build string: `RTKit-3255.160.4.release`
+- Kernelcache: `kernelcache.release.mac13j` (same IPSW)

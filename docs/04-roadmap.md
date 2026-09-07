@@ -2,21 +2,31 @@
 
 ## Open questions, in priority order
 
-1. **Mailbox endpoint ids.** Up to 8 RTKit routes; numbers are populated at
-   runtime in BSS. Needs a hypervisor trace or deeper disassembly of
-   `PlatformIOPIPCManager::InitMailboxRoute` (`0xe66a4`). *Blocks everything.*
-2. **Which `reg` range is the ASC?** `0x20D050000`+`0x8000` is the candidate.
-   Cheap to confirm once tracing works.
-3. **Is `H13C` the right variant for `t6001`?** Inferred from file sizes.
-   Confirm against `AppleAVE2.kext`'s selection logic.
-4. **Shared-memory ABI.** `_S_AVE_Session_PFCfg`, `AVE_PICMGMT_PARAMS` etc.
-   Names known, layouts not.
-5. **Power sequencing.** Eleven power/clock gates per instance, order unknown.
-6. **Input pixel formats.** Does AVE accept the "Interchange" tiled format
+1. **Numeric wire command ids.** The command *set* is known from both sides
+   (`AVE_HwC::SendFwCmd_*`, `CFlowControllerBase::ProcessCmd_*`). The ids are
+   written into the command struct by `AVE_CHM_MakeFwCmd_*`; recovering them
+   means following those field stores. **Static work — no hypervisor needed.**
+2. **Shared-memory channel layout.** `AVE_IPC` (`CreateChannel`, `Send`/`Recv`,
+   `Kernel2FwAddr`) is the real data path. Disassembling `AVE_IPC::Init` and
+   `CreateChannel` should give the ring layout. **Also static.**
+3. **RTKit mailbox endpoint ids.** Up to 8 routes, populated at runtime in BSS.
+   Now known to gate *bring-up only*, not the data path — and RTKit's own
+   management endpoint enumerates endpoints during the boot handshake, which
+   `apple-rtkit` already parses. So this may resolve itself on first boot
+   rather than needing a trace.
+4. **Which `reg` range is the ASC?** `0x20D050000`+`0x8000` is the candidate.
+5. **Is `H13C` the right variant for `t6001`?** Inferred from file sizes.
+   `AVE_FwImg::RetrieveInfo` / `AVE_DevInfo` in the kext should settle it —
+   static.
+6. **Struct layouts.** `sCAveCmdOpen` is 120 bytes; the rest
+   (`AVE_PICMGMT_PARAMS`, `_S_AVE_Session_PFCfg`, `_S_AVE_FrameInfo`) need
+   disassembly of their accessors. Static, but laborious.
+7. **Power sequencing.** Eleven gates per instance; `AVE_PMGR`'s
+   `SetPSDependencyUp/Down` and `CheckPeerUp/Down` encode the order — static.
+8. **Input pixel formats.** Does AVE accept the "Interchange" tiled format
    shared by AVD/AGX/DCP? If so, zero-copy capture→encode is possible. Worth
    an early check but should **not** gate anything — an NV12 path will exist.
-7. **Command wire ids.** Handler names confirmed; the enum ordering assumed
-   from `__text` layout needs one trace to verify.
+
 
 ## Sequencing
 
@@ -27,8 +37,15 @@ established; command set and state machine recovered.
 `AppleAVE2FW_*.im4p`. Small, self-contained, upstreamable, useful before any
 driver exists, and a reasonable way to open the conversation with upstream.
 
-**Phase 2 — tracing.** Requires a second machine for the m1n1 hypervisor
-serial console. Run `ffmpeg -c:v h264_videotoolbox` under the hypervisor with
+**Phase 2 — static host-side analysis (no hardware).** Extract
+`AppleAVE2.kext` from the kernelcache and work through `AVE_HwC`, `AVE_IPC`,
+`AVE_PMGR` and the `AVE_CHM_MakeFwCmd_*` builders. This was previously assumed
+to require tracing; it does not. See [06-kext.md](06-kext.md). Expected to
+yield the wire ids, the channel layout, the power sequence and the bring-up
+order.
+
+**Phase 2b — tracing, if still needed.** Requires a second machine for the
+m1n1 hypervisor serial console. Run `ffmpeg -c:v h264_videotoolbox` under the hypervisor with
 MMIO/DART tracing on `ave0`. Trace at **two levels**, not one:
 
 - hypervisor MMIO + DART underneath, and
@@ -38,7 +55,8 @@ The upper trace matters because VideoToolbox does real work in userspace, and
 the split between framework / kext / firmware is not yet known. MMIO traces
 alone will not show it.
 
-This should resolve questions 1, 2, 4 and 7 together.
+Best treated as confirmation of the static work rather than the primary
+source, and as the way to close anything Phase 2 could not.
 
 **Phase 3 — transport.** Bring up `apple-rtkit` against AVE: boot the firmware,
 attach endpoints, get crashlog and syslog endpoints responding. Standard RTKit
@@ -60,14 +78,18 @@ But two things make it less bad than that comparison suggests:
 - The transport is standard RTKit, not a bespoke bare-metal shim.
 - The firmware kept its symbols, so the protocol is substantially readable
   statically rather than purely by inference from traces.
+- **Both sides are available.** The kext supplies the host half — 1198 AVE
+  methods with meaningful names. Between the two, most of the protocol is
+  recoverable without ever powering on the hardware.
 
 The validation loop is also far friendlier than a decoder's. A decoder must
 match a reference bit-exactly; an encoder only has to emit a *legal*
 bitstream, and `ffmpeg` gives ground truth on every attempt. Quality can be
 improved incrementally after first light.
 
-Realistic estimate: months, not years — but Phase 2 needs hardware access and
-a second machine, and that is the gate.
+Realistic estimate: months, not years. The second machine is no longer the
+gate on progress — Phase 2 can proceed entirely offline, and hardware is only
+needed once there is something to run.
 
 ## Payoff
 
