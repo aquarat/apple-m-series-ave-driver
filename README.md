@@ -41,6 +41,9 @@ firmware and device tree.
 | IPC ring | 20 MiB `FwIPC` surface, 3 channels, `0x40` slots, phase-bit sync | Confirmed |
 | ASC start sequence | 4 register writes + idle poll, exact values | Confirmed |
 | Input pixel formats | NV12-style `420v`/`420f` **and** Interchange (lossless) | Confirmed |
+| Frame size formulas | all four layout primitives transcribed | Confirmed |
+| `420v` @ 1920x1080 | 3,110,400 B; Y stride 1920 @ 0; CbCr stride 1920 @ `0x1FA400` | Confirmed |
+| Stride/plane alignment | none applied by the primitives; taken from IOSurface | Confirmed |
 | DART | kext uses IOKit mapper only; `apple-dart` + DMA API suffices | Confirmed |
 | Power | no MMIO; `apple-pmgr-pwrstate` suffices. 11 domains, order known | Confirmed |
 | `ave0` / `ave1` coupling | none via power management — independent | Confirmed |
