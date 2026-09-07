@@ -33,6 +33,8 @@ firmware and device tree.
 | Userspace ABI | 10 IOKit selectors, exact struct sizes | Confirmed |
 | SoC identification | ADT `soc-id` -> DevID: t8103=10, t6000=11, t6001=12 | Confirmed |
 | MMIO bank mapping | bank N = ADT `reg` index N; ASC is bank 1 `+0x400000` | Confirmed |
+| Doorbell | bank 2 `+0x0C`, write `1 << chan_bit`; status W1C at `+0x10` | Confirmed |
+| IPC ring | 20 MiB `FwIPC` surface, 3 channels, `0x40` slots, phase-bit sync | Confirmed |
 | ASC start sequence | 4 register writes + idle poll, exact values | Confirmed |
 | Input pixel formats | NV12-style `420v`/`420f` **and** Interchange (lossless) | Confirmed |
 | DART | kext uses IOKit mapper only; `apple-dart` + DMA API suffices | Confirmed |

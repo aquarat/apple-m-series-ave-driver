@@ -40,7 +40,7 @@ N**. Roles below are from call sites (see
 |---|---|---|---|
 | 0 | `0x20D100000` | `0x45C000` | `AVE_DPE` — confirmed |
 | 1 | `0x20D800000` | `0x800000` | **ASC coprocessor block at `+0x400000`** — confirmed |
-| 2 | `0x20D050000` | `0x8000`   | no call site found — unknown |
+| 2 | `0x20D050000` | `0x8000`   | **IPC doorbell / interrupt / scratch mailbox** — confirmed |
 | 3 | `0x8E588000`  | `0x24`     | no call site found — unknown; **not** the `mcc_dataset` window |
 | 4 | `0x20C000000` | `0x1000000`| `AVE_AXI2AF` — confirmed |
 
@@ -68,6 +68,30 @@ idle when `value & 0x3 == 0` (`tst w0, #0x3` at `0xfffffe0008c2adbc`).
 
 Sibling routines exist for other SoCs — `_Atlas`, `_Castor`, `_Hera` — at the
 same offsets, so this sequence is not specific to `t6001`.
+
+### Bank 2 — the IPC doorbell block (verified)
+
+Bank 2 is reached through a per-SoC offset table rather than immediates, which
+is why a scan for immediate bank-2 accesses finds nothing. `AVE_SVECtrl::SetIntr`
+(`0xfffffe0008c91510`) is the proof:
+
+```
+fffffe0008c91534:  ldp  x0, x8, [x19, #24]   ; x0 = AVE_Reg*, x8 = offset table
+fffffe0008c91538:  ldr  w2, [x8]             ; offset = table[0]
+fffffe0008c9153c:  mov  w1, #0x2             ; bank 2
+fffffe0008c91544:  bl   0xfffffe0008c53e58   ; AVE_Reg::Write32(reg, bank, off, val)
+```
+
+The t6000/t6001 table at `0xfffffe00072748b4` reads
+`0x0c, 0x10, 0x08, 0x18, 0x1c, 0x20, 0x24, 0x28`, giving:
+
+| offset | absolute (`ave0`) | role |
+|---|---|---|
+| `0x0C` | `0x20D05000C` | doorbell — write `1 << descriptor[+0x44]` |
+| `0x10` | `0x20D050010` | interrupt status (write-1-to-clear) |
+| `0x18`+ | `0x20D050018`… | scratch mailbox registers |
+
+See [08-ipc-transport.md](08-ipc-transport.md).
 
 `ave1` mirrors this at `0x307100000`, `0x307800000`, `0x307050000`,
 `0x8E680260`, `0x306000000`.
