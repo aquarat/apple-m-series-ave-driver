@@ -23,9 +23,12 @@
    disassembly of their accessors. Static, but laborious.
 7. **Power sequencing.** Eleven gates per instance; `AVE_PMGR`'s
    `SetPSDependencyUp/Down` and `CheckPeerUp/Down` encode the order — static.
-8. **Input pixel formats.** Does AVE accept the "Interchange" tiled format
-   shared by AVD/AGX/DCP? If so, zero-copy capture→encode is possible. Worth
-   an early check but should **not** gate anything — an NV12 path will exist.
+8. ~~**Input pixel formats.**~~ **Answered** — see
+   [12-dart-surfaces-mmio.md](12-dart-surfaces-mmio.md). AVE accepts Interchange
+   (lossless variant only on M1 Pro/Max), so zero-copy capture→encode is
+   possible; and plain `420v`/`420f` exists on both codecs, so the simple NV12
+   bring-up path is available. Surface size/alignment formulas are the
+   remaining gap.
 
 
 ## Status

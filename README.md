@@ -31,6 +31,11 @@ firmware and device tree.
 | Numeric command ids | 1–12, from the firmware jump table (5 unused) | Confirmed |
 | Command struct sizes | `0x48` for most, `0x78` Config, `0x13F08` Reset | Confirmed |
 | Userspace ABI | 10 IOKit selectors, exact struct sizes | Confirmed |
+| SoC identification | ADT `soc-id` -> DevID: t8103=10, t6000=11, t6001=12 | Confirmed |
+| MMIO bank mapping | bank N = ADT `reg` index N; ASC is bank 1 `+0x400000` | Confirmed |
+| ASC start sequence | 4 register writes + idle poll, exact values | Confirmed |
+| Input pixel formats | NV12-style `420v`/`420f` **and** Interchange (lossless) | Confirmed |
+| DART | kext uses IOKit mapper only; `apple-dart` + DMA API suffices | Confirmed |
 | Mailbox endpoint ids | **Unknown** — gates bring-up only, not the data path | Open |
 
 Two findings matter most. **AVE runs RTKit**, so m1n1's tracer and Linux's
