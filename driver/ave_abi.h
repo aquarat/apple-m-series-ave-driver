@@ -87,13 +87,21 @@ enum ave_enc_type {
  * Same enum as _S_AVE_CHM+0x34. Note this is NOT _E_AVE_ClientType.
  */
 enum ave_work_type {
-	AVE_WORK_ENC	= 0,	/* anything not listed below */
+	AVE_WORK_ENC	= 1,
 	AVE_WORK_LRME	= 2,
 	AVE_WORK_MCTF	= 3,
 	AVE_WORK_MSC	= 4,
 	AVE_WORK_GGM	= 5,
 	AVE_WORK_DMV	= 6,
 };
+/*
+ * Read from the AVE_MD_SVE::CalcSurfaceInfo dispatch at
+ * 0xfffffe0008c8c83c..0xc8c894: a clean switch on 1..6 in which 3 branches to
+ * AVE_Work_MCTF_CalcSurfaceInfo and 6 to AVE_Work_DMV_CalcSurfaceInfo, with 0
+ * and anything > 6 falling to the error arm. Note Enc is 1, not 0 - an earlier
+ * reading of docs/11 ("else Enc") left this ambiguous and it was briefly
+ * recorded as 0 here.
+ */
 
 /*
  * Firmware pipeline states, reported back to the host.
@@ -241,6 +249,83 @@ struct ave_surface_info {
 	__le32	extra[4];	/* +0x20 sub-region sizes; for Recon these are
 				 *       luma/chroma data and meta sizes       */
 } __packed;
+
+/*
+ * Surface indices (_E_AVE_SurfaceIdx), from the name table at
+ * 0xfffffe0007ee1050 (41 entries, 16 bytes each).
+ */
+enum ave_surface_idx {
+	AVE_SURF_INPUT_DATA		= 0,
+	AVE_SURF_INPUT_SCALED_DATA	= 1,
+	AVE_SURF_DIRECT_RECON		= 2,
+	AVE_SURF_UC_INFO		= 3,	/* no InfoSet slot */
+	AVE_SURF_MULTI_PASS_STATS	= 4,
+	AVE_SURF_MB_INPUT_CTRL		= 5,
+	AVE_SURF_RECON			= 6,
+	AVE_SURF_LINK			= 7,
+	AVE_SURF_CODED_DATA		= 8,
+	AVE_SURF_CODED_HEADER		= 9,
+	AVE_SURF_SLICE_HEADER		= 10,
+	AVE_SURF_PROTECTED_DATA		= 11,
+	AVE_SURF_MB_STATS		= 12,
+	AVE_SURF_STATIC_AREA_QPMOD	= 13,	/* count 0 on M1 */
+	AVE_SURF_STATIC_AREA_CBP0	= 14,	/* count 0 on M1 */
+	AVE_SURF_COLOCATED		= 15,
+	AVE_SURF_HSC_OUTPUT		= 16,	/* count 0 on M1 */
+	AVE_SURF_LFS_REF		= 17,
+	AVE_SURF_LRS_NEIGHBOR_MV	= 18,	/* count 0 on M1 */
+	AVE_SURF_LFS_RESULT		= 19,
+	AVE_SURF_LRS_RESULT		= 20,
+	AVE_SURF_SRC_NEIGHBOR_INFO	= 21,
+	AVE_SURF_SRC_NEIGHBOR_PIXEL	= 22,
+	AVE_SURF_SRC_NEIGHBOR_DATA	= 23,
+	AVE_SURF_SRC_NEIGHBOR_FW_DATA	= 24,
+	AVE_SURF_TRANSCODED_DATA	= 25,	/* count 0 on M1 */
+	AVE_SURF_ENTROPY_CODING		= 26,
+	AVE_SURF_IOP_IPC		= 27,	/* no InfoSet slot */
+	AVE_SURF_FW_IMAGE		= 28,	/* no InfoSet slot */
+	AVE_SURF_FW_LOG			= 29,	/* no InfoSet slot */
+	AVE_SURF_FW_HEAP		= 30,	/* no InfoSet slot */
+	AVE_SURF_FW_IPC			= 31,	/* no InfoSet slot */
+	AVE_SURF_FW_CLIENT		= 32,
+	AVE_SURF_FW_CLIENT_MEM		= 33,
+	AVE_SURF_INIT_PARAMS_COPY	= 34,
+	AVE_SURF_MCTF_OUTPUT		= 35,
+	AVE_SURF_MCTF_REF		= 36,
+	AVE_SURF_GGM_REF		= 37,
+	AVE_SURF_GGM_STATS		= 38,
+	AVE_SURF_GGM_OUTPUT		= 39,
+	AVE_SURF_DMV_OUTPUT		= 40,
+	AVE_SURF_COUNT			= 41,
+};
+
+/*
+ * Surface index -> InfoSet slot.
+ *
+ * Six indices have no slot: 3 (UCInfo) and 27..31 (the device-global and
+ * firmware surfaces). Those are allocated directly with the static config
+ * flags, with no InfoSet entry to OR in.
+ *
+ * Settled by AVE_CreateDataSurfaces (0xfffffe0008c78600), which pairs
+ * GetSurfaceCfg(idx) with the InfoSet load in the same basic block:
+ * idx 2 -> [x26,#96] at 0xfffffe0008c7886c, then idx 4 -> [x26,#144] at
+ * 0xfffffe0008c789cc. AVE_DARTMapDataSurfaces reproduces it while emitting
+ * idx 5 before idx 4, so this is not an ordering artefact.
+ * AVE_GetSurfaceCfg itself does no remapping (sbfiz x8,x0,#4 at
+ * 0xfffffe0008ca8d00, bound cmp w0,#0x29).
+ */
+#define AVE_SLOT_NONE	0xff
+
+static inline u8 ave_surface_slot(enum ave_surface_idx idx)
+{
+	if (idx == AVE_SURF_UC_INFO || (idx >= AVE_SURF_IOP_IPC && idx <= AVE_SURF_FW_IPC))
+		return AVE_SLOT_NONE;
+	if (idx <= AVE_SURF_DIRECT_RECON)
+		return idx;			/* 0..2   -> 0..2   */
+	if (idx <= AVE_SURF_ENTROPY_CODING)
+		return idx - 1;			/* 4..26  -> 3..25  */
+	return idx - 6;				/* 32..40 -> 26..34 */
+}
 
 /* DPB capacity: refNum is capped at 16 and the total at a hard 17. */
 #define AVE_DPB_MAX		17
