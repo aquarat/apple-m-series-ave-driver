@@ -11,6 +11,37 @@
 #   ./tools/bringup.sh --status what happened last time
 #
 set -u
+
+# ---------------------------------------------------------------------------
+# SAFETY INTERLOCK - DO NOT REMOVE
+#
+# This script loads kernel modules that have hard-hung this machine six times
+# (docs/25-bringup-results.md). It must never run by accident, and in
+# particular must never be run by an automated agent exploring the repository.
+#
+# On 2026-09-07 a subagent doing static analysis ran this script and reset the
+# machine. The agent had been told not to run git; it had not been told not to
+# touch hardware. The fix is here rather than in the prompt, because a
+# safeguard that depends on everyone remembering an instruction is not one.
+#
+# To run deliberately:   AVE_I_MEAN_IT=1 ./tools/bringup.sh <stage>
+# ---------------------------------------------------------------------------
+if [ "${AVE_I_MEAN_IT:-}" != "1" ] && [ "${1:-}" != "--status" ]; then
+    cat >&2 <<'WARN'
+REFUSING TO RUN.
+
+tools/bringup.sh loads kernel modules that hang this machine. It is not safe
+to run casually, and automated agents must not run it at all.
+
+Read docs/25-bringup-results.md first. If you really intend to attempt a
+bring-up stage on hardware:
+
+    AVE_I_MEAN_IT=1 ./tools/bringup.sh <first-stage> [last-stage]
+
+"./tools/bringup.sh --status" is always allowed and touches nothing.
+WARN
+    exit 2
+fi
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 MARK="$REPO/data/bringup-marker"
 LOGDIR="$REPO/data/bringup-logs"
