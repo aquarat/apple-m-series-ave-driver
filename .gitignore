@@ -6,3 +6,5 @@ data/blobs/
 .venv/
 __pycache__/
 m1n1-src/
+data/bringup-marker
+data/bringup-logs/

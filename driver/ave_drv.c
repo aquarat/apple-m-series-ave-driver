@@ -31,6 +31,65 @@
 #define AVE_ASC_IDLE_TIMEOUT_US		100000
 
 /*
+ * Bring-up staging.
+ *
+ * There is no serial console on this machine, so a hang is silent. probe()
+ * is therefore split into numbered stages and stops after `stop_after`. Each
+ * stage logs before and after itself, so:
+ *
+ *   - if the machine survives, dmesg names every stage that completed;
+ *   - if it hangs, the marker file written by tools/bringup.sh before insmod
+ *     names the stage that did it.
+ *
+ * Stages that survive can be retested with rmmod/insmod in the same boot, so
+ * only a stage that actually hangs costs a reboot.
+ *
+ * Default is 0: map nothing, touch nothing. Raise it deliberately.
+ */
+static int stop_after;
+module_param(stop_after, int, 0444);
+MODULE_PARM_DESC(stop_after, "stop probe after this stage (0 = do nothing)");
+
+enum ave_stage {
+	AVE_STAGE_NONE		= 0,
+	AVE_STAGE_MAP_BANKS	= 1,
+	AVE_STAGE_DMA_MASK	= 2,
+	AVE_STAGE_GET_IRQ	= 3,
+	AVE_STAGE_REQUEST_IRQ	= 4,
+	AVE_STAGE_POWER_ATTACH	= 5,
+	AVE_STAGE_READ_SVE	= 6,	/* first actual register read */
+	AVE_STAGE_FW_ADOPT	= 7,
+	AVE_STAGE_IPC_ALLOC	= 8,
+	AVE_STAGE_POWER_ON	= 9,
+	AVE_STAGE_ASC_START	= 10,
+	AVE_STAGE_HANDSHAKE	= 11,
+	AVE_STAGE_MAX		= 11,
+};
+
+static const char * const ave_stage_name[] = {
+	"none", "map-banks", "dma-mask", "get-irq", "request-irq",
+	"power-attach", "read-sve-status", "fw-adopt", "ipc-alloc",
+	"power-on", "asc-start", "handshake",
+};
+
+/* Returns true if this stage should run. Logs the decision either way. */
+static bool ave_stage(struct device *dev, enum ave_stage n)
+{
+	if (n > stop_after) {
+		dev_info(dev, "stage %d (%s): SKIPPED (stop_after=%d)\n",
+			 n, ave_stage_name[n], stop_after);
+		return false;
+	}
+	dev_info(dev, "stage %d (%s): starting\n", n, ave_stage_name[n]);
+	return true;
+}
+
+static void ave_stage_ok(struct device *dev, enum ave_stage n)
+{
+	dev_info(dev, "stage %d (%s): OK\n", n, ave_stage_name[n]);
+}
+
+/*
  * Linux's DT already encodes the AVE power-domain tree (venc_sys -> venc_dma
  * -> venc_pipe4 / venc_pipe5 -> venc_me0 -> venc_me1), so genpd brings up the
  * whole chain from a leaf. The DT node lists the two leaves; we simply attach
@@ -257,66 +316,120 @@ static int ave_probe(struct platform_device *pdev)
 
 	ave->dev = dev;
 	platform_set_drvdata(pdev, ave);
+	dev_info(dev, "probe: staged bring-up, stop_after=%d (max %d)\n",
+		 stop_after, AVE_STAGE_MAX);
 
-	for (i = 0; i < AVE_NUM_BANKS; i++) {
-		struct resource *res;
+	if (ave_stage(dev, AVE_STAGE_MAP_BANKS)) {
+		for (i = 0; i < AVE_NUM_BANKS; i++) {
+			struct resource *res;
 
-		ave->bank[i].base = devm_platform_get_and_ioremap_resource(
-			pdev, i, &res);
-		if (IS_ERR(ave->bank[i].base))
-			return dev_err_probe(dev, PTR_ERR(ave->bank[i].base),
-					     "failed to map bank %u (%s)\n",
-					     i, bank_names[i]);
-		ave->bank[i].size = resource_size(res);
+			dev_info(dev, "  mapping bank %u (%s)\n", i, bank_names[i]);
+			ave->bank[i].base = devm_platform_get_and_ioremap_resource(
+				pdev, i, &res);
+			if (IS_ERR(ave->bank[i].base))
+				return dev_err_probe(dev, PTR_ERR(ave->bank[i].base),
+						     "bank %u (%s) failed\n",
+						     i, bank_names[i]);
+			ave->bank[i].size = resource_size(res);
+		}
+		ave_stage_ok(dev, AVE_STAGE_MAP_BANKS);
+	} else {
+		return 0;
+	}
+
+	if (ave_stage(dev, AVE_STAGE_DMA_MASK)) {
+		ret = dma_set_mask_and_coherent(dev, DMA_BIT_MASK(42));
+		if (ret)
+			return dev_err_probe(dev, ret, "no suitable DMA mask\n");
+		ave_stage_ok(dev, AVE_STAGE_DMA_MASK);
+	} else {
+		return 0;
+	}
+
+	if (ave_stage(dev, AVE_STAGE_GET_IRQ)) {
+		ave->irq = platform_get_irq(pdev, AVE_IRQ_INDEX);
+		if (ave->irq < 0)
+			return ave->irq;
+		dev_info(dev, "  irq = %d\n", ave->irq);
+		ave_stage_ok(dev, AVE_STAGE_GET_IRQ);
+	} else {
+		return 0;
+	}
+
+	if (ave_stage(dev, AVE_STAGE_REQUEST_IRQ)) {
+		ret = devm_request_irq(dev, ave->irq, ave_irq_handler, 0,
+				       dev_name(dev), ave);
+		if (ret)
+			return dev_err_probe(dev, ret, "request_irq failed\n");
+		ave_stage_ok(dev, AVE_STAGE_REQUEST_IRQ);
+	} else {
+		return 0;
+	}
+
+	if (ave_stage(dev, AVE_STAGE_POWER_ATTACH)) {
+		ret = devm_pm_domain_attach_list(dev, NULL, &ave->pd_list);
+		if (ret < 0)
+			return dev_err_probe(dev, ret, "power domain attach\n");
+		dev_info(dev, "  attached %d power domain(s)\n", ret);
+		if (ret < AVE_PD_LEAVES)
+			dev_warn(dev, "only %d power domain(s), expected %d\n",
+				 ret, AVE_PD_LEAVES);
+		devm_pm_runtime_enable(dev);
+		ave_stage_ok(dev, AVE_STAGE_POWER_ATTACH);
+	} else {
+		return 0;
 	}
 
 	/*
-	 * The DART is an ordinary apple-dart, so the plain DMA API is enough -
-	 * Apple's kext does not program DART registers either, it goes through
-	 * an IOKit mapper. 42 bits is a guess sized to the observed IOVAs.
+	 * First actual hardware access in the whole driver. Everything above
+	 * this line only sets up mappings and handlers; nothing has touched a
+	 * register. The SVE interrupt-status register is chosen because it is
+	 * a read of a status word - no side effects - and because if the block
+	 * is unpowered this is where the fabric will hang.
 	 */
-	ret = dma_set_mask_and_coherent(dev, DMA_BIT_MASK(42));
-	if (ret)
-		return dev_err_probe(dev, ret, "no suitable DMA mask\n");
+	if (ave_stage(dev, AVE_STAGE_READ_SVE)) {
+		u32 v;
 
-	ave->irq = platform_get_irq(pdev, AVE_IRQ_INDEX);
-	if (ave->irq < 0)
-		return ave->irq;
-
-	ret = devm_request_irq(dev, ave->irq, ave_irq_handler, 0,
-			       dev_name(dev), ave);
-	if (ret)
-		return dev_err_probe(dev, ret, "failed to request irq\n");
-
-	ret = devm_pm_domain_attach_list(dev, NULL, &ave->pd_list);
-	if (ret < 0)
-		return dev_err_probe(dev, ret, "failed to attach power domains\n");
-	if (ret < AVE_PD_LEAVES)
-		dev_warn(dev, "only %d power domain(s), expected %d\n",
-			 ret, AVE_PD_LEAVES);
-
-	ret = ave_fw_adopt(ave);
-	if (ret)
-		return dev_err_probe(dev, ret, "failed to adopt firmware\n");
-
-	ret = ave_ipc_init(ave);
-	if (ret)
-		return dev_err_probe(dev, ret, "failed to set up IPC\n");
-
-	devm_pm_runtime_enable(dev);
-
-	/*
-	 * Bring the coprocessor up once at probe so a failure is visible
-	 * immediately rather than at first open. A real driver would defer
-	 * this to the first V4L2 open.
-	 */
-	ret = ave_start(ave);
-	if (ret) {
-		ave_ipc_fini(ave);
-		return dev_err_probe(dev, ret, "coprocessor did not start\n");
+		ret = pm_runtime_resume_and_get(dev);
+		if (ret < 0)
+			return dev_err_probe(dev, ret, "power up failed\n");
+		dev_info(dev, "  powered up; reading SVE+0x%x ...\n",
+			 AVE_SVE_INTR_STATUS);
+		v = ave_read(ave, AVE_BANK_SVE, AVE_SVE_INTR_STATUS);
+		dev_info(dev, "  SVE intr status = 0x%08x\n", v);
+		pm_runtime_put(dev);
+		ave_stage_ok(dev, AVE_STAGE_READ_SVE);
+	} else {
+		return 0;
 	}
 
-	dev_info(dev, "Apple AVE video encoder ready\n");
+	if (ave_stage(dev, AVE_STAGE_FW_ADOPT)) {
+		ret = ave_fw_adopt(ave);
+		if (ret)
+			return dev_err_probe(dev, ret, "firmware adoption\n");
+		ave_stage_ok(dev, AVE_STAGE_FW_ADOPT);
+	} else {
+		return 0;
+	}
+
+	if (ave_stage(dev, AVE_STAGE_IPC_ALLOC)) {
+		ret = ave_ipc_init(ave);
+		if (ret)
+			return dev_err_probe(dev, ret, "IPC setup\n");
+		ave_stage_ok(dev, AVE_STAGE_IPC_ALLOC);
+	} else {
+		return 0;
+	}
+
+	if (stop_after >= AVE_STAGE_POWER_ON) {
+		ret = ave_start(ave);
+		if (ret) {
+			ave_ipc_fini(ave);
+			return dev_err_probe(dev, ret, "coprocessor start\n");
+		}
+		dev_info(dev, "Apple AVE video encoder ready\n");
+	}
+
 	return 0;
 }
 
