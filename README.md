@@ -31,7 +31,11 @@ firmware and device tree.
 | Numeric command ids | 1–12, from the firmware jump table (5 unused) | Confirmed |
 | Command struct sizes | `0x48` for most, `0x78` Config, `0x13F08` Reset | Confirmed |
 | Userspace ABI | 10 IOKit selectors, exact struct sizes | Confirmed |
-| SoC identification | ADT `soc-id` -> DevID: t8103=10, t6000=11, t6001=12 | Confirmed |
+| SoC identification | ADT `soc-id` -> DevID -> ChipType -> variant (`t6001`=`_Nyx`) | Confirmed |
+| Firmware variant | `H13C` for M1 Max, from `BuildManifest.plist` | Confirmed |
+| Firmware load | iBoot pre-loads; kext adopts via `segment-ranges`, IOVA 0 | Confirmed |
+| Interrupts | **one** AIC irq (ADT index 0); the rest is software dispatch | Confirmed |
+| Heartbeat | 3 s poll of a scratch counter; writes nothing — omittable | Confirmed |
 | MMIO bank mapping | bank N = ADT `reg` index N; ASC is bank 1 `+0x400000` | Confirmed |
 | Doorbell | bank 2 `+0x0C`, write `1 << chan_bit`; status W1C at `+0x10` | Confirmed |
 | IPC ring | 20 MiB `FwIPC` surface, 3 channels, `0x40` slots, phase-bit sync | Confirmed |

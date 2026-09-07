@@ -14,10 +14,11 @@
    management endpoint enumerates endpoints during the boot handshake, which
    `apple-rtkit` already parses. So this may resolve itself on first boot
    rather than needing a trace.
-4. **Which `reg` range is the ASC?** `0x20D050000`+`0x8000` is the candidate.
-5. **Is `H13C` the right variant for `t6001`?** Inferred from file sizes.
-   `AVE_FwImg::RetrieveInfo` / `AVE_DevInfo` in the kext should settle it —
-   static.
+4. ~~**Which `reg` range is the ASC?**~~ **Answered** — `reg[1] + 0x400000`.
+   `reg[2]` is the SVE control block (doorbell, status, scratch, idle).
+   `reg[3]` (36 bytes) remains unidentified.
+5. ~~**Is `H13C` the right variant for `t6001`?**~~ **Answered** — yes, from the
+   IPSW `BuildManifest.plist`. See `data/derived/board-to-ave-firmware.txt`.
 6. **Struct layouts.** `sCAveCmdOpen` is 120 bytes; the rest
    (`AVE_PICMGMT_PARAMS`, `_S_AVE_Session_PFCfg`, `_S_AVE_FrameInfo`) need
    disassembly of their accessors. Static, but laborious.

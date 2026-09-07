@@ -50,8 +50,13 @@ N**. Roles below are from call sites (see
 
 ### ASC start sequence (verified)
 
-`AVE_IOP_Start_Acis(AVE_Reg*)` at `0xfffffe0008c2ab34` — `_Acis` is the variant
-selected for `t6000`/`t6001`. Register helpers are
+`AVE_IOP_Start_Nyx(AVE_Reg*)` at `0xfffffe0008c35628`. Variant selection is by
+ChipType: `t6001` → DevID 12 → ChipType 7 → **`_Nyx`**; `t6000` → ChipType 6 →
+`_Castor`; `t8103` → ChipType 5 → `_Acis`. There are 21 such variants.
+An earlier revision of this document labelled the sequence `_Acis`, which is
+the `t8103` variant — **the label was wrong but the values are not**:
+`_Nyx` uses byte-identical offsets (`mov w20,#0x44; movk w20,#0x40,lsl#16`,
+bank 1, at `0xfffffe0008c356d4`), as do `_Castor`, `_Atlas` and `_Hera`. Register helpers are
 `Write32(AVE_Reg*, bank, offset, value)` at `0xfffffe0008c53e58` and
 `Read32(AVE_Reg*, bank, offset)` at `0xfffffe0008c53df0`. Every access below is
 bank 1; absolute addresses assume `ave0`'s base of `0x20D800000`.
@@ -66,8 +71,8 @@ bank 1; absolute addresses assume `ave0`'s base of `0x20D800000`.
 `AVE_IOP_CheckIdle_Acis` reads `0x400048` (`0x20DC00048`) and treats the core as
 idle when `value & 0x3 == 0` (`tst w0, #0x3` at `0xfffffe0008c2adbc`).
 
-Sibling routines exist for other SoCs — `_Atlas`, `_Castor`, `_Hera` — at the
-same offsets, so this sequence is not specific to `t6001`.
+The offsets are shared across every variant checked, so this sequence is not
+specific to `t6001`.
 
 ### Bank 2 — the IPC doorbell block (verified)
 

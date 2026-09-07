@@ -19,16 +19,24 @@ container and unwraps with `pyimg4`.
 
 ### Which variant is M1 Max?
 
-**Inferred, not confirmed: `H13C`.** The reasoning is that `H13C` and `H13D`
-are byte-identical in size, which fits M1 Ultra being two M1 Max dies, leaving
-`G` as the base part and `S` as Pro. The firmware itself contains
-`CAVCController_H13C.cpp` and `CHEVCController_H13C.cpp`, confirming the
-variant suffix is a per-SoC discriminator, but not which chip maps to which
-letter.
+**Confirmed: `H13C`.** The kext contains no firmware-selection logic at all —
+iBoot performs the selection, driven by the IPSW's `BuildManifest.plist`. That
+manifest maps board ids to payloads directly:
 
-**This must be confirmed against `AppleAVE2.kext`'s selection logic before any
-driver depends on it.** Loading the wrong variant is a plausible early
-bring-up failure that would be hard to diagnose.
+```
+j314cap / j316cap  (M1 Max)    -> AppleAVE2FW_H13C.im4p
+j314sap / j316sap  (M1 Pro)    -> AppleAVE2FW_H13S.im4p
+j375dap            (M1 Ultra)  -> AppleAVE2FW_H13D.im4p
+j274ap / j293ap …  (M1)        -> AppleAVE2FW_H13G.im4p
+```
+
+So the suffix scheme is **G = base, S = Pro, C = Max, D = Ultra**, exactly as
+the original file-size correlation suggested. Full table in
+`data/derived/board-to-ave-firmware.txt`.
+
+Note that the codename strings inside the firmware (`Erebus`) are **not** a
+per-SoC marker — all nineteen variants contain the same one, so they cannot be
+used to identify an image.
 
 ### Not currently extracted by Asahi
 
