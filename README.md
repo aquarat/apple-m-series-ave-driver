@@ -122,10 +122,15 @@ blocks first light.
 
 The confirmed constants are available as compilable headers:
 
-- `driver/ave_hw.h` — MMIO banks, ASC start sequence, doorbell, power domains
-- `driver/ave_abi.h` — command ids and sizes, the 64-byte header, IPC ring,
-  pixel-format enums, the 64-byte stride rule
+- `driver/ave_hw.h`, `driver/ave_abi.h` — the transcribed constants
+- `driver/ave_drv.c`, `driver/ave_ipc.c` — a first-draft platform driver
+  covering probe, power, firmware adoption, ASC start and the IPC ring.
+  **Untested and not yet compiled** — see `driver/README.md`.
 - `dts/apple,ave.yaml`, `dts/t6001-ave.dtsi` — device tree binding and nodes
+
+[docs/23-empirical-bringup.md](docs/23-empirical-bringup.md) covers closing the
+last gaps on hardware, using the firmware's own logging and the output
+bitstream as oracles rather than blind fuzzing.
 
 Every constant carries the instruction address it was read from, so any of them
 can be re-checked in one command. Three of the hardest pieces need no new
