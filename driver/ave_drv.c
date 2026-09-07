@@ -57,19 +57,18 @@ enum ave_stage {
 	AVE_STAGE_GET_IRQ	= 3,
 	AVE_STAGE_REQUEST_IRQ	= 4,
 	AVE_STAGE_POWER_ATTACH	= 5,
-	AVE_STAGE_READ_SVE	= 6,	/* first actual register read */
-	AVE_STAGE_FW_ADOPT	= 7,
-	AVE_STAGE_IPC_ALLOC	= 8,
-	AVE_STAGE_POWER_ON	= 9,
-	AVE_STAGE_ASC_START	= 10,
-	AVE_STAGE_HANDSHAKE	= 11,
-	AVE_STAGE_MAX		= 11,
+	AVE_STAGE_POWER_ON	= 6,	/* resume only - NO register access */
+	AVE_STAGE_READ_SVE	= 7,	/* first actual register read */
+	AVE_STAGE_FW_ADOPT	= 8,
+	AVE_STAGE_IPC_ALLOC	= 9,
+	AVE_STAGE_START		= 10,
+	AVE_STAGE_MAX		= 10,
 };
 
 static const char * const ave_stage_name[] = {
 	"none", "map-banks", "dma-mask", "get-irq", "request-irq",
-	"power-attach", "read-sve-status", "fw-adopt", "ipc-alloc",
-	"power-on", "asc-start", "handshake",
+	"power-attach", "power-on", "read-sve-status", "fw-adopt",
+	"ipc-alloc", "start",
 };
 
 /* Returns true if this stage should run. Logs the decision either way. */
@@ -367,7 +366,20 @@ static int ave_probe(struct platform_device *pdev)
 	}
 
 	if (ave_stage(dev, AVE_STAGE_POWER_ATTACH)) {
-		ret = devm_pm_domain_attach_list(dev, NULL, &ave->pd_list);
+		/*
+		 * PD_FLAG_ATTACH_POWER_ON matters here. The default creates a
+		 * device link per domain but WITHOUT DL_FLAG_RPM_ACTIVE, so
+		 * the domains are not guaranteed powered. The 2026-09-07 hang
+		 * happened on the first register read with only the default
+		 * behaviour, which is consistent with reading an unpowered
+		 * block.
+		 */
+		static const struct dev_pm_domain_attach_data pd_data = {
+			.pd_flags = PD_FLAG_ATTACH_POWER_ON |
+				    PD_FLAG_DEV_LINK_ON,
+		};
+
+		ret = devm_pm_domain_attach_list(dev, &pd_data, &ave->pd_list);
 		if (ret < 0)
 			return dev_err_probe(dev, ret, "power domain attach\n");
 		dev_info(dev, "  attached %d power domain(s)\n", ret);
@@ -381,23 +393,36 @@ static int ave_probe(struct platform_device *pdev)
 	}
 
 	/*
+	 * Power on, but touch NOTHING. The device is deliberately left
+	 * resumed so that userspace can confirm the domains actually came up
+	 * before the next stage reads a register:
+	 *
+	 *   cat /sys/kernel/debug/pm_genpd/pm_genpd_summary | grep venc
+	 *
+	 * If they do not all read "on" here, do not proceed to stage 7.
+	 */
+	if (ave_stage(dev, AVE_STAGE_POWER_ON)) {
+		ret = pm_runtime_resume_and_get(dev);
+		if (ret < 0)
+			return dev_err_probe(dev, ret, "power up failed\n");
+		dev_info(dev, "  resumed; left powered for inspection\n");
+		ave_stage_ok(dev, AVE_STAGE_POWER_ON);
+	} else {
+		return 0;
+	}
+
+	/*
 	 * First actual hardware access in the whole driver. Everything above
-	 * this line only sets up mappings and handlers; nothing has touched a
-	 * register. The SVE interrupt-status register is chosen because it is
-	 * a read of a status word - no side effects - and because if the block
-	 * is unpowered this is where the fabric will hang.
+	 * only establishes mappings, handlers and power. The SVE
+	 * interrupt-status register is chosen because reading it has no side
+	 * effects, and because an unpowered block hangs the fabric here.
 	 */
 	if (ave_stage(dev, AVE_STAGE_READ_SVE)) {
 		u32 v;
 
-		ret = pm_runtime_resume_and_get(dev);
-		if (ret < 0)
-			return dev_err_probe(dev, ret, "power up failed\n");
-		dev_info(dev, "  powered up; reading SVE+0x%x ...\n",
-			 AVE_SVE_INTR_STATUS);
+		dev_info(dev, "  reading SVE+0x%x ...\n", AVE_SVE_INTR_STATUS);
 		v = ave_read(ave, AVE_BANK_SVE, AVE_SVE_INTR_STATUS);
 		dev_info(dev, "  SVE intr status = 0x%08x\n", v);
-		pm_runtime_put(dev);
 		ave_stage_ok(dev, AVE_STAGE_READ_SVE);
 	} else {
 		return 0;
@@ -421,7 +446,7 @@ static int ave_probe(struct platform_device *pdev)
 		return 0;
 	}
 
-	if (stop_after >= AVE_STAGE_POWER_ON) {
+	if (stop_after >= AVE_STAGE_START) {
 		ret = ave_start(ave);
 		if (ret) {
 			ave_ipc_fini(ave);
