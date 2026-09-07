@@ -24,6 +24,7 @@
 #include <linux/platform_device.h>
 #include <linux/pm_domain.h>
 #include <linux/pm_runtime.h>
+#include <linux/reset.h>
 #include <linux/slab.h>
 
 #include "ave.h"
@@ -58,18 +59,19 @@ enum ave_stage {
 	AVE_STAGE_REQUEST_IRQ	= 4,
 	AVE_STAGE_POWER_ATTACH	= 5,
 	AVE_STAGE_POWER_ON	= 6,	/* resume only - NO register access */
-	AVE_STAGE_READ_ASC	= 7,	/* read bank 1 - what Apple touches first */
-	AVE_STAGE_ASC_START	= 8,	/* the four-write start sequence */
-	AVE_STAGE_READ_SVE	= 9,	/* bank 2, only after the IOP is up */
-	AVE_STAGE_FW_ADOPT	= 10,
-	AVE_STAGE_IPC_ALLOC	= 11,
-	AVE_STAGE_START		= 12,
-	AVE_STAGE_MAX		= 12,
+	AVE_STAGE_RESET		= 7,	/* reset pulse - AVD does this */
+	AVE_STAGE_READ_ASC	= 8,	/* read bank 1 - what Apple touches first */
+	AVE_STAGE_ASC_START	= 9,	/* the four-write start sequence */
+	AVE_STAGE_READ_SVE	= 10,	/* bank 2, only after the IOP is up */
+	AVE_STAGE_FW_ADOPT	= 11,
+	AVE_STAGE_IPC_ALLOC	= 12,
+	AVE_STAGE_START		= 13,
+	AVE_STAGE_MAX		= 13,
 };
 
 static const char * const ave_stage_name[] = {
 	"none", "map-banks", "dma-mask", "get-irq", "request-irq",
-	"power-attach", "power-on", "read-asc-status", "asc-start",
+	"power-attach", "power-on", "reset", "read-asc-status", "asc-start",
 	"read-sve-status", "fw-adopt", "ipc-alloc", "start",
 };
 
@@ -409,6 +411,39 @@ static int ave_probe(struct platform_device *pdev)
 			return dev_err_probe(dev, ret, "power up failed\n");
 		dev_info(dev, "  resumed; left powered for inspection\n");
 		ave_stage_ok(dev, AVE_STAGE_POWER_ON);
+	} else {
+		return 0;
+	}
+
+	/*
+	 * Pulse the block reset before touching anything.
+	 *
+	 * This is the one structural difference between this driver and
+	 * apple-avd, which drives the video DECODER on this same SoC and
+	 * works. Its module references __devm_reset_control_get and
+	 * reset_control_reset, and its DT node carries a "resets" property
+	 * pointing at its own power controller; ours had neither. The
+	 * apple-pmgr-pwrstate nodes expose #reset-cells = 0 for exactly this.
+	 *
+	 * Four separate attempts to read an AVE register - two banks, with
+	 * every power domain confirmed on - hung the fabric. A block still
+	 * held in reset is a candidate explanation that fits all of them.
+	 */
+	if (ave_stage(dev, AVE_STAGE_RESET)) {
+		ave->rst = devm_reset_control_get_optional_exclusive(dev, NULL);
+		if (IS_ERR(ave->rst))
+			return dev_err_probe(dev, PTR_ERR(ave->rst),
+					     "reset control\n");
+		if (!ave->rst) {
+			dev_warn(dev, "  no reset control in DT - skipping\n");
+		} else {
+			dev_info(dev, "  pulsing reset ...\n");
+			ret = reset_control_reset(ave->rst);
+			if (ret)
+				return dev_err_probe(dev, ret, "reset failed\n");
+			dev_info(dev, "  reset done\n");
+		}
+		ave_stage_ok(dev, AVE_STAGE_RESET);
 	} else {
 		return 0;
 	}

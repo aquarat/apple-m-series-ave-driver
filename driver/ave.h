@@ -12,6 +12,7 @@
 
 #include <linux/device.h>
 #include <linux/io.h>
+#include <linux/reset.h>
 #include <linux/types.h>
 
 #include "ave_hw.h"
@@ -50,6 +51,7 @@ struct ave_device {
 	struct device		*dev;
 	struct ave_bank		bank[AVE_NUM_BANKS];
 	int			irq;
+	struct reset_control	*rst;
 
 	/* Power domains, in ADT power-gates order. */
 	struct dev_pm_domain_list *pd_list;

@@ -45,6 +45,9 @@
 				interrupts = <0 0 1031 4>;
 				power-domains = <0x1d>, <0xc2>, <0xc4>,
 						<0xc3>, <0xc5>;
+				/* apple-avd does reset_control_reset() before its
+				 * first register access; #reset-cells is 0 */
+				resets = <0x1d>;
 			};
 		};
 	};
