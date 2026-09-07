@@ -21,8 +21,10 @@
 6. **Struct layouts.** `sCAveCmdOpen` is 120 bytes; the rest
    (`AVE_PICMGMT_PARAMS`, `_S_AVE_Session_PFCfg`, `_S_AVE_FrameInfo`) need
    disassembly of their accessors. Static, but laborious.
-7. **Power sequencing.** Eleven gates per instance; `AVE_PMGR`'s
-   `SetPSDependencyUp/Down` and `CheckPeerUp/Down` encode the order — static.
+7. ~~**Power sequencing.**~~ **Answered** — see [10-power.md](10-power.md).
+   `AVE_PMGR` performs no MMIO; it drives `AppleARMIODevice` by ADT
+   `power-gates` index, so Linux's `apple-pmgr-pwrstate` covers it. The eleven
+   domains and their dependency graph are recovered.
 8. ~~**Input pixel formats.**~~ **Answered** — see
    [12-dart-surfaces-mmio.md](12-dart-surfaces-mmio.md). AVE accepts Interchange
    (lossless variant only on M1 Pro/Max), so zero-copy capture→encode is

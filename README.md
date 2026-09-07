@@ -38,6 +38,8 @@ firmware and device tree.
 | ASC start sequence | 4 register writes + idle poll, exact values | Confirmed |
 | Input pixel formats | NV12-style `420v`/`420f` **and** Interchange (lossless) | Confirmed |
 | DART | kext uses IOKit mapper only; `apple-dart` + DMA API suffices | Confirmed |
+| Power | no MMIO; `apple-pmgr-pwrstate` suffices. 11 domains, order known | Confirmed |
+| `ave0` / `ave1` coupling | none via power management — independent | Confirmed |
 | Mailbox endpoint ids | **Unknown** — gates bring-up only, not the data path | Open |
 
 Two findings matter most. **AVE runs RTKit**, so m1n1's tracer and Linux's

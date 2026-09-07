@@ -90,6 +90,7 @@ The t6000/t6001 table at `0xfffffe00072748b4` reads
 | `0x0C` | `0x20D05000C` | doorbell — write `1 << descriptor[+0x44]` |
 | `0x10` | `0x20D050010` | interrupt status (write-1-to-clear) |
 | `0x18`+ | `0x20D050018`… | scratch mailbox registers |
+| `0x38` | `0x20D050038` | idle / clock-gating (`AVE_SVECtrl::SetIdle`) |
 
 See [08-ipc-transport.md](08-ipc-transport.md).
 
