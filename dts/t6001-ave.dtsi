@@ -1,0 +1,58 @@
+// SPDX-License-Identifier: GPL-2.0+ OR MIT
+/*
+ * AVE (video encoder) nodes for Apple M1 Max (t6001).
+ *
+ * Addresses, interrupts and gate indices transcribed from the ADT of a
+ * MacBook Pro 14" M1 Max (apple,j314c), read out of
+ * DeviceTree.j314cap.im4p in the macOS 26.6.2 restore image.
+ *
+ * NOT YET USABLE: the power-domains phandles below are placeholders. The ADT
+ * gives power-gate *indices* (listed per node); those must be resolved against
+ * the t6001 PMGR nodes before this will probe. See docs/10-power.md.
+ */
+
+/* ave0 - ADT power-gates: 456 457 458 301 302 303 304 300 459 600 602 */
+	dart_ave0: iommu@20d040000 {
+		compatible = "apple,t6000-dart";
+		reg = <0x2 0x0d040000 0x0 0x4000>,
+		      <0x2 0x0d030000 0x0 0x4000>,
+		      <0x2 0x0d020000 0x0 0x4000>,
+		      <0x2 0x0d044000 0x0 0x4000>;
+		interrupt-parent = <&aic>;
+		interrupts = <AIC_IRQ 0 1028 IRQ_TYPE_LEVEL_HIGH>;
+		#iommu-cells = <1>;
+		/* ADT: page-size 16384, sids 32769 */
+	};
+
+	ave0: video-encoder@20d100000 {
+		compatible = "apple,t6001-ave", "apple,ave";
+		reg = <0x2 0x0d100000 0x0 0x45c000>,
+		      <0x2 0x0d800000 0x0 0x800000>,
+		      <0x2 0x0d050000 0x0 0x008000>,
+		      <0x0 0x8e588000 0x0 0x000024>,
+		      <0x2 0x0c000000 0x0 0x1000000>;
+		reg-names = "dpe", "asc", "sve", "unk3", "axi2af";
+		interrupt-parent = <&aic>;
+		/* ADT lists 1031 1025 1024 1027 1026; only the first is used */
+		interrupts = <AIC_IRQ 0 1031 IRQ_TYPE_LEVEL_HIGH>;
+		iommus = <&dart_ave0 0>;
+		/* power-domains = <...>;  TODO: resolve gates 456,457,458,301,
+		 * 302,303,304,300,459,600,602 against the t6001 PMGR */
+		status = "disabled";
+	};
+
+/* ave1 - ADT power-gates: 549 550 551 368 369 370 371 367 552 601 603 */
+	ave1: video-encoder@307100000 {
+		compatible = "apple,t6001-ave", "apple,ave";
+		reg = <0x3 0x07100000 0x0 0x45c000>,
+		      <0x3 0x07800000 0x0 0x800000>,
+		      <0x3 0x07050000 0x0 0x008000>,
+		      <0x0 0x8e680260 0x0 0x007dc4>,
+		      <0x3 0x06000000 0x0 0x1000000>;
+		reg-names = "dpe", "asc", "sve", "unk3", "axi2af";
+		interrupt-parent = <&aic>;
+		/* ADT lists 1041 1035 1034 1037 1036 */
+		interrupts = <AIC_IRQ 0 1041 IRQ_TYPE_LEVEL_HIGH>;
+		iommus = <&dart_ave1 0>;
+		status = "disabled";
+	};
