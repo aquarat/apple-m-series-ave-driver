@@ -58,6 +58,40 @@ wedges the fabric.
   — calls `reset_control_reset()`, and our node lacked `resets`. Adding it and
   pulsing also hangs.
 
+## Further eliminations from static analysis (2026-09-07, after the reboots)
+
+- **The `venc_sys` mapping is now proven, not assumed.** ADT `ps-regs[10]` is
+  window 2 (base `0x8e580000`) at offset `0x300`; `VENC_SYS` has `psidx = 22`,
+  so its PS register is `0x8e580000 + 0x300 + 22*8 = 0x8e5803b0`. Adding the
+  `0x2_00000000` IO base that m1n1 applies gives `0x28e5803b0` — exactly
+  Linux's `power-management@28e580000/power-controller@3b0`. We are powering
+  the right device.
+
+- **AXI2AF cannot be the missing enabler.** `AVE_AXI2AF::ReadReg`
+  (`0xfffffe0008b5c9e8`) does `mov w1, #0x4` — it operates on **bank 4**, which
+  is AVE's own address space. Configuring the fabric would require touching the
+  very space that hangs, so it cannot be a precondition for that space
+  responding. Hypothesis 2 below is therefore dead.
+
+- **`AppleT6000` does reference VENC, but not usefully.** The strings are
+  `"VENC0 RD"`, `"VENC0 WR"`, `"VENC0 DCS RD"`, `"VENC0 DCS WR"`, `"VENC1 RD"`,
+  `"VENC1 WR"` — fabric **agent labels** used for error and performance
+  counting, alongside `AppleT6000PlatformErrorHandler::_fabricCommands`. They
+  confirm VENC is a distinct fabric agent (so our hang is most likely a fabric
+  timeout on that agent) but they are not an enable sequence.
+
+  *Method note:* the first version of this search claimed AppleT6000
+  "references VENC0/VENC1" using a loose regex plus nearest-preceding-fileset
+  attribution. Both were wrong — a re-run with NUL-terminated matching found
+  zero hits, and proper segment attribution was needed to find the real
+  strings. Trap 3 again.
+
+**The important structural conclusion:** every register the AVE kext touches is
+inside AVE's own address space (banks 0-4). Nothing AppleAVE2 does can be the
+thing that makes that space respond. The enabler is therefore either the power
+domains — which we now know we drive correctly — or something at platform level
+outside this kext entirely.
+
 ## Remaining hypotheses, untested
 
 1. **Incomplete power.** `venc_me1` has **no phandle** in the base device tree,
@@ -66,13 +100,19 @@ wedges the fabric.
    fabric hang, and this is the one thing we have not been able to control.
    Testing it needs either a base-DT change or `of_find_node_by_path` plumbing
    in the driver.
-2. **Fabric / AXI2AF configuration.** The pmgr carries an `axi2af-axi-config`
-   property and AVE has an `AVE_AXI2AF` class with `ApplyTunables`, `SetParity`
-   and `CheckIdle`. If the interconnect path to the block is unconfigured,
-   nothing on it will respond.
-3. **A tunables sequence.** `AVE_DPE::ApplyTunables`, `AVE_AXI2AF::ApplyTunables`
-   and `AVE_RegCfg_Apply` all exist and all run before normal operation. Apple
-   may be applying a register-config blob we know nothing about.
+2. ~~**Fabric / AXI2AF configuration.**~~ **Eliminated** — `AVE_AXI2AF`
+   operates on bank 4, inside AVE address space. See above.
+3. ~~**A tunables sequence inside the kext.**~~ Largely eliminated by the same
+   argument: `AVE_DPE` is bank 0 and `AVE_AXI2AF` is bank 4, both inside the
+   space that hangs.
+
+4. **A difference between Asahi's `apple-pmgr-pwrstate` and macOS's PS
+   handling.** Both write the same register, but macOS may write a different
+   value, or perform additional steps (a second PS field, a settle poll, a
+   related device). genpd reporting "on" means Asahi's driver read back what it
+   expected — not necessarily that the block is fully enabled. **This is the
+   most promising remaining avenue and it is pure static work**: compare
+   `ApplePMGR`/`AppleARMIODevice`'s device power-up against the Asahi driver.
 
 ## Recommendation
 
