@@ -1,3 +1,12 @@
+> ## Correction — the coded-data claim below is wrong
+>
+> This document concludes that `AVE_CalcBufSizeOfCodedData` is not a closed
+> form. **It is one.** See [18-coded-data-sizing.md](18-coded-data-sizing.md).
+> Bitrate, framerate, level and profile are not inputs, no level/MaxCPB table is
+> consulted, and an unconditional `2 x base` ceiling means rate control cannot
+> inflate the result past a known bound. The float table encodes inflation
+> factors that the ceiling then clamps.
+>
 > ## Verification note
 >
 > Re-checked against the binaries before committing:

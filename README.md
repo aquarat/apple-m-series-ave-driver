@@ -50,7 +50,8 @@ firmware and device tree.
 | Encode surface set | 35-slot InfoSet; 19 internal + 7 out allocations | Confirmed |
 | Surface index -> slot | full 41-row map; 6 indices have no slot | Confirmed |
 | `Recon` @ 1920x1080 | 3,133,440 B; DPB hard max 17 frames | Confirmed |
-| Coded-output size | **not a closed form** — rate-control dependent | Open |
+| Coded-output size | **closed form**; exact for 8-bit 4:2:0, `2x` ceiling | Confirmed |
+| Coded output @ 1920x1080 | 3,112,960 B (both codecs); header 49,152 B | Confirmed |
 | DART | kext uses IOKit mapper only; `apple-dart` + DMA API suffices | Confirmed |
 | Power | no MMIO; `apple-pmgr-pwrstate` suffices. 11 domains, order known | Confirmed |
 | `ave0` / `ave1` coupling | none via power management — independent | Confirmed |
