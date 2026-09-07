@@ -44,6 +44,9 @@ firmware and device tree.
 | Frame size formulas | all four layout primitives transcribed | Confirmed |
 | `420v` @ 1920x1080 | 3,110,400 B; Y stride 1920 @ 0; CbCr stride 1920 @ `0x1FA400` | Confirmed |
 | Stride/plane alignment | none applied by the primitives; taken from IOSurface | Confirmed |
+| Encode surface set | 35-slot InfoSet; 19 internal + 7 out allocations | Confirmed |
+| `Recon` @ 1920x1080 | 3,133,440 B; DPB hard max 17 frames | Confirmed |
+| Coded-output size | **not a closed form** — rate-control dependent | Open |
 | DART | kext uses IOKit mapper only; `apple-dart` + DMA API suffices | Confirmed |
 | Power | no MMIO; `apple-pmgr-pwrstate` suffices. 11 domains, order known | Confirmed |
 | `ave0` / `ave1` coupling | none via power management — independent | Confirmed |
