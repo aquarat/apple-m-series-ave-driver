@@ -2,37 +2,30 @@
 
 ## Open questions, in priority order
 
-1. **Numeric wire command ids.** The command *set* is known from both sides
-   (`AVE_HwC::SendFwCmd_*`, `CFlowControllerBase::ProcessCmd_*`). The ids are
-   written into the command struct by `AVE_CHM_MakeFwCmd_*`; recovering them
-   means following those field stores. **Static work — no hypervisor needed.**
-2. **Shared-memory channel layout.** `AVE_IPC` (`CreateChannel`, `Send`/`Recv`,
-   `Kernel2FwAddr`) is the real data path. Disassembling `AVE_IPC::Init` and
-   `CreateChannel` should give the ring layout. **Also static.**
-3. **RTKit mailbox endpoint ids.** Up to 8 routes, populated at runtime in BSS.
-   Now known to gate *bring-up only*, not the data path — and RTKit's own
-   management endpoint enumerates endpoints during the boot handshake, which
-   `apple-rtkit` already parses. So this may resolve itself on first boot
-   rather than needing a trace.
-4. ~~**Which `reg` range is the ASC?**~~ **Answered** — `reg[1] + 0x400000`.
-   `reg[2]` is the SVE control block (doorbell, status, scratch, idle).
-   `reg[3]` (36 bytes) remains unidentified.
-5. ~~**Is `H13C` the right variant for `t6001`?**~~ **Answered** — yes, from the
-   IPSW `BuildManifest.plist`. See `data/derived/board-to-ave-firmware.txt`.
-6. **Struct layouts.** `sCAveCmdOpen` is 120 bytes; the rest
-   (`AVE_PICMGMT_PARAMS`, `_S_AVE_Session_PFCfg`, `_S_AVE_FrameInfo`) need
-   disassembly of their accessors. Static, but laborious.
-7. ~~**Power sequencing.**~~ **Answered** — see [10-power.md](10-power.md).
-   `AVE_PMGR` performs no MMIO; it drives `AppleARMIODevice` by ADT
-   `power-gates` index, so Linux's `apple-pmgr-pwrstate` covers it. The eleven
-   domains and their dependency graph are recovered.
-8. ~~**Input pixel formats.**~~ **Answered** — see
-   [12-dart-surfaces-mmio.md](12-dart-surfaces-mmio.md). AVE accepts Interchange
-   (lossless variant only on M1 Pro/Max), so zero-copy capture→encode is
-   possible; and plain `420v`/`420f` exists on both codecs, so the simple NV12
-   bring-up path is available. Surface size/alignment formulas are the
-   remaining gap.
+Answered items have been removed; the history is in the git log and in the
+individual docs. What remains:
 
+1. **Per-frame `Process` fields.** QP, frame type, input surface and output
+   buffer live in `AVE_PICMGMT_PARAMS` inside `sCAveCmdAvcProcess`. The block
+   map is done ([20](20-command-structs.md)) but the field-to-offset join is
+   not. **This is the last thing between here and a first encode.**
+2. **`_E_AVE_RCMode` / `_E_AVE_EncMode` enumerator names.** Neither binary
+   contains a name-string array for them. Constant-QP is believed to be
+   `RCMode = 3` but that is **inferred, not read**, and it may not be
+   statically recoverable at all. Needed to select fixed-QP for first light.
+3. **PMGR phandles.** The ADT gives power-gate *indices*; they must be
+   cross-referenced against the t6001 PMGR nodes. Not disassembly work.
+4. **`iAddr` alignment.** [21](21-buffer-publication.md) reports 64-byte for AVC
+   and 128-byte for HEVC, but no `% 128` assertion exists in either binary and
+   the claim could not be reproduced. Either find the enforcing instruction or
+   drop it. The 64-byte *stride* and *plane-offset* rules are confirmed and
+   independent of this.
+5. **`reg[3]`** (`0x8E588000`, 36 bytes) — no call site found by anyone.
+   Map it and ignore it.
+6. **ADT interrupts 1024–1027** — unclaimed by Apple's own driver.
+7. **Remaining struct interiors** — `_S_AVE_Session_PFCfg`, the rest of
+   `AvcStart` (~11.5 KB), the HEVC variants, the `pPicParams` name join.
+   Laborious but not blocking.
 
 ## Status
 
