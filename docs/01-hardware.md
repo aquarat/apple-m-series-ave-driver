@@ -30,16 +30,44 @@ Note `ave0` reports `soc-id = t6000` even on this `t6001` part.
 
 ## MMIO ranges
 
-`ave0` has five `reg` entries. The roles below are **inferred from size and
-from the firmware's `MapRemoteRegs` behaviour, not confirmed**:
+`ave0` has five `reg` entries. `AVE_Reg::Init` (`0xfffffe0008c532d0`) maps them
+with `mapDeviceMemoryWithIndex` in a loop, caching each result in an array
+indexed by position — so throughout the kext, **"bank" N means ADT `reg` entry
+N**. Roles below are from call sites (see
+[12-dart-surfaces-mmio.md](12-dart-surfaces-mmio.md)):
 
-| # | Base | Size | Likely role |
+| # | Base | Size | Role |
 |---|---|---|---|
-| 0 | `0x20D100000` | `0x45C000` | Main encoder register file (large, fixed-function blocks) |
-| 1 | `0x20D800000` | `0x800000` | 8 MB window — coprocessor SRAM / firmware load area |
-| 2 | `0x20D050000` | `0x8000`   | ASC control + mailbox (size is typical for an ASC wrap) |
-| 3 | `0x8E588000`  | `0x24`     | 36 bytes — PMGR/fuse or `mcc_dataset` config |
-| 4 | `0x20C000000` | `0x1000000`| 16 MB window |
+| 0 | `0x20D100000` | `0x45C000` | `AVE_DPE` — confirmed |
+| 1 | `0x20D800000` | `0x800000` | **ASC coprocessor block at `+0x400000`** — confirmed |
+| 2 | `0x20D050000` | `0x8000`   | no call site found — unknown |
+| 3 | `0x8E588000`  | `0x24`     | no call site found — unknown; **not** the `mcc_dataset` window |
+| 4 | `0x20C000000` | `0x1000000`| `AVE_AXI2AF` — confirmed |
+
+> **Corrected.** An earlier revision of this document guessed the ASC mailbox
+> was `reg[2]` on the strength of its 32 KB size. It is not. The ASC is in
+> `reg[1]`, and `reg[2]`'s purpose remains unknown.
+
+### ASC start sequence (verified)
+
+`AVE_IOP_Start_Acis(AVE_Reg*)` at `0xfffffe0008c2ab34` — `_Acis` is the variant
+selected for `t6000`/`t6001`. Register helpers are
+`Write32(AVE_Reg*, bank, offset, value)` at `0xfffffe0008c53e58` and
+`Read32(AVE_Reg*, bank, offset)` at `0xfffffe0008c53df0`. Every access below is
+bank 1; absolute addresses assume `ave0`'s base of `0x20D800000`.
+
+| VA | access | offset | absolute | value |
+|---|---|---|---|---|
+| `0xc2abf8` | write | `0x400808` | `0x20DC00808` | `1` |
+| `0xc2ac10` | write | `0x400044` | `0x20DC00044` | `0` |
+| `0xc2ac24` | write | `0x400400` | `0x20DC00400` | `0x10000` |
+| `0xc2ac3c` | write | `0x400044` | `0x20DC00044` | `0x10` |
+
+`AVE_IOP_CheckIdle_Acis` reads `0x400048` (`0x20DC00048`) and treats the core as
+idle when `value & 0x3 == 0` (`tst w0, #0x3` at `0xfffffe0008c2adbc`).
+
+Sibling routines exist for other SoCs — `_Atlas`, `_Castor`, `_Hera` — at the
+same offsets, so this sequence is not specific to `t6001`.
 
 `ave1` mirrors this at `0x307100000`, `0x307800000`, `0x307050000`,
 `0x8E680260`, `0x306000000`.
