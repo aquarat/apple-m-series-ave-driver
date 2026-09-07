@@ -17,7 +17,13 @@ LOGDIR="$REPO/data/bringup-logs"
 mkdir -p "$LOGDIR"
 
 names=(none map-banks dma-mask get-irq request-irq power-attach \
-       read-sve-status fw-adopt ipc-alloc power-on asc-start handshake)
+       power-on read-sve-status fw-adopt ipc-alloc start)
+
+# Seconds to wait after syncing the marker before doing anything that can hang.
+# The 2026-09-07 attempt lost both the marker update and the session transcript
+# because the machine died too soon after the write. Give the filesystem and
+# the terminal time to settle.
+SETTLE=${SETTLE:-8}
 
 if [ "${1:-}" = "--status" ]; then
     if [ -s "$MARK" ]; then
@@ -40,7 +46,8 @@ for n in $(seq "$first" "$last"); do
     echo "=============== stage $n (${names[$n]}) ==============="
     cleanup
     # Record intent BEFORE touching anything, and get it onto disk.
-    echo "$n" > "$MARK"; sync
+    echo "$n" > "$MARK"
+    sync; sleep "$SETTLE"; sync
     sudo dmesg -C
 
     sudo insmod "$REPO/driver/apple-ave.ko" stop_after="$n" || { echo "insmod driver failed"; exit 1; }
