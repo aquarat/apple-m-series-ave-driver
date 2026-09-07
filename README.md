@@ -25,18 +25,27 @@ firmware and device tree.
 | Firmware runtime | **RTKit** (`RTKit-3255.160.4.release`), ASC 128-bit mailbox | Confirmed |
 | Where is rate control? | In firmware (`CRateControl`, `CAVEMultiPass`) | Confirmed |
 | Driver model | V4L2 **stateful** M2M encoder | Follows from the above |
-| Command set | 16 handlers recovered | Names confirmed, ids inferred |
-| Mailbox endpoint ids | **Unknown** — populated at runtime in BSS | Open |
+| Firmware command handlers | 16 recovered (`ProcessCmd_*`) | Names confirmed |
+| Host↔fw data path | Shared-memory channels (`AVE_IPC`), not endpoint messaging | Confirmed |
+| Wire command set | 11 commands (`AVE_HwC::SendFwCmd_*`) | Confirmed |
+| Numeric command ids | **Unknown** — recoverable statically from the kext | Open |
+| Mailbox endpoint ids | **Unknown** — gates bring-up only, not the data path | Open |
 
-The single most consequential finding is that **AVE runs RTKit**. That means
-m1n1's existing RTKit tracer and Linux's `apple-rtkit` driver apply directly,
-so the transport layer is solved infrastructure rather than new work. This is
-substantially better than the initial expectation.
+Two findings matter most. **AVE runs RTKit**, so m1n1's tracer and Linux's
+`apple-rtkit` apply directly and the coprocessor lifecycle is existing
+infrastructure. And **`AppleAVE2.kext` is statically analysable from the same
+IPSW**, giving the host half of the protocol — 1198 named methods — without
+hardware. Together these mean the project is not blocked on hypervisor
+tracing, which was the original assumption.
 
-See [docs/01-hardware.md](docs/01-hardware.md),
-[docs/02-firmware.md](docs/02-firmware.md),
-[docs/03-protocol.md](docs/03-protocol.md) for the findings, and
-[docs/04-roadmap.md](docs/04-roadmap.md) for what to do next.
+Both sides of the protocol are available for static analysis: the firmware
+image ([docs/02-firmware.md](docs/02-firmware.md),
+[docs/03-protocol.md](docs/03-protocol.md)) and `AppleAVE2.kext`
+([docs/06-kext.md](docs/06-kext.md)), which contributes 1198 named AVE methods.
+Hardware and a hypervisor trace are **not** required to make further progress.
+
+See also [docs/01-hardware.md](docs/01-hardware.md) and
+[docs/04-roadmap.md](docs/04-roadmap.md).
 
 ## Licensing and blobs
 
@@ -61,6 +70,10 @@ git clone --depth 1 https://github.com/AsahiLinux/m1n1 m1n1-src   # ADT parser
 
 python3 tools/extract_protocol.py data/blobs/ave_h13c.bin
 ./.venv/bin/python tools/adt_dump.py data/blobs/adt.bin --grep ave
+
+# host side: pull AppleAVE2.kext out of the kernelcache
+python3 tools/kext_extract.py data/blobs/kc.macho --list --grep ave
+python3 tools/kext_classmap.py data/derived/kext-symbols.txt
 ```
 
 Full reproduction steps, including why the ADT cannot simply be read from a
