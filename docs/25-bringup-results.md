@@ -144,6 +144,14 @@ So the PMGR state is unremarkable and this hypothesis is eliminated, at the
 cost of no reboots. The obvious follow-up — re-dumping with the VENC domains
 powered on, to compare like with like — has not been done.
 
+## Superseded in part
+
+See [29-first-access-hypothesis.md](29-first-access-hypothesis.md). Every
+attempt recorded above was a **read** (or a PMGR reset); Apple's first
+hardware access is a **write** to bank 2 `+0x38`. On an AXI fabric a posted
+write need not stall where a read does, so the "any access hangs" conclusion
+below may be too strong — it may be that any *read* hangs.
+
 ## Recommendation
 
 **Stop hardware attempts here.** The information yield per reboot has dropped
