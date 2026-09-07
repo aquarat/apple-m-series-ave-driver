@@ -48,6 +48,7 @@ firmware and device tree.
 | Kext-allocated surfaces | linear blobs, `align_up(size, 16 KB)`, no geometry keys | Confirmed |
 | FwIPC allocator | ChkPool buddy allocator, 64-byte granule and alignment | Confirmed |
 | Encode surface set | 35-slot InfoSet; 19 internal + 7 out allocations | Confirmed |
+| Surface index -> slot | full 41-row map; 6 indices have no slot | Confirmed |
 | `Recon` @ 1920x1080 | 3,133,440 B; DPB hard max 17 frames | Confirmed |
 | Coded-output size | **not a closed form** — rate-control dependent | Open |
 | DART | kext uses IOKit mapper only; `apple-dart` + DMA API suffices | Confirmed |

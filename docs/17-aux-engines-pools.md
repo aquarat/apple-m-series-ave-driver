@@ -1,4 +1,19 @@
-> ## Verification note — InfoSet slot mapping is not fully settled
+> ## Verification note — RESOLVED; this document was wrong
+>
+> The slot-mapping disagreement recorded below has been settled in
+> [19-infoset-slot-map.md](19-infoset-slot-map.md). **This document's claim was
+> wrong**: index 0 (`InputData`) *does* have a slot, and the six skipped indices
+> are 3 (`UCInfo`) and 27..31 (`IOPIPC`, `FwImage`, `FwLog`, `FwHeap`, `FwIPC`).
+> [16-encode-surface-set.md](16-encode-surface-set.md) had it right.
+>
+> Also corrected: this document left `_E_AVE_WorkType`'s `Enc` value as "0
+> and/or 1, not read directly". It is **1**, read from the
+> `AVE_MD_SVE::CalcSurfaceInfo` dispatch at `0xfffffe0008c8c83c`, where 0 falls
+> to the error arm.
+>
+> The original note follows.
+>
+> ## (superseded) InfoSet slot mapping is not fully settled
 >
 > This document and [16-encode-surface-set.md](16-encode-surface-set.md) were
 > written independently and **agree** on the load-bearing facts: the InfoSet is
