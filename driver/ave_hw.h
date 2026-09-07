@@ -94,32 +94,48 @@
 #define AVE_IRQ_INDEX		0
 
 /*
- * Power domains, in ADT power-gates order.
- * Names from the kext table at 0xfffffe0007ee0e18.
- * AVE_PMGR performs no MMIO at all - it drives AppleARMIODevice by gate index -
- * so Linux's apple-pmgr-pwrstate covers this and only the ordering is
- * AVE specific.
+ * Power domains.
  *
- * Power-up is a two-branch tree rooted at IOP:
- *   perf ladder : IOP -> IOP_MID -> IOP_MID2 -> IOP_MAX
- *   datapath    : IOP -> DMA_FE -> {PIPE4_HME | PIPE5_MDINTRA} -> ME0 -> ME1
- * FAB is independent. DCS is absent on t6001.
- * AVC uses the PIPE4_HME branch; HEVC and LRME use PIPE5_MDINTRA.
+ * IMPORTANT: the ADT power-gates list is NOT the AVE_PMGR PD enum order, and
+ * it is not all power gates. Resolving the eleven ADT gate ids against the
+ * ADT's own PMGR device table (/arm-io/pmgr "devices", matched on id2) gives:
+ *
+ *   456 VENC-SYS-V      457 VENC-SOC-VNOM   458 VENC-MEM-FAST
+ *   300 VENC_DMA        301 VENC_PIPE4      302 VENC_PIPE5
+ *   303 VENC_ME0        304 VENC_ME1
+ *   459 VENC-SOC-VMAX   600 VENC-SOC-VMID2  602 VENC-FAB0-VMAX
+ *
+ * Only the five VENC_* entries have a real ps register (psreg 13, psidx 0..4).
+ * The six hyphenated ones are voltage/performance states with psreg 0, which
+ * is consistent with docs/10 finding that AVE's "PStates" are a clock ladder
+ * with no DVFS values anywhere in the kext.
+ *
+ * Linux models six per instance and ALREADY encodes the dependency tree, so
+ * genpd brings up the whole chain from a leaf and the driver does not have to
+ * walk it:
+ *
+ *   ... -> venc_sys -> venc_dma -> venc_pipe4
+ *                              -> venc_pipe5 -> venc_me0 -> venc_me1
+ *
+ * That matches the tree recovered from AVE_PMGR in docs/10 (AVC uses the
+ * pipe4 branch, HEVC and LRME the pipe5 branch), independently confirmed here
+ * by Asahi's own device tree.
+ *
+ * Referencing venc_pipe4 and venc_me1 is therefore sufficient to power
+ * everything.
  */
 enum ave_power_domain {
-	AVE_PD_IOP		= 0,
-	AVE_PD_IOP_MID		= 1,
-	AVE_PD_IOP_MID2		= 2,
-	AVE_PD_IOP_MAX		= 3,
-	AVE_PD_DMA_FE		= 4,
-	AVE_PD_PIPE4_HME	= 5,
-	AVE_PD_PIPE5_MDINTRA	= 6,
-	AVE_PD_ME0		= 7,
-	AVE_PD_ME1		= 8,
-	AVE_PD_FAB		= 9,
-	AVE_PD_DCS		= 10,	/* absent on t6001 */
-	AVE_PD_COUNT		= 11,
+	AVE_PD_SYS	= 0,	/* venc_sys   - root                        */
+	AVE_PD_DMA	= 1,	/* venc_dma   - datapath front end          */
+	AVE_PD_PIPE4	= 2,	/* venc_pipe4 - AVC branch (HME)            */
+	AVE_PD_PIPE5	= 3,	/* venc_pipe5 - HEVC/LRME branch (MDINTRA)  */
+	AVE_PD_ME0	= 4,	/* venc_me0                                 */
+	AVE_PD_ME1	= 5,	/* venc_me1   - deepest leaf                */
+	AVE_PD_COUNT	= 6,
 };
+
+/* The DT node lists the two leaves; genpd pulls their ancestors up. */
+#define AVE_PD_LEAVES	2
 
 /* Power states (AVE_PMGR). */
 enum ave_power_state {

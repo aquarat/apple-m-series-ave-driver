@@ -106,6 +106,27 @@ file_offset = ptr & 0xFFFFFFFF        # not a vmaddr
 Verified by matching all ten `IOExternalMethodDispatch` entries against known
 symbol addresses. If a table decode produces garbage names, this is usually why.
 
+## Trap 6 — extending a containment argument past what it covers
+
+The IOMMU containment argument — "AVE cannot reach memory outside its DART
+mappings, so the blast radius is small" — is true, and was used to justify a
+live probe attempt. It cost a hard SoC hang and a reboot
+([24-incident-2026-09-07.md](24-incident-2026-09-07.md)).
+
+The argument was sound for the coprocessor and silently extended to the
+experiment as a whole. The experiment also stood up a **new DART**, which is the
+thing the containment depends on, from an *inferred* power-domain reference.
+An access to an unpowered register block on Apple silicon hangs the fabric with
+no fault and nothing logged.
+
+Generalised: when a safety argument names a specific mechanism, check that every
+part of the planned action is actually covered by that mechanism. Ask which
+component the argument protects, and enumerate what else the action touches.
+Here, a second driver was bound and never risk-assessed at all.
+
+Related: device probe is **asynchronous**. A clean `insmod` return is not
+evidence that anything downstream of it succeeded.
+
 ## What counts as authoritative
 
 Ranked, most to least:

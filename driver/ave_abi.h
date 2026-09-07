@@ -9,6 +9,7 @@
 #ifndef __AVE_ABI_H__
 #define __AVE_ABI_H__
 
+#include <linux/compiler_attributes.h>
 #include <linux/types.h>
 
 /*
@@ -207,12 +208,18 @@ enum ave_lossy_level {
  * guard on it - so a monochrome Interchange format computes a 4:4:4-sized
  * chroma region. Read from the code; preserved here as a hazard.
  */
-static const struct { u8 h, v; } ave_chroma_div[4] = {
-	[AVE_CHROMA_400] = { 1, 1 },
-	[AVE_CHROMA_420] = { 2, 2 },
-	[AVE_CHROMA_422] = { 2, 1 },
-	[AVE_CHROMA_444] = { 1, 1 },
-};
+static inline void ave_chroma_div(enum ave_chroma_fmt fmt, u8 *h, u8 *v)
+{
+	static const u8 div[4][2] = {
+		[AVE_CHROMA_400] = { 1, 1 },
+		[AVE_CHROMA_420] = { 2, 2 },
+		[AVE_CHROMA_422] = { 2, 1 },
+		[AVE_CHROMA_444] = { 1, 1 },
+	};
+
+	*h = div[fmt][0];
+	*v = div[fmt][1];
+}
 
 /*
  * THE hard constraint on client buffers.
