@@ -39,18 +39,33 @@
 | Phase | State |
 |---|---|
 | 0 — static recon | **done** |
-| 1 — fwextract plumbing | not started |
-| 2 — static host-side analysis | **~25%** — architecture mapped, no values recovered |
-| 2b — tracing | not started (no longer on the critical path) |
+| 1 — fwextract plumbing | not started (see note below) |
+| 2 — static host-side analysis | **substantially done** |
+| 2b — tracing | not started (not on the critical path) |
 | 3 — transport bring-up | not started |
 | 4 — first light | not started |
 | 5 — V4L2 driver | not started |
 
-What exists today is a **map, not a specification**. Every finding so far is a
-name or a structural relationship. There are no numbers a driver could use:
-no command ids, no struct field offsets, no register offsets within the five
-MMIO ranges, no ring format, no power-up order, no firmware load procedure.
-No driver code has been written.
+Phase 2 has produced most of what a driver needs to reach a first `Open`:
+the power-up order, the firmware load contract, the ASC start sequence, the
+IPC ring and doorbell, the interrupt path, the wire command ids and the
+command header. Still no driver code exists, and the following are still
+missing before an encode can be attempted:
+
+- **Surface size and alignment formulas** (`AVE_Work_Enc_CalcSurfaceInfo` and
+  five siblings, undisassembled). You cannot allocate a frame buffer without
+  these. This is the single largest remaining gap.
+- **Command struct interiors** beyond the common `0x40` header — including the
+  81,672-byte `Reset` payload and the ~104 KB userspace `Prepare`/`Start` blob.
+- **`reg[3]`** (`0x8E588000`, 36 bytes) — no call site found by anyone.
+- **ADT interrupts 1024–1027** — unclaimed by the host driver; purpose unknown.
+
+Phase 1 note: the original justification was opening a conversation with
+upstream. That no longer applies. The firmware still has to reach
+`/lib/firmware` for a driver to work, but a local extraction script covers it —
+and per [09-firmware-load.md](09-firmware-load.md), iBoot pre-loads the image
+and the kext adopts it via `segment-ranges`, so the Linux path may look more
+like DCP/ISP than like a `request_firmware()` blob.
 
 ## Sequencing
 
