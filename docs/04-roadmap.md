@@ -58,8 +58,11 @@ missing before an encode can be attempted:
 - ~~**Coded-output buffer size.**~~ **Answered** — it is a closed form. See
   [18-coded-data-sizing.md](18-coded-data-sizing.md); implemented as
   `ave_coded_data_size()` in `driver/ave_abi.h`.
-- **Command struct interiors** beyond the common `0x40` header — including the
-  81,672-byte `Reset` payload and the ~104 KB userspace `Prepare`/`Start` blob.
+- **Per-frame `Process` fields.** `Open`, `Config`, `Reset` and the session
+  parameters in `Start` are mapped ([20](20-command-structs.md),
+  [21](21-buffer-publication.md)). What is still missing is the per-frame QP,
+  frame type, input surface and output buffer, all inside `AVE_PICMGMT_PARAMS`.
+  This is now the last thing between here and a first encode.
 - **`reg[3]`** (`0x8E588000`, 36 bytes) — no call site found by anyone.
 - **ADT interrupts 1024–1027** — unclaimed by the host driver; purpose unknown.
 
