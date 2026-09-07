@@ -31,25 +31,11 @@
 #define AVE_ASC_IDLE_TIMEOUT_US		100000
 
 /*
- * Power domains, in ADT power-gates order. Apple brings them up as a tree
- * rooted at IOP (see docs/10-power.md); DCS is absent on t6001.
- *
- * The datapath branch forks: AVC uses PIPE4_HME, HEVC and LRME use
- * PIPE5_MDINTRA. We bring both up - Apple's driver selects per codec, but
- * powering both is simpler and the domains are independent of each other.
+ * Linux's DT already encodes the AVE power-domain tree (venc_sys -> venc_dma
+ * -> venc_pipe4 / venc_pipe5 -> venc_me0 -> venc_me1), so genpd brings up the
+ * whole chain from a leaf. The DT node lists the two leaves; we simply attach
+ * to whatever it lists and let genpd order them.
  */
-static const unsigned int __maybe_unused ave_pd_order[] = {
-	AVE_PD_IOP,
-	AVE_PD_IOP_MID,
-	AVE_PD_IOP_MID2,
-	AVE_PD_IOP_MAX,
-	AVE_PD_DMA_FE,
-	AVE_PD_PIPE4_HME,
-	AVE_PD_PIPE5_MDINTRA,
-	AVE_PD_ME0,
-	AVE_PD_ME1,
-	AVE_PD_FAB,
-};
 
 /*
  * Adopt the firmware iBoot already placed in memory.
@@ -305,9 +291,9 @@ static int ave_probe(struct platform_device *pdev)
 	ret = devm_pm_domain_attach_list(dev, NULL, &ave->pd_list);
 	if (ret < 0)
 		return dev_err_probe(dev, ret, "failed to attach power domains\n");
-	if (ret < (int)ARRAY_SIZE(ave_pd_order))
-		dev_warn(dev, "only %d power domains, expected %zu\n",
-			 ret, ARRAY_SIZE(ave_pd_order));
+	if (ret < AVE_PD_LEAVES)
+		dev_warn(dev, "only %d power domain(s), expected %d\n",
+			 ret, AVE_PD_LEAVES);
 
 	ret = ave_fw_adopt(ave);
 	if (ret)

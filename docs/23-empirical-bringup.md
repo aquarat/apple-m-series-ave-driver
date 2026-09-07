@@ -93,12 +93,26 @@ field. Domain is small, signal is clean, and no addresses are involved.
 - **Be careful with anything that carries an address.** Wrong values produce
   DART faults or a wedged coprocessor.
 
-On which: the **DART is the safety net**. AVE cannot reach memory outside its
-mappings, so a bad address is contained by the IOMMU rather than corrupting the
-system. The realistic worst case is a wedged coprocessor requiring a reboot —
-tedious, not dangerous. The firmware is loaded and signed by iBoot, so it
-cannot be persistently damaged either. The blast radius genuinely is small,
-which is what makes an empirical approach reasonable here at all.
+On which: the **DART is the safety net** — for the coprocessor. AVE cannot
+reach memory outside its mappings, so a bad *address* is contained by the IOMMU,
+and the firmware is loaded and signed by iBoot so it cannot be persistently
+damaged.
+
+> **Corrected 2026-09-07.** That containment argument is sound for the
+> coprocessor and was then wrongly extended to the whole experiment. It assumes
+> a working, correctly powered DART; **standing up a new DART node is not itself
+> a contained act.** An access to an unpowered or unclocked register block on
+> Apple silicon hangs the fabric with no fault, no panic and nothing logged.
+> That is what happened on the first probe attempt — see
+> [24-incident-2026-09-07.md](24-incident-2026-09-07.md).
+>
+> Two further gaps in that assessment: device probe is **asynchronous**, so a
+> clean `insmod` return is not evidence the step succeeded; and an overlay that
+> binds two drivers needs both risk-assessed, not just the one being developed.
+>
+> **Do not attempt a probe on this machine without an m1n1 hypervisor serial
+> console attached.** A hang with no console destroys the information needed to
+> diagnose it.
 
 ## Harness
 
