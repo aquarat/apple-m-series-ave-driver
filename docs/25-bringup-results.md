@@ -114,6 +114,36 @@ outside this kext entirely.
    most promising remaining avenue and it is pure static work**: compare
    `ApplePMGR`/`AppleARMIODevice`'s device power-up against the Asahi driver.
 
+## PMGR register dump (read-only, no crash)
+
+`test/psdump` reads the raw PMGR power-state registers and decodes them against
+Asahi's `pmgr-pwrstate` field definitions. It touches only PMGR, never AVE
+space, so it is safe. With the AVE domains **off** and AVD active as a control:
+
+```
+avd_sys   (WORKS) = 0x1f0003ff  target=f actual=f WAS_PWRGATED WAS_CLKGATED ps_auto=f
+venc_sys          = 0x0f000300  target=0 actual=0 WAS_PWRGATED WAS_CLKGATED ps_auto=f
+venc_dma          = 0x00000300  target=0 actual=0 WAS_PWRGATED WAS_CLKGATED ps_auto=0
+venc_pipe4/5,
+venc_me0/me1      = 0x00000300  (identical)
+```
+
+Asahi's driver writes `PS_TARGET` (bits 0-3), polls `PS_ACTUAL` (4-7), and
+touches nothing else — leaving `DEV_DISABLE` (bit 10), `RESET` (bit 31),
+`PS_MIN` (16-19) and `PS_AUTO` (24-27) alone. The hypothesis was that iBoot had
+left `DEV_DISABLE` or `RESET` set on VENC, which would let genpd report "on"
+while the block stayed dead.
+
+**It has not.** Neither bit is set on any VENC domain. `WAS_PWRGATED` and
+`WAS_CLKGATED` (`0x300`) are history flags, set on AVD too. The only difference
+is `AUTO_ENABLE`/`PS_AUTO`, and that is explained by `avd_sys` being powered on
+while the VENC domains are off — Asahi sets auto-enable after a successful
+transition.
+
+So the PMGR state is unremarkable and this hypothesis is eliminated, at the
+cost of no reboots. The obvious follow-up — re-dumping with the VENC domains
+powered on, to compare like with like — has not been done.
+
 ## Recommendation
 
 **Stop hardware attempts here.** The information yield per reboot has dropped

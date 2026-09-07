@@ -1,0 +1,1 @@
+savedcmd_psdump.ko := ld -r -EL  -maarch64linux -z norelro -z noexecstack --no-warn-rwx-segments --build-id=sha1  -T /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/scripts/module.lds -o psdump.ko psdump.o psdump.mod.o .module-common.o
