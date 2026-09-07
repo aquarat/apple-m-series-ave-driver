@@ -24,8 +24,33 @@
 #define AVE_BANK_DPE		0	/* 0x20D100000 + 0x45C000, AVE_DPE      */
 #define AVE_BANK_ASC		1	/* 0x20D800000 + 0x800000, coprocessor  */
 #define AVE_BANK_SVE		2	/* 0x20D050000 +   0x8000, doorbell etc */
-#define AVE_BANK_UNKNOWN3	3	/* 0x8E588000  +     0x24, purpose unknown */
-#define AVE_BANK_AXI2AF		4	/* 0x20C000000 + 0x1000000, AVE_AXI2AF */
+#define AVE_BANK_PMGR_PS	3	/* 0x8E588000  +     0x24  - see below  */
+#define AVE_BANK_FABRIC		4	/* 0x20C000000 + 0x1000000 - see below  */
+
+/*
+ * IMPORTANT: banks 3 and 4 are NOT AVE address space. Both are PMGR-owned
+ * windows that the ADT hands to the AVE node, and both were misclassified in
+ * earlier revisions of this header.
+ *
+ * Bank 3 is PMGR ps-regs[13] = reg window 2 (0x8E580000) + 0x8000, i.e. the
+ * power-state registers for the five real VENC gates:
+ *
+ *   +0x00 VENC_DMA   +0x08 VENC_PIPE4  +0x10 VENC_PIPE5
+ *   +0x18 VENC_ME0   +0x20 VENC_ME1
+ *
+ * The declared size of 0x24 is exactly ME1's register plus four bytes, which
+ * is how the identification was confirmed. ave1 corroborates: its bank 3 is
+ * 0x8E680260 + 0x7DC4, spanning VENC1_SYS to VENC1_ME1.
+ *
+ * Bank 4 is the PMGR fabric bridge window: bridge-reg-index is 48, VENC_SYS
+ * owns bridge subdev 2, and pmgr reg[50] is exactly 0x20C000000 + 0x1000000.
+ * AVE_AXI2AF operates on this window - so it configures a PMGR fabric bridge,
+ * not an AVE register block.
+ *
+ * Consequence: only banks 0, 1 and 2 are AVE address space, and those are the
+ * three that hang. Banks 3 and 4 are PMGR space, which is demonstrably
+ * accessible - test/psdump reads bank 3 addresses successfully.
+ */
 
 #define AVE_NUM_BANKS		5
 
