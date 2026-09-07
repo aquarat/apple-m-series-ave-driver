@@ -55,10 +55,9 @@ missing before an encode can be attempted:
 - ~~**Surface size and alignment formulas.**~~ **Done** — see docs 14–17.
   Frame-size primitives, the enforced 64-byte stride rule, the 35-slot
   InfoSet, and per-surface sizes at 1920x1080.
-- **Coded-output buffer size.** `AVE_CalcBufSizeOfCodedData` is not a closed
-  form — it is rate-control dependent and uses a float table. This is the
-  number a V4L2 driver most needs for its capture-side buffer, and it is now
-  the largest remaining gap.
+- ~~**Coded-output buffer size.**~~ **Answered** — it is a closed form. See
+  [18-coded-data-sizing.md](18-coded-data-sizing.md); implemented as
+  `ave_coded_data_size()` in `driver/ave_abi.h`.
 - **Command struct interiors** beyond the common `0x40` header — including the
   81,672-byte `Reset` payload and the ~104 KB userspace `Prepare`/`Start` blob.
 - **`reg[3]`** (`0x8E588000`, 36 bytes) — no call site found by anyone.

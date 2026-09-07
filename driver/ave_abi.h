@@ -331,6 +331,70 @@ static inline u8 ave_surface_slot(enum ave_surface_idx idx)
 #define AVE_DPB_MAX		17
 #define AVE_MAX_REF_FRAMES	16
 
+/*
+ * Coded (bitstream) output buffer size.
+ *
+ * AVE_CalcBufSizeOfCodedData (0xfffffe0008b5f58c) IS a closed form. Its
+ * parameters are named by its own os_log format strings:
+ *   (devType, encType, W, H, chromaFmt, bitDepth, bufSize, bLossless,
+ *    bufSizeFactor, bMaxBufSize, encMode, RCMode, initialQPI)
+ * Bitrate, framerate, level, profile and entropy mode are NOT inputs, and no
+ * level/MaxCPB table is consulted - verified by listing every data load in the
+ * function.
+ *
+ * The base quantity is one raw 8-bit 4:2:0 frame at width aligned to the
+ * macroblock size: 16 for AVC, 32 for HEVC (csel on encType==1 at
+ * 0xfffffe0008b5f5d8). Height is NOT aligned.
+ *
+ * Rate control can inflate the base by factors from a table at
+ * 0xfffffe000723e9f0 (1.3, 1.6, 1.2, 2.8, 51.0), but an UNCONDITIONAL ceiling
+ * of 2 x base applies at 0xfffffe0008b5f86c (lsl w8,w22,#1; csel ... lt), so
+ * nothing can route around it. Result is then rounded up to 4 KB
+ * (0xfffffe0008b5f880).
+ *
+ * The 460800 floor is itself computed, as a 640x480 frame
+ * (AVE_Linear_CalcFrameSize(640, 480, 8, 420) at 0xfffffe0008b5f80c).
+ *
+ * The expression below is EXACT - not conservative - for 8-bit 4:2:0 with
+ * bLossless, bMaxBufSize, bufSize and bufSizeFactor all zero, RCMode != 3 and
+ * encMode != 2. A driver that builds its own client state controls all of
+ * those. If any are left unpinned, the domain maximum read off the ceiling is
+ * 3 bytes/pixel: 3 * ALIGN(w, mb) * h.
+ *
+ * Checked: 1280x720 -> 1384448, 1920x1080 -> 3112960, 3840x2160 -> 12443648.
+ */
+#define AVE_CODED_MIN_SIZE	460800		/* 640 * 480 * 3 / 2 */
+#define AVE_CODED_ALIGN		4096
+
+static inline u32 ave_coded_data_size(u32 w, u32 h, bool hevc)
+{
+	u32 mb = hevc ? 32 : 16;
+	u32 wa = (w + mb - 1) & ~(mb - 1);
+	u32 base = wa * h * 3 / 2;
+	u32 size;
+
+	if (base >= AVE_CODED_MIN_SIZE)
+		size = base;
+	else
+		size = (2 * base < AVE_CODED_MIN_SIZE) ? 2 * base : AVE_CODED_MIN_SIZE;
+
+	return (size + AVE_CODED_ALIGN - 1) & ~(AVE_CODED_ALIGN - 1);
+}
+
+/* Absolute worst case over the whole input domain, from the 2x ceiling. */
+static inline u32 ave_coded_data_size_max(u32 w, u32 h, bool hevc)
+{
+	u32 mb = hevc ? 32 : 16;
+
+	return 3 * ((w + mb - 1) & ~(mb - 1)) * h;
+}
+
+/* AVE_CalcBufSizeOfCodedHeader takes no arguments: mov w0,#0xc000; ret. */
+#define AVE_CODED_HEADER_SIZE	0xc000		/* 49152 */
+
+/* Buffer count is clamped to at most 30. */
+#define AVE_CODED_MAX_BUFS	30
+
 /* Firmware must be mapped at DART IOVA 0 (assert at 0xfffffe0008bec408). */
 #define AVE_FW_IOVA		0
 
