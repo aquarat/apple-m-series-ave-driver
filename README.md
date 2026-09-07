@@ -53,6 +53,11 @@ IPSW**, giving the host half of the protocol — 1198 named methods — without
 hardware. Together these mean the project is not blocked on hypervisor
 tracing, which was the original assumption.
 
+**Before adding findings, read [docs/00-methodology.md](docs/00-methodology.md)** —
+it records the standing evidence rule and five traps in these binaries, each of
+which has already produced a wrong result here that a later commit had to
+correct.
+
 Both sides of the protocol are available for static analysis: the firmware
 image ([docs/02-firmware.md](docs/02-firmware.md),
 [docs/03-protocol.md](docs/03-protocol.md)) and `AppleAVE2.kext`
