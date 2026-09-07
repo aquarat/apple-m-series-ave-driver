@@ -1207,6 +1207,19 @@ deps_ave_ipc.o := \
     $(wildcard include/config/STRICT_DEVMEM) \
   /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/iopoll.h \
   ave.h \
+  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/reset.h \
+    $(wildcard include/config/RESET_CONTROLLER) \
+  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/of.h \
+    $(wildcard include/config/OF_DYNAMIC) \
+    $(wildcard include/config/SPARC) \
+    $(wildcard include/config/OF_PROMTREE) \
+    $(wildcard include/config/OF_KOBJ) \
+    $(wildcard include/config/OF_NUMA) \
+    $(wildcard include/config/OF_OVERLAY) \
+  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/mod_devicetable.h \
+  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/uapi/linux/mei.h \
+  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/uapi/linux/mei_uuid.h \
+  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/property.h \
   ave_hw.h \
   ave_abi.h \
 

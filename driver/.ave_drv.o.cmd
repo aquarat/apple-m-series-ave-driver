@@ -1271,6 +1271,8 @@ deps_ave_drv.o := \
     $(wildcard include/config/PM_GENERIC_DOMAINS_SLEEP) \
     $(wildcard include/config/PM_GENERIC_DOMAINS_OF) \
   /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/pm_runtime.h \
+  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/reset.h \
+    $(wildcard include/config/RESET_CONTROLLER) \
   ave.h \
   ave_hw.h \
   ave_abi.h \
