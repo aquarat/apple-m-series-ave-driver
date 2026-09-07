@@ -59,8 +59,8 @@ enum ave_stage {
 	AVE_STAGE_REQUEST_IRQ	= 4,
 	AVE_STAGE_POWER_ATTACH	= 5,
 	AVE_STAGE_POWER_ON	= 6,	/* resume only - NO register access */
-	AVE_STAGE_RESET		= 7,	/* reset pulse - AVD does this */
-	AVE_STAGE_READ_ASC	= 8,	/* read bank 1 - what Apple touches first */
+	AVE_STAGE_WRITE_IDLE	= 7,	/* THE write Apple issues first */
+	AVE_STAGE_READ_ASC	= 8,	/* read bank 1 */
 	AVE_STAGE_ASC_START	= 9,	/* the four-write start sequence */
 	AVE_STAGE_READ_SVE	= 10,	/* bank 2, only after the IOP is up */
 	AVE_STAGE_FW_ADOPT	= 11,
@@ -71,7 +71,7 @@ enum ave_stage {
 
 static const char * const ave_stage_name[] = {
 	"none", "map-banks", "dma-mask", "get-irq", "request-irq",
-	"power-attach", "power-on", "reset", "read-asc-status", "asc-start",
+	"power-attach", "power-on", "write-sve-idle", "read-asc-status", "asc-start",
 	"read-sve-status", "fw-adopt", "ipc-alloc", "start",
 };
 
@@ -416,34 +416,26 @@ static int ave_probe(struct platform_device *pdev)
 	}
 
 	/*
-	 * Pulse the block reset before touching anything.
+	 * THE experiment (docs/29-first-access-hypothesis.md).
 	 *
-	 * This is the one structural difference between this driver and
-	 * apple-avd, which drives the video DECODER on this same SoC and
-	 * works. Its module references __devm_reset_control_get and
-	 * reset_control_reset, and its DT node carries a "resets" property
-	 * pointing at its own power controller; ours had neither. The
-	 * apple-pmgr-pwrstate nodes expose #reset-cells = 0 for exactly this.
+	 * This is the first register access Apple's driver makes, exactly:
 	 *
-	 * Four separate attempts to read an AVE register - two banks, with
-	 * every power domain confirmed on - hung the fabric. A block still
-	 * held in reset is a candidate explanation that fits all of them.
+	 *   AVE_HwC::Init -> AVE_PMGR::SetClockGating(true)
+	 *     -> AVE_SVECtrl::SetIdle(1) -> Write32(bank 2, +0x38, 1)
+	 *
+	 * It is a WRITE. Every previous attempt here was a read, and all of them
+	 * hung the fabric. On an AXI-style fabric a posted write need not wait
+	 * for a response where a read must, so a non-responding agent would hang
+	 * reads and swallow writes - which would explain six identical failures.
+	 *
+	 * One write, nothing else, so the stage has exactly one variable.
 	 */
-	if (ave_stage(dev, AVE_STAGE_RESET)) {
-		ave->rst = devm_reset_control_get_optional_exclusive(dev, NULL);
-		if (IS_ERR(ave->rst))
-			return dev_err_probe(dev, PTR_ERR(ave->rst),
-					     "reset control\n");
-		if (!ave->rst) {
-			dev_warn(dev, "  no reset control in DT - skipping\n");
-		} else {
-			dev_info(dev, "  pulsing reset ...\n");
-			ret = reset_control_reset(ave->rst);
-			if (ret)
-				return dev_err_probe(dev, ret, "reset failed\n");
-			dev_info(dev, "  reset done\n");
-		}
-		ave_stage_ok(dev, AVE_STAGE_RESET);
+	if (ave_stage(dev, AVE_STAGE_WRITE_IDLE)) {
+		dev_info(dev, "  writing 1 to SVE+0x%x (Apple's first access) ...\n",
+			 AVE_SVE_IDLE);
+		ave_write(ave, AVE_BANK_SVE, AVE_SVE_IDLE, 1);
+		dev_info(dev, "  write returned\n");
+		ave_stage_ok(dev, AVE_STAGE_WRITE_IDLE);
 	} else {
 		return 0;
 	}
