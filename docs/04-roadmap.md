@@ -28,6 +28,24 @@
    an early check but should **not** gate anything — an NV12 path will exist.
 
 
+## Status
+
+| Phase | State |
+|---|---|
+| 0 — static recon | **done** |
+| 1 — fwextract plumbing | not started |
+| 2 — static host-side analysis | **~25%** — architecture mapped, no values recovered |
+| 2b — tracing | not started (no longer on the critical path) |
+| 3 — transport bring-up | not started |
+| 4 — first light | not started |
+| 5 — V4L2 driver | not started |
+
+What exists today is a **map, not a specification**. Every finding so far is a
+name or a structural relationship. There are no numbers a driver could use:
+no command ids, no struct field offsets, no register offsets within the five
+MMIO ranges, no ring format, no power-up order, no firmware load procedure.
+No driver code has been written.
+
 ## Sequencing
 
 **Phase 0 — static (done).** Firmware and ADT obtained and analysed; RTKit
@@ -37,9 +55,11 @@ established; command set and state machine recovered.
 `AppleAVE2FW_*.im4p`. Small, self-contained, upstreamable, useful before any
 driver exists, and a reasonable way to open the conversation with upstream.
 
-**Phase 2 — static host-side analysis (no hardware).** Extract
-`AppleAVE2.kext` from the kernelcache and work through `AVE_HwC`, `AVE_IPC`,
-`AVE_PMGR` and the `AVE_CHM_MakeFwCmd_*` builders. This was previously assumed
+**Phase 2 — static host-side analysis (no hardware).** *In progress.* The
+kext is extracted and its 91 classes mapped, which established the transport
+model and the wire command set. What remains is the disassembly that turns
+names into values: `AVE_HwC`, `AVE_IPC`, `AVE_PMGR`, `AVE_FwImg` and the
+`AVE_CHM_MakeFwCmd_*` builders. This was previously assumed
 to require tracing; it does not. See [06-kext.md](06-kext.md). Expected to
 yield the wire ids, the channel layout, the power sequence and the bring-up
 order.
