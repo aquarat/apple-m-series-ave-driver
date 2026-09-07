@@ -67,14 +67,21 @@ struct ave_cmd_hdr {
 	__le32	work_type;	/* +0x18  enum ave_work_type               */
 	__le32	enc_type;	/* +0x1c  enum ave_enc_type                */
 	__le32	slot;		/* +0x20  in-flight slot index, < 51       */
-	__le32	arg;		/* +0x24  command specific (priority value
-				 *        for AVE_CMD_PRIORITY)            */
+	__le32	priority;	/* +0x24  client priority - NOT command
+				 *        specific. The firmware passes it to
+				 *        CAVEPriorityQueue::SetClientPriority
+				 *        from Start and Process as well as
+				 *        Priority (ldr w2,[x21,#36] then
+				 *        bl 0x401c8 at firmware 0x29840).   */
 	__le32	unk_28;		/* +0x28  unknown                          */
 	__le32	unk_2c;		/* +0x2c  unknown                          */
 	__u8	timeout[16];	/* +0x30  _S_AVE_TimeOut, copied verbatim  */
 } __packed;
 
 #define AVE_MAX_INFLIGHT	51	/* hdr.slot is bounds-checked < 51 */
+
+/* CAVEPriorityQueue::RegisterClient caps concurrent clients (cmp w8,#0x80). */
+#define AVE_MAX_CLIENTS		128
 
 /* hdr.enc_type */
 enum ave_enc_type {
@@ -330,6 +337,66 @@ static inline u8 ave_surface_slot(enum ave_surface_idx idx)
 /* DPB capacity: refNum is capped at 16 and the total at a hard 17. */
 #define AVE_DPB_MAX		17
 #define AVE_MAX_REF_FRAMES	16
+
+/*
+ * sCAveCmdOpen (0x48): the 8 bytes past the common header are unused. The
+ * builder writes str xzr there and the firmware's ProcessCmd_Open reads only
+ * +0x08, +0x10 and +0x20 in the entire function. Open's real work is
+ * CAVEPriorityQueue::RegisterClient(cmd[0x10]).
+ *
+ * sCAveCmdConfig (0x78), fields past the header:
+ *   +0x48, +0x49  u8   gate McpuController creation
+ *   +0x58, +0x5c  u32  doorbell cadence (CChannelManager::DoorBellCadenceSet)
+ *   +0x60         u32  memory-controller DSID (AVE_MCC::GetDSID)
+ *   +0x68         u64  IOVA of a shared region given to the firmware's
+ *                      PlatformIOPIPCManager::AddSharedMemory
+ *   +0x70         u32  size of that region
+ * (+0x4a is written but never read; +0x50 is logged but never written.)
+ */
+
+/*
+ * sCAveCmdAvcStart (0x3180) - session parameters. Only the fields a minimal
+ * encode needs are listed; roughly 11.5 KB of the struct is unmapped.
+ * Names come from AVE_Alg_PrintCfg's sub-printers, which name every field, and
+ * were cross-checked against the firmware's AVE_KeyFrame::Init argument list.
+ */
+#define AVE_START_FRAMERATE	0x220
+#define AVE_START_RCMODE	0x234
+#define AVE_START_BITRATE	0x238
+#define AVE_START_QP_I		0x240
+#define AVE_START_QP_P		0x244
+#define AVE_START_QP_B		0x248
+#define AVE_START_QP_MIN	0x298
+#define AVE_START_QP_MAX	0x29c
+#define AVE_START_MAX_GOP	0x2b8	/* MaxKeyFrameInterval */
+#define AVE_START_REF_NUM	0x2e0
+#define AVE_START_WIDTH		0x368
+#define AVE_START_HEIGHT	0x36c
+#define AVE_START_BUF_SET	0x390	/* _S_AVE_Buf_Set, 0x21f0 bytes */
+#define AVE_START_MAX_REF	0x2d44
+#define AVE_START_PROFILE	0x291c
+#define AVE_START_LEVEL		0x2938
+#define AVE_START_ENTROPY	0x2fd8
+
+#define AVE_BUF_SET_SIZE	0x21f0
+
+/*
+ * AVE_CMD_RESET carries a verbatim replay of the Start parameter block,
+ * buffer table included. The arithmetic closes exactly:
+ *   0x68 + 0x3118  = 0x3180  (AvcStart)
+ *   0x68 + 0x13ec0 = 0x13f28 (HevcStart)
+ *   0x48 + 0x13ec0 = 0x13f08 (Reset)
+ * The 0x20 difference is the FwClient/FwClientMem pair that Start carries and
+ * Reset does not. Reset's buffer table sits at +0x370.
+ */
+
+/*
+ * Plane-offset constraint, from a kext assertion (alongside the stride rule):
+ *   offset >= 0 && offset <= size && offset % 64 == 0
+ *   && PerFrameData.StillOffsetW % 64 == 0
+ *   && PerFrameData.StillOffsetH % 16 == 0
+ */
+#define AVE_PLANE_OFFSET_ALIGN	64
 
 /*
  * Coded (bitstream) output buffer size.

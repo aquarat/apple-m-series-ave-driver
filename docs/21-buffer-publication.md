@@ -1,3 +1,34 @@
+> ## Verification note
+>
+> - **The Reset-is-a-replay-of-Start finding is self-checking and holds.** The
+>   three sizes close exactly on the same two constants:
+>   `0x68 + 0x3118 = 0x3180`, `0x68 + 0x13ec0 = 0x13f28`,
+>   `0x48 + 0x13ec0 = 0x13f08`, with the `0x20` difference accounted for by the
+>   `FwClient`/`FwClientMem` pair. Three independent size facts reconciling on
+>   one hypothesis is strong.
+>
+> - **One claim could not be reproduced and is downgraded.** This document
+>   states that `iAddr` must be 64-byte aligned for AVC and **128-byte for
+>   HEVC**, asserted by the firmware. There is **no `% 128` assertion string
+>   anywhere in either binary** — searched both images for `% 128 ==` and
+>   `% 64 ==`. The search does return positives (the four `% 64` assertions
+>   below), so it discriminates. Treat the 64/128 `iAddr` rule as **unverified**
+>   until someone cites the instruction that enforces it; it may be a numeric
+>   check rather than an assert, but it has not been located.
+>
+> - **A different, real alignment constraint was found while checking**, from a
+>   kext assertion:
+>
+>   ```
+>   pFrameInfo->PerFrameData.StillOffsetW % 64 == 0 &&
+>   pFrameInfo->PerFrameData.StillOffsetH % 16 == 0 &&
+>   offset >= 0 && offset <= size && offset % 64 == 0
+>   ```
+>
+>   So **plane offsets must be 64-byte aligned**, which joins the 64-byte stride
+>   rule from [15-surface-layout.md](15-surface-layout.md) as a hard constraint
+>   on client buffers. Added to `driver/ave_abi.h` as `AVE_PLANE_OFFSET_ALIGN`.
+
 # Buffer publication — how the firmware learns where the buffers are
 
 *The `_S_AVE_Buf_Set` slot map, the DPB publication mechanism, what the 81 KB
@@ -10,8 +41,9 @@ the VA of the instruction it came from. Anything not read directly out of an
 instruction is marked **inferred** or **unknown**, per
 [00-methodology.md](00-methodology.md).
 
-This document supersedes two claims in
-[16-encode-surface-set.md](16-encode-surface-set.md) §5 — see §7.
+This document corrects two claims in
+[16-encode-surface-set.md](16-encode-surface-set.md) §5 and closes four of its
+open questions — see §7.
 
 ---
 
@@ -21,7 +53,7 @@ There are **three** publication events, not one:
 
 | when | vehicle | contents |
 |---|---|---|
-| `Start` (once per session) | `_S_AVE_Buf_Set` at `chm+0x4E8`, copied into `sCAveCmd{Avc,Hevc}Start+0x390` | the whole buffer **pool** — every internal and external-out surface, ~19 kinds, `{u64 dartAddr; u32 size; u32 pad}` entries |
+| `Start` (once per session) | `_S_AVE_Buf_Set` at `chm+0x4E8`, copied into `sCAveCmd{Avc,Hevc}Start+0x390` | the whole buffer **pool** — every internal and external-out surface, 22 regions, `{u64 iAddr; u32 iSize; u32 pad}` entries |
 | `Start` (same command) | `cmd+0x48`/`+0x58` | `FwClient` and `FwClientMem`, as bare `{addr,size}` pairs outside the Buf_Set |
 | `Process` (every frame) | `AVE_PICMGMT_PARAMS`, copied into `sCAveCmdAvcProcess+0x12C0` | the DART addresses of *this frame's* input, output, recon, colocated and reference buffers, chosen by index out of the pools above |
 | `Reset` | `sCAveCmdReset+0x48` | a verbatim replay of the `Start` parameter block, saved in the `InitParamsCopy` surface |
@@ -29,7 +61,14 @@ There are **three** publication events, not one:
 So the model is **not** "publish once, then index by slot". The pool is
 published at Start so the firmware can validate and pre-map it; the per-frame
 command then re-states the actual addresses it wants used. A driver must do
-both.
+both — and the firmware checks that they agree: it asserts
+`pPicParams->sOutput.Coded == EncCommParams.bitstream_addr_dst[index]`
+(`__cstring 0x129a12`).
+
+The names in this document are Apple's own wherever a string in one of the two
+binaries supplies them. The buffer table is `sBufSet`, its leaf descriptor has
+`.iAddr`/`.iSize`, the per-frame block is `pPicParams`, and the Start payload is
+`pInitParams` / `sCAveInitCmdInternalParams` — see §2.2, §5.2.1 and §6.1.
 
 ---
 
@@ -78,11 +117,19 @@ what assigns the names.
 | `0x2298` | 4 | `InitParamsCopy` | 2734 | `0xfffffe0008c7c778` |
 | `0x22B8` | 2 x 8, strides `0x40`/`8` | `MCTFOutput` | 2746 | `0xfffffe0008c7c7b8` |
 
-Regions are exactly contiguous with no gaps, and 26 regions cover the 26 surface
-kinds that live in a `SurfaceSet`. (The other nine InfoSet slots — `InputData`,
+The 26 regions are exactly contiguous with no gaps and account for every
+surface kind that `AVE_CreateInternalSurfaces` or
+`AVE_CreateExternalOutSurfaces` allocates. `0x2338` is therefore the extent of
+everything the print functions walk; that it is also the declared `sizeof` is
+**inferred** — no `bzero` of the whole `SurfaceSet` was found.
+(`AVE_PrintExternalInSurfaces`, `0xfffffe0008c76f38`, prints nothing at all —
+its whole body is the null check and the log-level test — which is consistent
+with external-in being only `Recon`, already covered at `+0x10`.)
+
+The other nine InfoSet slots — `InputData`,
 `InputScaledData`, `DirectRecon`, `MultiPassStats`, `MCTFRef`, `GGMRef`,
 `GGMStats`, `GGMOutput`, `DMVOutput` — are *data* surfaces and live in a
-separate 96-byte `_S_AVE_SurfaceDataSet`; see §5.3.)
+separate 96-byte `_S_AVE_SurfaceDataSet`; see §5.3.
 
 ### 1.1 Where the three structures live
 
@@ -107,7 +154,7 @@ The `_S_AVE_Buf_Set` is **not** in that object. It lives inside the
 
 ### 2.1 Size and placement — confirmed twice
 
-`MakeFwCmd_Start_AVC` (`0xfffffe0008b66fxx`) does, in order:
+`AVE_CHM_MakeFwCmd_Start_AVC` (`0xfffffe0008b66ff8`) does, in order:
 
 ```
 b6718c:  mov  w8, #0x1838              ; 6200
@@ -140,19 +187,66 @@ builder writes after the block is at **`cmd + 0x2580`**
 
 **`sizeof(_S_AVE_Buf_Set) = 0x21F0` (8688 bytes)** — confirmed from both ends.
 
-### 2.2 Entry format
+### 2.2 Entry format — and Apple's own name for it
 
 The plain entry is 16 bytes, built by the recurring idiom (e.g.
 `0xfffffe0008b6fd5c`–`0xb6fd74`):
 
 ```c
-struct _S_AVE_Buf { uint64_t dartAddr; uint32_t size; uint32_t pad; };
+struct _S_AVE_Buf { uint64_t iAddr; uint32_t iSize; uint32_t pad; };
 ```
 
-`dartAddr` = `AVE_Surface::GetDARTAddr(surf, chm->[0x28], 0)`
-(`0xfffffe0008c6da54`), `size` = `AVE_Surface::GetSize(surf)`
+`iAddr` = `AVE_Surface::GetDARTAddr(surf, chm->[0x28], 0)`
+(`0xfffffe0008c6da54`), `iSize` = `AVE_Surface::GetSize(surf)`
 (`0xfffffe0008c6dbbc`) — the surface's *actual* size, not the InfoSet's
 requested size. Four surface kinds use wider entries: see the table.
+
+The field names are not guesses. The firmware's own trace and assertion strings
+name the structure and its members verbatim (`__cstring`, file offsets from
+`strings -a -t x data/blobs/ave_h13c.bin`):
+
+| VA | string |
+|---|---|
+| `0x12a7f7` | `sBufSet.saCodedData[%d].iAddr:%016llx` |
+| `0x12a81e` | `sBufSet.saCodedData[%d].iSize:0x%x` |
+| `0x12a865` | `sBufSet.saRecon[%d][0].iAddr:%016llx` |
+| `0x12a88b` | `sBufSet.saEntropyCoding[%d][%d].saIBuf[AVE_BufIdx_Data].iAddr:%016llx` |
+
+So `_S_AVE_Buf_Set` is **`sBufSet`**, its members are `sa<SurfaceName>[]`
+arrays, the leaf descriptor has `.iAddr` and `.iSize`, and the wider entries
+(`0x20`, `0x40`) are arrays `saIBuf[]` of that leaf, indexed by an enum
+`_E_AVE_BufIdx` whose members `AVE_BufIdx_Data`, `AVE_BufIdx_Luma` and
+`AVE_BufIdx_Chroma` all appear as literal text in the image. `saRecon[%d][0]`
+is two-dimensional exactly as §3.2 predicts. This is an independent
+confirmation of the whole §2.3 shape from the other side of the interface.
+
+### 2.2.1 Address alignment — a hard firmware requirement
+
+The firmware asserts alignment on the addresses it is handed. From the same
+`__cstring` region:
+
+```
+0x1297ad  (EncCommParams.encoder_addr_entropy[i][...].saIBuf[AVE_BufIdx_Data].iAddr & 63)  == 0
+0x130a69  (EncCommParams.encoder_addr_entropy[i][...].saIBuf[AVE_BufIdx_Data].iAddr & 127) == 0
+0x12ed62  (cPicMgmtParams[AVE_BufIdx_Luma].saIBuf[AVE_BufIdx_Data].iAddr & 63)   == 0
+0x12edf1  (cPicMgmtParams[AVE_BufIdx_Chroma].saIBuf[AVE_BufIdx_Data].iAddr & 63) == 0
+0x131c75  (pPicParams->sRecon.Y_LSB  & 127) == 0
+0x131cb9  (pPicParams->sRecon.Y_MSB  & 127) == 0
+0x131cfe  (pPicParams->sRecon.UV_LSB & 127) == 0
+0x131d44  (pPicParams->sRecon.UV_MSB & 127) == 0
+0x131517  (pPicParams->sRef.Low_Res_Y_L0[me_ref_index] & 63) == 0
+0x131933  (pPicParams->sRef.Y_L0_MSB[me_ref_index]     & 63) == 0
+0x131e46  ((pPicParams->sRef.Colocated_L1[0] + ...)    & 63) == 0
+```
+
+**64-byte alignment for AVC, 128-byte for HEVC and for every recon plane.**
+`0x1297ad` is the AVC entropy path and `0x130a69` the HEVC one, which is what
+fixes the two constants to the two codecs. Kext-allocated surfaces are
+16 KB-aligned ([16-encode-surface-set.md](16-encode-surface-set.md) §3), so this
+only bites on client-supplied buffers and on the *derived* plane addresses
+(`base + extra[1] + extra[3]`, §3.1) — those must stay 128-aligned too.
+These are `AVE_ASSERT`-style failures, i.e. the firmware halts, so a driver
+must honour them.
 
 ### 2.3 The map
 
@@ -209,9 +303,12 @@ The regions are contiguous and account for the whole `0x21F0`.
    are **left as whatever the `0x2460` template copy put there**. The two paths
    rejoin at `0xfffffe0008b70018` (`b` at `0xfffffe0008b70d94`).
 3. **Single-slot vs four-slot `SrcNeighbor*`/`EntropyCoding`.**
-   `cbz w8, 0xfffffe0008b70e08` at `0xfffffe0008b70038`, where `w8` comes from a
-   per-unit table (`chm[+0x20][+20]*0x70 + chm[+0x18] + 756`,
-   `0xfffffe0008b7001c`–`0xb70028`). Zero -> the four-entry loops
+   `cbz w8, 0xfffffe0008b70e08` at `0xfffffe0008b70038`, where `w8` is
+   `client[ pipelineObj[+20] * 0x70 + 756 ]` — `ldrsw x8,[x8,#20]`,
+   `smaddl x8,w8,#0x70,x10`, `ldr w8,[x8,#756]` at
+   `0xfffffe0008b7001c`–`0xb70028`, with `x8 = chm[+0x20]` and
+   `x10 = chm[+0x18]` restored from `[fp-144]`/`[fp-136]`
+   (stored at `0xfffffe0008b6fd1c`). Zero -> the four-entry loops
    (`0xb70e08` onward); non-zero -> a single entry per region, taken at
    SurfaceSet index `chm[+0x2C]` and written to slot 0 of the same regions
    (`0xfffffe0008b7003c` onward). Both write the same Buf_Set offsets, so §2.3
@@ -323,6 +420,25 @@ Same "metadata block first, then data block" layout, same pairing.
 For a baseline uncompressed AVC encode `extra[1] = extra[3] = 0`, so the
 Start-time DPB entry degenerates to `{ base, lumaBytes, base, 0 }`.
 
+### 3.2.1 The firmware's names for the four planes
+
+The firmware calls the four `GetFwDPBBuf` outputs, in the per-frame block,
+`pPicParams->sRecon.{Y_LSB, Y_MSB, UV_LSB, UV_MSB}` (assert strings at
+`0x131c57`, `0x131c9b`, `0x131cdf`, `0x131d25`), and elsewhere addresses the
+same pair-of-pairs as
+`cPicMgmtParams[AVE_BufIdx_{Luma,Chroma}].saIBuf[AVE_BufIdx_Data]`
+(`0x12ec6e`, `0x12edac`). There is a
+`CAVE_PICMGMT_PARAMS::GetPlaneCompressedInfo(_E_AVE_BufIdx)` (symbol at
+`0x1342b0`), so the second element of each `saIBuf[]` pair is the *compression*
+side-band of that plane.
+
+That means [16-encode-surface-set.md](16-encode-surface-set.md)'s label
+"lumaMeta / chromaMeta" for `extra[1]`/`extra[3]` should be read as
+**the second (MSB / compression-info) plane**, not necessarily "metadata" in
+any general sense. The grouping — two planes, each a `{iAddr, iSize}` pair,
+luma first — is confirmed; the `_LSB`/`_MSB` assignment to `out[0]`/`out[1]` is
+**inferred** from C declaration order and has not been proved.
+
 ### 3.3 Count
 
 **2 groups of 17** entries, `0x20` each, at Buf_Set `+0x000 .. +0x440`. The
@@ -336,8 +452,8 @@ via the unrolled-two idiom at `0xfffffe0008b6ff08`/`0xb6ff7c`/`0xb6ff88`; the
 
 ## 4. The `Start` command layout
 
-`AVE_CHM_MakeFwCmd_Start_AVC(chm, u64 cnt, u32 flags, _S_AVE_TimeOut*,
-sCAveCmdAvcStart* x23)`:
+`AVE_CHM_MakeFwCmd_Start_AVC(_S_AVE_CHM* x19, u64 cnt, u32 flags,
+_S_AVE_TimeOut*, sCAveCmdAvcStart* x23)` at `0xfffffe0008b66ff8`:
 
 | off | size | contents | VA |
 |---|---:|---|---|
@@ -360,7 +476,7 @@ The `FwClient` pointer at `+0x48` is read back by the firmware:
 `ProcessCmd_Start_AVC` does `ldr x1,[x21,#72]` / `ldr w2,[x21,#80]` at
 `0x297d8`/`0x297dc` and passes them to `0x31cc0`. Both sides agree.
 
-`MakeFwCmd_Start_HEVC` (`0xfffffe0008b676xx`) is the same shape with the block
+`AVE_CHM_MakeFwCmd_Start_HEVC` (`0xfffffe0008b67738`) is the same shape with the block
 sizes scaled up; total `0x13F28`.
 
 ---
@@ -404,10 +520,10 @@ pools published at Start:
 | `0x4618` / `SliceHeader` | `CmdInfo[+48]`, then `SurfaceSet[+0x418][slot]` | `0xfffffe0008b73384`, `0xb7338c` |
 | `0x45C8` | `SurfaceSet[+0x5F8][slot]` = **`MBStats`** | `0xfffffe0008b72b3c`, base `0xb72b0c` |
 | `0x4F48`/`0x4F58` | `SurfaceSet[+0xBE0]` / `[+0x15E0]` = `LFSResult` / `LRSResult` | `0xfffffe0008b72f10`, `0xb72b94`; bases `0xb72edc`, `0xb72b5c` |
-| `0x4548`–`0x4560` | **the current recon picture**: all four `GetFwDPBBuf` outputs, stored as `q0,q1` | `0xfffffe0008b74fb8`, `0xb74fc0`; call `0xb73f5c` |
+| `0x4548`, `0x4550`, `0x4558`, `0x4560` | a **four-address plane quad** — `sRecon.{Y_LSB,Y_MSB,UV_LSB,UV_MSB}` (§3.2.1). Written either from a stack YUV-info struct (`0xfffffe0008b72a7c`–`0xb72a90`) or from `GetFwDPBBuf`'s `out[0..3]` as `q0,q1` (`0xfffffe0008b74fb8`/`0xb74fc0`, call at `0xb73f5c`) — the same two-arm choice `GetFwDPBBuf` itself makes | as cited |
 | `0x4568` | the `Colocated` buffer of the *same* DPB slot | `0xfffffe0008b7501c` |
-| `0x4548`+ per reference | `_S_AVE_DPB_Set[+0x00,+0x38,+0x40,+0x48]` -> `0x4F18`, `0x4F48`, `0x4F58` | `0xfffffe0008b75060`, `0xb75090`, `0xb750c8` |
-| `0x4548`.. input | input frame plane addresses from a stack YUV-info struct, plus a crop offset | `0xfffffe0008b72a7c`–`0xb72a90`, `0xb72c40`–`0xb72c50` |
+| `0x4570` (+`0x4578` size) | input picture address, adjusted by `frameInfo[5264] + frameInfo[5268]*stride` — a crop origin | `0xfffffe0008b72c40`–`0xb72c50` |
+| `0x4F18` / `0x4F48` / `0x4F58` | the surfaces at `_S_AVE_DPB_Set[+0x38, +0x40, +0x48]` | `0xfffffe0008b75060`, `0xb75090`, `0xb750c8` |
 | `0x4670`,`0x4690`,`0x46B0`,`0x46D0` | `SrcNeighbor{Info,Pixel,Data,FwData}[chm[0x2C]]` | `0xfffffe0008b73bfc`, `0xb73c3c`, `0xb73c7c`, `0xb73cc0` |
 
 **The DPB slot number is recovered by pointer search, not stored.** After
@@ -427,10 +543,80 @@ the pool slot (`FrameInfo[+0xC6C]` for the output pools, a
 given an index it has to resolve. The Start-time Buf_Set is the *declaration*
 of the pool; the Process command is the *selection*.
 
+### 5.2.1 The firmware's names for the per-frame block
+
+The firmware calls this block **`pPicParams`** and names its members verbatim in
+assertion strings. This is the most useful single list in the image for anyone
+filling the structure:
+
+| VA | string (abridged) | what it is |
+|---|---|---|
+| `0x128acc` | `pPicParams->sInput.sMultiPassStats.iAddr != 0` | input sub-struct, uses the same `{iAddr,iSize}` leaf |
+| `0x129a12` | `pPicParams->sOutput.Coded == EncCommParams.bitstream_addr_dst[index]` | **the output bitstream address**, and the firmware cross-checks it against its own table |
+| `0x129a57` | `pPicParams->sOutput.CodedBufSize > (minBufSize/2)` | output size, with a minimum |
+| `0x131c57`.. | `pPicParams->sRecon.{Y_LSB,Y_MSB,UV_LSB,UV_MSB}` | the recon quad (§3.2.1) |
+| `0x131906`.. | `pPicParams->sRef.{Y_L0_MSB,Y_L0_LSB,Y_L1_MSB,Y_L1_LSB}[me_ref_index]` | **the reference lists** — arrays of addresses indexed by `me_ref_index` |
+| `0x1314e6`, `0x1315e4` | `pPicParams->sRef.Low_Res_Y_L{0,1}[me_ref_index]` | low-resolution (LRME) reference lists |
+| `0x131df4` | `pPicParams->sRef.Colocated_L1[0] + coloDataContextOffset + multiCoreOffset` | colocated MV store, with a context offset |
+| `0x12f1f4`, `0x13154f` | `pPicParams->sLowResOutput.{LowResSrcLumaScaled,LowResResults}` | LRME outputs |
+| `0x12f921`, `0x12fae5` | `pPicParams->sFrameInfo.{iLayerID,PicOrderCntVal}` | frame identity |
+| `0x12f18f` | `pPicParams->sRCUpdateData.bInputCompressed` | rate-control update block |
+
+So the reference pictures **are** named by index within the frame
+(`me_ref_index` into `sRef.Y_L0_*[]`), but the array elements are addresses,
+not pool slot numbers. `0x129a12` is worth noting: the firmware asserts that
+the address the host puts in `sOutput.Coded` equals the entry in its own
+`bitstream_addr_dst[index]` table — i.e. **it validates the per-frame address
+against the pool published at Start**. That is direct evidence that the two
+publication events are meant to agree, and that a driver cannot skip either.
+
 *Caveat:* AVC transmits only the first `0x5118` bytes of `AVE_PICMGMT_PARAMS`
 (`0xfffffe0008b6a55c`), so any PICMGMT offset `>= 0x5118` — e.g. the
 `str x0,[x23,#29536]` at `0xfffffe0008b73adc` — is HEVC-only
 (`sCAveCmdHevcProcess` is `0xB1C0`).
+
+### 5.4 Firmware side of `Process`
+
+`CFlowControllerBase::ProcessCmd_Process_AVC` spans `0x2adf0`–`0x2b47c`
+(next symbol `ProcessCmd_Process_HEVC` at `0x2b480`). It gets the command as
+`ldr x19,[x20,#1472]` (`0x2ae4c`), reads only `+0x08`, `+0x10` and `+0x24` from
+the header on the normal path, acquires an internal buffer from
+`CFlowControllerBase::aquireEncCmdBufFromPool` (`0x263ec`, named by the assert
+tag `"pEncCmdBuf"` at `0x122203`), and copies the command into it **at the same
+offsets**, in slices:
+
+| command range | bytes | copy VA |
+|---|---:|---|
+| `+0x0048` .. `+0x099C` | 2388 | `0x2b270` (gated on a flag at `+0x48`, `0x2b264`) |
+| `+0x099C` .. `+0x12C0` | 2340 | `0x2b32c` |
+| `+0x12C0` .. `+0x1690` | 976 | `0x2b318` |
+| `+0x29F8` .. `+0x2A18/0x2A20` | 32 or 40 | `0x2b33c` |
+| `+0x2A20` .. | count x 8 | `0x2b35c` |
+| `+0x54E8` .. `+0x63D8` | 3824 | `0x2b378` |
+
+then `CFlowControllerBase::SendCommandToQueue(...)` at `0x2b3ac`. **Every
+address `SetDataInfo_FwBuf` writes lands in the last slice**: PICMGMT `+0x4228`
+is command `+0x54E8`, so the recon quad (PICMGMT `+0x4548` = cmd `+0x5808`) and
+the coded-output pointer (PICMGMT `+0x4EF8` = cmd `+0x61B8`) are both inside
+`+0x54E8 .. +0x63D8`. A separate pointer, cmd `+0x4E20`, is passed *uncopied*
+to `0x32dc4`, which walks it as `{int32 count; ...; 0x78-byte records at +0x20}`
+and logs them via `"AVE_StoreRCFrameStats"` (`0x122b88`) — rate-control frame
+statistics, not buffers.
+
+Two side results worth recording here because they close open items in
+[07-commands-abi.md](07-commands-abi.md) §7:
+
+- **Header `+0x24` is a priority**, for `Process` as well as for `Priority`.
+  `ProcessCmd_Process_AVC` compares it against
+  `CAVEPriorityQueue::GetClientPriority` and, on a mismatch, calls
+  `SetClientPriority(pCmd->client_id, thatField)` (`0x2aebc`–`0x2aef0`), under
+  the log string `"%s::%s:%d adjust piority %lld %lld | %d %d"` (`0x1223ae`,
+  Apple's typo). The assert tag
+  `"hClientQueue.GetClientPriority(pCmd->client_id, &tmpPriority) == true"`
+  (`0x122368`) also names `+0x10` verbatim as `client_id`.
+- **Header `+0x20` is read by the firmware**, once, at `0x2b034`, only on the
+  failure path, where it is stored into an error record built by `0x311a8`.
+  docs/07 records this as "not determined".
 
 ### 5.3 The data surfaces
 
@@ -447,8 +633,8 @@ is not the creation order and was not cross-checked).
 
 ## 6. The `Reset` payload — solved
 
-`AVE_CHM_MakeFwCmd_Reset(chm, u64 cnt, u32 flags, _S_AVE_TimeOut*,
-sCAveCmdReset* x23)` at `0xfffffe0008b6b9f4`:
+`AVE_CHM_MakeFwCmd_Reset(_S_AVE_CHM* x19, u64 cnt, u32 flags,
+_S_AVE_TimeOut*, sCAveCmdReset* x23)` at `0xfffffe0008b6b9f4`:
 
 ```
 b6ba98:  bzero(cmd, 0x13F08)
@@ -462,7 +648,7 @@ b6bbe8:  memcpy(cmd + 0x48, x0, 0x3118)       ; codec == 1 (AVC)
 b6bbf4:  memcpy(cmd + 0x48, x0, 0x13EC0)      ; codec == 2 (HEVC)
 ```
 
-and the *last* thing `MakeFwCmd_Start_AVC` does
+and the *last* thing `AVE_CHM_MakeFwCmd_Start_AVC` does
 (`0xfffffe0008b675a4`–`0xb675e0`) is the mirror image:
 
 ```
@@ -474,7 +660,7 @@ b675dc:  mov w2, #0x3118
 b675e0:  bl memcpy                            ; save the Start body
 ```
 
-`MakeFwCmd_Start_HEVC` does the same with `0x13EC0` at
+`AVE_CHM_MakeFwCmd_Start_HEVC` does the same with `0x13EC0` at
 `0xfffffe0008b67dbc`–`0xb67dc8`.
 
 `0x13EC0` is exactly `AVE_CalcBufSizeOfInitParamsCopy`'s constant return
@@ -505,16 +691,75 @@ lists "why `sCAveCmdReset` is 81672 bytes" as unexplained; it can be closed.
 
 *What the firmware does with it* is covered in §6.1.
 
-### 6.1 Firmware side
+### 6.1 What the payload is called, and what the firmware does with it
 
-`CFlowControllerBase::ProcessCmd_Reset` (`0x28d64`) itself touches only the
-header: `x19 = this[1472]` is the command (`0x28dbc`), then `ldp x8,x1,[x19,#8]`
-= `+0x08`/`+0x10` (`0x28dcc`), `ldr x1,[x19,#16]` (`0x28df8`, `0x28e4c`),
-`ldr w2,[x19,#36]` = `+0x24` (`0x28e50`). It hands the command pointer on as
-`x5` to `0x403fc` with `w4 = 12` (`0x28e74`/`0x28e78`) after
-`0x3f840` and `0x401c8`. It does not parse the payload inline. Compare
-`ProcessCmd_Start_AVC` (`0x29744`), which reads `+0x48`/`+0x50`/`+0x18`/`+0x1c`
-(`0x297d8`–`0x297e0`) and calls `0x31cc0`.
+The firmware's own names, from `__cstring` and from the symbol table, settle
+what this block is:
+
+| VA | name |
+|---|---|
+| `0x129ef2` | `pAvcInitCmd->sFwClientMem.iAddr != 0` |
+| `0x130125` | `pHevcInitCmd->sFwClientMem.iAddr != 0` |
+| `0x12eee6` | `%s::%s: pInitParams is NULL` |
+| `0x1304f1` | `... pInitParams->sPSInfo.iNum %d header [%d] eType %d iLayerID %d iOffset %d iSize %d` |
+| `0x136615` | `(psPSInfo->saBuf[iNum].sBuf.iOffset + psPSInfo->saBuf[iNum].sBuf.iSize) <= (int32_t)sizeof(psPSContext->iaPSData)` |
+| `0x0580f4` | `CAVCController::Init(_E_AVE_EncType, sCAveInitCmdInternalParams, int, unsigned, unsigned*)` |
+| `0x057254` | **`CAVCController::ResetBetweenPasses(sCAveInitCmdInternalParams)`** |
+| `0x08b930` | `CHEVCController::ResetBetweenPasses(sCAveInitCmdInternalParams)` |
+| `0x0814bc` | `CHEVCController::DebugInit(CAVEControllerHevcInitCmd*)` |
+
+So the `Start` command is `sCAveCmd{Avc,Hevc}Start` on the wire and
+`pAvcInitCmd` / `CAVEControllerHevcInitCmd` inside the firmware; its parameter
+block is `pInitParams` / `sCAveInitCmdInternalParams`; and the same type is the
+argument of `ResetBetweenPasses`. The kext's name for the save area,
+`InitParamsCopy`, is literally that: a copy of `InitParams`. That the payload
+is an init-parameter block rather than a bare address table is therefore
+confirmed from both sides, by name.
+
+`pInitParams->sPSInfo` carries the SPS/PPS/VPS bytes inline, described by
+`saBuf[i].sBuf.{iOffset,iSize}` into a byte array `iaPSData`, built by
+`AVE_PSInfo_Make(const unsigned char*, _E_AVE_PSType, int, int,
+_S_AVE_PSContext*)` (`0x0e8f64`). That is another chunk of the 81 KB.
+
+**The handler itself does not parse it.**
+`CFlowControllerBase::ProcessCmd_Reset` (`0x28d64`) reads only `+0x08`, `+0x10`
+(`0x28dcc`, `0x28df8`, `0x28e4c`) and `+0x24` (`0x28e50`) — maximum offset
+`0x24` — then passes the raw command pointer as arg 5 to
+`CAVEPriorityQueue::Enqueue` (`0x403fc`, `w4 = 12` at `0x28e74`), which stores
+it verbatim into a ring slot (`str x4,[x19,#24]` at `0x3db84`) and sets a ready
+flag (`0x3dcf0`). Nothing in that chain — `0x3f840` `IsClientRegistered`,
+`0x401c8` `SetClientPriority`, `0x403fc` `Enqueue`, `0x3db84`, `0x559f0`
+`AVE_CheckEncCmd` — dereferences the command at or beyond `+0x48`, and none of
+them contains a 16-byte-stride loop over the payload.
+
+The **positive control** for that negative is `Start`, which takes the same
+shape of pointer and *does* read deep: `ProcessCmd_Start_AVC` (`0x29744`) reads
+`+0x48`/`+0x50` (`0x297d8`/`0x297dc`) into
+`CFlowControllerBase::CreateClient` (`0x31cc0`), then hands the raw pointer to
+`CFlowControllerBase::ProcessCmd_Start` (`0x31e44`, call at `0x29858`), which
+reads `cmd+0x3150` (`0x31efc`), `cmd+0x3154` (`0x31f34`) and memcpy's 36 bytes
+from `cmd+0x3158` (`0x31f38`) for AVC, and `+0x13ef8`/`+0x13efc`/`+0x13f00` for
+HEVC (`0x32088`–`0x320f8`). Those are exactly the tail fields the kext writes at
+`cmd+0x2580 + 3024 = cmd+0x3150` (`strb w8,[x26,#3024]`,
+`0xfffffe0008b67380`) — **both sides agree on a byte offset near the end of an
+81 KB structure**, which is about as strong a cross-check as this project gets.
+
+So Reset is queued, not decoded, on the synchronous path. Whether the
+asynchronous worker that drains that queue re-runs the same `InitParams`
+consumer — which the `ResetBetweenPasses(sCAveInitCmdInternalParams)` signature
+strongly suggests — was **not traced**. Treat "Reset re-applies the Start
+parameters, buffer table included" as the reading the evidence supports, and
+the exact firmware path as unknown.
+
+### 6.2 Size assertion, re-confirmed
+
+`0x12569d` `insize == sizeof(struct sCAveCmdReset)`; the compare is
+`mov w8,#0x3f08` (`0x28294`) / `movk w8,#1,lsl#16` (`0x28298`) /
+`cmp w21,w8` (`0x2829c`), gating the call at `0x282b0`. There is **no**
+equivalent `sizeof(struct sCAveCmdAvcStart)` / `...HevcStart` string anywhere
+in the image (grepped over the whole blob) — Start's size gate is not
+assert-backed, which is why [07-commands-abi.md](07-commands-abi.md) §2 could
+only get the Start sizes from the host.
 
 ---
 
@@ -565,17 +810,26 @@ header: `x19 = this[1472]` is the command (`0x28dbc`), then `ldp x8,x1,[x19,#8]`
 - The remaining `0x2460`-byte engine parameter block outside the Buf_Set
   (`chm+0x4C0..+0x4E8` and `chm+0x26D8..+0x2920`), and the three other
   client-derived blocks the Start command carries (`+0x27C8`, `+0x291C`,
-  `+0x2FD0`). None of them were decoded.
-- The full field map of `AVE_PICMGMT_PARAMS`. §5.2 names about fifteen offsets
-  out of `0x5118` bytes; `AVE_CHM_SetDataInfo_Frame` (`0xfffffe0008b682bc`),
-  `_Header` (`0xb68858`) and `_RC` (`0xb69110`) fill the rest and were not read.
+  `+0x2FD0`). None of them were decoded. `pInitParams->sPSInfo` (§6.1) is
+  somewhere in there.
+- The full field map of `AVE_PICMGMT_PARAMS` / `pPicParams`. §5.2 and §5.2.1
+  name about twenty offsets and a dozen member names out of `0x5118` bytes, but
+  the two are not yet joined up — no `sRef.Y_L0_MSB[]` *offset* is known.
+  `AVE_CHM_SetDataInfo_Frame` (`0xfffffe0008b682bc`), `_Header` (`0xb68858`) and
+  `_RC` (`0xb69110`) fill the rest and were not read. The firmware never touches
+  command `+0x1690..+0x29F8` (§5.4), so roughly `0x1368` bytes of the block are
+  inert on this path.
 - `_S_AVE_DPB_Set` — its size and the meaning of its members beyond
   `+0x00/+0x30/+0x38/+0x40/+0x48` (§5.2). `AVE_CHM_PrepareDataInfo`
   (`0xfffffe0008b69a28`) builds it and was not read.
-- The `_S_AVE_SurfaceDataSet` offset -> surface name mapping (§5.3).
+- The `_S_AVE_SurfaceDataSet` offset -> surface name mapping (§5.3) — the
+  eleven client-supplied surfaces, `InputData` included.
+- Whether `sRecon.Y_LSB` is `out[0]` or `out[1]` (§3.2.1). The grouping is
+  confirmed; the order within each pair is inferred.
 - Why `SetFwBuf` publishes only `Recon` set 0 while publishing both `LFSRef`
   sets (§3.3), and the three re-writing outer loops flagged in §2.4.
 - What `client[+6209]` bit 3 means beyond "use `ProtectedData`", and what
   distinguishes client type 4 (§2.4).
-- Which firmware function consumes the Start/Reset parameter block. §6.1 traces
-  Reset only as far as `0x403fc`.
+- Which firmware function re-applies the Reset payload. §6.1 traces Reset only
+  to the queue; `C{AVC,HEVC}Controller::ResetBetweenPasses` (`0x057254`,
+  `0x08b930`) is the obvious candidate but the link was not traced.

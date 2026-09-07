@@ -44,6 +44,10 @@ firmware and device tree.
 | Frame size formulas | all four layout primitives transcribed | Confirmed |
 | `420v` @ 1920x1080 | 3,110,400 B; Y stride 1920 @ 0; CbCr stride 1920 @ `0x1FA400` | Confirmed |
 | **Input stride constraint** | **non-zero multiple of 64 on both planes** (enforced, `-1015`) | Confirmed |
+| **Plane offset constraint** | **64-byte aligned** (asserted) | Confirmed |
+| Session parameters | width/height/QP/GOP/bitrate offsets in `AvcStart` | Confirmed |
+| `Reset` payload | verbatim replay of the `Start` parameter block | Confirmed |
+| Max concurrent clients | 128 | Confirmed |
 | Plane count | 2 planes only; a third would alias onto plane 1 | Confirmed |
 | Kext-allocated surfaces | linear blobs, `align_up(size, 16 KB)`, no geometry keys | Confirmed |
 | FwIPC allocator | ChkPool buddy allocator, 64-byte granule and alignment | Confirmed |
