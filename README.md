@@ -28,7 +28,9 @@ firmware and device tree.
 | Firmware command handlers | 16 recovered (`ProcessCmd_*`) | Names confirmed |
 | Host↔fw data path | Shared-memory channels (`AVE_IPC`), not endpoint messaging | Confirmed |
 | Wire command set | 11 commands (`AVE_HwC::SendFwCmd_*`) | Confirmed |
-| Numeric command ids | **Unknown** — recoverable statically from the kext | Open |
+| Numeric command ids | 1–12, from the firmware jump table (5 unused) | Confirmed |
+| Command struct sizes | `0x48` for most, `0x78` Config, `0x13F08` Reset | Confirmed |
+| Userspace ABI | 10 IOKit selectors, exact struct sizes | Confirmed |
 | Mailbox endpoint ids | **Unknown** — gates bring-up only, not the data path | Open |
 
 Two findings matter most. **AVE runs RTKit**, so m1n1's tracer and Linux's
