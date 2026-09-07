@@ -1,0 +1,8 @@
+# Apple proprietary firmware / device tree blobs — NEVER commit these.
+# They are extracted locally from an IPSW by tools/fetch_firmware.py.
+data/blobs/
+*.im4p
+*.bin
+.venv/
+__pycache__/
+m1n1-src/

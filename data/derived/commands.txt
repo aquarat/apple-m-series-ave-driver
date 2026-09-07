@@ -1,0 +1,27 @@
+# AVE command handlers recovered from the firmware symbol table.
+# Dispatcher: CFlowControllerBase::CmdProcessor(void*, uint32_t, uint32_t*)
+#
+# The index is this handler's position in the contiguous __text run.
+# That is STRONGLY SUGGESTIVE of the wire command id but is NOT confirmed:
+# it assumes the compiler emitted the handlers in enum order. Must be
+# verified against a real mailbox trace before any driver relies on it.
+
+  0  0x00028d64  CFlowControllerBase::ProcessCmd_Reset()
+  1  0x00029080  CFlowControllerBase::ProcessCmd_Config()
+  2  0x00029578  CFlowControllerBase::ProcessCmd_Open()
+  3  0x00029744  CFlowControllerBase::ProcessCmd_Start_AVC()
+  4  0x00029954  CFlowControllerBase::ProcessCmd_Start_HEVC()
+  5  0x00029b84  CFlowControllerBase::ProcessCmd_Process_DMV()
+  6  0x0002a128  CFlowControllerBase::ProcessCmd_Process_LRME()
+  7  0x0002a720  CFlowControllerBase::ProcessCmd_Process_MCTF()
+  8  0x0002adf0  CFlowControllerBase::ProcessCmd_Process_AVC()
+  9  0x0002b480  CFlowControllerBase::ProcessCmd_Process_HEVC()
+ 10  0x0002bbe0  CFlowControllerBase::ProcessCmd_Stop()
+ 11  0x0002c4f0  CFlowControllerBase::ProcessCmd_Flush()
+ 12  0x0002cdcc  CFlowControllerBase::ProcessCmd_Close()
+ 13  0x0002d178  CFlowControllerBase::ProcessCmd_Complete()
+ 14  0x0002d608  CFlowControllerBase::ProcessCmd_Priority()
+ 15  0x0002d7e4  CFlowControllerBase::ProcessCmd_Halt()
+
+# Not dispatch-table entries (take arguments):
+     0x00031e44  CFlowControllerBase::ProcessCmd_Start(...)   [mangled args: yjPv]

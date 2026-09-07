@@ -1,0 +1,3 @@
+remotezip>=0.12   # HTTP range-request access into the IPSW zip
+pyimg4>=0.8       # Image4 (.im4p) unwrapping + LZFSE
+construct>=2.10   # required by m1n1's ADT parser
