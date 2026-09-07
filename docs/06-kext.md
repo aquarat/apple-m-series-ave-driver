@@ -87,16 +87,20 @@ AVE_CHM_MakeFwCmd_Start_HEVC (..., sCAveCmdHevcStart*)
 AVE_CHM_MakeFwCmd_Process_AVC(..., sCAveCmdAvcProcess*, int, AVE_PICMGMT_PARAMS*, _S_AVE_FrameInfo*)
 ```
 
-`sCAveCmdOpen` is **120 bytes** (`0x78`), from the allocation in
-`AVE_CHM_MakeFwCmd_Open` at `0xfffffe0008b668c0`.
+> **Corrected.** An earlier revision of this document claimed `sCAveCmdOpen`
+> is 120 bytes, reading the `mov w0, #0x78` in `AVE_CHM_MakeFwCmd_Open` as an
+> allocation size. It is not — it is the `AVE_Log` subsystem id passed to
+> `AVE_Log_CheckLevel`, the same pattern the firmware uses with subsystem
+> `0x80` in `CmdProcessor`. `sCAveCmdOpen` is **72 bytes** (`0x48`), enforced
+> by the firmware itself. See [07-commands-abi.md](07-commands-abi.md) for the
+> confirmed sizes.
 
-### Numeric command ids: still open
+### Numeric command ids: recovered
 
-Disassembling the `SendFwCmd_*` call sites yields only allocator tags and log
-constants, not distinguishing ids — the id is stored *into* the command struct
-by `AVE_CHM_MakeFwCmd_*` rather than passed to `SendFwCmd`. Recovering it means
-following the field stores in those builders. That is bounded static work; it
-does **not** need a hypervisor.
+**Resolved** — see [07-commands-abi.md](07-commands-abi.md). The firmware's
+`CmdProcessor` reads a u16 id at offset 0 of the command struct and branches
+through a 12-entry jump table, which gives the ids directly and independently
+of the host side.
 
 ## Interrupt sources
 

@@ -13,35 +13,36 @@ python3 tools/extract_protocol.py data/blobs/ave_h13c.bin
 ## Command set
 
 Dispatcher: `CFlowControllerBase::CmdProcessor(void*, uint32_t, uint32_t*)`
-at `0x28134`. Sixteen zero-argument handlers form one contiguous run in
-`__text`:
+at `0x28134`. It reads a **u16 command id at offset 0** of the command struct
+(`ldrh w8, [x19]` at `0x28244`), rejects anything where `id - 1 > 0xb`, and
+branches through a 12-entry jump table at `0x28c6c`:
 
-| idx | handler | notes |
-|---|---|---|
-| 0 | `ProcessCmd_Reset` | |
-| 1 | `ProcessCmd_Config` | |
-| 2 | `ProcessCmd_Open` | session open — `client_id` appears here |
-| 3 | `ProcessCmd_Start_AVC` | H.264 |
-| 4 | `ProcessCmd_Start_HEVC` | H.265 |
-| 5 | `ProcessCmd_Process_DMV` | direct motion vector |
-| 6 | `ProcessCmd_Process_LRME` | low-resolution motion estimation |
-| 7 | `ProcessCmd_Process_MCTF` | motion-compensated temporal filtering |
-| 8 | `ProcessCmd_Process_AVC` | encode a frame |
-| 9 | `ProcessCmd_Process_HEVC` | encode a frame |
-| 10 | `ProcessCmd_Stop` | |
+| id | handler | notes |
+|---:|---|---|
+| 1 | `ProcessCmd_Config` | struct size `0x78` |
+| 2 | `ProcessCmd_Halt` | |
+| 3 | `ProcessCmd_Open` | session open — `client_id` appears here |
+| 4 | `ProcessCmd_Close` | |
+| 5 | *unused* | jump-table entry targets the default block |
+| 6 | `ProcessCmd_Start_AVC` / `_HEVC` | codec chosen by field `+0x1c` (1=AVC, 2=HEVC) |
+| 7 | `ProcessCmd_Stop` | |
+| 8 | `ProcessCmd_Process_*` | engine chosen by field `+0x18` (AVC/HEVC/LRME/MCTF/DMV) |
+| 9 | `ProcessCmd_Complete` | |
+| 10 | `ProcessCmd_Priority` | |
 | 11 | `ProcessCmd_Flush` | |
-| 12 | `ProcessCmd_Close` | |
-| 13 | `ProcessCmd_Complete` | |
-| 14 | `ProcessCmd_Priority` | |
-| 15 | `ProcessCmd_Halt` | |
+| 12 | `ProcessCmd_Reset` | struct size `0x13F08` (81,672 bytes) |
+
+Every command except `Config` and `Reset` uses a `0x48`-byte struct.
 
 `CFlowControllerBase::ProcessCmd_Start(uint64_t, uint32_t, void*)` at `0x31e44`
 takes arguments and sits outside that run — it is a helper called by
 `Start_AVC` / `Start_HEVC`, not a table entry.
 
-> **The index column is inferred.** It assumes the compiler emitted handlers in
-> enum order, which is usual but not guaranteed. The *names* are confirmed;
-> the *wire ids* are not. Verify against a mailbox trace before relying on them.
+> **Corrected.** An earlier revision of this document listed these handlers in
+> `__text` emission order (Reset=0, Config=1, Open=2, …) and inferred that to be
+> the wire ordering. It is not. The table above is the real dispatch, read out
+> of the firmware's own jump table at `0x28c6c` and verified against the
+> per-command size checks. See [07-commands-abi.md](07-commands-abi.md).
 
 ## Pipeline state machine
 
