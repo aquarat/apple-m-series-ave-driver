@@ -108,10 +108,30 @@ python3 tools/kext_classmap.py data/derived/kext-symbols.txt
 Full reproduction steps, including why the ADT cannot simply be read from a
 booted Linux system, are in [docs/05-reproducing.md](docs/05-reproducing.md).
 
+## Building a driver
+
+[docs/22-driver-plan.md](docs/22-driver-plan.md) maps the findings onto the
+components a Linux driver needs, with the bring-up sequence and what still
+blocks first light.
+
+The confirmed constants are available as compilable headers:
+
+- `driver/ave_hw.h` — MMIO banks, ASC start sequence, doorbell, power domains
+- `driver/ave_abi.h` — command ids and sizes, the 64-byte header, IPC ring,
+  pixel-format enums, the 64-byte stride rule
+- `dts/apple,ave.yaml`, `dts/t6001-ave.dtsi` — device tree binding and nodes
+
+Every constant carries the instruction address it was read from, so any of them
+can be re-checked in one command. Three of the hardest pieces need no new
+Apple-specific code: `apple-dart` covers the IOMMU, `apple-pmgr-pwrstate` covers
+power, and the coprocessor is ordinary RTKit.
+
 ## Layout
 
 ```
-docs/            findings and roadmap
+docs/            findings, methodology and the driver plan
+driver/          C headers of confirmed constants
+dts/             device tree binding and node fragments
 tools/           extraction and analysis scripts
 data/derived/    committed: symbols, command tables, ADT dumps (facts)
 data/blobs/      gitignored: Apple proprietary firmware and device tree

@@ -1,0 +1,111 @@
+# SPDX-License-Identifier: GPL-2.0-only OR BSD-2-Clause
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/media/apple,ave.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Apple SoC video encoder (AVE)
+
+maintainers:
+  -" "
+
+description: |
+  AVE is the hardware video encoder on Apple silicon, the counterpart to AVD
+  (the decoder). It supports H.264 and HEVC.
+
+  The block is driven by an RTKit coprocessor whose firmware Apple ships as a
+  standalone Image4 payload (Firmware/ave/AppleAVE2FW_<variant>.im4p). iBoot
+  pre-loads that image and passes its location through the ADT; the OS adopts
+  it rather than loading it itself. The firmware must be mapped at DART IOVA 0.
+
+  M1 Max (t6001) exposes two independent instances. They are not coupled - in
+  particular they share no power-domain dependency.
+
+  Derived from AppleAVE2.kext and the ADT. See
+  https://github.com/  (project docs) for the analysis this binding is based on.
+
+properties:
+  compatible:
+    items:
+      - enum:
+          - apple,t8103-ave
+          - apple,t6000-ave
+          - apple,t6001-ave
+      - const: apple,ave
+
+  reg:
+    items:
+      - description: DPE block
+      - description: ASC coprocessor window (control block at +0x400000)
+      - description: SVE control - doorbell, interrupt status, scratch registers
+      - description: unidentified 36-byte window
+      - description: AXI2AF block
+    minItems: 5
+
+  reg-names:
+    items:
+      - const: dpe
+      - const: asc
+      - const: sve
+      - const: unk3
+      - const: axi2af
+
+  interrupts:
+    description: |
+      The ADT declares five. Apple's driver registers a handler for the first
+      only; that one carries every event, demultiplexed by the SVE interrupt
+      status register. The purpose of the remaining four is unknown.
+    minItems: 1
+    maxItems: 5
+
+  iommus:
+    maxItems: 1
+
+  power-domains:
+    description: |
+      Eleven domains, in the ADT power-gates order:
+      IOP, IOP_Mid, IOP_Mid2, IOP_Max, DMA/FE, Pipe4/HME, Pipe5/MDINTRA,
+      ME0/ME, ME1/MDINTER, FAB, DCS. DCS is absent on t6001.
+
+      Ordering is not free: power-up is a tree rooted at IOP, with a perf ladder
+      IOP -> IOP_Mid -> IOP_Mid2 -> IOP_Max and a datapath
+      IOP -> DMA/FE -> {Pipe4/HME | Pipe5/MDINTRA} -> ME0/ME -> ME1/MDINTER.
+      FAB is independent.
+    minItems: 10
+    maxItems: 11
+
+  clocks:
+    maxItems: 1
+
+required:
+  - compatible
+  - reg
+  - reg-names
+  - interrupts
+  - iommus
+  - power-domains
+
+additionalProperties: false
+
+examples:
+  - |
+    #include <dt-bindings/interrupt-controller/apple-aic.h>
+    #include <dt-bindings/interrupt-controller/irq.h>
+
+    soc {
+        #address-cells = <2>;
+        #size-cells = <2>;
+
+        video-encoder@20d100000 {
+            compatible = "apple,t6001-ave", "apple,ave";
+            reg = <0x2 0x0d100000 0x0 0x45c000>,
+                  <0x2 0x0d800000 0x0 0x800000>,
+                  <0x2 0x0d050000 0x0 0x008000>,
+                  <0x0 0x8e588000 0x0 0x000024>,
+                  <0x2 0x0c000000 0x0 0x1000000>;
+            reg-names = "dpe", "asc", "sve", "unk3", "axi2af";
+            interrupts = <AIC_IRQ 0 1031 IRQ_TYPE_LEVEL_HIGH>;
+            iommus = <&dart_ave0 0>;
+            power-domains = <&ps_ave0_iop>;
+        };
+    };
