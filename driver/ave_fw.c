@@ -164,7 +164,12 @@ static int ave_fw_patch_ioba(struct ave_device *ave, void *img, size_t size)
 	}
 	bus = (u64)fabric - AVE_ARM_IO_BUS_OFFSET;
 
-	for (i = 0; i + 16 <= size; i += 4) {
+	/*
+	 * Byte-wise, not word-wise. The tag list is packed with no alignment:
+	 * IOBA sits at image 0x1341f5, which is 4-byte aligned only by
+	 * accident of nothing. A stride of 4 walks straight past it.
+	 */
+	for (i = 0; i + 16 <= size; i++) {
 		u8 *p = (u8 *)img + i;
 		u32 len = get_unaligned_le32(p + 4);
 
