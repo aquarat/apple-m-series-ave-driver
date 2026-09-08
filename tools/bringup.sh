@@ -48,8 +48,8 @@ LOGDIR="$REPO/data/bringup-logs"
 mkdir -p "$LOGDIR"
 
 names=(none map-banks dma-mask get-irq request-irq power-attach \
-       power-on write-sve-idle read-asc-status ipc-alloc fw-load iop-config \
-       asc-start read-sve-status probe-state start)
+       power-on write-sve-idle read-asc-status ipc-alloc fw-load boot-cfg iop-config \
+       asc-start recv-msg probe-state start)
 
 # Seconds to wait after syncing the marker before doing anything that can hang.
 # The 2026-09-07 attempt lost both the marker update and the session transcript

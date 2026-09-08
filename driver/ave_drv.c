@@ -63,19 +63,20 @@ enum ave_stage {
 	AVE_STAGE_READ_ASC	= 8,	/* read bank 1 */
 	AVE_STAGE_IPC_ALLOC	= 9,	/* exercises the DART */
 	AVE_STAGE_FW_LOAD	= 10,	/* must precede ASC start */
-	AVE_STAGE_IOP_CONFIG	= 11,	/* tell the ASC where firmware is */
-	AVE_STAGE_ASC_START	= 12,	/* the four-write start sequence */
-	AVE_STAGE_READ_SVE	= 13,	/* bank 2, once the IOP is up */
-	AVE_STAGE_PROBE_STATE	= 14,	/* is the core actually executing? */
-	AVE_STAGE_START		= 15,
-	AVE_STAGE_MAX		= 15,
+	AVE_STAGE_BOOT_CFG	= 11,	/* hand the firmware its arguments */
+	AVE_STAGE_IOP_CONFIG	= 12,	/* tell the ASC where firmware is */
+	AVE_STAGE_ASC_START	= 13,	/* the four-write start sequence */
+	AVE_STAGE_RECV_MSG	= 14,	/* wait for the firmware to speak */
+	AVE_STAGE_PROBE_STATE	= 15,	/* is the core actually executing? */
+	AVE_STAGE_START		= 16,
+	AVE_STAGE_MAX		= 16,
 };
 
 static const char * const ave_stage_name[] = {
 	"none", "map-banks", "dma-mask", "get-irq", "request-irq",
 	"power-attach", "power-on", "write-sve-idle", "read-asc-status",
-	"ipc-alloc", "fw-load", "iop-config", "asc-start", "read-sve-status",
-	"probe-state", "start",
+	"ipc-alloc", "fw-load", "boot-cfg", "iop-config", "asc-start",
+	"recv-msg", "probe-state", "start",
 };
 
 /* Returns true if this stage should run. Logs the decision either way. */
@@ -413,6 +414,15 @@ static int ave_probe(struct platform_device *pdev)
 	} else {
 		return 0;
 	}
+	if (ave_stage(dev, AVE_STAGE_BOOT_CFG)) {
+		ret = ave_boot_config(ave);
+		if (ret)
+			return dev_err_probe(dev, ret, "boot config\n");
+		ave_stage_ok(dev, AVE_STAGE_BOOT_CFG);
+	} else {
+		return 0;
+	}
+
 	/*
 	 * Tell the coprocessor where its firmware is. This is what
 	 * AVE_IOP_Config_Nyx does, and it is on our path precisely because we
@@ -465,24 +475,23 @@ static int ave_probe(struct platform_device *pdev)
 	} else {
 		return 0;
 	}
-	if (ave_stage(dev, AVE_STAGE_READ_SVE)) {
-		u32 v;
+	if (ave_stage(dev, AVE_STAGE_RECV_MSG)) {
+		u32 msg[4];
 
-		dev_info(dev, "  reading SVE+0x%x ...\n", AVE_SVE_INTR_STATUS);
-		v = ave_read(ave, AVE_BANK_SVE, AVE_SVE_INTR_STATUS);
-		dev_info(dev, "  SVE intr status = 0x%08x\n", v);
-		ave_stage_ok(dev, AVE_STAGE_READ_SVE);
+		dev_info(dev, "  waiting up to 2s for the firmware to speak ...\n");
+		ret = ave_recv_iop_msg(ave, msg, 2000);
+		if (ret) {
+			dev_warn(dev, "  no message from firmware (%d)\n", ret);
+		} else {
+			dev_info(dev, "  MSG 1: %#010x %#010x %#010x %#010x\n",
+				 msg[0], msg[1], msg[2], msg[3]);
+		}
+		ave_fw_log_dump(ave);
+		ave_stage_ok(dev, AVE_STAGE_RECV_MSG);
 	} else {
 		return 0;
 	}
-	/*
-	 * Is the coprocessor executing?
-	 *
-	 * Nothing so far distinguishes "started and running firmware" from
-	 * "started and idle because it has nothing to run". A running RTKit
-	 * image touches the SVE scratch registers, so sample them twice with a
-	 * delay and report any that move. Reads only.
-	 */
+
 	if (ave_stage(dev, AVE_STAGE_PROBE_STATE)) {
 		u32 before[AVE_SVE_NUM_SCRATCH], after[AVE_SVE_NUM_SCRATCH];
 		u32 st0, st1, i;
