@@ -1,3 +1,15 @@
+> ## Corrections from [32-picmgmt-params.md](32-picmgmt-params.md)
+>
+> Three items in this document's section 5.2 are wrong:
+>
+> - The Recon quad order is `{Y_MSB, Y_LSB, UV_MSB, UV_LSB}`, not
+>   `{Y_LSB, Y_MSB, ...}`. That closes the open question recorded here.
+> - `0x45C8 <- MBStats` is wrong. The cited instruction
+>   `0xfffffe0008b72b3c` writes `0x4608`, and nothing in
+>   `AVE_CHM_SetDataInfo_FwBuf` writes `0x45C8` at all - a scan returns the
+>   other 26 offsets, so it discriminates.
+> - `0x4618` holds `GetDARTAddr(CmdInfo[48])`, not the `SliceHeader` pool entry.
+
 > ## Verification note
 >
 > - **The Reset-is-a-replay-of-Start finding is self-checking and holds.** The
