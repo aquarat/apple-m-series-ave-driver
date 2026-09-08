@@ -8,3 +8,5 @@ __pycache__/
 m1n1-src/
 data/bringup-marker
 data/bringup-logs/
+test/ave_overlay_dtbo.h
+test/*.dtbo

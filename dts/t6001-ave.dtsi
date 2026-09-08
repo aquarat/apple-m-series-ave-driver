@@ -6,31 +6,35 @@
  * MacBook Pro 14" M1 Max (apple,j314c), read out of
  * DeviceTree.j314cap.im4p in the macOS 26.6.2 restore image.
  *
+ * Addresses are CPU PHYSICAL = ADT bus address + 0x2_00000000, per the
+ * /arm-io "ranges" property. Using the raw ADT values points at an undecoded
+ * hole; verify with tools/check_addrs.py before changing any of them.
+ *
  * NOT YET USABLE: the power-domains phandles below are placeholders. The ADT
  * gives power-gate *indices* (listed per node); those must be resolved against
  * the t6001 PMGR nodes before this will probe. See docs/10-power.md.
  */
 
 /* ave0 - ADT power-gates: 456 457 458 301 302 303 304 300 459 600 602 */
-	dart_ave0: iommu@20d040000 {
+	dart_ave0: iommu@40d040000 {
 		compatible = "apple,t6000-dart";
-		reg = <0x2 0x0d040000 0x0 0x4000>,
-		      <0x2 0x0d030000 0x0 0x4000>,
-		      <0x2 0x0d020000 0x0 0x4000>,
-		      <0x2 0x0d044000 0x0 0x4000>;
+		reg = <0x4 0x0d040000 0x0 0x4000>,
+		      <0x4 0x0d030000 0x0 0x4000>,
+		      <0x4 0x0d020000 0x0 0x4000>,
+		      <0x4 0x0d044000 0x0 0x4000>;
 		interrupt-parent = <&aic>;
 		interrupts = <AIC_IRQ 0 1028 IRQ_TYPE_LEVEL_HIGH>;
 		#iommu-cells = <1>;
 		/* ADT: page-size 16384, sids 32769 */
 	};
 
-	ave0: video-encoder@20d100000 {
+	ave0: video-encoder@40d100000 {
 		compatible = "apple,t6001-ave", "apple,ave";
-		reg = <0x2 0x0d100000 0x0 0x45c000>,
-		      <0x2 0x0d800000 0x0 0x800000>,
-		      <0x2 0x0d050000 0x0 0x008000>,
-		      <0x0 0x8e588000 0x0 0x000024>,
-		      <0x2 0x0c000000 0x0 0x1000000>;
+		reg = <0x4 0x0d100000 0x0 0x45c000>,
+		      <0x4 0x0d800000 0x0 0x800000>,
+		      <0x4 0x0d050000 0x0 0x008000>,
+		      <0x2 0x8e588000 0x0 0x000024>,
+		      <0x4 0x0c000000 0x0 0x1000000>;
 		reg-names = "dpe", "asc", "sve", "unk3", "axi2af";
 		interrupt-parent = <&aic>;
 		/* ADT lists 1031 1025 1024 1027 1026; only the first is used */
@@ -42,13 +46,13 @@
 	};
 
 /* ave1 - ADT power-gates: 549 550 551 368 369 370 371 367 552 601 603 */
-	ave1: video-encoder@307100000 {
+	ave1: video-encoder@507100000 {
 		compatible = "apple,t6001-ave", "apple,ave";
-		reg = <0x3 0x07100000 0x0 0x45c000>,
-		      <0x3 0x07800000 0x0 0x800000>,
-		      <0x3 0x07050000 0x0 0x008000>,
-		      <0x0 0x8e680260 0x0 0x007dc4>,
-		      <0x3 0x06000000 0x0 0x1000000>;
+		reg = <0x5 0x07100000 0x0 0x45c000>,
+		      <0x5 0x07800000 0x0 0x800000>,
+		      <0x5 0x07050000 0x0 0x008000>,
+		      <0x2 0x8e680260 0x0 0x007dc4>,
+		      <0x5 0x06000000 0x0 0x1000000>;
 		reg-names = "dpe", "asc", "sve", "unk3", "axi2af";
 		interrupt-parent = <&aic>;
 		/* ADT lists 1041 1035 1034 1037 1036 */

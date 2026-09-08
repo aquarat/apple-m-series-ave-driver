@@ -33,13 +33,15 @@
 			#address-cells = <2>;
 			#size-cells = <2>;
 
-			ave0: video-encoder@20d100000 {
+			ave0: video-encoder@40d100000 {
 				compatible = "apple,t6001-ave", "apple,ave";
-				reg = <0x2 0x0d100000 0x0 0x45c000>,
-				      <0x2 0x0d800000 0x0 0x800000>,
-				      <0x2 0x0d050000 0x0 0x008000>,
-				      <0x0 0x8e588000 0x0 0x000024>,
-				      <0x2 0x0c000000 0x0 0x1000000>;
+				/* CPU physical = ADT bus + 0x2_00000000, per
+				 * /arm-io "ranges". See tools/check_addrs.py. */
+				reg = <0x4 0x0d100000 0x0 0x45c000>,
+				      <0x4 0x0d800000 0x0 0x800000>,
+				      <0x4 0x0d050000 0x0 0x008000>,
+				      <0x2 0x8e588000 0x0 0x000024>,
+				      <0x4 0x0c000000 0x0 0x1000000>;
 				reg-names = "dpe", "asc", "sve", "unk3", "axi2af";
 				interrupt-parent = <0x13>;
 				interrupts = <0 0 1031 4>;

@@ -1,6 +1,12 @@
 # The first access is a WRITE, not a read
 
-> ## RESULT: hypothesis refuted (2026-09-07)
+> ## THE REFUTATION BELOW IS ITSELF VOID (2026-09-08)
+>
+> The write was issued to `0x20d050038`, an undecoded hole; the correct address
+> is `0x40d050038`. The posted-write hypothesis is **untested**, not refuted.
+> See [30-address-translation-bug.md](30-address-translation-bug.md).
+>
+> ## RESULT: hypothesis refuted (2026-09-07) — WITHDRAWN
 >
 > Stage 7 was rebuilt to issue exactly Apple's first access — a single
 > `Write32(bank 2, +0x38, 1)` and nothing else — and **it hung the machine**,

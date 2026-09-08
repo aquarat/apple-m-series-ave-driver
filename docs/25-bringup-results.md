@@ -1,3 +1,14 @@
+> # VOID — read [30-address-translation-bug.md](30-address-translation-bug.md) first
+>
+> Every hardware observation in this document is invalid. The addresses used
+> were ADT **bus** addresses without the `/arm-io` `ranges` translation, so all
+> eight attempts accessed an undecoded hole at `0x20d…` rather than AVE at
+> `0x40d…`. A hole hangs the fabric exactly like an unresponsive device.
+>
+> The eliminations, the "reads and writes both hang" conclusion and the
+> "non-deterministic stage 6" finding are all withdrawn. The static analysis
+> referenced here is unaffected.
+
 # Hardware bring-up results, 2026-09-07
 
 Five attempts on an M1 Max (j314c), Fedora Asahi 7.1.6-400, with no serial
