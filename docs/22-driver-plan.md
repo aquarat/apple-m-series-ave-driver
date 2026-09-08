@@ -4,6 +4,30 @@ What a Linux AVE driver consists of, what this repository already supplies, and
 what is still missing. The constants are in `driver/ave_hw.h` and
 `driver/ave_abi.h`; the device tree is in `dts/`.
 
+## Status, 2026-09-08: the hardware responds
+
+Stages 1-10 pass on real hardware, at the corrected addresses
+([30](30-address-translation-bug.md)):
+
+| stage | result |
+|---|---|
+| 1-6 map banks, DMA mask, IRQ, power attach, resume | OK, repeatable |
+| 7 write `SVE+0x38` (Apple's first access) | OK |
+| 8 read `ASC+0x400048` | **`CPU_STATUS = 0x0000002a`** |
+| 9 ASC start sequence + idle poll | OK - the poll succeeded |
+| 10 read `SVE+0x10` | **`intr status = 0x00000000`** |
+
+Stage 9 returning OK means the four-write start sequence ran and
+`(CPU_STATUS & 3) == 0` was reached within the timeout, so the block accepts
+the documented start sequence and transitions as expected.
+
+**What this does not yet establish:** that the coprocessor is *executing*
+anything. No firmware has been loaded, so the core has nothing to run. "Idle"
+here means the control block reports idle, not that a running firmware is
+quiescent.
+
+Next blocker is firmware delivery - see below.
+
 ## Shape
 
 A V4L2 **stateful** M2M encoder. That follows from the firmware owning rate
@@ -114,9 +138,13 @@ rounded to 16 KB.
 
 ## What still blocks first light
 
-1. **Command struct interiors.** Only the 64-byte header is mapped. Without the
-   body of `Config`, `Open` and `Start_AVC` — resolution, codec, rate-control
-   mode, QP — no session can be configured.
+1. **Firmware delivery.** `ave_fw_adopt()` needs `segment-ranges` on the AVE
+   node, and m1n1 does not emit an AVE node at all, so Linux has no firmware
+   region. This is now the immediate blocker and it needs an m1n1 patch rather
+   than a driver change: `dt_reserve_asc_firmware()` is generic and is already
+   called for ISP. Doing so also answers the open question of whether iBoot
+   pre-loads AVE firmware on a non-macOS boot, which
+   [09-firmware-load.md](09-firmware-load.md) assumes but has never verified.
 2. **Coded-output buffer size.** Not a closed form; rate-control dependent.
 3. **Buffer publication.** `AVE_CHM_SetFwBuf` writes `{dartAddr, size}` entries
    into the Start command at `+0x4e8`; the slot-to-surface table is only
