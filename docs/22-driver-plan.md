@@ -17,6 +17,19 @@ Stages 1-10 pass on real hardware, at the corrected addresses
 | 9 ASC start sequence + idle poll | OK - the poll succeeded |
 | 10 read `SVE+0x10` | **`intr status = 0x00000000`** |
 
+After the DART fixes (two instances, never removed), stages 1-9 in the new
+order also pass:
+
+| stage | result |
+|---|---|
+| 1-8 as above | OK |
+| DART bind | both DARTs init; `Adding to iommu group 16` |
+| 9 ipc-alloc | **20 MiB at iova `0xfe000000`** |
+
+So DMA through the AVE DART works end to end. The top-down IOVA is also the
+concrete demonstration that `dma_alloc_coherent` cannot place firmware at
+IOVA 0.
+
 Stage 9 returning OK means the four-write start sequence ran and
 `(CPU_STATUS & 3) == 0` was reached within the timeout, so the block accepts
 the documented start sequence and transitions as expected.
