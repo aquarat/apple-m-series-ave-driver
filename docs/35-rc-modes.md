@@ -529,9 +529,9 @@ for name, va in [('ConstantQpRateControl', 0x135938),
     print(name, [hex(struct.unpack('<Q', d[off+i:off+i+8])[0] & 0xFFFFFFFF)
                  for i in range(0x10, 0x50, 8)])
 EOF
-# ConstantQpRateControl        ['0x63d0', '0x6444', '0x8bd4', '0x64b8', ...]
+# ConstantQpRateControl        ['0xa3d0', '0xa444', '0x8bd4', '0xa4b8', ...]
 #                                                    ^ processRateControl
-# ConstantRateFactorRateControl['0x64cc', '0x6540', '0x8010', '0x639c', ...]
+# ConstantRateFactorRateControl['0xa4cc', '0xa540', '0x8010', '0xa39c', ...]
 ```
 
 Strings:

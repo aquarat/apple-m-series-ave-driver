@@ -87,7 +87,11 @@ and shared-memory calls only. **Confirmed.**
 
 ## 2. The register block — bank 2
 
-Bank 2 = ADT `reg[2]`. `ave0`: **`0x20D050000`**, size `0x8000`.
+Bank 2 = ADT `reg[2]`. `ave0`: **`0x20D050000`** *(the ADT/bus value; the
+Linux node and `ave_hw.h` carry the translated `0x4_0d050000`)*, size `0x8000`.
+The firmware-side arithmetic below is in **bus** addresses precisely because
+the coprocessor sits on the far side of the `/arm-io` translation — see
+[40](40-firmware-io-base.md). Do not "correct" one form into the other.
 `ave1`: `0x307050000`. (Bus addresses; `/arm-io` `ranges` translation already
 applied — see [30-address-translation-bug.md](30-address-translation-bug.md)
 and re-check with `tools/check_addrs.py` before any run.)
