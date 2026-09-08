@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Reduced test overlay: the AVE node ONLY.
+ * Test overlay: the AVE node plus ONE DART instance.
  *
  * Deliberately omits the DART and the "iommus" property. apple-dart programs
  * registers on probe and is the leading suspect for the 2026-09-07 hang
@@ -33,6 +33,23 @@
 			#address-cells = <2>;
 			#size-cells = <2>;
 
+			/*
+			 * ADT dart-ave0 has four reg ranges. Linux models
+			 * multi-instance DARTs as separate single-reg nodes -
+			 * ADT dart-isp0 has six and Linux has iommu@3860e8000,
+			 * @3860f4000 and @3860fc000, with isp0 referencing
+			 * three of them. So one node per instance, and we start
+			 * with instance 0 only to keep the variables down.
+			 */
+			dart_ave0: iommu@40d040000 {
+				compatible = "apple,t6000-dart";
+				reg = <0x4 0x0d040000 0x0 0x4000>;
+				interrupt-parent = <0x13>;
+				interrupts = <0 0 1028 4>;
+				#iommu-cells = <1>;
+				power-domains = <0x1d>;
+			};
+
 			ave0: video-encoder@40d100000 {
 				compatible = "apple,t6001-ave", "apple,ave";
 				/* CPU physical = ADT bus + 0x2_00000000, per
@@ -50,6 +67,7 @@
 				/* apple-avd does reset_control_reset() before its
 				 * first register access; #reset-cells is 0 */
 				resets = <0x1d>;
+				iommus = <&dart_ave0 0>;
 			};
 		};
 	};
