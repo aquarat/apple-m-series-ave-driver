@@ -52,11 +52,18 @@ echo "commit    : $(git -C "$REPO" rev-parse --short HEAD)"
 echo "log       : $LOG"
 echo
 
-if ! lsmod | grep -q ave_overlay; then
-    echo "!! ave_overlay is not loaded - the AVE node does not exist yet."
-    echo "   Load it first, then re-run:  sudo insmod test/ave_overlay_mod.ko"
-    exit 1
+# The overlay creates the AVE node. It has no module_exit (apple_dart_remove
+# resets the DART with no runtime resume and hangs the machine), so it loads
+# once per boot and stays.
+if lsmod | grep -q '^ave_overlay'; then
+    echo ">>> overlay already loaded"
+else
+    echo ">>> insmod test/ave-overlay.ko"
+    sudo insmod test/ave-overlay.ko || { echo "!! overlay insmod failed"; exit 1; }
+    sleep 1
 fi
+if [ ! -e /sys/bus/platform/devices/*.ave ] 2>/dev/null; then :; fi
+echo ">>> AVE platform device: $(ls -d /sys/bus/platform/devices/*ave* 2>/dev/null || echo NONE)"
 
 echo "$BOOT" > "$MARK"; sync; sync
 
