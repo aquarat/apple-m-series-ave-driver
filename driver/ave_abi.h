@@ -722,4 +722,35 @@ static inline u32 ave_coded_data_size_max(u32 w, u32 h, bool hevc)
 #define AVE_SPS_DIRECT_8X8_INFERENCE	0x2d58
 #define AVE_SPS_FRAME_MBS_ONLY_FLAG_REQ	1	/* CropUnitY assumes it */
 
+/*
+ * Input pixel format.
+ *
+ * There is no host-supplied format selector. The firmware derives the pixel
+ * format enumerator itself from SPS.chroma_format_idc and the bit depth
+ * (fw 0x6c7dc-0x6c828: base 18/20/22 by chroma format, +1 when bit depth is
+ * non-zero) and feeds it to a DMA register. So "tell it we have NV12" means
+ * setting the SPS fields correctly and nothing else.
+ *
+ * WARNING: 10-bit input is not rejected. The firmware logs "10bit content is
+ * not supported" (fw 0xb69ec) and then encodes mis-configured - no panic, no
+ * error return. That is unlike every other bad input on this path, which is
+ * loud, so the driver must refuse non-8-bit itself.
+ */
+#define AVE_SPS_PROFILE			0x291c	/* 6 = High                   */
+#define AVE_SPS_CHROMA_FORMAT_IDC	0x2940	/* 1 = 4:2:0                  */
+#define AVE_SPS_BIT_DEPTH_LUMA_M8	0x2948	/* 0 = 8-bit                  */
+#define AVE_SPS_BIT_DEPTH_CHROMA_M8	0x294c	/* 0 = 8-bit                  */
+#define AVE_START_STRIDE_MODE		0x0094	/* 0 = use per-frame strides  */
+#define AVE_START_NEED_LSB_PLANES	0x25a5	/* 0 = no _LSB plane demanded */
+
+#define AVE_PROFILE_HIGH		6
+
+/*
+ * Per-frame input planes. The descriptor is a union selected by
+ * bInputCompressed (fw 0xb6cf4); these are the sLinear arm. Strides must be
+ * non-zero and 64-byte aligned or the frame is refused.
+ */
+#define AVE_PIC_IN_LUMA_STRIDE		0x457c
+#define AVE_PIC_IN_CHROMA_STRIDE	0x459c
+
 #endif /* __AVE_ABI_H__ */
