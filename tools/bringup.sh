@@ -48,8 +48,8 @@ LOGDIR="$REPO/data/bringup-logs"
 mkdir -p "$LOGDIR"
 
 names=(none map-banks dma-mask get-irq request-irq power-attach \
-       power-on write-sve-idle read-asc-status asc-start read-sve-status ipc-alloc \
-       fw-adopt start)
+       power-on write-sve-idle read-asc-status ipc-alloc fw-adopt \
+       asc-start read-sve-status start)
 
 # Seconds to wait after syncing the marker before doing anything that can hang.
 # The 2026-09-07 attempt lost both the marker update and the session transcript
@@ -71,7 +71,10 @@ fi
 first=${1:?usage: bringup.sh <first-stage> [last-stage]}
 last=${2:-$first}
 
-cleanup() { sudo rmmod ave_overlay 2>/dev/null; sudo rmmod apple_ave 2>/dev/null; }
+# NOTE: the overlay is deliberately never removed - see ave_overlay_mod.c.
+# Unbinding a DART calls apple_dart_hw_reset() against a power-gated block and
+# hangs the machine. Iterate by reloading apple_ave only.
+cleanup() { sudo rmmod apple_ave 2>/dev/null; }
 trap cleanup EXIT
 
 for n in $(seq "$first" "$last"); do
@@ -96,7 +99,11 @@ for n in $(seq "$first" "$last"); do
     trap 'sudo kill $DMESG_PID 2>/dev/null; kill $SYNC_PID 2>/dev/null; cleanup' EXIT
 
     sudo insmod "$REPO/driver/apple-ave.ko" stop_after="$n" || { echo "insmod driver failed"; exit 1; }
-    sudo insmod "$REPO/test/ave-overlay.ko" || { echo "insmod overlay failed"; exit 1; }
+    if [ -d /proc/device-tree/soc/video-encoder@40d100000 ]; then
+        echo "  overlay already applied this boot - reusing it"
+    else
+        sudo insmod "$REPO/test/ave-overlay.ko" || { echo "insmod overlay failed"; exit 1; }
+    fi
     sleep 2
 
     # Record what was ACTUALLY applied, not what we intended. The marker file
@@ -111,8 +118,8 @@ for n in $(seq "$first" "$last"); do
                     "$(od -An -tx4 "$n/$pr" | tr -d '\n' | tr -s ' ')"
             done
         done
-        echo "--- any DART node from our overlay? ---"
-        ls -d /proc/device-tree/soc/iommu@40d* 2>/dev/null || echo "  none (expected)"
+        echo "--- DART nodes from our overlay (two expected) ---"
+        ls -d /proc/device-tree/soc/iommu@40d* 2>/dev/null || echo "  NONE - overlay did not apply its DARTs"
     } | tee "$LOGDIR/applied-$n.log"
     sync
 

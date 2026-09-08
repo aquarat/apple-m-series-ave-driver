@@ -3,7 +3,6 @@ savedcmd_ave-overlay.mod.o := gcc -Wp,-MMD,./.ave-overlay.mod.o.d -nostdinc -I/u
 source_ave-overlay.mod.o := ave-overlay.mod.c
 
 deps_ave-overlay.mod.o := \
-    $(wildcard include/config/MODULE_UNLOAD) \
   /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/compiler-version.h \
     $(wildcard include/config/CC_VERSION_TEXT) \
   /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/kconfig.h \
@@ -65,6 +64,7 @@ deps_ave-overlay.mod.o := \
     $(wildcard include/config/HAVE_STATIC_CALL_INLINE) \
     $(wildcard include/config/KUNIT) \
     $(wildcard include/config/PRINTK_INDEX) \
+    $(wildcard include/config/MODULE_UNLOAD) \
     $(wildcard include/config/CONSTRUCTORS) \
     $(wildcard include/config/FUNCTION_ERROR_INJECTION) \
     $(wildcard include/config/DYNAMIC_DEBUG_CORE) \

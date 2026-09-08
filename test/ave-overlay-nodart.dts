@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Test overlay: the AVE node plus all FOUR DART instances.
+ * Test overlay: the AVE node plus its TWO DART instances.
  *
  * Deliberately omits the DART and the "iommus" property. apple-dart programs
  * registers on probe and is the leading suspect for the 2026-09-07 hang
@@ -34,8 +34,24 @@
 			#size-cells = <2>;
 
 			/*
-			 * ADT dart-ave0 is FOUR DART instances behind ONE
-			 * interrupt (1028). Linux models multi-instance DARTs
+			 * ADT dart-ave0 has four reg ranges but only TWO are
+			 * DARTs. The ADT "instance" property decodes to
+			 * DAPF:CPUDART, DART:DART, SMMU:SMMU, and the layout is
+			 * DARTs first, then SMMUs, then one DAPF at
+			 * first-DART+0x4000:
+			 *
+			 *   reg[0] 0x40d040000  CPUDART  (DART)
+			 *   reg[1] 0x40d030000  DART     (DART)
+			 *   reg[2] 0x40d020000  SMMU     - NOT a DART
+			 *   reg[3] 0x40d044000  DAPF     - NOT a DART
+			 *
+			 * ADT dart-isp0 confirms the rule: five entries over
+			 * six regs, and Linux models exactly reg[0..2].
+			 * Pointing apple-dart at the SMMU or the DAPF makes it
+			 * write DART register layouts into blocks that are not
+			 * DARTs.
+			 *
+			 * Both DARTs share ONE interrupt (1028). Linux models multi-instance DARTs
 			 * as separate single-reg nodes that all carry the same
 			 * shared interrupt - ADT dart-isp0 has six instances on
 			 * interrupt 543, and Linux's iommu@3860e8000,
@@ -66,24 +82,6 @@
 				power-domains = <0x1d>;
 			};
 
-			dart_ave0_2: iommu@40d020000 {
-				compatible = "apple,t6000-dart";
-				reg = <0x4 0x0d020000 0x0 0x4000>;
-				interrupt-parent = <0x13>;
-				interrupts = <0 0 1028 4>;
-				#iommu-cells = <1>;
-				power-domains = <0x1d>;
-			};
-
-			dart_ave0_3: iommu@40d044000 {
-				compatible = "apple,t6000-dart";
-				reg = <0x4 0x0d044000 0x0 0x4000>;
-				interrupt-parent = <0x13>;
-				interrupts = <0 0 1028 4>;
-				#iommu-cells = <1>;
-				power-domains = <0x1d>;
-			};
-
 			ave0: video-encoder@40d100000 {
 				compatible = "apple,t6001-ave", "apple,ave";
 				/* CPU physical = ADT bus + 0x2_00000000, per
@@ -101,8 +99,7 @@
 				/* apple-avd does reset_control_reset() before its
 				 * first register access; #reset-cells is 0 */
 				resets = <0x1d>;
-				iommus = <&dart_ave0_0 0>, <&dart_ave0_1 0>,
-					 <&dart_ave0_2 0>, <&dart_ave0_3 0>;
+				iommus = <&dart_ave0_0 0>, <&dart_ave0_1 0>;
 			};
 		};
 	};
