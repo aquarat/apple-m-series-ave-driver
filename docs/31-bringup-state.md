@@ -91,3 +91,65 @@ Ranked by how well each fits the evidence. None is established.
 - The command layer: `docs/07`/`20` have the ids, sizes and header; the
   per-frame `AVE_PICMGMT_PARAMS` fields are still unmapped.
 - V4L2 M2M glue.
+
+## Addendum, 2026-09-08 (later)
+
+### The firmware-base register already holds a value, and our write is ignored
+
+Reading `ASC+0x50000` *before* writing it:
+
+```
+BEFORE any write = 0x0102010000b28001   (base field 0x10000b28000)
+we write          0x0102000000000000
+readback          0x0102010000b28001    - UNCHANGED
+```
+
+Two things follow. The tag `0x0102…` was **already present**, so something set
+this register before us. And **our write had no effect at all**.
+
+The extracted base, `0x10000b28000`, sits 1.25 MiB below the first
+`asc-firmware@10000c68000` reserved region and is not inside any of the four
+`asc-firmware` carveouts that m1n1 emits (those belong to other coprocessors).
+So it is not obviously a pointer to a region Linux knows about.
+
+Candidate readings, none established:
+
+- The register is **read-only, or write-locked while the core is running**.
+  `AVE_IOP_Config_Nyx` clearly does `Write64(bank1, 0x50000, base|tag)`, so
+  Apple writes it — but Apple writes it *before* starting the core.
+- The field decomposition is wrong and `0x10000b28000` is not a base at all.
+
+### Our recent tests are not independent
+
+Nothing in the driver ever clears `CPU_CONTROL`, and `docs/09` established that
+Apple never does either — shutdown is by sending `Halt` and polling scratch 0,
+which we do not implement. **So the coprocessor stays started across module
+unload and reload.**
+
+Every stage-11 and stage-14 run since the first successful `asc-start` has
+therefore been executed against an already-running core, and `CPU_STATUS = 0x2c`
+is that persistent post-start state rather than a fresh result. This weakens
+the recent observations: a clean test of "does the core start" now requires a
+**reboot** between attempts, not just a module reload.
+
+That also offers a simple explanation for the ignored write: Apple configures
+the base while the core is stopped, and we are writing to a core that has been
+running since an earlier experiment.
+
+### The SID 15 hypothesis is weakened
+
+`dart-isp0` has **identical** `sids = 0x8001` and `bypass = 0x8000`, and
+`mapper-isp0` is `reg = 0` exactly like `mapper-ave0`. Linux drives ISP
+successfully referencing SID 0 only, on three DARTs. So SID 15 sitting in
+bypass is the normal arrangement for this class of block and is unlikely to be
+what distinguishes AVE.
+
+The real structural difference between the two remains firmware delivery: ISP's
+image is iBoot-preloaded and m1n1 reserves it with `dt_reserve_asc_firmware`,
+whereas we load ours from Linux.
+
+### Next test, once it can be run cleanly
+
+Reboot, then in one boot: read `ASC+0x50000` before anything else (does it hold
+a base on a fresh machine?), write the base, verify the write takes, then start.
+That distinguishes "write-locked while running" from "read-only".
