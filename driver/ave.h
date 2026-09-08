@@ -87,6 +87,12 @@ static inline void ave_write(struct ave_device *ave, unsigned int bank,
 	writel_relaxed(val, ave->bank[bank].base + off);
 }
 
+static inline void ave_write64(struct ave_device *ave, unsigned int bank,
+			       u32 off, u64 val)
+{
+	writeq_relaxed(val, ave->bank[bank].base + off);
+}
+
 /* ave_fw.c */
 int ave_fw_load(struct ave_device *ave);
 void ave_fw_unload(struct ave_device *ave);

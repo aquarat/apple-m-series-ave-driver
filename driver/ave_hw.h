@@ -95,10 +95,29 @@
 
 /*
  * Firmware base-address handoff, within AVE_BANK_ASC.
- * UNVERIFIED: reported as a 64-bit write of
- * (fw_base & 0x3FFFFFFFF800) | 0x0102000000000000. The high tag is unexplained.
+ *
+ * VERIFIED against AVE_IOP_Config_Nyx:
+ *
+ *   and  x8, x20, #0x3fffffff800          ; fw_base & AVE_ASC_FW_BASE_MASK
+ *   mov  x9, #0x102000000000000           ; AVE_ASC_FW_BASE_TAG
+ *   orr  x3, x8, x9
+ *   mov  w1, #0x1                         ; bank 1
+ *   mov  w2, #0x50000
+ *   bl   AVE_Reg::Write64
+ *
+ * The mask requires a 2 KiB aligned base. The tag's meaning is unknown and is
+ * reproduced verbatim. Config also Read64s the same offset first, to log it.
+ *
+ * Apple passes the address the firmware is mapped at; we map at DART IOVA 0,
+ * so for us the value reduces to the tag alone.
+ *
+ * Note the mask is 0x3fffffff800 (11 hex digits), not the 0x3FFFFFFFF800 that
+ * an earlier revision of this file recorded.
  */
 #define AVE_ASC_FW_BASE		0x50000
+#define AVE_ASC_FW_BASE_MASK	0x3fffffff800ULL
+#define AVE_ASC_FW_BASE_TAG	0x0102000000000000ULL
+
 
 /*
  * SVE control block, within AVE_BANK_SVE. Offsets come from a per-SoC table;
