@@ -1045,3 +1045,57 @@ new hardware requirement; it adds *predictions* that experiment 1 will confirm
 or refute for free. If the boot handshake reaches message 1 and scratch 0..3
 read `2 / 0x1F280 / 0x100 / 0xC0000`, §3 and §4 are validated end to end
 without a second reboot.
+
+
+---
+
+## Verification pass (what was independently re-derived, and what was not)
+
+Re-read from the bytes by the integrating session, not taken on trust:
+
+| Claim | Evidence | Verdict |
+|---|---|---|
+| Only **two** channels exist | `0xe0f08: cbz w20, 0xe0f80` skips descriptors 2 and 3; the flag is `wzr` at the call site | confirmed |
+| Descriptor stride `0x100` | descriptors written at `x19+0`, `+0x100`, `+0x200`, `+0x300` | confirmed |
+| Field layout `+0x40` dir, `+0x44` IPI bit, `+0x48` count, `+0x4C/+0x50` ring base | `str` offsets 64/68/72/76/80 on desc 0 and the identical 320/324/328/332/336 on desc 1 | confirmed |
+| `"IO"` dir 0 bit 1 992 slots; `"IO_T2H"` dir 1 bit 3 993 slots | the stored immediates, plus names at VA `0x11e852` / `0x11e855` | confirmed |
+| Slot size is `0x40` | `x24 = x21 + 0xF800` is the `IO_T2H` ring base and `0xF800 / 992 = 64` | confirmed |
+| Rings begin at `base + 0x200` | `add x21, x19, x8, lsl #8` with `x8` = channel count 2 | confirmed |
+| Table size `0x1F280` | `0xe0d84: mov w10,#0xf280` + `movk #1,lsl#16`, selected on the flag | confirmed |
+
+**The size deserves its own note**, because it does *not* equal the sum of its
+parts and that looks like an error until you check the other branch. Content
+ends at `0x1F240`; the literal is `0x1F280`, i.e. `0x40` of slop. The
+four-channel literal in the same instruction pair is `0x27680`
+(`mov w9,#0x7680` + `movk #2,lsl#16`), and four channels of content come to
+`0x400 + 0xF800 + 0xF840 + 0x200 + 0x8000 = 0x27640` — **the same `0x40` of
+slop**. Two independent constants reconciling with an identical remainder is
+what promotes this from arithmetic that nearly works to a confirmed layout.
+
+The two flag-gated channels are `"SHAREDMALLOC"` and `"TERMINAL"` (VA
+`0x131531` / `0x13153e`). `TERMINAL` is worth remembering: if that flag can be
+set, it is a second firmware output path independent of the log ring in
+[33](33-firmware-logging.md). Not pursued — the flag is a literal zero on the
+only path we have.
+
+### Not independently re-derived
+
+- **The ping-pong ring** (§9) — the claim that the phase bit is constant, that
+  `Receive` never writes the slot back, and that the peer returns credit by
+  sending into the slot. What *was* checked is that the kext's echo call
+  (`0xfffffe0008c19714`) really does precede the processing call
+  (`0xfffffe0008c17c34`), and that its callee opens with a log site consistent
+  with a send path. The algorithm itself rests on the agent's reading that the
+  firmware's `Send` is instruction-identical to the kext's.
+- **The predicted message-1 values.** The driver reads them from the scratch
+  registers rather than assuming them, so a wrong prediction costs a mismatch
+  warning, not a failed boot. Treat them as a check, not an input.
+
+### Consequence for the existing driver
+
+`driver/ave_ipc.c`'s ring is reported structurally wrong (per-lap phase flip,
+one head/tail pair, no credit return on `IO_T2H`). It is deliberately **not**
+rewritten yet: the pending hardware test exercises the boot handshake only
+(stages 1-15) and never reaches the ring, so rewriting it now would mean
+shipping a second untested layer into an experiment whose whole purpose is to
+isolate the first. The rewrite follows the boot result.
