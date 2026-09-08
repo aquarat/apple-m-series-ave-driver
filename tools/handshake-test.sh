@@ -84,6 +84,14 @@ sync; sync; sleep 8
 
 sudo dmesg -C 2>/dev/null || true
 
+# A failed probe still leaves the module loaded, so the next insmod fails
+# with "File exists" and the run is wasted. Unload first if present.
+if lsmod | grep -q '^apple_ave'; then
+    echo ">>> apple_ave already loaded - removing it first"
+    sudo rmmod apple_ave || { echo "!! rmmod failed"; exit 1; }
+    sleep 2
+fi
+
 echo ">>> insmod apple-ave.ko stop_after=15"
 sudo insmod driver/apple-ave.ko stop_after=15 &
 INS=$!

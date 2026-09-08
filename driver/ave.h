@@ -82,6 +82,7 @@ struct ave_device {
 		size_t		size;
 		bool		mapped_at_zero;
 		u64		fw_base;	/* reported back by the fw  */
+		u64		map_iova;	/* where the core fetches */
 	} fw;
 
 	struct ave_dma_buf	ipc;		/* the 20 MiB FwIPC region */

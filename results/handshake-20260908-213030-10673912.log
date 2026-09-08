@@ -1,0 +1,17 @@
+=== AVE boot handshake test ===
+date      : 2026-09-08T21:30:30+01:00
+boot_id   : 10673912
+uptime    : 981.63s
+kernel    : 7.1.13-401.asahi.vrr1.fc44.aarch64+16k
+commit    : fa56a6f
+log       : /home/aquarat/Projects/apple-ave-driver/results/handshake-20260908-213030-10673912.log
+
+>>> modules match running kernel 7.1.13-401.asahi.vrr1.fc44.aarch64+16k
+>>> overlay already loaded
+>>> AVE platform device: NONE
+>>> syncing and settling before the risky part
+>>> insmod apple-ave.ko stop_after=15
+insmod: ERROR: could not insert module driver/apple-ave.ko: File exists
+(no driver output in dmesg)
+
+=== done. full log: /home/aquarat/Projects/apple-ave-driver/results/handshake-20260908-213030-10673912.log ===
