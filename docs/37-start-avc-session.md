@@ -26,7 +26,7 @@ python3 tools/disas.py --kext --addr 0xfffffe0008cbea9c -n 0x5d8
 
 This document extends [20-command-structs.md](20-command-structs.md) §3, which
 mapped the command at block granularity. Nothing in docs/20 §3 is contradicted;
-five things are corrected or sharpened, see §10.
+several things are corrected or sharpened, see §10.
 
 ---
 
@@ -317,6 +317,12 @@ returns `[entry + 4]`. Out of range logs and returns **0**, which would emit
 | 8 | 122 | High 4:2:2 |
 | 9 | 244 | High 4:4:4 |
 
+Two enum traps. `eProfile = 3` yields `profile_idc = 67`; real Constrained
+Baseline is `profile_idc = 66` with `constraint_set1_flag = 1`, so treat that
+enumerator as suspect. `eLevel = 2` (Level 1b) writes `level_idc = 1` verbatim
+where the spec wants `level_idc = 11` plus `constraint_set3_flag = 1`. Neither
+affects the recommended `{6, 12}` pair. **Confirmed** from the tables.
+
 The SPS writer emits the high-profile syntax group (`chroma_format_idc`,
 `bit_depth_*`, `qpprime`, scaling lists) only when the enum is in
 `{1, 6, 7, 8, 9}` — fw `0x41d5c`–`0x41d68` (`sub w10, w9, #6; cmp w10, #4;
@@ -380,14 +386,57 @@ block starts. **Confirmed.**
 | `0x304C` | `+124` | u32 | PPS header length **in bits** | `0x65858` | only if flag 0 |
 | `0x3050` | `+128` | u8[256] | PPS RBSP byte buffer | kext `cbfc68` | only if flag 0 |
 
-PPS scaling lists live in the `AVC_PPS` object (kext `this+32/44/56`), not in
-this struct, so they are unreachable from the command.
+PPS scaling lists live in the `AVC_PPS` object (kext `this+32/44/56`, fw
+`0x42bc4` onward), not in this struct, and the constructor zeroes them
+(`0x4276c`), so setting `pic_scaling_matrix_present_flag = 1` would emit an
+all-zero present-flag set. Unreachable from the command; leave the flag at 0.
+
+Only **index 0** of `chroma_qp_index_offset[]` and
+`second_chroma_qp_index_offset[]` ever reaches the bitstream: the AVC call site
+passes array index 0 to `pic_parameter_set_rbsp` (`0x6d80c` `mov w4, wzr`).
+**Confirmed.** The other seven slots exist for multi-PPS sessions.
 
 **`transform_8x8_mode_flag = 1` is only legal for `profile_idc >= 100`.** With
 `eProfile = 6` that holds. If a driver drops to Main (`eProfile = 4`) it must
 also clear `transform_8x8_mode_flag`, or the PPS will carry a syntax element
 the decoder will not read — this is a real, silent stream corruption, not a
 firmware error. (Standards requirement, not a firmware finding.)
+
+### 4.1 The slice header is entirely firmware-generated
+
+Worth stating because it removes a whole category of "what else must I set?".
+`AVC_Slice::slice_header(const H264_SEQUENCE_HEADER_PARAMS&, const
+H264_PICTURE_HEADER_PARAMS&, int)` (`0x433a0`) is fed a
+`H264_SLICE_HEADER_PARAMS` that is **firmware-internal**: it is filled by
+`AVE_H264_PrepareSliceHeader` (`0x50f94`) and `AVE_H264_Update_POClsb_SliceType`
+(`0x50ef4`) from `sCommonParams` and the DPB, per picture. The host supplies
+none of it. **Confirmed.**
+
+`sCommonParams` is `CAVCController + 0xF58` — `CAVCController::PipePrepareParam`
+calls `AVE_H264_PrepareSliceHeader` at `0x5882c` with `x0 = x19 + 0xF58`.
+**Confirmed.** That makes `sCommonParams + 6120 = CAVCController + 10048`, which
+is exactly where `InitEncodingParameters` stores `QP[I] + 6·bit_depth_luma_
+minus8` (`0x6c0b4`), tying docs/32 §1's QP finding to the Start command
+end to end.
+
+Two consequences for the driver:
+
+* The only Start-command values that reach the slice header are `QP[I/P/B]`
+  (through `slice_qp_delta = QP − PPS.pic_init_qp_minus26 − 26`, computed at
+  `0x5121c`–`0x51234` and recomputed after rate control at `0x59274`) and the
+  SPS/PPS fields that set field widths (`log2_max_frame_num_minus4`,
+  `log2_max_pic_order_cnt_lsb_minus4`) and `pic_init_qp_minus26`.
+* The slice-header writer is constructed with **emulation prevention off**
+  (`0x43320`), writes **no** start code and **no** NAL header byte, and skips
+  `first_mb_in_slice`. The hardware entropy engine supplies those while
+  interleaving slice data. So a driver must not expect the coded-data buffer to
+  be assembled by the CPU. **Confirmed.**
+
+`sCommonParams` is **not** a straight copy of the Start payload — do not try to
+translate other `sCommonParams` offsets by a constant. `InitEncodingParameters`
+is 11 KB of field-by-field copying with arithmetic (the QP triple is stored
+*offset by the bit depth*, not copied). The SPS and PPS blocks are verbatim
+`memcpy`s, which is exactly why those translate cleanly and nothing else does.
 
 ---
 
@@ -820,8 +869,14 @@ Stated so the next person does not spend a day on them.
   malformed SPS. **Must be 0.** Same for `aspect_ratio_info_present_flag`
   (`0x2D5D`) and `overscan_info_present_flag` (`0x2D5E`): the bits are written,
   the payloads are not.
-* **`_S_AVE_PSContext`** (`0x27C8`) — §7.
-* **`_S_AVE_Session_PFCfg`** — §8.
+* **`_S_AVE_PSContext`** (`0x27C8`) — §7. Leave zero; note in particular that
+  `SPS.header_len` (`0x2DCC`) must stay zero or `AVC_SPS::Generate` refuses
+  (§5.2).
+* **`_S_AVE_Session_PFCfg`** — it is not in this command at all; it is the head
+  of the per-frame `AVE_PICMGMT_PARAMS`, and all-zero is the correct value there
+  too. §8.
+* **The slice header.** Entirely firmware-generated (§4.1). There is nothing to
+  set and no buffer to provide.
 * **`sQPMod`** (`0x300`–`0x367`), `sRef.ReferenceGap[]`, `sAlgCfg.sComm.Feature`
   bits other than bit 1 (frame drop), `SEIFeature`, `VUIFeature`.
 * **The `0x68`–`0x207` head** and the bulk of `VideoParams`. `InitEncodingParameters`
@@ -852,14 +907,25 @@ Stated so the next person does not spend a day on them.
 * **docs/32 §6.4** left `EncCommParams.bitstream_addr_dst[index]` unlocated. It
   is `sCAveCmdAvcStart + 0x0D50 + 16·index`. §6.
 * **docs/04 roadmap** lists `_S_AVE_Session_PFCfg` as the unmapped struct to
-  chase. It is a *per-frame* config consumed by the DPB manager, not part of the
-  minimal Start path. §8.
+  chase. It is `AVE_PICMGMT_PARAMS + 0x0000 .. 0x1737`, i.e. the per-frame head
+  docs/32 §4 had already partly mapped — not part of `sCAveCmdAvcStart` at all.
+  §8.
+* **docs/32 §1** says "per-frame QP does not exist". Sharper: it *does* exist,
+  at `_S_AVE_Session_PFCfg + 0x364` = `AVE_PICMGMT_PARAMS + 0x364`, and the AVC
+  firmware never reads it. The operational conclusion (QP is session-scoped) is
+  unchanged. §8.
+* **docs/20 §4.1** described `sCAveCmdAvcProcess + 0x48` (0x954 bytes) as "a
+  per-picture parameter block of which Start sends a prefix". It is
+  `_S_AVE_PSContext`: a `0x154` descriptor table plus a `0x800` parameter-set
+  NAL payload. §7.
+* **docs/32 §1** lists `sOutput.Coded` as "must equal the Start-time
+  CodedData[slot] IOVA". The array is now at a known command offset and the
+  index is `AVE_PICMGMT_PARAMS + 0x4EF4`, not the command slot. §6.
 
 ---
 
 ## 11. Still unknown
 
-* The offset of `_S_AVE_Session_PFCfg`, if it is in the command at all (§8).
 * `cmd + 0x26DC` as `input_chroma_format`: the AVC path stores it to the same
   controller field (`x25 + 1828`, `0x6c24c`) that `COFController::
   InitEncodingParameters` stores its `input_chroma_format` to before asserting
@@ -892,7 +958,7 @@ Stated so the next person does not spend a day on them.
 
 ## 12. Proposed hardware experiments (do not run — for the operator)
 
-Both are cheap and both discriminate.
+All three are cheap and all three discriminate.
 
 1. **Height ambiguity.** The one genuinely uncertain value in §1 is
    `VideoParams.ui32Height`. The kext's own trace computes
@@ -904,7 +970,15 @@ Both are cheap and both discriminate.
    the §1 command once with `height = 1088` and once with `1080`, keeping
    everything else identical, and compare the emitted SPS: the correct one gives
    `pic_height_in_map_units_minus1 = 67` and a decoded 1920×1080.
-2. **Header round-trip.** With `bFWCreatesHeader = 1`, the firmware writes the
+2. **`bFWCreatesHeader` and the parameter-set ids.** The two most dangerous
+   values in §1 are `SPS.seq_parameter_set_id` (the kext's own
+   `SetDefaultParams` uses **1**, and the PPS is force-set to reference SPS
+   **0** — §5.5) and `SPS.header_len` (must be 0 on input — §5.2). Both fail
+   loudly: the first gives a stream `ffmpeg` refuses, the second gives Start
+   status **-1001**. Worth submitting one deliberately-wrong Start of each kind
+   to confirm the error codes surface to the host at all, before debugging a
+   silent failure.
+3. **Header round-trip.** With `bFWCreatesHeader = 1`, the firmware writes the
    SPS/PPS bit lengths back to its own copy and logs
    `"%s::%s:%d PSInfo num %d"` (`0x6d868`) and, in `DebugInit`,
    `"SPS header length:%d"` / `"PPS header length:%d"` (`0x64cd8`, `0x65858`).
@@ -912,3 +986,42 @@ Both are cheap and both discriminate.
    lengths and the full `SPSparams.*` / `PPSParams.*` dump, which validates §3
    and §4 end to end without needing a frame to be encoded. That is the cheapest
    possible confirmation of this entire document.
+
+
+---
+
+## Verification pass (independent re-derivation)
+
+| Claim | Evidence | Verdict |
+|---|---|---|
+| SPS block is at `Start + 0x291C`, `0x6B4` bytes | `0x6c024: mov w2,#0x6b4`; src `0x6c054: add x1, x24, #0x28b4` with `x24 = cmd + 0x68` -> `0x68 + 0x28B4 = 0x291C` | confirmed |
+| ...copied to controller `+0x247C4` | `0x6c010: add x9, x20, #0x24, lsl #12` / `add x28, x9, #0x7c0` / `0x6c020: add x0, x28, #0x4` | confirmed |
+| PPS block is at `Start + 0x2FD0`, `0x180` bytes | `0x6c070: mov w2,#0x180`; src `add x1, x24, #0x2f68` -> `0x68 + 0x2F68 = 0x2FD0` | confirmed |
+| ...copied to controller `+0x24E78` | `0x6c05c: mov w9,#0x4e78` + `movk #0x2,lsl#16` | confirmed |
+| `SPS.header_len` must be 0 on input | `0x41b68: ldr w8,[x8,#1200]` / `cbz w8, 0x41bcc`; the fall-through logs at subsystem 195 level 4 and takes the error path | confirmed |
+| `bFWCreatesHeader` must match between SPS and PPS | `0x6d7b0/0x6d7b4: ldrb` from `+1200` and `+1840` / `0x6d7bc: cmp w8,w10` / `b.ne 0x6df8c` | confirmed |
+
+The `x24 = cmd + 0x68` premise is not assumed here - it is *validated* by the
+result: two independent source offsets both land exactly on the claimed block
+addresses under the same bias. A wrong bias would have to be wrong by the same
+amount twice to produce that.
+
+### Correction owed to [32](32-picmgmt-params.md) §1
+
+Doc 32 states the per-frame block "carries no QP field that was found". The
+sharper statement is that a per-frame QP field **exists** at
+`AVE_PICMGMT_PARAMS + 0x364` - inside copied slice 0, so it does reach the
+firmware - and the AVC path **never reads it**. *(Field location and the
+negative are this agent's reading; not independently re-derived here.)*
+
+The practical guidance is unchanged and is now better supported rather than
+weaker: set QP once at `Start` and vary only `FrameType` per frame. But the
+distinction matters for a driver author, because "the field is absent" and
+"the field is present, accepted, and silently ignored" fail very differently -
+the second looks like the hardware disobeying you.
+
+### Not independently re-derived
+
+The profile/level enum tables, the `_S_AVE_Session_PFCfg` placement, the
+slice-group abort, and the header-size limits are the agent's readings. The
+NV12 pixel-format selector remains **unlocated** - see the risk note below.
