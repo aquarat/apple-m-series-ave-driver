@@ -99,7 +99,29 @@
 				/* apple-avd does reset_control_reset() before its
 				 * first register access; #reset-cells is 0 */
 				resets = <0x1d>;
-				iommus = <&dart_ave0_0 0>, <&dart_ave0_1 0>;
+				/*
+				 * Only the real DART.
+				 *
+				 * The ADT dart-ave0 node has four reg entries
+				 * but its "instance" property names three
+				 * different things: DAPF (CPUDART), DART and
+				 * SMMU. Listing two of them as
+				 * apple,t6000-dart modelled a non-translating
+				 * block as an IOMMU, and Linux agrees they
+				 * are not alike: 40d040000 probes with
+				 * "bypass support: 1", 40d030000 with "0".
+				 *
+				 * That mattered once bypass became the goal.
+				 * An identity domain needs bypass on every
+				 * DART in the group, so the bogus second
+				 * entry made /sys/kernel/iommu_groups/N/type
+				 * reject "identity" with -EINVAL.
+				 *
+				 * 40d040000 is the one the core actually
+				 * fetches through - every translation fault
+				 * we have seen came from it.
+				 */
+				iommus = <&dart_ave0_0 0>;
 			};
 		};
 	};

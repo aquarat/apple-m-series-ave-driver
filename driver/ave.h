@@ -125,6 +125,7 @@ int ave_boot_config(struct ave_device *ave);
 int ave_recv_iop_msg(struct ave_device *ave, u32 out[4], unsigned int timeout_ms);
 void ave_fw_log_dump(struct ave_device *ave);
 void ave_fw_globals_dump(struct ave_device *ave);
+void ave_fw_peek_phys(struct ave_device *ave);
 int ave_ipc_init(struct ave_device *ave);
 void ave_ipc_fini(struct ave_device *ave);
 int ave_ipc_handshake(struct ave_device *ave);
