@@ -153,3 +153,32 @@ whereas we load ours from Linux.
 Reboot, then in one boot: read `ASC+0x50000` before anything else (does it hold
 a base on a fresh machine?), write the base, verify the write takes, then start.
 That distinguishes "write-locked while running" from "read-only".
+
+
+---
+
+## Kernel change, 2026-09-08
+
+The machine's default boot entry is now
+`7.1.13-401.asahi.vrr1.fc44.aarch64+16k`, a locally built kernel carrying the
+unmerged Asahi VRR patches
+([AsahiLinux/linux#477](https://github.com/AsahiLinux/linux/pull/477)), booted
+with `appledrm.force_vrr=1`. Written up in the `fedora-asahi-remix-notes`
+repo under `projects/promotion-vrr-kernel.md`. Three kernels are installed:
+7.0.13 (safety net), 7.1.6 (what this driver was developed against) and the
+new 7.1.13.
+
+Both `driver/apple-ave.ko` and `test/ave-overlay.ko` rebuild against it with
+no warnings and no API changes, and `tools/handshake-test.sh` now checks
+vermagic against the running kernel and rebuilds rather than failing at
+`insmod`, since a mismatch there produces a much less legible error than
+saying so up front.
+
+**One caveat on comparability.** The patches themselves are display-only and
+have no bearing on AVE, but this is a 7.1.6 -> 7.1.13 jump, so `apple-dart`,
+genpd and the IOMMU core have all moved under us. Earlier bring-up results in
+this document were measured on 7.1.6. If something behaves differently after
+the reboot, "the kernel changed" is a live hypothesis and not a lazy one -
+that is the same class of mistake as
+[30](30-address-translation-bug.md), where eight experiments were run
+faithfully against an apparatus nobody had checked.
