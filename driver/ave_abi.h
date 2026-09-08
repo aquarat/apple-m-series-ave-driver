@@ -696,4 +696,30 @@ static inline u32 ave_coded_data_size_max(u32 w, u32 h, bool hevc)
 #define AVE_RC_MODE_CBR			2
 #define AVE_RC_MODE_CONST_QP		3
 
+/*
+ * Source surface geometry.
+ *
+ * The macroblock grid is taken from the host-supplied SPS block
+ * (pic_*_minus1 + 1 at fw 0x6c384 / 0x6c3dc), NOT from VideoParams.ui32Height.
+ * So the encoder reads a whole number of macroblock rows regardless of the
+ * height we declare: a 1080p encode fetches 1088 luma rows.
+ *
+ * A source buffer allocated for 1080 rows is therefore eight rows short and
+ * the read runs off the end of the mapping. Always allocate and DART-map the
+ * input at macroblock-aligned height.
+ *
+ * Hardware width granularity is 2 MB, not 1: the picture-size register
+ * computes ((w + 31) >> 4) & 0x7fe (fw 0xb4514-0xb4524).
+ */
+#define AVE_MB_SIZE			16
+#define ave_mb_align(v)			(((v) + AVE_MB_SIZE - 1) & ~(AVE_MB_SIZE - 1))
+#define ave_src_luma_rows(h)		ave_mb_align(h)
+#define ave_src_chroma_rows(h)		(ave_mb_align(h) / 2)
+
+/* Dimension fields that must agree, for 1920x1080: 1920/1088, 119, 67. */
+#define AVE_SPS_PIC_WIDTH_MBS_M1	0x2d4c	/* SPS +0x430 */
+#define AVE_SPS_PIC_HEIGHT_MAPU_M1	0x2d50	/* SPS +0x434 */
+#define AVE_SPS_DIRECT_8X8_INFERENCE	0x2d58
+#define AVE_SPS_FRAME_MBS_ONLY_FLAG_REQ	1	/* CropUnitY assumes it */
+
 #endif /* __AVE_ABI_H__ */
