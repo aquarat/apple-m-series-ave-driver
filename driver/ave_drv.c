@@ -362,6 +362,7 @@ static int ave_probe(struct platform_device *pdev)
 		ret = pm_runtime_resume_and_get(dev);
 		if (ret < 0)
 			return dev_err_probe(dev, ret, "power up failed\n");
+		ave->powered = true;
 		dev_info(dev, "  resumed; left powered for inspection\n");
 		ave_stage_ok(dev, AVE_STAGE_POWER_ON);
 	} else {
@@ -563,6 +564,27 @@ static void ave_remove(struct platform_device *pdev)
 	struct ave_device *ave = platform_get_drvdata(pdev);
 
 	ave_stop(ave);
+
+	/*
+	 * The staged bring-up takes a runtime-PM reference at stage 6 and
+	 * leaves the block powered on purpose, but ave_stop() only unwinds a
+	 * *fully* started device. Without this, rmmod left VENC powered with
+	 * the core still executing - and a core that faults on every
+	 * instruction fetch then sits there generating a DART interrupt storm
+	 * (measured: ~260k/s) that survives the driver being unloaded.
+	 *
+	 * Halt the core before dropping the reference. Clearing CPU_CONTROL is
+	 * what stops the fetches; the power-down is what makes it stay stopped.
+	 */
+	if (ave->powered) {
+		if (ave->bank[AVE_BANK_ASC].base) {
+			ave_write(ave, AVE_BANK_ASC, AVE_ASC_CPU_CONTROL, 0);
+			dev_info(ave->dev, "halted the core (CPU_CONTROL = 0)\n");
+		}
+		ave->powered = false;
+		pm_runtime_put(ave->dev);
+	}
+
 	ave_fw_unload(ave);
 	ave_ipc_fini(ave);
 }
