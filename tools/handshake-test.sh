@@ -52,6 +52,23 @@ echo "commit    : $(git -C "$REPO" rev-parse --short HEAD)"
 echo "log       : $LOG"
 echo
 
+# Three kernels are installed on this machine (a 7.0 safety net, the 7.1.6
+# these modules were first developed against, and the 7.1.13 VRR build that is
+# now the default boot entry). A module built for one will not load on
+# another, and the resulting insmod error is far less clear than saying so
+# here - so check, and rebuild rather than fail.
+WANT=$(uname -r)
+for m in driver/apple-ave.ko test/ave-overlay.ko; do
+    HAVE=$(modinfo "$m" 2>/dev/null | awk '/^vermagic:/{print $2}')
+    if [ "$HAVE" != "$WANT" ]; then
+        echo ">>> $m was built for ${HAVE:-nothing}, running kernel is $WANT - rebuilding"
+        KD=/lib/modules/$WANT/build
+        [ -e "$KD" ] || { echo "!! no kernel-devel for $WANT; install it and re-run"; exit 1; }
+        make -C "$(dirname "$m")" KDIR="$KD" >/dev/null || { echo "!! rebuild failed"; exit 1; }
+    fi
+done
+echo ">>> modules match running kernel $WANT"
+
 # The overlay creates the AVE node. It has no module_exit (apple_dart_remove
 # resets the DART with no runtime resume and hangs the machine), so it loads
 # once per boot and stays.
