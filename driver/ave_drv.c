@@ -14,6 +14,7 @@
 
 #include <linux/array_size.h>
 #include <linux/delay.h>
+#include <linux/iopoll.h>
 #include <linux/dma-mapping.h>
 #include <linux/kernel.h>
 #include <linux/interrupt.h>
@@ -65,15 +66,16 @@ enum ave_stage {
 	AVE_STAGE_IOP_CONFIG	= 11,	/* tell the ASC where firmware is */
 	AVE_STAGE_ASC_START	= 12,	/* the four-write start sequence */
 	AVE_STAGE_READ_SVE	= 13,	/* bank 2, once the IOP is up */
-	AVE_STAGE_START		= 14,
-	AVE_STAGE_MAX		= 14,
+	AVE_STAGE_PROBE_STATE	= 14,	/* is the core actually executing? */
+	AVE_STAGE_START		= 15,
+	AVE_STAGE_MAX		= 15,
 };
 
 static const char * const ave_stage_name[] = {
 	"none", "map-banks", "dma-mask", "get-irq", "request-irq",
 	"power-attach", "power-on", "write-sve-idle", "read-asc-status",
 	"ipc-alloc", "fw-load", "iop-config", "asc-start", "read-sve-status",
-	"start",
+	"probe-state", "start",
 };
 
 /* Returns true if this stage should run. Logs the decision either way. */
@@ -460,6 +462,47 @@ static int ave_probe(struct platform_device *pdev)
 	} else {
 		return 0;
 	}
+	/*
+	 * Is the coprocessor executing?
+	 *
+	 * Nothing so far distinguishes "started and running firmware" from
+	 * "started and idle because it has nothing to run". A running RTKit
+	 * image touches the SVE scratch registers, so sample them twice with a
+	 * delay and report any that move. Reads only.
+	 */
+	if (ave_stage(dev, AVE_STAGE_PROBE_STATE)) {
+		u32 before[AVE_SVE_NUM_SCRATCH], after[AVE_SVE_NUM_SCRATCH];
+		u32 st0, st1, i;
+		bool moved = false;
+
+		st0 = ave_read(ave, AVE_BANK_ASC, AVE_ASC_CPU_STATUS);
+		for (i = 0; i < AVE_SVE_NUM_SCRATCH; i++)
+			before[i] = ave_read(ave, AVE_BANK_SVE, AVE_SVE_SCRATCH(i));
+
+		msleep(200);
+
+		st1 = ave_read(ave, AVE_BANK_ASC, AVE_ASC_CPU_STATUS);
+		for (i = 0; i < AVE_SVE_NUM_SCRATCH; i++)
+			after[i] = ave_read(ave, AVE_BANK_SVE, AVE_SVE_SCRATCH(i));
+
+		dev_info(dev, "  CPU_STATUS %#010x -> %#010x%s\n",
+			 st0, st1, st0 != st1 ? "  CHANGED" : "");
+		for (i = 0; i < AVE_SVE_NUM_SCRATCH; i++) {
+			dev_info(dev, "  scratch[%u] %#010x -> %#010x%s\n",
+				 i, before[i], after[i],
+				 before[i] != after[i] ? "  CHANGED" : "");
+			if (before[i] != after[i])
+				moved = true;
+		}
+		dev_info(dev, "  verdict: %s\n",
+			 (moved || st0 != st1)
+			 ? "something is executing"
+			 : "no observable activity - core may not be running");
+		ave_stage_ok(dev, AVE_STAGE_PROBE_STATE);
+	} else {
+		return 0;
+	}
+
 	if (stop_after >= AVE_STAGE_START) {
 		ret = ave_start(ave);
 		if (ret) {
