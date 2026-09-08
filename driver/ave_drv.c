@@ -61,18 +61,18 @@ enum ave_stage {
 	AVE_STAGE_POWER_ON	= 6,	/* resume only - NO register access */
 	AVE_STAGE_WRITE_IDLE	= 7,	/* THE write Apple issues first */
 	AVE_STAGE_READ_ASC	= 8,	/* read bank 1 */
-	AVE_STAGE_ASC_START	= 9,	/* the four-write start sequence */
-	AVE_STAGE_READ_SVE	= 10,	/* bank 2, only after the IOP is up */
-	AVE_STAGE_IPC_ALLOC	= 11,	/* exercises the DART */
-	AVE_STAGE_FW_ADOPT	= 12,
+	AVE_STAGE_IPC_ALLOC	= 9,	/* exercises the DART */
+	AVE_STAGE_FW_ADOPT	= 10,	/* must precede ASC start */
+	AVE_STAGE_ASC_START	= 11,	/* the four-write start sequence */
+	AVE_STAGE_READ_SVE	= 12,	/* bank 2, once the IOP is up */
 	AVE_STAGE_START		= 13,
 	AVE_STAGE_MAX		= 13,
 };
 
 static const char * const ave_stage_name[] = {
 	"none", "map-banks", "dma-mask", "get-irq", "request-irq",
-	"power-attach", "power-on", "write-sve-idle", "read-asc-status", "asc-start",
-	"read-sve-status", "ipc-alloc", "fw-adopt", "start",
+	"power-attach", "power-on", "write-sve-idle", "read-asc-status",
+	"ipc-alloc", "fw-adopt", "asc-start", "read-sve-status", "start",
 };
 
 /* Returns true if this stage should run. Logs the decision either way. */
@@ -465,7 +465,28 @@ static int ave_probe(struct platform_device *pdev)
 	} else {
 		return 0;
 	}
-
+	if (ave_stage(dev, AVE_STAGE_IPC_ALLOC)) {
+		ret = ave_ipc_init(ave);
+		if (ret)
+			return dev_err_probe(dev, ret, "IPC setup\n");
+		ave_stage_ok(dev, AVE_STAGE_IPC_ALLOC);
+	} else {
+		return 0;
+	}
+	if (ave_stage(dev, AVE_STAGE_FW_ADOPT)) {
+		ret = ave_fw_adopt(ave);
+		if (ret)
+			return dev_err_probe(dev, ret, "firmware adoption\n");
+		ave_stage_ok(dev, AVE_STAGE_FW_ADOPT);
+	} else {
+		return 0;
+	}
+	/*
+	 * ASC start must come AFTER firmware is mapped at IOVA 0. With a DART
+	 * attached and nothing at 0, the core's first instruction fetch faults,
+	 * the DART raises its interrupt, the handler clears it, the core
+	 * retries - a handled-interrupt flood rather than a clean failure.
+	 */
 	if (ave_stage(dev, AVE_STAGE_ASC_START)) {
 		ret = ave_asc_start(ave);
 		if (ret)
@@ -474,7 +495,6 @@ static int ave_probe(struct platform_device *pdev)
 	} else {
 		return 0;
 	}
-
 	if (ave_stage(dev, AVE_STAGE_READ_SVE)) {
 		u32 v;
 
@@ -485,25 +505,6 @@ static int ave_probe(struct platform_device *pdev)
 	} else {
 		return 0;
 	}
-
-	if (ave_stage(dev, AVE_STAGE_IPC_ALLOC)) {
-		ret = ave_ipc_init(ave);
-		if (ret)
-			return dev_err_probe(dev, ret, "IPC setup\n");
-		ave_stage_ok(dev, AVE_STAGE_IPC_ALLOC);
-	} else {
-		return 0;
-	}
-
-	if (ave_stage(dev, AVE_STAGE_FW_ADOPT)) {
-		ret = ave_fw_adopt(ave);
-		if (ret)
-			return dev_err_probe(dev, ret, "firmware adoption\n");
-		ave_stage_ok(dev, AVE_STAGE_FW_ADOPT);
-	} else {
-		return 0;
-	}
-
 	if (stop_after >= AVE_STAGE_START) {
 		ret = ave_start(ave);
 		if (ret) {

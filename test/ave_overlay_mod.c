@@ -39,14 +39,23 @@ static int __init ave_ov_init(void)
 	return 0;
 }
 
-static void __exit ave_ov_exit(void)
-{
-	int ret = of_overlay_remove(&ovcs_id);
-
-	pr_info("ave-overlay: removed (%d)\n", ret);
-}
-
+/*
+ * There is deliberately NO module_exit.
+ *
+ * Removing the overlay unbinds the DARTs, and apple_dart_remove() calls
+ * apple_dart_hw_reset() -- sixteen TCR writes plus a TLB invalidate -- without
+ * any runtime resume. By then __device_release_driver() has already called
+ * pm_runtime_put_sync(), and pmgr-pwrstate is GENPD_FLAG_IRQ_SAFE, so venc_sys
+ * is genuinely powered off. Writing DART registers into a power-gated block
+ * hangs the fabric.
+ *
+ * That is what killed the first DART attempt: the log showed the DART
+ * initialise and stage 1 pass, then the machine died in cleanup's rmmod.
+ *
+ * Apply once per boot; iterate by rmmod/insmod of apple_ave only. The AVE
+ * device, its IOMMU group and its default domain all persist across driver
+ * unbinds.
+ */
 module_init(ave_ov_init);
-module_exit(ave_ov_exit);
 MODULE_DESCRIPTION("Apply the AVE test device-tree overlay");
 MODULE_LICENSE("GPL");

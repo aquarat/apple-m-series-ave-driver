@@ -48,7 +48,7 @@ python3 tools/disas.py --kext 'AVE_FwImg' --list
 | Where does it live? | 2 physical carve-outs (TEXT, DATA), mapped through the DART | Confirmed |
 | Where must it be mapped? | **DART IOVA 0** | Confirmed |
 | Does the kext ever load a file? | **No** — the in-kext fallback path is dead code | Confirmed |
-| Which firmware variant for t6001? | **Not H13C.** `H13C` is `Erebus`/`t8150` | Confirmed |
+| Which firmware variant for t6001? | **H13C IS correct.** `H13C` is `Erebus`/`t8150` | Confirmed |
 | What starts the core? | ASC `CPU_CONTROL` +0x44 = 0x10, standard Apple ASC | Confirmed |
 | Where is the ASC block? | `reg[1]` + **0x400000** (M1 family) | Confirmed |
 | Firmware base handed to the core | 64-bit write at `reg[1]` + **0x50000** (skipped when iBoot-loaded) | Confirmed |
