@@ -1,5 +1,32 @@
 # The first access is a WRITE, not a read
 
+> ## RESULT: hypothesis refuted (2026-09-07)
+>
+> Stage 7 was rebuilt to issue exactly Apple's first access — a single
+> `Write32(bank 2, +0x38, 1)` and nothing else — and **it hung the machine**,
+> same signature as every read: PMU `1 boot error, 0 panics`, nothing logged,
+> marker correctly attributing it to `write-sve-idle`.
+>
+> So the read/write distinction is **not** the explanation. The AVE address
+> space is dead to all traffic, in both directions. That is outcome 2 of the
+> three predicted below, and it is a clean elimination: posted writes do not
+> get through either.
+>
+> What this leaves, from the analysis in this document and
+> [27-platform-enablers.md](27-platform-enablers.md):
+>
+> - **The fabric bridge.** `VENC_SYS` owns PMGR bridge 2, which is
+>   `pmgr reg[50]` = `0x20C000000` = ave0's bank 4. If that bridge is not
+>   configured, nothing behind it responds — and nothing in Linux configures
+>   it, because nothing in Linux knows AVE exists.
+> - **Something iBoot does only when macOS is the target OS.** Asahi boots
+>   through the same iBoot, but iBoot is told which OS it is starting, and the
+>   VENC fabric agent may simply be left unrouted for a non-macOS boot.
+>
+> Both are consistent with every observation to date, and neither can be
+> distinguished without either reading the bridge window or tracing macOS.
+
+
 This is the most actionable result to come out of the static analysis, and it
 explains why every hardware attempt so far has failed in the same way.
 
