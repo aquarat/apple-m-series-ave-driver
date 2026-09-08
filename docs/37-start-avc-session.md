@@ -1025,3 +1025,11 @@ the second looks like the hardware disobeying you.
 The profile/level enum tables, the `_S_AVE_Session_PFCfg` placement, the
 slice-group abort, and the header-size limits are the agent's readings. The
 NV12 pixel-format selector remains **unlocated** - see the risk note below.
+
+
+> **Retracted.** The `0x26DC input_chroma_format` row in §1 is withdrawn. The
+> store is unconditionally overwritten at fw `0x6c378` with
+> `SPS.chroma_format_idc`, and it is the latter that reaches the fetch logic.
+> See [39](39-input-format.md). The field is genuine in `COFController`; it is
+> dead for AVC. Also superseded: the statement that there are no stride fields
+> to set — `iStride` at PICMGMT `+0x457C` / `+0x459C` is required.
