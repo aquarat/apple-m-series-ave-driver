@@ -62,16 +62,18 @@ enum ave_stage {
 	AVE_STAGE_READ_ASC	= 8,	/* read bank 1 */
 	AVE_STAGE_IPC_ALLOC	= 9,	/* exercises the DART */
 	AVE_STAGE_FW_LOAD	= 10,	/* must precede ASC start */
-	AVE_STAGE_ASC_START	= 11,	/* the four-write start sequence */
-	AVE_STAGE_READ_SVE	= 12,	/* bank 2, once the IOP is up */
-	AVE_STAGE_START		= 13,
-	AVE_STAGE_MAX		= 13,
+	AVE_STAGE_IOP_CONFIG	= 11,	/* tell the ASC where firmware is */
+	AVE_STAGE_ASC_START	= 12,	/* the four-write start sequence */
+	AVE_STAGE_READ_SVE	= 13,	/* bank 2, once the IOP is up */
+	AVE_STAGE_START		= 14,
+	AVE_STAGE_MAX		= 14,
 };
 
 static const char * const ave_stage_name[] = {
 	"none", "map-banks", "dma-mask", "get-irq", "request-irq",
 	"power-attach", "power-on", "write-sve-idle", "read-asc-status",
-	"ipc-alloc", "fw-load", "asc-start", "read-sve-status", "start",
+	"ipc-alloc", "fw-load", "iop-config", "asc-start", "read-sve-status",
+	"start",
 };
 
 /* Returns true if this stage should run. Logs the decision either way. */
@@ -409,6 +411,31 @@ static int ave_probe(struct platform_device *pdev)
 	} else {
 		return 0;
 	}
+	/*
+	 * Tell the coprocessor where its firmware is. This is what
+	 * AVE_IOP_Config_Nyx does, and it is on our path precisely because we
+	 * are the not-iBoot-loaded case: Apple skips it when iBoot has already
+	 * placed the image.
+	 *
+	 * We map at IOVA 0, so the masked base contributes nothing and the
+	 * value is the tag alone.
+	 */
+	if (ave_stage(dev, AVE_STAGE_IOP_CONFIG)) {
+		u64 v = (ave->fw.mapped_at_zero ? 0 : ave->fw.iova) &
+			AVE_ASC_FW_BASE_MASK;
+
+		v |= AVE_ASC_FW_BASE_TAG;
+		dev_info(dev, "  writing fw base %#llx to ASC+0x%x ...\n",
+			 v, AVE_ASC_FW_BASE);
+		ave_write64(ave, AVE_BANK_ASC, AVE_ASC_FW_BASE, v);
+		dev_info(dev, "  readback = %#llx\n",
+			 readq_relaxed(ave->bank[AVE_BANK_ASC].base +
+				       AVE_ASC_FW_BASE));
+		ave_stage_ok(dev, AVE_STAGE_IOP_CONFIG);
+	} else {
+		return 0;
+	}
+
 	/*
 	 * ASC start must come AFTER firmware is mapped at IOVA 0. With a DART
 	 * attached and nothing at 0, the core's first instruction fetch faults,

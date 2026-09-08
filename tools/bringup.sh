@@ -48,7 +48,7 @@ LOGDIR="$REPO/data/bringup-logs"
 mkdir -p "$LOGDIR"
 
 names=(none map-banks dma-mask get-irq request-irq power-attach \
-       power-on write-sve-idle read-asc-status ipc-alloc fw-load \
+       power-on write-sve-idle read-asc-status ipc-alloc fw-load iop-config \
        asc-start read-sve-status start)
 
 # Seconds to wait after syncing the marker before doing anything that can hang.
