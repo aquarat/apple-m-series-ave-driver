@@ -166,3 +166,42 @@ It is the right next step and is worth waiting for.
 Static analysis remains productive and unblocked in the meantime — the command
 struct interiors, the `pPicParams` field join and the HEVC paths are all still
 open and need no hardware.
+
+## Addendum, 2026-09-08: the experiment stopped being reproducible
+
+An eighth attempt hung at **stage 6** — `pm_runtime_resume_and_get()` followed
+by nothing at all. No register is touched in that stage. It had previously
+passed **twice**, on this same kernel, with this same code, and its success was
+what established that the power domains come up correctly.
+
+That is the important result of the session, and it is a negative one:
+
+**The failure is not deterministic per stage, so per-stage bisection is no
+longer sound.** Every conclusion of the form "stage N is safe, stage N+1 is
+where it breaks" rested on the assumption that a passing stage stays passing.
+Stage 6 has now falsified that assumption.
+
+Consequences for what was recorded above:
+
+- The eliminations derived from *static analysis* stand — they do not depend on
+  this. Power-domain mapping, the bank 3/4 reclassification, the PMGR
+  comparison, the absence of an enable call in the kext: all still hold.
+- The eliminations derived from *hardware attempts* are weaker than they read.
+  "Reads hang", "writes hang", "reset hangs" are each a single observation, and
+  we now know a repeat of the same step can change outcome.
+
+Possible causes, none established: accumulated SoC state across seventeen
+boots; a timing or race dependence rather than a per-stage property; or
+something about the machine's condition after repeated hard resets.
+
+**Recommendation: stop hardware attempts until the m1n1 hypervisor console is
+available.** Not as a precaution but because the method has stopped working —
+attributing a hang to a stage requires that stages behave consistently, and
+they no longer do. Further attempts would generate data that cannot be trusted,
+at roughly one reboot each.
+
+Eight attempts produced one genuinely load-bearing hardware fact — that the AVE
+address space does not respond to reads or writes while its power domains
+report on — and it took the first three to establish it. The remaining five
+added little. That is the argument for stopping, independent of any risk
+consideration.
