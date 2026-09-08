@@ -82,6 +82,19 @@ for n in $(seq "$first" "$last"); do
     sync; sleep "$SETTLE"; sync
     sudo dmesg -C
 
+    # Capture kernel messages to disk AS THEY ARE EMITTED, and force them out
+    # with a background sync loop. journald buffers, so a hang loses everything
+    # since the last flush - three attempts produced no record at all of the
+    # modules even loading. The live log below survives because each line is
+    # appended and synced within ~200ms.
+    LIVE="$LOGDIR/live-$n.log"
+    : > "$LIVE"
+    sudo dmesg -w >> "$LIVE" 2>/dev/null &
+    DMESG_PID=$!
+    ( while kill -0 $DMESG_PID 2>/dev/null; do sync; sleep 0.2; done ) &
+    SYNC_PID=$!
+    trap 'sudo kill $DMESG_PID 2>/dev/null; kill $SYNC_PID 2>/dev/null; cleanup' EXIT
+
     sudo insmod "$REPO/driver/apple-ave.ko" stop_after="$n" || { echo "insmod driver failed"; exit 1; }
     sudo insmod "$REPO/test/ave-overlay.ko" || { echo "insmod overlay failed"; exit 1; }
     sleep 2
@@ -105,6 +118,9 @@ for n in $(seq "$first" "$last"); do
 
     sudo dmesg | grep -E 'apple-ave|apple_ave|ave-overlay|video-encoder' \
         | tee "$LOGDIR/stage-$n.log"
+
+    sudo kill $DMESG_PID 2>/dev/null; kill $SYNC_PID 2>/dev/null; sync
+    trap cleanup EXIT
 
     if sudo dmesg | grep -q "stage $n (${names[$n]}): OK"; then
         echo "--- stage $n OK ---"
