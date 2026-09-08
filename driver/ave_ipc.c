@@ -236,7 +236,7 @@ int ave_boot_config(struct ave_device *ave)
 	cfg = ave->fwcfg.cpu;
 	memset(cfg, 0, sizeof(*cfg));
 	cfg->dev_index         = cpu_to_le32(0);	  /* ave0            */
-	cfg->dev_id            = cpu_to_le32(AVE_DEVID_T6001);
+	cfg->dev_id            = cpu_to_le32(AVE_DEVID_T6000); /* ave0, not the SoC */
 	cfg->dev_num           = cpu_to_le32(2);	  /* two instances   */
 	cfg->dev_num_per_group = cpu_to_le32(1);	  /* TODO: unverified */
 	cfg->dev_subid_flag    = cpu_to_le64(0);
@@ -275,6 +275,13 @@ int ave_recv_iop_msg(struct ave_device *ave, u32 out[4], unsigned int timeout_ms
 	u32 st;
 
 	for (i = 0; i < timeout_ms * 1000 / 200; i++) {
+		/* The IRQ handler may have got there first and cleared it. */
+		if (READ_ONCE(ave->hs_seen)) {
+			memcpy(out, ave->hs_scratch, sizeof(ave->hs_scratch));
+			dev_info(ave->dev, "  message taken from the IRQ handler\n");
+			return 0;
+		}
+
 		st = ave_read(ave, AVE_BANK_SVE, AVE_SVE_INTR_STATUS);
 		if (st & 1) {
 			ave_write(ave, AVE_BANK_SVE, AVE_SVE_INTR_STATUS, 1);

@@ -166,6 +166,25 @@ static irqreturn_t ave_irq_handler(int irq, void *data)
 	if (!status)
 		return IRQ_NONE;
 
+	/*
+	 * Capture before clearing. Until the handshake completes this may be
+	 * the firmware's first and only message, and write-1-to-clear
+	 * destroys it. Reading the scratch words here costs four MMIO reads
+	 * and turns an unrecoverable miss into a logged fact.
+	 */
+	if (!ave->hs_seen) {
+		ave->hs_status     = status;
+		ave->hs_scratch[0] = ave_read(ave, AVE_BANK_SVE, AVE_SVE_SCRATCH(0));
+		ave->hs_scratch[1] = ave_read(ave, AVE_BANK_SVE, AVE_SVE_SCRATCH(1));
+		ave->hs_scratch[2] = ave_read(ave, AVE_BANK_SVE, AVE_SVE_SCRATCH(2));
+		ave->hs_scratch[3] = ave_read(ave, AVE_BANK_SVE, AVE_SVE_SCRATCH(3));
+		ave->hs_seen = true;
+		dev_info(ave->dev,
+			 "IRQ: first firmware message, status %#x, scratch %#x %#x %#x %#x\n",
+			 status, ave->hs_scratch[0], ave->hs_scratch[1],
+			 ave->hs_scratch[2], ave->hs_scratch[3]);
+	}
+
 	/* Write-1-to-clear: the value read is written straight back. */
 	ave_write(ave, AVE_BANK_SVE, AVE_SVE_INTR_STATUS, status);
 
@@ -267,6 +286,7 @@ static int ave_probe(struct platform_device *pdev)
 						     "bank %u (%s) failed\n",
 						     i, bank_names[i]);
 			ave->bank[i].size = resource_size(res);
+			ave->bank[i].phys = res->start;
 		}
 		ave_stage_ok(dev, AVE_STAGE_MAP_BANKS);
 	} else {

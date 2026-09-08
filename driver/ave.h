@@ -20,6 +20,7 @@
 
 /* One mapped MMIO bank; index matches the ADT reg index. */
 struct ave_bank {
+	phys_addr_t		phys;	/* AP-physical start, for the IOBA patch */
 	void __iomem	*base;
 	resource_size_t	size;
 };
@@ -50,6 +51,19 @@ struct ave_channel {
 struct ave_device {
 	struct device		*dev;
 	struct ave_bank		bank[AVE_NUM_BANKS];
+
+	/*
+	 * Boot-handshake capture. The IRQ is requested before the firmware
+	 * has said anything, and the handler must write-1-clear the whole
+	 * status word or the line stays asserted. That would consume the
+	 * firmware's very first message and we would record a working boot as
+	 * silence - so during the handshake the handler stashes it here
+	 * instead of dropping it, and ave_recv_iop_msg() accepts either
+	 * source.
+	 */
+	bool			hs_seen;
+	u32			hs_status;
+	u32			hs_scratch[4];
 	int			irq;
 	struct reset_control	*rst;
 
