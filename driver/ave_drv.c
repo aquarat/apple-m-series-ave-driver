@@ -20,7 +20,6 @@
 #include <linux/iopoll.h>
 #include <linux/module.h>
 #include <linux/of.h>
-#include <linux/of_address.h>
 #include <linux/platform_device.h>
 #include <linux/pm_domain.h>
 #include <linux/pm_runtime.h>
@@ -62,7 +61,7 @@ enum ave_stage {
 	AVE_STAGE_WRITE_IDLE	= 7,	/* THE write Apple issues first */
 	AVE_STAGE_READ_ASC	= 8,	/* read bank 1 */
 	AVE_STAGE_IPC_ALLOC	= 9,	/* exercises the DART */
-	AVE_STAGE_FW_ADOPT	= 10,	/* must precede ASC start */
+	AVE_STAGE_FW_LOAD	= 10,	/* must precede ASC start */
 	AVE_STAGE_ASC_START	= 11,	/* the four-write start sequence */
 	AVE_STAGE_READ_SVE	= 12,	/* bank 2, once the IOP is up */
 	AVE_STAGE_START		= 13,
@@ -72,7 +71,7 @@ enum ave_stage {
 static const char * const ave_stage_name[] = {
 	"none", "map-banks", "dma-mask", "get-irq", "request-irq",
 	"power-attach", "power-on", "write-sve-idle", "read-asc-status",
-	"ipc-alloc", "fw-adopt", "asc-start", "read-sve-status", "start",
+	"ipc-alloc", "fw-load", "asc-start", "read-sve-status", "start",
 };
 
 /* Returns true if this stage should run. Logs the decision either way. */
@@ -98,73 +97,6 @@ static void ave_stage_ok(struct device *dev, enum ave_stage n)
  * whole chain from a leaf. The DT node lists the two leaves; we simply attach
  * to whatever it lists and let genpd order them.
  */
-
-/*
- * Adopt the firmware iBoot already placed in memory.
- *
- * The kext does not load the image; iBoot does, and the OS picks it up through
- * the "segment-ranges" property - the same property and layout m1n1 emits for
- * DCP and ISP. Two segments: TEXT (read-only to the device) and DATA
- * (read-write). See docs/09-firmware-load.md.
- *
- * The DATA segment is snapshotted here and must be restored before every
- * start, because the firmware writes into it and a restart with dirty DATA
- * does not work on Apple's side either.
- */
-static int ave_fw_adopt(struct ave_device *ave)
-{
-	struct device_node *np = ave->dev->of_node;
-	u64 seg[4];
-	void *src;
-	int ret;
-
-	/*
-	 * TODO(unverified): the exact "segment-ranges" cell layout for AVE has
-	 * not been confirmed against a live m1n1-generated FDT - only that the
-	 * kext consumes the same property DCP/ISP use. Treat this parse as
-	 * provisional.
-	 */
-	ret = of_property_read_u64_array(np, "apple,segment-ranges", seg,
-					 ARRAY_SIZE(seg));
-	if (ret) {
-		dev_err(ave->dev, "no apple,segment-ranges: %d\n", ret);
-		return ret;
-	}
-
-	ave->fw.text_pa   = seg[0];
-	ave->fw.text_size = seg[1];
-	ave->fw.data_pa   = seg[2];
-	ave->fw.data_size = seg[3];
-
-	src = memremap(ave->fw.data_pa, ave->fw.data_size, MEMREMAP_WB);
-	if (!src)
-		return -ENOMEM;
-
-	ave->fw.data_snapshot = devm_kmemdup(ave->dev, src, ave->fw.data_size,
-					     GFP_KERNEL);
-	memunmap(src);
-	if (!ave->fw.data_snapshot)
-		return -ENOMEM;
-
-	dev_info(ave->dev, "firmware: text %pa+%zx data %pa+%zx\n",
-		 &ave->fw.text_pa, ave->fw.text_size,
-		 &ave->fw.data_pa, ave->fw.data_size);
-	return 0;
-}
-
-/* Restore the pristine DATA segment. Must precede every coprocessor start. */
-static int ave_fw_restore_data(struct ave_device *ave)
-{
-	void *dst;
-
-	dst = memremap(ave->fw.data_pa, ave->fw.data_size, MEMREMAP_WB);
-	if (!dst)
-		return -ENOMEM;
-
-	memcpy(dst, ave->fw.data_snapshot, ave->fw.data_size);
-	memunmap(dst);
-	return 0;
-}
 
 /*
  * Start the coprocessor.
@@ -268,10 +200,6 @@ static int ave_start(struct ave_device *ave)
 	ret = ave_power_up(ave);
 	if (ret)
 		return ret;
-
-	ret = ave_fw_restore_data(ave);
-	if (ret)
-		goto err_power;
 
 	ret = ave_asc_start(ave);
 	if (ret)
@@ -473,11 +401,11 @@ static int ave_probe(struct platform_device *pdev)
 	} else {
 		return 0;
 	}
-	if (ave_stage(dev, AVE_STAGE_FW_ADOPT)) {
-		ret = ave_fw_adopt(ave);
+	if (ave_stage(dev, AVE_STAGE_FW_LOAD)) {
+		ret = ave_fw_load(ave);
 		if (ret)
-			return dev_err_probe(dev, ret, "firmware adoption\n");
-		ave_stage_ok(dev, AVE_STAGE_FW_ADOPT);
+			return dev_err_probe(dev, ret, "firmware load\n");
+		ave_stage_ok(dev, AVE_STAGE_FW_LOAD);
 	} else {
 		return 0;
 	}
@@ -522,6 +450,7 @@ static void ave_remove(struct platform_device *pdev)
 	struct ave_device *ave = platform_get_drvdata(pdev);
 
 	ave_stop(ave);
+	ave_fw_unload(ave);
 	ave_ipc_fini(ave);
 }
 

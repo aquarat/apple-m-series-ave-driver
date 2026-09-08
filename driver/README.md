@@ -17,6 +17,25 @@ here as a first draft.
 Covers steps 1–5 of [../docs/22-driver-plan.md](../docs/22-driver-plan.md).
 There is no command layer and no V4L2 layer yet.
 
+## Firmware
+
+The driver loads the firmware itself rather than adopting an iBoot pre-load, so
+no bootloader patch is needed. It requests `apple/ave_h13c.bin`: the **unwrapped
+Mach-O**, not the `.im4p`.
+
+Apple firmware is not redistributable and is not in this repository. Extract
+your own from an IPSW for hardware you own:
+
+```sh
+./.venv/bin/python tools/fetch_firmware.py --board j314c --variant H13C
+./.venv/bin/pyimg4 im4p extract \
+    -i data/blobs/Firmware/ave/AppleAVE2FW_H13C.im4p -o data/blobs/ave_h13c.bin
+sudo install -Dm644 data/blobs/ave_h13c.bin /lib/firmware/apple/ave_h13c.bin
+```
+
+Use `data/derived/board-to-ave-firmware.txt` to pick the right variant for a
+different machine.
+
 ## Building
 
 ```sh
