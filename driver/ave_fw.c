@@ -388,3 +388,48 @@ void ave_fw_unload(struct ave_device *ave)
 		       DMA_ATTR_FORCE_CONTIGUOUS);
 	ave->fw.cpu = NULL;
 }
+
+/*
+ * Peek at the physical address the fw-base register points at.
+ *
+ * The core fetches at an address this DART cannot translate - its input
+ * address space is 32 bits and the fetch is at ~1.1 TB - which means the
+ * fetch is meant to bypass and land on physical memory. If iBoot left a
+ * firmware image there we should see a Mach-O header, and its IOBA tag
+ * should already be populated, since iBoot would have done for its own copy
+ * what ave_fw_patch_ioba() now does for ours.
+ *
+ * Read-only, first page only.
+ */
+void ave_fw_peek_phys(struct ave_device *ave)
+{
+	phys_addr_t pa;
+	void *p;
+	u64 fwreg;
+	u32 magic;
+
+	fwreg = ave_read64(ave, AVE_BANK_ASC, AVE_ASC_FW_BASE);
+	pa = fwreg & AVE_ASC_FW_BASE_MASK;
+	if (!pa)
+		return;
+
+	p = memremap(pa, SZ_4K, MEMREMAP_WB);
+	if (!p)
+		p = memremap(pa, SZ_4K, MEMREMAP_WT);
+	if (!p) {
+		dev_info(ave->dev, "  phys %pa: not mappable\n", &pa);
+		return;
+	}
+
+	magic = get_unaligned_le32(p);
+	dev_info(ave->dev, "  phys %pa: first word %#010x %s\n", &pa, magic,
+		 magic == MH_MAGIC_64 ? "= MH_MAGIC_64, a Mach-O is here" :
+					"(not a Mach-O header)");
+	print_hex_dump(KERN_INFO, "ave phys: ", DUMP_PREFIX_OFFSET, 16, 1,
+		       p, 16, true);
+	/* The first word is a branch; show where it lands. */
+	dev_info(ave->dev, "  branch target region (+0x200):\n");
+	print_hex_dump(KERN_INFO, "ave +200: ", DUMP_PREFIX_OFFSET, 16, 1,
+		       p + 0x200, 96, true);
+	memunmap(p);
+}

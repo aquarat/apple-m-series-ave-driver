@@ -509,6 +509,7 @@ static int ave_probe(struct platform_device *pdev)
 		}
 		ave_fw_log_dump(ave);
 		ave_fw_globals_dump(ave);
+		ave_fw_peek_phys(ave);
 		ave_stage_ok(dev, AVE_STAGE_RECV_MSG);
 	} else {
 		return 0;
