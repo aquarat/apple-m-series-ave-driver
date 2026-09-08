@@ -13,9 +13,12 @@ should generalise across the M1 family and forward.
 
 ## Status
 
-Static reconnaissance only. **No code has been run on the hardware, and no
-driver exists yet.** Everything here was derived from Apple's own shipped
-firmware and device tree.
+A driver exists and runs on real hardware. It brings the block up, maps its
+firmware at DART IOVA 0 and starts the coprocessor; the firmware does not yet
+report in. See [docs/31-bringup-state.md](docs/31-bringup-state.md) for exactly
+how far it gets and what is believed to be missing.
+
+The static analysis below is the project's foundation and is largely complete.
 
 | Question | Answer | Confidence |
 |---|---|---|
