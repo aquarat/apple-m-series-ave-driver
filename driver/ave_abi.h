@@ -176,6 +176,44 @@ struct ave_ipc_slot {
 #define AVE_IPC_GRANULE		64
 
 /*
+ * Boot argument block, _S_AVE_Fw_Cfg - 56 bytes.
+ *
+ * The host allocates this, fills it, DART-maps it, and hands the firmware its
+ * address in scratch registers 1 and 2 with scratch 0 set to
+ * AVE_IOP_FLAG_HOST_MODE, all BEFORE starting the core.
+ *
+ * The firmware's very first act (CPlatformEnvironment ctor, fw 0xe0fec) is to
+ * read scratch 0 and compare it against 0x08042006. If it does not match it
+ * takes a standalone branch and never talks to the host at all - which is
+ * exactly what we saw when starting the core with the scratch registers zero.
+ *
+ * Field offsets confirmed from both sides: the host writer AVE_HwC::MakeFwCfg
+ * (0xfffffe0008c1cbf0) and the firmware reader at fw 0xe1218..0xe1344.
+ */
+struct ave_fw_cfg {
+	__le32	dev_index;	/* +0x00 instance, 0 for ave0            */
+	__le32	dev_id;		/* +0x04 AVE_DevInfo::GetDevID()         */
+	__le32	dev_num;	/* +0x08                                  */
+	__le32	dev_num_per_group; /* +0x0c                              */
+	__le64	dev_subid_flag;	/* +0x10                                  */
+	__le32	dev_revision;	/* +0x18                                  */
+	__le32	pad_1c;		/* +0x1c not written by Apple            */
+	__le64	log_addr;	/* +0x20 DART addr of the log surface    */
+	__le32	log_size;	/* +0x28 its size                        */
+	__le32	pad_2c;		/* +0x2c not written                     */
+	__le32	cfg30;		/* +0x30 AVE_Cfg_Get()[+0x30], default 0 */
+	__le32	pad_34;		/* +0x34 not written                     */
+} __packed;
+
+#define AVE_FW_CFG_SIZE		0x38		/* firmware maps exactly 56 */
+
+/* scratch0 value that selects host mode; anything else means standalone */
+#define AVE_IOP_FLAG_HOST_MODE	0x08042006
+
+/* Surface config index 29 is the firmware log surface (AVE_FwLog). */
+#define AVE_SURF_IDX_FWLOG	29
+
+/*
  * Pixel formats.
  *
  * Enum names are not inferred - they come from the string pointer array at

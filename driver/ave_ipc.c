@@ -21,6 +21,7 @@
 #include <linux/io.h>
 #include <linux/iopoll.h>
 #include <linux/slab.h>
+#include <linux/sizes.h>
 
 #include "ave.h"
 
@@ -167,6 +168,126 @@ int ave_ipc_handshake(struct ave_device *ave)
 	 */
 	ave->nchannels = 0;
 	return 0;
+}
+
+/*
+ * Hand the firmware its boot arguments, BEFORE the core is started.
+ *
+ * This is the step that was missing. AVE_HwC::StartUpIOP does, between
+ * AVE_IPC::Alloc and AVE_IOP::Config:
+ *
+ *   MakeFwCfg(cfg)                  0xfffffe0008c1d978
+ *   SetIOPFlag(0)                   0xfffffe0008c1da64  scratch0 = magic
+ *   d = Kernel2DARTAddr(cfg)        0xfffffe0008c1db50
+ *   WriteScratch(1, lo32(d))        0xfffffe0008c1dc7c
+ *   WriteScratch(2, hi32(d))        0xfffffe0008c1dd10
+ *
+ * and only then Config and Start. Starting the core with the scratch registers
+ * zero makes the firmware take its standalone branch (fw 0xe115c) and go quiet,
+ * which is precisely what we observed.
+ */
+int ave_boot_config(struct ave_device *ave)
+{
+	struct ave_fw_cfg *cfg;
+
+	/*
+	 * The firmware log surface. Its address goes in the boot block, so the
+	 * firmware writes its log where we can read it - which is the whole
+	 * observability story for this project.
+	 *
+	 * Size is a guess: gs_saAVE_SurfaceCfg carries no size field, and the
+	 * real size comes from a per-surface calculation we have not mapped.
+	 */
+	ave->fwlog.size = SZ_1M;
+	ave->fwlog.cpu = dma_alloc_coherent(ave->dev, ave->fwlog.size,
+					    &ave->fwlog.iova, GFP_KERNEL);
+	if (!ave->fwlog.cpu)
+		return -ENOMEM;
+
+	ave->fwcfg.size = AVE_FW_CFG_SIZE;
+	ave->fwcfg.cpu = dma_alloc_coherent(ave->dev, ave->fwcfg.size,
+					    &ave->fwcfg.iova, GFP_KERNEL);
+	if (!ave->fwcfg.cpu) {
+		dma_free_coherent(ave->dev, ave->fwlog.size, ave->fwlog.cpu,
+				  ave->fwlog.iova);
+		ave->fwlog.cpu = NULL;
+		return -ENOMEM;
+	}
+
+	cfg = ave->fwcfg.cpu;
+	memset(cfg, 0, sizeof(*cfg));
+	cfg->dev_index         = cpu_to_le32(0);	  /* ave0            */
+	cfg->dev_id            = cpu_to_le32(AVE_DEVID_T6001);
+	cfg->dev_num           = cpu_to_le32(2);	  /* two instances   */
+	cfg->dev_num_per_group = cpu_to_le32(1);	  /* TODO: unverified */
+	cfg->dev_subid_flag    = cpu_to_le64(0);
+	cfg->dev_revision      = cpu_to_le32(0);	  /* TODO: unreadable */
+	cfg->log_addr          = cpu_to_le64(ave->fwlog.iova);
+	cfg->log_size          = cpu_to_le32(ave->fwlog.size);
+	cfg->cfg30             = cpu_to_le32(0);
+
+	dev_info(ave->dev, "  boot cfg at iova %pad, log surface %zu KiB at %pad\n",
+		 &ave->fwcfg.iova, ave->fwlog.size >> 10, &ave->fwlog.iova);
+
+	/* Order matters: flag first, then the pointer halves. */
+	ave_write(ave, AVE_BANK_SVE, AVE_SVE_SCRATCH(0), AVE_IOP_FLAG_HOST_MODE);
+	ave_write(ave, AVE_BANK_SVE, AVE_SVE_SCRATCH(1),
+		  lower_32_bits(ave->fwcfg.iova));
+	ave_write(ave, AVE_BANK_SVE, AVE_SVE_SCRATCH(2),
+		  upper_32_bits(ave->fwcfg.iova));
+
+	dev_info(ave->dev, "  scratch0=%#x scratch1=%#x scratch2=%#x\n",
+		 ave_read(ave, AVE_BANK_SVE, AVE_SVE_SCRATCH(0)),
+		 ave_read(ave, AVE_BANK_SVE, AVE_SVE_SCRATCH(1)),
+		 ave_read(ave, AVE_BANK_SVE, AVE_SVE_SCRATCH(2)));
+	return 0;
+}
+
+/*
+ * Wait for a message from the firmware.
+ *
+ * RecvIOPMsg (0xfffffe0008c9161c) polls bank2+0x10 bit 0, clears it
+ * write-1-to-clear BEFORE reading, then takes scratch 0..3 as the payload.
+ * Apple's default timeout is about 2 s.
+ */
+int ave_recv_iop_msg(struct ave_device *ave, u32 out[4], unsigned int timeout_ms)
+{
+	unsigned int i;
+	u32 st;
+
+	for (i = 0; i < timeout_ms * 1000 / 200; i++) {
+		st = ave_read(ave, AVE_BANK_SVE, AVE_SVE_INTR_STATUS);
+		if (st & 1) {
+			ave_write(ave, AVE_BANK_SVE, AVE_SVE_INTR_STATUS, 1);
+			out[0] = ave_read(ave, AVE_BANK_SVE, AVE_SVE_SCRATCH(0));
+			out[1] = ave_read(ave, AVE_BANK_SVE, AVE_SVE_SCRATCH(1));
+			out[2] = ave_read(ave, AVE_BANK_SVE, AVE_SVE_SCRATCH(2));
+			out[3] = ave_read(ave, AVE_BANK_SVE, AVE_SVE_SCRATCH(3));
+			return 0;
+		}
+		udelay(200);
+	}
+	return -ETIMEDOUT;
+}
+
+/* Dump whatever the firmware has written into its log surface. */
+void ave_fw_log_dump(struct ave_device *ave)
+{
+	const u8 *p = ave->fwlog.cpu;
+	size_t i, nonzero = 0;
+
+	if (!p)
+		return;
+	for (i = 0; i < ave->fwlog.size; i++)
+		if (p[i])
+			nonzero++;
+
+	dev_info(ave->dev, "  fw log surface: %zu non-zero bytes of %zu\n",
+		 nonzero, ave->fwlog.size);
+	if (nonzero)
+		print_hex_dump(KERN_INFO, "ave fwlog: ", DUMP_PREFIX_OFFSET,
+			       16, 1, p, min_t(size_t, 256, ave->fwlog.size),
+			       true);
 }
 
 int ave_ipc_init(struct ave_device *ave)

@@ -70,6 +70,8 @@ struct ave_device {
 	} fw;
 
 	struct ave_dma_buf	ipc;		/* the 20 MiB FwIPC region */
+	struct ave_dma_buf	fwcfg;		/* 56-byte boot argument block */
+	struct ave_dma_buf	fwlog;		/* firmware log surface        */
 	struct ave_channel	chan[AVE_IPC_MAX_CHANNELS];
 	unsigned int		nchannels;
 
@@ -98,6 +100,9 @@ int ave_fw_load(struct ave_device *ave);
 void ave_fw_unload(struct ave_device *ave);
 
 /* ave_ipc.c */
+int ave_boot_config(struct ave_device *ave);
+int ave_recv_iop_msg(struct ave_device *ave, u32 out[4], unsigned int timeout_ms);
+void ave_fw_log_dump(struct ave_device *ave);
 int ave_ipc_init(struct ave_device *ave);
 void ave_ipc_fini(struct ave_device *ave);
 int ave_ipc_handshake(struct ave_device *ave);
