@@ -1,0 +1,94 @@
+=== AVE boot handshake test ===
+date      : 2026-09-08T21:30:57+01:00
+boot_id   : 10673912
+uptime    : 1008.07s
+kernel    : 7.1.13-401.asahi.vrr1.fc44.aarch64+16k
+commit    : fa56a6f
+log       : /home/aquarat/Projects/apple-ave-driver/results/handshake-20260908-213057-10673912.log
+
+>>> modules match running kernel 7.1.13-401.asahi.vrr1.fc44.aarch64+16k
+>>> overlay already loaded
+>>> AVE platform device: NONE
+>>> syncing and settling before the risky part
+>>> apple_ave already loaded - removing it first
+>>> insmod apple-ave.ko stop_after=15
+[ 1018.635470] apple-ave 40d100000.video-encoder: probe: staged bring-up, stop_after=15 (max 16)
+[ 1018.635475] apple-ave 40d100000.video-encoder: stage 1 (map-banks): starting
+[ 1018.635477] apple-ave 40d100000.video-encoder:   mapping bank 0 (dpe)
+[ 1018.635490] apple-ave 40d100000.video-encoder:   mapping bank 1 (asc)
+[ 1018.635494] apple-ave 40d100000.video-encoder:   mapping bank 2 (sve)
+[ 1018.635497] apple-ave 40d100000.video-encoder:   mapping bank 3 (unk3)
+[ 1018.635500] apple-ave 40d100000.video-encoder:   mapping bank 4 (axi2af)
+[ 1018.635504] apple-ave 40d100000.video-encoder: stage 1 (map-banks): OK
+[ 1018.635505] apple-ave 40d100000.video-encoder: stage 2 (dma-mask): starting
+[ 1018.635506] apple-ave 40d100000.video-encoder: stage 2 (dma-mask): OK
+[ 1018.635507] apple-ave 40d100000.video-encoder: stage 3 (get-irq): starting
+[ 1018.635514] apple-ave 40d100000.video-encoder:   irq = 130
+[ 1018.635514] apple-ave 40d100000.video-encoder: stage 3 (get-irq): OK
+[ 1018.635515] apple-ave 40d100000.video-encoder: stage 4 (request-irq): starting
+[ 1018.635521] apple-ave 40d100000.video-encoder: stage 4 (request-irq): OK
+[ 1018.635522] apple-ave 40d100000.video-encoder: stage 5 (power-attach): starting
+[ 1018.635709] apple-ave 40d100000.video-encoder:   attached 5 power domain(s)
+[ 1018.635711] apple-ave 40d100000.video-encoder: stage 5 (power-attach): OK
+[ 1018.635711] apple-ave 40d100000.video-encoder: stage 6 (power-on): starting
+[ 1018.635713] apple-ave 40d100000.video-encoder:   resumed; left powered for inspection
+[ 1018.635714] apple-ave 40d100000.video-encoder: stage 6 (power-on): OK
+[ 1018.635715] apple-ave 40d100000.video-encoder: stage 7 (write-sve-idle): starting
+[ 1018.635715] apple-ave 40d100000.video-encoder:   writing 1 to SVE+0x38 (Apple's first access) ...
+[ 1018.635716] apple-ave 40d100000.video-encoder:   write returned
+[ 1018.635717] apple-ave 40d100000.video-encoder: stage 7 (write-sve-idle): OK
+[ 1018.635718] apple-ave 40d100000.video-encoder: stage 8 (read-asc-status): starting
+[ 1018.635718] apple-ave 40d100000.video-encoder:   reading ASC+0x400048 (CPU_STATUS) ...
+[ 1018.635720] apple-ave 40d100000.video-encoder:   ASC CPU_STATUS = 0x0000002a
+[ 1018.635721] apple-ave 40d100000.video-encoder: stage 8 (read-asc-status): OK
+[ 1018.635721] apple-ave 40d100000.video-encoder: stage 9 (ipc-alloc): starting
+[ 1018.636387] apple-ave 40d100000.video-encoder: IPC region 20 MiB at iova 0x00000000fa000000
+[ 1018.636389] apple-ave 40d100000.video-encoder: stage 9 (ipc-alloc): OK
+[ 1018.636389] apple-ave 40d100000.video-encoder: stage 10 (fw-load): starting
+[ 1018.638654] apple-ave 40d100000.video-encoder: firmware image: 2622936 bytes
+[ 1018.638656] apple-ave 40d100000.video-encoder:   image spans 0x268000, allocating 0x268000 contiguous
+[ 1018.640089] apple-ave 40d100000.video-encoder:   __TEXT       vm 0x0+0x134000 file 0x4000+0x134000
+[ 1018.640124] apple-ave 40d100000.video-encoder:   __DATA       vm 0x134000+0x134000 file 0x138000+0x134000
+[ 1018.760852] apple-ave 40d100000.video-encoder:   IOBA at image +0x1341fd: 0x0 -> 0x20c000000
+[ 1018.760857] apple-ave 40d100000.video-encoder:   IOSZ at image +0x13420d: 0 -> 0x2000000
+[ 1018.881036] apple-ave 40d100000.video-encoder:   fw-base register 0x102010000b28001 -> mapping image at IOVA 0x10000b28000
+[ 1018.881038] apple-ave 40d100000.video-encoder:   iova 0x00000000f9c00000 -> phys 0x0000010008800000, mapping at IOVA 0x10000b28000
+[ 1018.881175] apple-ave 40d100000.video-encoder: IOVA 0x10000b28000 already mapped; dropping the stale mapping and retrying
+[ 1018.881186] apple-ave 40d100000.video-encoder: firmware mapped at IOVA 0x10000b28000, 0x268000 bytes
+[ 1018.881187] apple-ave 40d100000.video-encoder:   verify: iova_to_phys(0x10000b28000) = 0x0000010008800000, expected 0x0000010008800000
+[ 1018.881198] apple-ave 40d100000.video-encoder: stage 10 (fw-load): OK
+[ 1018.881199] apple-ave 40d100000.video-encoder: stage 11 (boot-cfg): starting
+[ 1018.881224] apple-ave 40d100000.video-encoder:   boot cfg at iova 0x00000000f9bbc000, log surface 128 KiB at 0x00000000f9bc0000
+[ 1018.881226] apple-ave 40d100000.video-encoder:   scratch0=0x8042006 scratch1=0xf9bbc000 scratch2=0x0
+[ 1018.881227] apple-ave 40d100000.video-encoder: stage 11 (boot-cfg): OK
+[ 1018.881227] apple-ave 40d100000.video-encoder: stage 12 (iop-config): starting
+[ 1018.881229] apple-ave 40d100000.video-encoder:   ASC+0x50000 BEFORE any write = 0x102010000b28001  (base field 0x10000b28000)
+[ 1018.881230] apple-ave 40d100000.video-encoder:   writing fw base 0x102000000000000 to ASC+0x50000 ...
+[ 1018.881231] apple-ave 40d100000.video-encoder:   readback = 0x102010000b28001
+[ 1018.881232] apple-ave 40d100000.video-encoder: stage 12 (iop-config): OK
+[ 1018.881232] apple-ave 40d100000.video-encoder: stage 13 (asc-start): starting
+[ 1018.881234] apple-ave 40d100000.video-encoder: stage 13 (asc-start): OK
+[ 1018.881234] apple-ave 40d100000.video-encoder: stage 14 (recv-msg): starting
+[ 1018.881235] apple-ave 40d100000.video-encoder:   waiting up to 2s for the firmware to speak ...
+[ 1020.884775] apple-ave 40d100000.video-encoder:   no message from firmware (-110)
+[ 1020.884779] apple-ave 40d100000.video-encoder:   fw log: rd=0 wr=0 ring=0x20000
+[ 1020.884780] apple-ave 40d100000.video-encoder:   firmware globals (read straight out of our image buffer):
+[ 1020.884781] apple-ave 40d100000.video-encoder:     0x195090 = 0x0000000000000000  gs_psCfg (NULL => AVE_Log_Output disabled)
+[ 1020.884782] apple-ave 40d100000.video-encoder:     0x1950b0 = 0x0000000000000000  gs_psCfg+0x20
+[ 1020.884783] apple-ave 40d100000.video-encoder:     0x2649a0 = 0x0000000000000000  __rtk_crashlog_local_buffer
+[ 1020.884784] apple-ave 40d100000.video-encoder:     0x2649c8 = 0x0000000000000000  crashlog related
+[ 1020.884784] apple-ave 40d100000.video-encoder: stage 14 (recv-msg): OK
+[ 1020.884785] apple-ave 40d100000.video-encoder: stage 15 (probe-state): starting
+[ 1021.088480] apple-ave 40d100000.video-encoder:   CPU_STATUS 0x0000002c -> 0x0000002c
+[ 1021.088487] apple-ave 40d100000.video-encoder:   scratch[0] 0x08042006 -> 0x08042006
+[ 1021.088491] apple-ave 40d100000.video-encoder:   scratch[1] 0xf9bbc000 -> 0xf9bbc000
+[ 1021.088494] apple-ave 40d100000.video-encoder:   scratch[2] 0x00000000 -> 0x00000000
+[ 1021.088498] apple-ave 40d100000.video-encoder:   scratch[3] 0x00000000 -> 0x00000000
+[ 1021.088501] apple-ave 40d100000.video-encoder:   scratch[4] 0x00000000 -> 0x00000000
+[ 1021.088504] apple-ave 40d100000.video-encoder:   scratch[5] 0x00000000 -> 0x00000000
+[ 1021.088507] apple-ave 40d100000.video-encoder:   scratch[6] 0x00000000 -> 0x00000000
+[ 1021.088510] apple-ave 40d100000.video-encoder:   scratch[7] 0x00000000 -> 0x00000000
+[ 1021.088513] apple-ave 40d100000.video-encoder:   verdict: no observable activity - core may not be running
+[ 1021.088517] apple-ave 40d100000.video-encoder: stage 15 (probe-state): OK
+
+=== done. full log: /home/aquarat/Projects/apple-ave-driver/results/handshake-20260908-213057-10673912.log ===

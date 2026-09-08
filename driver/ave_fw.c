@@ -278,7 +278,19 @@ int ave_fw_load(struct ave_device *ave)
 	 * So we take the address from the register rather than choosing one.
 	 */
 	fwreg = ave_read64(ave, AVE_BANK_ASC, AVE_ASC_FW_BASE);
-	map_iova = fwreg & AVE_ASC_FW_BASE_MASK;
+
+	/*
+	 * Take the low 32 bits, not the wide mask.
+	 *
+	 * This DART reports "AS 32 -> 42": a 32-bit input address space. The
+	 * wide field reading gives 0x10000b28000, which is above 4 GiB and so
+	 * can never be translated - and indeed mapping there verified clean
+	 * via iommu_iova_to_phys() while every fetch still faulted, because
+	 * the software page table happily held an address the hardware cannot
+	 * present. The DART's fault register reports the same 0x100 prefix it
+	 * cannot decode.
+	 */
+	map_iova = fwreg & 0xfffff000ULL;
 	if (!map_iova) {
 		dev_warn(ave->dev,
 			 "fw-base register is %#llx; falling back to IOVA 0\n", fwreg);
@@ -293,18 +305,52 @@ int ave_fw_load(struct ave_device *ave)
 		goto err_free;
 	}
 
-	dev_info(ave->dev, "  iova %pad -> phys %pa, mapping at IOVA 0\n",
-		 &ave->fw.iova, &pa);
+	dev_info(ave->dev, "  iova %pad -> phys %pa, mapping at IOVA %#llx\n",
+		 &ave->fw.iova, &pa, map_iova);
 
+	ave->fw.map_iova = map_iova;
 	ret = iommu_map(domain, map_iova, pa, size,
 			IOMMU_READ | IOMMU_WRITE, GFP_KERNEL);
+	if (ret) {
+		if (ret == -EEXIST) {
+			/*
+			 * A previous probe leaked this mapping - the unmap
+			 * used to use a hardcoded IOVA 0. The domain belongs
+			 * to the device, not to us, so it survives rmmod and
+			 * there is nothing else that will clean it up short
+			 * of a reboot. Drop it and retry once.
+			 */
+			dev_warn(ave->dev,
+				 "IOVA %#llx already mapped; dropping the stale mapping and retrying\n",
+				 map_iova);
+			iommu_unmap(domain, map_iova, size);
+			ret = iommu_map(domain, map_iova, pa, size,
+					IOMMU_READ | IOMMU_WRITE, GFP_KERNEL);
+		}
+	}
 	if (ret) {
 		dev_err(ave->dev, "iommu_map at IOVA %#llx failed: %d\n",
 			map_iova, ret);
 		goto err_free;
 	}
 	ave->fw.mapped_at_zero = true;
-	dev_info(ave->dev, "firmware mapped at IOVA 0, %#zx bytes\n", size);
+	dev_info(ave->dev, "firmware mapped at IOVA %#llx, %#zx bytes\n",
+		 map_iova, size);
+
+	/*
+	 * Verify the mapping rather than trusting iommu_map()'s return. The
+	 * core faults at this exact IOVA, so "the call succeeded" is not the
+	 * question - the question is whether the DART that the core fetches
+	 * through can actually translate it.
+	 */
+	{
+		phys_addr_t back = iommu_iova_to_phys(domain, map_iova);
+
+		dev_info(ave->dev,
+			 "  verify: iova_to_phys(%#llx) = %pa, expected %pa%s\n",
+			 map_iova, &back, &pa,
+			 back == pa ? "" : "   *** MISMATCH ***");
+	}
 
 	release_firmware(fw);
 	return 0;
@@ -325,10 +371,16 @@ void ave_fw_unload(struct ave_device *ave)
 	if (!ave->fw.cpu)
 		return;
 
+	/*
+	 * Unmap where we actually mapped. This used to unmap a hardcoded
+	 * IOVA 0; once the map address started coming from the fw-base
+	 * register the mapping leaked on every unload, and the next probe
+	 * failed with -EEXIST.
+	 */
 	if (ave->fw.mapped_at_zero) {
 		domain = iommu_get_domain_for_dev(ave->dev);
 		if (domain)
-			iommu_unmap(domain, 0, ave->fw.size);
+			iommu_unmap(domain, ave->fw.map_iova, ave->fw.size);
 		ave->fw.mapped_at_zero = false;
 	}
 

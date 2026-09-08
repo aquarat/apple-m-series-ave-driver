@@ -311,3 +311,43 @@ second** and kept doing so after `rmmod`, because the staged probe takes a
 runtime-PM reference at stage 6 and `ave_stop()` only unwinds a fully started
 device. `ave_remove()` now halts the core (`CPU_CONTROL = 0`) and drops that
 reference, so unbinding really does stop it.
+
+### The fetch cannot be satisfied by translation: the DART is 32-bit in
+
+```
+apple-dart 40d040000.iommu: DART [pagesize 4000, 16 streams,
+    bypass support: 1, bypass forced: 0, locked: 0, AS 32 -> 42] initialized
+apple-dart 40d030000.iommu: DART [... bypass support: 0, ... AS 32 -> 42]
+```
+
+`AS 32 -> 42` is a **32-bit input address space**. The core fetches at
+`0x10000b28200` — about 1.1 TB — which no page table on this DART can ever
+describe. Three experiments, all with `iommu_iova_to_phys()` verifying the
+mapping was present and correct:
+
+| image mapped at | result |
+|---|---|
+| IOVA `0` | fault at `0x10000b28200` |
+| IOVA `0x10000b28000` (wide field) | map verified, still fault at `0x10000b28200` |
+| IOVA `0xb28000` (low 32 bits) | map verified, still fault at `0x10000b28200` |
+
+So the software mapping being right is not the issue, and re-reading the
+register's base field differently does not help: the DART faults on the
+address the *core* emits, and the core emits a 44-bit one.
+
+**Therefore the fetch is not meant to be translated at all — it is meant to
+bypass.** `40d040000` reports `bypass support: 1` (and `40d030000` reports
+`0`, which is presumably why the fetch goes through the former). In bypass the
+address passes to physical memory unchanged, and physical `0x10000b28000` is
+where iBoot placed a firmware image before handing the machine over. Linux's
+`apple_dart_hw_reset` clears bypass on probe, which is exactly the mechanism
+[04](04-roadmap.md) phase 3 suspected — the correction is that it applies to
+**stream 0 on the fetch DART**, not to SID 15.
+
+**Next step:** enable bypass for stream 0 on `40d040000` and see whether the
+core executes iBoot's image. Note what that implies if it works: the core runs
+firmware we did not load, so the `IOBA` patch in
+[40](40-firmware-io-base.md) becomes irrelevant to instruction fetch (iBoot's
+copy already has it filled in), and our own image is then only useful if we
+can get the fetch translated — which needs the fw-base register to hold an
+address inside 4 GiB, and that register ignores our writes.
