@@ -61,6 +61,9 @@ struct ave_device {
 	 * instead of dropping it, and ave_recv_iop_msg() accepts either
 	 * source.
 	 */
+#define AVE_SNAP_PAGES	4096			/* 16 MiB at 4 KiB pages */
+	u32			snap[AVE_SNAP_PAGES];	/* CRC of iBoot's image */
+	bool			snap_valid;
 	bool			powered;   /* holds a runtime-PM ref from stage 6 */
 	bool			hs_seen;
 	u32			hs_status;
@@ -126,6 +129,8 @@ int ave_recv_iop_msg(struct ave_device *ave, u32 out[4], unsigned int timeout_ms
 void ave_fw_log_dump(struct ave_device *ave);
 void ave_fw_globals_dump(struct ave_device *ave);
 void ave_fw_peek_phys(struct ave_device *ave);
+void ave_fw_snapshot_phys(struct ave_device *ave);
+void ave_fw_diff_phys(struct ave_device *ave);
 int ave_ipc_init(struct ave_device *ave);
 void ave_ipc_fini(struct ave_device *ave);
 int ave_ipc_handshake(struct ave_device *ave);

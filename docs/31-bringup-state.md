@@ -403,3 +403,47 @@ So fetch was necessary and is not sufficient. Open questions, in order:
    a confirmed one.
 3. Whether this image expects the same `0x08042006` handshake at all - it is
    not the image [34](34-boot-handshake.md) was derived from.
+
+### Correction: bypass does not fix the fetch, it silences it
+
+The "zero faults" result above was read too generously. Adding a liveness test
+- checksum every page of iBoot's image before starting the core and again
+after - shows **no page changes**, across 16 MiB and a 6 second wait. The core
+is not executing.
+
+So the absence of faults did not mean the fetch succeeded. It meant no fetch
+was happening.
+
+Two variables had been changed at once (the single-DART overlay *and* the
+identity domain), which was careless. Separating them:
+
+| overlay | domain | DART faults | image modified |
+|---|---|---|---|
+| single DART | DMA | **yes**, at `0x10000b28200` | no (cannot execute) |
+| single DART | identity | none | no |
+
+The overlay correction is therefore sound - the core still fetches with it in
+place - and **the identity domain is what stops the fetch**. Bypass is not the
+answer, or at least not this bypass.
+
+A candidate explanation, unverified: the ADT carries
+`bypass-address = 0x200000000` on `dart-ave0`, the same value as the
+`/arm-io` bus translation. If Apple's bypass path applies that offset and
+Linux's does not, the fetch in bypass lands somewhere that simply does not
+respond - no translation, so no fault, and no instructions, so no writes.
+That is consistent with everything observed but is not yet evidence.
+
+**What is now solid:**
+
+- The core issues instruction fetches at `0x10000b28200`, a 44-bit address.
+- This DART has a 32-bit input address space, so no page table can ever
+  satisfy that fetch.
+- The fw-base register that supplies the address ignores our writes.
+- iBoot left a real firmware at that physical address.
+
+Those four facts do not have a resolution on the Linux side alone: we cannot
+make the DART translate a 44-bit address, and we cannot change the address.
+The remaining routes are to find how the register becomes writable (it is
+plausibly locked above EL1, which is what m1n1 exists to handle), or to find
+the configuration under which Apple's own bypass path routes the fetch
+correctly.

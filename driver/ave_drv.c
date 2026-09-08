@@ -488,6 +488,8 @@ static int ave_probe(struct platform_device *pdev)
 	 * the DART raises its interrupt, the handler clears it, the core
 	 * retries - a handled-interrupt flood rather than a clean failure.
 	 */
+	ave_fw_snapshot_phys(ave);
+
 	if (ave_stage(dev, AVE_STAGE_ASC_START)) {
 		ret = ave_asc_start(ave);
 		if (ret)
@@ -500,7 +502,7 @@ static int ave_probe(struct platform_device *pdev)
 		u32 msg[4];
 
 		dev_info(dev, "  waiting up to 2s for the firmware to speak ...\n");
-		ret = ave_recv_iop_msg(ave, msg, 2000);
+		ret = ave_recv_iop_msg(ave, msg, 6000);
 		if (ret) {
 			dev_warn(dev, "  no message from firmware (%d)\n", ret);
 		} else {
@@ -510,6 +512,7 @@ static int ave_probe(struct platform_device *pdev)
 		ave_fw_log_dump(ave);
 		ave_fw_globals_dump(ave);
 		ave_fw_peek_phys(ave);
+		ave_fw_diff_phys(ave);
 		ave_stage_ok(dev, AVE_STAGE_RECV_MSG);
 	} else {
 		return 0;

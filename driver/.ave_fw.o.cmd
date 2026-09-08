@@ -41,6 +41,31 @@ deps_ave_fw.o := \
     $(wildcard include/config/ARM64_PTR_AUTH_KERNEL) \
     $(wildcard include/config/ARM64_PTR_AUTH) \
     $(wildcard include/config/BUILTIN_RETURN_ADDRESS_STRIPS_PAC) \
+  /usr/src/kernels/7.1.13-401.asahi.vrr2.fc44.aarch64+16k/include/linux/crc32.h \
+    $(wildcard include/config/CRC32_ARCH) \
+  /usr/src/kernels/7.1.13-401.asahi.vrr2.fc44.aarch64+16k/include/linux/types.h \
+    $(wildcard include/config/HAVE_UID16) \
+    $(wildcard include/config/UID16) \
+    $(wildcard include/config/ARCH_DMA_ADDR_T_64BIT) \
+    $(wildcard include/config/PHYS_ADDR_T_64BIT) \
+    $(wildcard include/config/64BIT) \
+    $(wildcard include/config/ARCH_32BIT_USTAT_F_TINODE) \
+  /usr/src/kernels/7.1.13-401.asahi.vrr2.fc44.aarch64+16k/include/uapi/linux/types.h \
+  /usr/src/kernels/7.1.13-401.asahi.vrr2.fc44.aarch64+16k/arch/arm64/include/generated/uapi/asm/types.h \
+  /usr/src/kernels/7.1.13-401.asahi.vrr2.fc44.aarch64+16k/include/uapi/asm-generic/types.h \
+  /usr/src/kernels/7.1.13-401.asahi.vrr2.fc44.aarch64+16k/include/asm-generic/int-ll64.h \
+  /usr/src/kernels/7.1.13-401.asahi.vrr2.fc44.aarch64+16k/include/uapi/asm-generic/int-ll64.h \
+  /usr/src/kernels/7.1.13-401.asahi.vrr2.fc44.aarch64+16k/arch/arm64/include/uapi/asm/bitsperlong.h \
+  /usr/src/kernels/7.1.13-401.asahi.vrr2.fc44.aarch64+16k/include/asm-generic/bitsperlong.h \
+  /usr/src/kernels/7.1.13-401.asahi.vrr2.fc44.aarch64+16k/include/uapi/asm-generic/bitsperlong.h \
+  /usr/src/kernels/7.1.13-401.asahi.vrr2.fc44.aarch64+16k/include/uapi/linux/posix_types.h \
+  /usr/src/kernels/7.1.13-401.asahi.vrr2.fc44.aarch64+16k/include/linux/stddef.h \
+  /usr/src/kernels/7.1.13-401.asahi.vrr2.fc44.aarch64+16k/include/uapi/linux/stddef.h \
+  /usr/src/kernels/7.1.13-401.asahi.vrr2.fc44.aarch64+16k/arch/arm64/include/uapi/asm/posix_types.h \
+  /usr/src/kernels/7.1.13-401.asahi.vrr2.fc44.aarch64+16k/include/uapi/asm-generic/posix_types.h \
+  /usr/src/kernels/7.1.13-401.asahi.vrr2.fc44.aarch64+16k/include/linux/bitrev.h \
+    $(wildcard include/config/HAVE_ARCH_BITREVERSE) \
+  /usr/src/kernels/7.1.13-401.asahi.vrr2.fc44.aarch64+16k/arch/arm64/include/asm/bitrev.h \
   /usr/src/kernels/7.1.13-401.asahi.vrr2.fc44.aarch64+16k/include/linux/dma-mapping.h \
     $(wildcard include/config/DMA_API_DEBUG) \
     $(wildcard include/config/HAS_DMA) \
@@ -80,26 +105,6 @@ deps_ave_fw.o := \
   /usr/src/kernels/7.1.13-401.asahi.vrr2.fc44.aarch64+16k/include/linux/kasan-checks.h \
     $(wildcard include/config/KASAN_GENERIC) \
     $(wildcard include/config/KASAN_SW_TAGS) \
-  /usr/src/kernels/7.1.13-401.asahi.vrr2.fc44.aarch64+16k/include/linux/types.h \
-    $(wildcard include/config/HAVE_UID16) \
-    $(wildcard include/config/UID16) \
-    $(wildcard include/config/ARCH_DMA_ADDR_T_64BIT) \
-    $(wildcard include/config/PHYS_ADDR_T_64BIT) \
-    $(wildcard include/config/64BIT) \
-    $(wildcard include/config/ARCH_32BIT_USTAT_F_TINODE) \
-  /usr/src/kernels/7.1.13-401.asahi.vrr2.fc44.aarch64+16k/include/uapi/linux/types.h \
-  /usr/src/kernels/7.1.13-401.asahi.vrr2.fc44.aarch64+16k/arch/arm64/include/generated/uapi/asm/types.h \
-  /usr/src/kernels/7.1.13-401.asahi.vrr2.fc44.aarch64+16k/include/uapi/asm-generic/types.h \
-  /usr/src/kernels/7.1.13-401.asahi.vrr2.fc44.aarch64+16k/include/asm-generic/int-ll64.h \
-  /usr/src/kernels/7.1.13-401.asahi.vrr2.fc44.aarch64+16k/include/uapi/asm-generic/int-ll64.h \
-  /usr/src/kernels/7.1.13-401.asahi.vrr2.fc44.aarch64+16k/arch/arm64/include/uapi/asm/bitsperlong.h \
-  /usr/src/kernels/7.1.13-401.asahi.vrr2.fc44.aarch64+16k/include/asm-generic/bitsperlong.h \
-  /usr/src/kernels/7.1.13-401.asahi.vrr2.fc44.aarch64+16k/include/uapi/asm-generic/bitsperlong.h \
-  /usr/src/kernels/7.1.13-401.asahi.vrr2.fc44.aarch64+16k/include/uapi/linux/posix_types.h \
-  /usr/src/kernels/7.1.13-401.asahi.vrr2.fc44.aarch64+16k/include/linux/stddef.h \
-  /usr/src/kernels/7.1.13-401.asahi.vrr2.fc44.aarch64+16k/include/uapi/linux/stddef.h \
-  /usr/src/kernels/7.1.13-401.asahi.vrr2.fc44.aarch64+16k/arch/arm64/include/uapi/asm/posix_types.h \
-  /usr/src/kernels/7.1.13-401.asahi.vrr2.fc44.aarch64+16k/include/uapi/asm-generic/posix_types.h \
   /usr/src/kernels/7.1.13-401.asahi.vrr2.fc44.aarch64+16k/include/linux/kcsan-checks.h \
     $(wildcard include/config/KCSAN_WEAK_MEMORY) \
     $(wildcard include/config/KCSAN_IGNORE_ATOMICS) \

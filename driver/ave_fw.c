@@ -27,6 +27,7 @@
  * dma_alloc_coherent for this device.
  */
 
+#include <linux/crc32.h>
 #include <linux/dma-mapping.h>
 #include <linux/unaligned.h>
 #include <linux/firmware.h>
@@ -447,4 +448,81 @@ void ave_fw_peek_phys(struct ave_device *ave)
 	print_hex_dump(KERN_INFO, "ave +200: ", DUMP_PREFIX_OFFSET, 16, 1,
 		       p + 0x200, 0x400, true);
 	memunmap(p);
+}
+
+/*
+ * Is the core actually executing?
+ *
+ * In bypass the core runs iBoot's image at a physical address we can read
+ * directly, and the diagnostics that used to answer this question are dead:
+ * the firmware-globals readback indexes *our* image, which the core never
+ * touches, so it reports zero whatever happens.
+ *
+ * This asks the only question that survives - does the memory change? A
+ * firmware that is running writes something: a stack, a heap, a log cursor,
+ * a zeroed BSS. One that is parked in the b .+0 loop at +0x200 writes
+ * nothing. Checksum each page before starting the core and again after, and
+ * the answer is the list of pages that differ.
+ */
+static void *ave_snap_map(struct ave_device *ave, phys_addr_t *pa_out)
+{
+	u64 fwreg = ave_read64(ave, AVE_BANK_ASC, AVE_ASC_FW_BASE);
+	phys_addr_t pa = fwreg & AVE_ASC_FW_BASE_MASK;
+
+	if (!pa)
+		return NULL;
+	*pa_out = pa;
+	return memremap(pa, AVE_SNAP_PAGES * SZ_4K, MEMREMAP_WB);
+}
+
+void ave_fw_snapshot_phys(struct ave_device *ave)
+{
+	phys_addr_t pa;
+	void *p = ave_snap_map(ave, &pa);
+	unsigned int i;
+
+	ave->snap_valid = false;
+	if (!p) {
+		dev_info(ave->dev, "  snapshot: cannot map iBoot image\n");
+		return;
+	}
+	for (i = 0; i < AVE_SNAP_PAGES; i++)
+		ave->snap[i] = crc32(0, (u8 *)p + i * SZ_4K, SZ_4K);
+	memunmap(p);
+	ave->snap_valid = true;
+	dev_info(ave->dev, "  snapshot: %u pages of %pa checksummed before start\n",
+		 AVE_SNAP_PAGES, &pa);
+}
+
+void ave_fw_diff_phys(struct ave_device *ave)
+{
+	phys_addr_t pa;
+	void *p;
+	unsigned int i, changed = 0, first = 0;
+
+	if (!ave->snap_valid)
+		return;
+	p = ave_snap_map(ave, &pa);
+	if (!p)
+		return;
+
+	for (i = 0; i < AVE_SNAP_PAGES; i++) {
+		if (crc32(0, (u8 *)p + i * SZ_4K, SZ_4K) != ave->snap[i]) {
+			if (!changed)
+				first = i;
+			changed++;
+			if (changed <= 8)
+				dev_info(ave->dev, "    page %u (+%#x) changed\n",
+					 i, i * SZ_4K);
+		}
+	}
+	memunmap(p);
+
+	if (changed)
+		dev_info(ave->dev,
+			 "  THE CORE IS ALIVE: %u/%u pages changed, first at +%#x\n",
+			 changed, AVE_SNAP_PAGES, first * SZ_4K);
+	else
+		dev_info(ave->dev,
+			 "  no page of iBoot's image changed - the core is not executing it\n");
 }
