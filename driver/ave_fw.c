@@ -308,6 +308,21 @@ int ave_fw_load(struct ave_device *ave)
 	dev_info(ave->dev, "  iova %pad -> phys %pa, mapping at IOVA %#llx\n",
 		 &ave->fw.iova, &pa, map_iova);
 
+	/*
+	 * In bypass there is nothing to map, and nothing we could usefully
+	 * map: the core fetches the physical address in the fw-base register,
+	 * which is iBoot's bootstrap, not our image. Mapping is only
+	 * meaningful for a translating domain.
+	 */
+	if (domain->type == IOMMU_DOMAIN_IDENTITY) {
+		dev_info(ave->dev,
+			 "  identity domain: DART in bypass, core will fetch phys %#llx directly\n",
+			 fwreg & AVE_ASC_FW_BASE_MASK);
+		ave->fw.mapped_at_zero = false;
+		release_firmware(fw);
+		return 0;
+	}
+
 	ave->fw.map_iova = map_iova;
 	ret = iommu_map(domain, map_iova, pa, size,
 			IOMMU_READ | IOMMU_WRITE, GFP_KERNEL);
@@ -430,6 +445,6 @@ void ave_fw_peek_phys(struct ave_device *ave)
 	/* The first word is a branch; show where it lands. */
 	dev_info(ave->dev, "  branch target region (+0x200):\n");
 	print_hex_dump(KERN_INFO, "ave +200: ", DUMP_PREFIX_OFFSET, 16, 1,
-		       p + 0x200, 96, true);
+		       p + 0x200, 0x400, true);
 	memunmap(p);
 }

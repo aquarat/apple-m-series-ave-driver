@@ -351,3 +351,55 @@ firmware we did not load, so the `IOBA` patch in
 copy already has it filled in), and our own image is then only useful if we
 can get the fetch translated — which needs the fw-base register to hold an
 address inside 4 GiB, and that register ignores our writes.
+
+### Bypass works: zero faults, and iBoot's image is a full bootstrap
+
+Overlay corrected to reference only the real DART, then:
+
+```
+$ echo identity | sudo tee /sys/kernel/iommu_groups/16/type    # now accepted
+```
+
+Result: **zero DART translation faults**, where every previous run produced a
+continuous storm at `0x10000b28200`. The core fetches successfully for the
+first time. Identity is visible in the driver log too - `iova
+0x1000bc00000 -> phys 0x1000bc00000`.
+
+What it is fetching is not a shim. Reading 1 KB at the branch target
+(`data/blobs/iboot-ave-stub-1k.bin`, gitignored):
+
+```
+ 200:  14000000  b  0x200          ; a parking loop, not the entry
+ 204:  d5384241  mrs x1, currentel ; <- entry, from the b +0x204 at offset 0
+ 20c:  f1000c3f  cmp x1, #0x3
+ 218:  d51e4021  msr elr_el3, x1
+ 224:  d69f03e0  eret              ; drop EL3 -> EL1
+ 234:  d518c000  msr vbar_el1, x0  ; install vectors
+ 238:  d53800a0  mrs x0, mpidr_el1
+ 250:  d5181040  msr cpacr_el1, x0
+ 284:  d518a200  msr mair_el1, x0  ; MMU attributes
+ 2a8:  f0000740  adrp x0, 0xeb000  ; image is at least ~960 KB
+```
+
+That is a complete coprocessor bring-up sequence, so iBoot leaves a full
+firmware at physical `0x10000b28000` - not a loader stub that wants our image.
+
+**Consequences for the driver.** In bypass there is nothing useful to map: the
+core runs iBoot's image, not the one we load, so `ave_fw_load()` now skips the
+`iommu_map()` on an identity domain. It also means the firmware-globals
+diagnostic from [33](33-firmware-logging.md) is dead in this mode - those
+offsets are into *our* image, which the core never executes, so they will read
+zero regardless and must not be cited as evidence of anything.
+
+**Still silent.** `CPU_STATUS` remains `0x2c` and no scratch register changes.
+So fetch was necessary and is not sufficient. Open questions, in order:
+
+1. Is the core actually progressing, or parked? Nothing currently distinguishes
+   "executing happily" from "spinning in the `b 0x200` loop". A
+   before/after diff of physical memory around the image would settle it,
+   since a running firmware writes *something*.
+2. The boot config now sits at physical `0x10473518000` and we pass it as
+   scratch1 `0x73518000` / scratch2 `0x104`. The split is our convention, not
+   a confirmed one.
+3. Whether this image expects the same `0x08042006` handshake at all - it is
+   not the image [34](34-boot-handshake.md) was derived from.
