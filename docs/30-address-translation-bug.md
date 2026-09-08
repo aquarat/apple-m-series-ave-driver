@@ -1,5 +1,26 @@
 # The address-translation bug: eight experiments measured nothing
 
+> ## CONFIRMED BY THE FIX, 2026-09-08
+>
+> With the corrected addresses, stages 1-7 all pass and the machine stays up:
+>
+> ```
+> apple-ave 40d100000.video-encoder: stage 5 (power-attach): OK  (5 domains)
+> apple-ave 40d100000.video-encoder: stage 6 (power-on): OK
+> apple-ave 40d100000.video-encoder: stage 7 (write-sve-idle): starting
+> apple-ave 40d100000.video-encoder:   writing 1 to SVE+0x38 ...
+> apple-ave 40d100000.video-encoder:   write returned
+> apple-ave 40d100000.video-encoder: stage 7 (write-sve-idle): OK
+> ```
+>
+> That write is Apple's first register access, at `0x40d050038`. The identical
+> write to `0x20d050038` hung the machine. **The address translation was the
+> entire problem.** There was never anything wrong with the AVE block, the
+> power domains, the fabric, the bridge, or iBoot.
+>
+> Stage 6 also now passes repeatably, confirming that its "non-determinism" was
+> the overlay regression and nothing physical.
+
 Found by an independent review, 2026-09-08. Verified before acting on it.
 
 ## What was wrong

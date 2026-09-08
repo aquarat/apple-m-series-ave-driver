@@ -86,6 +86,23 @@ for n in $(seq "$first" "$last"); do
     sudo insmod "$REPO/test/ave-overlay.ko" || { echo "insmod overlay failed"; exit 1; }
     sleep 2
 
+    # Record what was ACTUALLY applied, not what we intended. The marker file
+    # captures intent and was blind to an overlay regression that silently
+    # reintroduced a DART node for four attempts (docs/30).
+    {
+        echo "--- applied device-tree node ---"
+        for n in /proc/device-tree/soc/video-encoder@*; do
+            echo "node: $n"
+            for pr in reg power-domains iommus resets interrupts; do
+                [ -e "$n/$pr" ] && printf '  %-14s %s\n' "$pr" \
+                    "$(od -An -tx4 "$n/$pr" | tr -d '\n' | tr -s ' ')"
+            done
+        done
+        echo "--- any DART node from our overlay? ---"
+        ls -d /proc/device-tree/soc/iommu@40d* 2>/dev/null || echo "  none (expected)"
+    } | tee "$LOGDIR/applied-$n.log"
+    sync
+
     sudo dmesg | grep -E 'apple-ave|apple_ave|ave-overlay|video-encoder' \
         | tee "$LOGDIR/stage-$n.log"
 
