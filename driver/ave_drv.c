@@ -25,6 +25,7 @@
 #include <linux/pm_domain.h>
 #include <linux/pm_runtime.h>
 #include <linux/reset.h>
+#include <linux/reset.h>
 #include <linux/slab.h>
 
 #include "ave.h"
@@ -48,6 +49,10 @@
  * Default is 0: map nothing, touch nothing. Raise it deliberately.
  */
 static int stop_after;
+static int rvbar_probe;
+module_param(rvbar_probe, int, 0444);
+MODULE_PARM_DESC(rvbar_probe, "walk test values through the ASC RVBAR and report which bits move");
+
 module_param(stop_after, int, 0444);
 MODULE_PARM_DESC(stop_after, "stop probe after this stage (0 = do nothing)");
 
@@ -488,6 +493,67 @@ static int ave_probe(struct platform_device *pdev)
 	 * the DART raises its interrupt, the handler clears it, the core
 	 * retries - a handled-interrupt flood rather than a clean failure.
 	 */
+	/*
+	 * Is the RVBAR write ignored because the register is locked, or
+	 * because it is read-only, or because we are writing it at the wrong
+	 * time? m1n1 treats bit 0 of an ASC RVBAR as a lock bit, and our live
+	 * value has it set, so this walks a few values through and reports
+	 * exactly which bits move - the cheapest way to tell those apart.
+	 */
+	if (rvbar_probe) {
+		static const u64 test[] = {
+			0x0102000000000000ULL,	/* tag only, base 0        */
+			0x0000000000000000ULL,	/* everything clear        */
+			0xffffffffffffffffULL,	/* everything set          */
+		};
+		u64 orig = ave_read64(ave, AVE_BANK_ASC, AVE_ASC_FW_BASE);
+		unsigned int i;
+
+		dev_info(dev, "rvbar probe: original %#018llx (bit0=%llu)\n",
+			 orig, orig & 1);
+		for (i = 0; i < ARRAY_SIZE(test); i++) {
+			u64 back;
+
+			ave_write64(ave, AVE_BANK_ASC, AVE_ASC_FW_BASE, test[i]);
+			back = ave_read64(ave, AVE_BANK_ASC, AVE_ASC_FW_BASE);
+			dev_info(dev, "  wrote %#018llx -> read %#018llx  %s\n",
+				 test[i], back,
+				 back == test[i] ? "TOOK" :
+				 back == orig    ? "ignored" : "PARTIAL");
+		}
+		ave_write64(ave, AVE_BANK_ASC, AVE_ASC_FW_BASE, orig);
+		dev_info(dev, "  restored, now %#018llx\n",
+			 ave_read64(ave, AVE_BANK_ASC, AVE_ASC_FW_BASE));
+
+		/*
+		 * If bit 0 really is a lock, only a reset clears it. Power
+		 * gating does not - the value survives every rmmod. Use the
+		 * reset controller the DT already gives us rather than poking
+		 * the PMGR registers behind genpd's back.
+		 */
+		if (rvbar_probe >= 2) {
+			struct reset_control *rst;
+
+			rst = devm_reset_control_get_optional_exclusive(dev, NULL);
+			if (IS_ERR(rst)) {
+				dev_info(dev, "  reset control unavailable: %ld\n",
+					 PTR_ERR(rst));
+			} else if (!rst) {
+				dev_info(dev, "  no reset control in DT\n");
+			} else {
+				int rr = reset_control_reset(rst);
+
+				dev_info(dev, "  reset_control_reset() = %d\n", rr);
+				dev_info(dev, "  RVBAR after reset: %#018llx\n",
+					 ave_read64(ave, AVE_BANK_ASC, AVE_ASC_FW_BASE));
+				ave_write64(ave, AVE_BANK_ASC, AVE_ASC_FW_BASE,
+					    0x0102000000000000ULL);
+				dev_info(dev, "  wrote tag-only after reset -> %#018llx\n",
+					 ave_read64(ave, AVE_BANK_ASC, AVE_ASC_FW_BASE));
+			}
+		}
+	}
+
 	ave_fw_snapshot_phys(ave);
 
 	if (ave_stage(dev, AVE_STAGE_ASC_START)) {
