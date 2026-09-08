@@ -44,7 +44,7 @@ individual docs. What remains:
 | 3 — transport bring-up | **candidate fix pending hardware test** — [34](34-boot-handshake.md) |
 | 4 — IPC transport live | spec in progress — [36](36-ipc-implementation.md) |
 | 5 — session setup | struct map substantially done — [20](20-command-structs.md), [37](37-start-avc-session.md) |
-| 6 — one encoded frame | per-frame block mapped — [32](32-picmgmt-params.md) |
+| 6 — one encoded frame | statically specified — [32](32-picmgmt-params.md), [37](37-start-avc-session.md), [38](38-dimension-convention.md), [39](39-input-format.md) |
 | 7 — V4L2 driver | not started |
 
 Phase 2 has produced most of what a driver needs to reach a first `Open`:
@@ -133,7 +133,18 @@ rejecting them. It rejects wrong sizes outright, so mistakes are loud.
 
 ### Phase 6 — one encoded frame
 
-The real remaining unknown. `Process` is `0x63D8` and its per-frame fields —
+**No longer blocked on static analysis.** The per-frame block, the session
+parameters, the dimension convention and the input format are all specified;
+what remains is hardware. Two things found on the way are worth carrying
+forward because neither is a parameter problem and neither would have been
+found by reading the parameter block:
+
+- the encoder fetches `16*ceil(H/16)` luma rows regardless of declared height,
+  so a 1080-row source allocation is eight rows short ([38](38-dimension-convention.md))
+- 10-bit input is accepted, logged as unsupported, and then encoded
+  mis-configured ([39](39-input-format.md))
+
+Historical note on what this section used to say: `Process` is `0x63D8` and its per-frame fields —
 QP, frame type, input surface, output buffer — live in `AVE_PICMGMT_PARAMS`
 (`0x5118` bytes) which is **not** mapped. Surface sizes and the 64-byte stride
 rule are known ([14](14-frame-size-formulas.md)-[17](17-aux-engines-pools.md));
