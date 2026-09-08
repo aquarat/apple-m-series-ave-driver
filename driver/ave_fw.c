@@ -28,6 +28,7 @@
  */
 
 #include <linux/dma-mapping.h>
+#include <linux/unaligned.h>
 #include <linux/firmware.h>
 #include <linux/iommu.h>
 #include <linux/sizes.h>
@@ -125,6 +126,82 @@ next:
 }
 
 /*
+ * Patch the image's IOBA / IOSZ tags.
+ *
+ * The firmware does not hard-code its register base. CPlatformEnvironment's
+ * constructor copies a length-prefixed "IOBA" tag out of its own __DATA into
+ * a global (fw 0xe18dc-0xe1910) and forms every MMIO address from it:
+ * base + 0x1800000 is the ASC bank, base + 0x1050000 the SVE bank, and the
+ * very first register write it performs is base + 0x1c00808 (fw 0xe1a78).
+ *
+ * In the image we ship, that tag is eight zero bytes - iBoot fills it in on
+ * an Apple boot, and nothing on our path did. With a base of zero the
+ * coprocessor starts, addresses nothing that exists, and goes quiet, which is
+ * exactly the symptom we have been chasing.
+ *
+ * The value is a BUS address, not an AP-physical one: the coprocessor sits on
+ * the far side of the /arm-io translation. Deriving it from a mapped
+ * resource rather than hard-coding it keeps the two from being confused
+ * again - that confusion cost eight experiments already (docs/30).
+ */
+static int ave_fw_patch_ioba(struct ave_device *ave, void *img, size_t size)
+{
+	static const u8 tag_ioba[4] = { 'A', 'B', 'O', 'I' };	/* "IOBA", reversed */
+	static const u8 tag_iosz[4] = { 'Z', 'S', 'O', 'I' };	/* "IOSZ", reversed */
+	phys_addr_t fabric = ave->bank[AVE_BANK_FABRIC].phys;
+	u64 bus;
+	size_t i;
+	int patched = 0;
+
+	if (!fabric) {
+		dev_err(ave->dev, "no fabric bank resource; cannot derive I/O base\n");
+		return -EINVAL;
+	}
+	if (fabric < AVE_ARM_IO_BUS_OFFSET) {
+		dev_err(ave->dev, "fabric phys %pa is below the /arm-io offset\n",
+			&fabric);
+		return -EINVAL;
+	}
+	bus = (u64)fabric - AVE_ARM_IO_BUS_OFFSET;
+
+	for (i = 0; i + 16 <= size; i += 4) {
+		u8 *p = (u8 *)img + i;
+		u32 len = get_unaligned_le32(p + 4);
+
+		if (!memcmp(p, tag_ioba, 4) && len == 8) {
+			u64 old = get_unaligned_le64(p + 8);
+
+			if (old && old != bus) {
+				dev_warn(ave->dev,
+					 "IOBA already set to %#llx, leaving it\n", old);
+			} else {
+				put_unaligned_le64(bus, p + 8);
+				dev_info(ave->dev, "  IOBA at image +%#zx: %#llx -> %#llx\n",
+					 i + 8, old, bus);
+			}
+			patched |= 1;
+		} else if (!memcmp(p, tag_iosz, 4) && len == 4) {
+			u32 old = get_unaligned_le32(p + 8);
+
+			if (!old) {
+				put_unaligned_le32(AVE_IOBA_SIZE, p + 8);
+				dev_info(ave->dev, "  IOSZ at image +%#zx: 0 -> %#x\n",
+					 i + 8, AVE_IOBA_SIZE);
+			}
+			patched |= 2;
+		}
+	}
+
+	if (patched != 3) {
+		dev_err(ave->dev,
+			"IOBA/IOSZ tags not found in image (found mask %d)\n",
+			patched);
+		return -EINVAL;
+	}
+	return 0;
+}
+
+/*
  * Load the firmware and map it at IOVA 0.
  *
  * The caller must have attached the IOMMU already - this uses the device's
@@ -167,6 +244,8 @@ int ave_fw_load(struct ave_device *ave)
 	ave->fw.size = size;
 
 	ret = ave_fw_walk(ave, fw, ave->fw.cpu, &span);
+	if (!ret)
+		ret = ave_fw_patch_ioba(ave, ave->fw.cpu, span);
 	if (ret)
 		goto err_free;
 

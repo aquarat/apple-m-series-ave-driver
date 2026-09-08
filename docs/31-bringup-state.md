@@ -182,3 +182,32 @@ the reboot, "the kernel changed" is a live hypothesis and not a lazy one -
 that is the same class of mistake as
 [30](30-address-translation-bug.md), where eight experiments were run
 faithfully against an apparatus nobody had checked.
+
+
+---
+
+## Correction, 2026-09-08: the "core stays started" premise was wrong
+
+This document claimed that nothing ever clears ASC `CPU_CONTROL`, that the
+core had therefore been running continuously since the first `asc-start`, and
+that no result was clean without a power cycle. **That is false**, and it was
+contradicted by material already in the repository:
+
+- `ave_asc_start()` writes `CPU_CONTROL = 0` as its *second* register write,
+  matching the kext at `0xfffffe0008c356f4`. The true statement — which
+  `ave_hw.h` and `ave_drv.c` both make correctly — is that nothing clears it
+  *again after* start. Dropping that one word inverted the meaning.
+- `pm_genpd_summary` shows every `venc_*` domain `off-0` while the module is
+  unloaded, so genpd power-gates the block on `rmmod` regardless.
+- Every stage-8 read in this boot's journal returned `CPU_STATUS = 0x2a`,
+  never a persistent `0x2c` — fourteen reads, including one an hour after the
+  last `asc-start`.
+
+So a module reload *is* a clean experiment and the reboot requirement was
+self-imposed. `tools/handshake-test.sh` no longer refuses a second run.
+
+The reasoning this invalidates: the earlier reading of the ignored `0x50000`
+write as "we are writing to a core that has been running since an earlier
+experiment" has no support. And the real cause of the silence is now
+[40](40-firmware-io-base.md) — the firmware's I/O base is zero in the image we
+load, so it was never addressing the registers this document describes.

@@ -114,6 +114,24 @@
  * Note the mask is 0x3fffffff800 (11 hex digits), not the 0x3FFFFFFFF800 that
  * an earlier revision of this file recorded.
  */
+/*
+ * The /arm-io bus->AP-physical translation. ADT reg entries are bus
+ * addresses; Linux nodes carry the translated ones. Subtracting this is how
+ * we recover what the coprocessor itself must be told - see
+ * docs/30-address-translation-bug.md for what happens when the two are
+ * confused in the other direction.
+ */
+#define AVE_ARM_IO_BUS_OFFSET	0x200000000ULL
+
+/*
+ * The firmware's own I/O window, as it must appear in the image's IOBA tag:
+ * the 32 MiB region based at bus 0x20C000000 (bank 4's AP-physical
+ * 0x40C000000 less the translation). The firmware forms every register
+ * address as base + a fixed offset, e.g. base + 0x1800000 = the ASC bank and
+ * base + 0x1050000 = the SVE bank.
+ */
+#define AVE_IOBA_SIZE		0x2000000
+
 #define AVE_ASC_FW_BASE		0x50000
 #define AVE_ASC_FW_BASE_MASK	0x3fffffff800ULL
 #define AVE_ASC_FW_BASE_TAG	0x0102000000000000ULL
@@ -200,6 +218,16 @@ enum ave_power_state {
 /*
  * SoC identification. AVE_DevInfo::RetrieveDevID reads the ADT "soc-id"
  * property and looks it up in a 34-entry table at 0xfffffe0007edba00.
+ *
+ * The DevID is per ENCODER INSTANCE, not per machine: on this t6001 board
+ * /arm-io/ave0 carries soc-id t6000 and /arm-io/ave1 carries t6001, so ave0
+ * is DevID 11 (_Castor) and ave1 is 12 (_Nyx). We drive ave0, so we send 11.
+ *
+ * Getting this wrong is quiet rather than loud. The firmware indexes a table
+ * at __DATA 0x135c60 by DevID with stride 0x48 and no bounds check
+ * (fw 0x21d6c); rows 11 and 12 are both valid but carry different device and
+ * capability descriptors, so a wrong value is accepted and mis-configures the
+ * engine instead of being rejected.
  */
 #define AVE_DEVID_T8103		10
 #define AVE_DEVID_T6000		11

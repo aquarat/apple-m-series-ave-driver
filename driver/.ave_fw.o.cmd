@@ -1200,6 +1200,9 @@ deps_ave_fw.o := \
   /usr/src/kernels/7.1.13-401.asahi.vrr1.fc44.aarch64+16k/include/linux/logic_pio.h \
     $(wildcard include/config/INDIRECT_PIO) \
   /usr/src/kernels/7.1.13-401.asahi.vrr1.fc44.aarch64+16k/include/linux/fwnode.h \
+  /usr/src/kernels/7.1.13-401.asahi.vrr1.fc44.aarch64+16k/include/linux/unaligned.h \
+  /usr/src/kernels/7.1.13-401.asahi.vrr1.fc44.aarch64+16k/include/linux/unaligned/packed_struct.h \
+  /usr/src/kernels/7.1.13-401.asahi.vrr1.fc44.aarch64+16k/include/vdso/unaligned.h \
   /usr/src/kernels/7.1.13-401.asahi.vrr1.fc44.aarch64+16k/include/linux/firmware.h \
     $(wildcard include/config/FW_LOADER) \
     $(wildcard include/config/FW_UPLOAD) \
