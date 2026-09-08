@@ -127,6 +127,33 @@ Here, a second driver was bound and never risk-assessed at all.
 Related: device probe is **asynchronous**. A clean `insmod` return is not
 evidence that anything downstream of it succeeded.
 
+## Trap 7 — verifying the findings but never the apparatus
+
+Eight hardware experiments were run against an address that has no device
+behind it, because ADT bus addresses were used without the `/arm-io` `ranges`
+translation. Every one hung, and each hang was interpreted as evidence about
+AVE. It was evidence about the harness. See
+[30-address-translation-bug.md](30-address-translation-bug.md).
+
+Every constant taken out of Apple's binaries had been re-checked against those
+binaries. Nothing re-checked the overlay, the addresses, or which artefact the
+build actually produced — and a tracked generated header quietly reverted the
+overlay for four attempts without anyone noticing.
+
+**Before theorising about a hardware failure, prove the apparatus against a
+known-good target.** A working analogue existed on the same SoC the entire
+time: pointing the same staged driver at `avd0` would have isolated this in one
+reboot instead of eight.
+
+Corollaries worth stating separately:
+
+- If one instance of a computed address works and others do not, suspect the
+  computation before suspecting the hardware. `psdump` used the translated PMGR
+  address and worked; everything else used untranslated addresses and hung.
+- Record what *ran*, not what was intended. The marker file captured intent and
+  was therefore blind to the overlay regression.
+- Do not track generated build artefacts. That is how the regression hid.
+
 ## What counts as authoritative
 
 Ranked, most to least:

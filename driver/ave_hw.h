@@ -21,18 +21,27 @@
  * mapDeviceMemoryWithIndex and caches them in an array, so a "bank" in the kext
  * is exactly an ADT reg index. ave0 on t6001 has five.
  */
-#define AVE_BANK_DPE		0	/* 0x20D100000 + 0x45C000, AVE_DPE      */
-#define AVE_BANK_ASC		1	/* 0x20D800000 + 0x800000, coprocessor  */
-#define AVE_BANK_SVE		2	/* 0x20D050000 +   0x8000, doorbell etc */
-#define AVE_BANK_PMGR_PS	3	/* 0x8E588000  +     0x24  - see below  */
-#define AVE_BANK_FABRIC		4	/* 0x20C000000 + 0x1000000 - see below  */
+/*
+ * Addresses below are CPU PHYSICAL. The ADT stores BUS addresses, and the
+ * /arm-io "ranges" property maps bus 0x0 -> parent 0x2_00000000 for the first
+ * 16 GB, so essentially every peripheral address needs +0x2_00000000.
+ *
+ * Eight bring-up attempts used the raw ADT values and therefore accessed an
+ * undecoded hole, which hangs the fabric exactly like an unresponsive device.
+ * Run tools/check_addrs.py before trusting any address in this file.
+ */
+#define AVE_BANK_DPE		0	/* 0x40D100000 + 0x45C000, AVE_DPE      */
+#define AVE_BANK_ASC		1	/* 0x40D800000 + 0x800000, coprocessor  */
+#define AVE_BANK_SVE		2	/* 0x40D050000 +   0x8000, doorbell etc */
+#define AVE_BANK_PMGR_PS	3	/* 0x28E588000 +     0x24  - see below  */
+#define AVE_BANK_FABRIC		4	/* 0x40C000000 + 0x1000000 - see below  */
 
 /*
  * IMPORTANT: banks 3 and 4 are NOT AVE address space. Both are PMGR-owned
  * windows that the ADT hands to the AVE node, and both were misclassified in
  * earlier revisions of this header.
  *
- * Bank 3 is PMGR ps-regs[13] = reg window 2 (0x8E580000) + 0x8000, i.e. the
+ * Bank 3 is PMGR ps-regs[13] = reg window 2 (0x28E580000) + 0x8000, i.e. the
  * power-state registers for the five real VENC gates:
  *
  *   +0x00 VENC_DMA   +0x08 VENC_PIPE4  +0x10 VENC_PIPE5
@@ -43,7 +52,7 @@
  * 0x8E680260 + 0x7DC4, spanning VENC1_SYS to VENC1_ME1.
  *
  * Bank 4 is the PMGR fabric bridge window: bridge-reg-index is 48, VENC_SYS
- * owns bridge subdev 2, and pmgr reg[50] is exactly 0x20C000000 + 0x1000000.
+ * owns bridge subdev 2, and pmgr reg[50] is exactly 0x40C000000 + 0x1000000.
  * AVE_AXI2AF operates on this window - so it configures a PMGR fabric bridge,
  * not an AVE register block.
  *
