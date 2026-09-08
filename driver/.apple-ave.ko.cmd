@@ -1,1 +1,1 @@
-savedcmd_apple-ave.ko := ld -r -EL  -maarch64linux -z norelro -z noexecstack --no-warn-rwx-segments --build-id=sha1  -T /usr/src/kernels/7.1.13-401.asahi.vrr1.fc44.aarch64+16k/scripts/module.lds -o apple-ave.ko apple-ave.o apple-ave.mod.o .module-common.o
+savedcmd_apple-ave.ko := ld -r -EL  -maarch64linux -z norelro -z noexecstack --no-warn-rwx-segments --build-id=sha1  -T /usr/src/kernels/7.1.13-401.asahi.vrr2.fc44.aarch64+16k/scripts/module.lds -o apple-ave.ko apple-ave.o apple-ave.mod.o .module-common.o

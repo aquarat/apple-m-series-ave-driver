@@ -1,0 +1,158 @@
+=== AVE boot handshake test ===
+date      : 2026-09-08T22:51:51+01:00
+boot_id   : 2621373c
+uptime    : 1912.64s
+kernel    : 7.1.13-401.asahi.vrr2.fc44.aarch64+16k
+commit    : 98a211f
+log       : /home/aquarat/Projects/apple-ave-driver/results/handshake-20260908-225151-2621373c.log
+
+>>> modules match running kernel 7.1.13-401.asahi.vrr2.fc44.aarch64+16k
+>>> overlay already loaded
+>>> AVE platform device: NONE
+>>> syncing and settling before the risky part
+>>> insmod apple-ave.ko stop_after=15
+[ 1920.541215] apple-ave 40d100000.video-encoder: probe: staged bring-up, stop_after=15 (max 16)
+[ 1920.541220] apple-ave 40d100000.video-encoder: stage 1 (map-banks): starting
+[ 1920.541222] apple-ave 40d100000.video-encoder:   mapping bank 0 (dpe)
+[ 1920.541236] apple-ave 40d100000.video-encoder:   mapping bank 1 (asc)
+[ 1920.541242] apple-ave 40d100000.video-encoder:   mapping bank 2 (sve)
+[ 1920.541245] apple-ave 40d100000.video-encoder:   mapping bank 3 (unk3)
+[ 1920.541247] apple-ave 40d100000.video-encoder:   mapping bank 4 (axi2af)
+[ 1920.541253] apple-ave 40d100000.video-encoder: stage 1 (map-banks): OK
+[ 1920.541254] apple-ave 40d100000.video-encoder: stage 2 (dma-mask): starting
+[ 1920.541255] apple-ave 40d100000.video-encoder: stage 2 (dma-mask): OK
+[ 1920.541256] apple-ave 40d100000.video-encoder: stage 3 (get-irq): starting
+[ 1920.541263] apple-ave 40d100000.video-encoder:   irq = 130
+[ 1920.541264] apple-ave 40d100000.video-encoder: stage 3 (get-irq): OK
+[ 1920.541265] apple-ave 40d100000.video-encoder: stage 4 (request-irq): starting
+[ 1920.541272] apple-ave 40d100000.video-encoder: stage 4 (request-irq): OK
+[ 1920.541272] apple-ave 40d100000.video-encoder: stage 5 (power-attach): starting
+[ 1920.541503] apple-ave 40d100000.video-encoder:   attached 5 power domain(s)
+[ 1920.541506] apple-ave 40d100000.video-encoder: stage 5 (power-attach): OK
+[ 1920.541506] apple-ave 40d100000.video-encoder: stage 6 (power-on): starting
+[ 1920.541508] apple-ave 40d100000.video-encoder:   resumed; left powered for inspection
+[ 1920.541509] apple-ave 40d100000.video-encoder: stage 6 (power-on): OK
+[ 1920.541509] apple-ave 40d100000.video-encoder: stage 7 (write-sve-idle): starting
+[ 1920.541510] apple-ave 40d100000.video-encoder:   writing 1 to SVE+0x38 (Apple's first access) ...
+[ 1920.541511] apple-ave 40d100000.video-encoder:   write returned
+[ 1920.541512] apple-ave 40d100000.video-encoder: stage 7 (write-sve-idle): OK
+[ 1920.541513] apple-ave 40d100000.video-encoder: stage 8 (read-asc-status): starting
+[ 1920.541513] apple-ave 40d100000.video-encoder:   reading ASC+0x400048 (CPU_STATUS) ...
+[ 1920.541515] apple-ave 40d100000.video-encoder:   ASC CPU_STATUS = 0x0000002a
+[ 1920.541516] apple-ave 40d100000.video-encoder: stage 8 (read-asc-status): OK
+[ 1920.541516] apple-ave 40d100000.video-encoder: stage 9 (ipc-alloc): starting
+[ 1920.546088] apple-ave 40d100000.video-encoder: IPC region 20 MiB at iova 0x000001000a800000
+[ 1920.546094] apple-ave 40d100000.video-encoder: stage 9 (ipc-alloc): OK
+[ 1920.546096] apple-ave 40d100000.video-encoder: stage 10 (fw-load): starting
+[ 1920.548041] apple-ave 40d100000.video-encoder: firmware image: 2622936 bytes
+[ 1920.548042] apple-ave 40d100000.video-encoder:   image spans 0x268000, allocating 0x268000 contiguous
+[ 1920.548246] apple-ave 40d100000.video-encoder:   __TEXT       vm 0x0+0x134000 file 0x4000+0x134000
+[ 1920.548292] apple-ave 40d100000.video-encoder:   __DATA       vm 0x134000+0x134000 file 0x138000+0x134000
+[ 1920.670812] apple-ave 40d100000.video-encoder:   IOBA at image +0x1341fd: 0x0 -> 0x20c000000
+[ 1920.670817] apple-ave 40d100000.video-encoder:   IOSZ at image +0x13420d: 0 -> 0x2000000
+[ 1920.791486] apple-ave 40d100000.video-encoder:   fw-base register 0x102010000b28001 -> mapping image at IOVA 0xb28000
+[ 1920.791489] apple-ave 40d100000.video-encoder:   iova 0x000001000bc00000 -> phys 0x000001000bc00000, mapping at IOVA 0xb28000
+[ 1920.791490] apple-ave 40d100000.video-encoder:   identity domain: DART in bypass, core will fetch phys 0x10000b28000 directly
+[ 1920.791500] apple-ave 40d100000.video-encoder: stage 10 (fw-load): OK
+[ 1920.791501] apple-ave 40d100000.video-encoder: stage 11 (boot-cfg): starting
+[ 1920.791750] apple-ave 40d100000.video-encoder:   boot cfg at iova 0x00000102b49b0000, log surface 128 KiB at 0x000001000a480000
+[ 1920.791755] apple-ave 40d100000.video-encoder:   scratch0=0x8042006 scratch1=0xb49b0000 scratch2=0x102
+[ 1920.791756] apple-ave 40d100000.video-encoder: stage 11 (boot-cfg): OK
+[ 1920.791757] apple-ave 40d100000.video-encoder: stage 12 (iop-config): starting
+[ 1920.791759] apple-ave 40d100000.video-encoder:   ASC+0x50000 BEFORE any write = 0x102010000b28001  (base field 0x10000b28000)
+[ 1920.791760] apple-ave 40d100000.video-encoder:   writing fw base 0x10201000bc00000 to ASC+0x50000 ...
+[ 1920.791761] apple-ave 40d100000.video-encoder:   readback = 0x102010000b28001
+[ 1920.791762] apple-ave 40d100000.video-encoder: stage 12 (iop-config): OK
+[ 1920.791762] apple-ave 40d100000.video-encoder: stage 13 (asc-start): starting
+[ 1920.791764] apple-ave 40d100000.video-encoder: stage 13 (asc-start): OK
+[ 1920.791765] apple-ave 40d100000.video-encoder: stage 14 (recv-msg): starting
+[ 1920.791765] apple-ave 40d100000.video-encoder:   waiting up to 2s for the firmware to speak ...
+[ 1922.795232] apple-ave 40d100000.video-encoder:   no message from firmware (-110)
+[ 1922.795236] apple-ave 40d100000.video-encoder:   fw log: rd=0 wr=0 ring=0x20000
+[ 1922.795237] apple-ave 40d100000.video-encoder:   firmware globals (read straight out of our image buffer):
+[ 1922.795238] apple-ave 40d100000.video-encoder:     0x195090 = 0x0000000000000000  gs_psCfg (NULL => AVE_Log_Output disabled)
+[ 1922.795239] apple-ave 40d100000.video-encoder:     0x1950b0 = 0x0000000000000000  gs_psCfg+0x20
+[ 1922.795240] apple-ave 40d100000.video-encoder:     0x2649a0 = 0x0000000000000000  __rtk_crashlog_local_buffer
+[ 1922.795241] apple-ave 40d100000.video-encoder:     0x2649c8 = 0x0000000000000000  crashlog related
+[ 1922.795257] apple-ave 40d100000.video-encoder:   phys 0x0000010000b28000: first word 0x14000081 (not a Mach-O header)
+[ 1922.795258] ave phys: 00000000: 81 00 00 14 00 00 00 00 00 00 00 00 00 00 00 00  ................
+[ 1922.795259] apple-ave 40d100000.video-encoder:   branch target region (+0x200):
+[ 1922.795260] ave +200: 00000000: 00 00 00 14 41 42 38 d5 21 0c 42 d3 3f 0c 00 f1  ....AB8.!.B.?...
+[ 1922.795260] ave +200: 00000010: c1 00 00 54 a1 00 00 10 21 40 1e d5 a1 78 80 d2  ...T....!@...x..
+[ 1922.795261] ave +200: 00000020: 01 40 1e d5 e0 03 9f d6 df 43 03 d5 e7 03 00 aa  .@.......C......
+[ 1922.795262] ave +200: 00000030: 80 ee ff 10 00 c0 18 d5 a0 00 38 d5 01 1c 40 d3  ..........8...@.
+[ 1922.795262] ave +200: 00000040: fa 03 01 aa 01 3c 48 d3 fb 03 01 aa 00 06 a0 d2  .....<H.........
+[ 1922.795263] ave +200: 00000050: 40 10 18 d5 df 3f 03 d5 eb 03 07 aa 01 10 38 d5  @....?........8.
+[ 1922.795263] ave +200: 00000060: 01 01 10 36 21 f8 7d 92 01 10 18 d5 df 3f 03 d5  ...6!.}......?..
+[ 1922.795264] ave +200: 00000070: 40 00 80 d2 00 04 80 9a 7a 13 00 94 43 01 00 94  @.......z...C...
+[ 1922.795264] ave +200: 00000080: c0 26 00 58 00 a2 18 d5 9f 40 00 d5 a0 eb ff 10  .&.X.....@......
+[ 1922.795265] ave +200: 00000090: f7 03 00 aa 21 30 00 58 21 8c 40 92 00 00 01 cb  ....!0.X!.@.....
+[ 1922.795265] ave +200: 000000a0: e9 03 00 aa 08 00 80 d2 40 07 00 f0 00 00 19 91  ........@.......
+[ 1922.795266] ave +200: 000000b0: 41 07 00 f0 21 00 19 91 1f 00 01 eb e0 01 00 54  A...!..........T
+[ 1922.795266] ave +200: 000000c0: 60 07 00 f0 00 00 29 91 00 20 00 91 42 01 00 94  `.....).. ..B...
+[ 1922.795267] ave +200: 000000d0: 03 24 40 92 68 c4 72 d3 21 00 a0 d2 01 00 01 8a  .$@.h.r.!.......
+[ 1922.795267] ave +200: 000000e0: 3f 00 00 f1 80 00 00 54 02 00 80 d2 42 00 08 8b  ?......T....B...
+[ 1922.795268] ave +200: 000000f0: 29 01 02 cb e0 03 09 aa 01 00 80 d2 2d 00 08 8b  )...........-...
+[ 1922.795268] ave +200: 00000100: 00 00 0d 8b 0c 00 08 cb a0 f9 01 10 00 04 40 29  ..............@)
+[ 1922.795269] ave +200: 00000110: 00 80 01 8b 1f 00 00 f1 61 00 00 54 60 07 00 90  ........a..T`...
+[ 1922.795270] ave +200: 00000120: 00 00 00 91 f6 03 00 aa 61 07 00 90 02 00 00 90  ........a.......
+[ 1922.795270] ave +200: 00000130: 23 00 02 cb 63 00 0d 8b 19 00 03 cb 60 0a 00 90  #...c.......`...
+[ 1922.795271] ave +200: 00000140: 00 60 0d 91 00 0c 1a 8b e2 03 00 aa 1a 01 00 94  .`..............
+[ 1922.795271] ave +200: 00000150: e3 03 00 aa 61 20 00 58 7f 00 01 eb 60 29 00 54  ....a .X....`).T
+[ 1922.795272] ave +200: 00000160: 41 20 00 58 7f 00 01 eb 20 00 80 d2 80 00 00 54  A .X.... ......T
+[ 1922.795272] ave +200: 00000170: e0 03 02 aa 14 01 00 94 00 00 80 d2 f8 03 00 aa  ................
+[ 1922.795273] ave +200: 00000180: 60 0a 00 90 00 00 00 91 0b 01 00 94 e7 03 00 aa  `...............
+[ 1922.795273] ave +200: 00000190: 02 08 80 d2 42 00 00 cb 60 0a 00 90 00 20 00 91  ....B...`.... ..
+[ 1922.795274] ave +200: 000001a0: 05 01 00 94 1f 0c 00 f1 e1 00 00 54 c2 04 80 d2  ...........T....
+[ 1922.795274] ave +200: 000001b0: 47 03 80 d2 42 00 60 91 42 00 04 91 25 03 80 d2  G...B.`.B...%...
+[ 1922.795275] ave +200: 000001c0: ef 03 05 aa 1f 08 00 f1 21 02 00 54 85 04 80 d2  ........!..T....
+[ 1922.795275] ave +200: 000001d0: ef 03 05 aa 42 bc 70 d3 04 10 80 d2 42 00 04 8b  ....B.p.....B...
+[ 1922.795276] ave +200: 000001e0: 04 20 a0 d2 42 00 04 8b 21 00 80 d2 e6 03 07 aa  . ..B...!.......
+[ 1922.795276] ave +200: 000001f0: 21 20 c6 9a 06 00 80 d2 c1 00 01 cb e6 03 0d aa  ! ..............
+[ 1922.795277] ave +200: 00000200: 21 00 06 8b ed 03 01 aa 39 03 0d cb 1f 04 00 f1  !.......9.......
+[ 1922.795277] ave +200: 00000210: a1 00 00 54 85 04 80 d2 ef 03 05 aa 42 00 60 91  ...T........B.`.
+[ 1922.795278] ave +200: 00000220: 42 00 04 91 e1 00 05 cb 23 00 80 d2 61 20 c1 9a  B.......#...a ..
+[ 1922.795279] ave +200: 00000230: ee 03 01 aa 01 07 38 d5 c0 19 00 58 00 00 02 aa  ......8....X....
+[ 1922.795279] ave +200: 00000240: 20 08 60 b3 40 20 18 d5 21 08 00 90 21 00 00 91   .`.@ ..!...!...
+[ 1922.795280] ave +200: 00000250: 62 08 00 90 42 00 00 91 42 00 01 cb e2 37 40 b3  b...B...B....7@.
+[ 1922.795280] ave +200: 00000260: ea 03 02 aa 62 07 00 90 21 00 02 cb 34 00 16 8b  ....b...!...4...
+[ 1922.795281] ave +200: 00000270: e0 03 14 aa e1 03 0a aa 00 00 01 8b 02 10 40 d1  ..............@.
+[ 1922.795281] ave +200: 00000280: f2 03 02 aa e2 03 0e aa 02 0c 02 cb f0 03 02 aa  ................
+[ 1922.795282] ave +200: 00000290: e0 03 0d aa 01 00 80 d2 21 00 08 8b 1f 00 01 eb  ........!.......
+[ 1922.795282] ave +200: 000002a0: 61 00 00 54 02 20 18 d5 02 00 00 14 22 20 18 d5  a..T. ......" ..
+[ 1922.795283] ave +200: 000002b0: e0 03 18 aa 1f 04 00 f1 80 04 00 54 e0 03 1a aa  ...........T....
+[ 1922.795283] ave +200: 000002c0: 40 04 00 b5 64 80 80 d2 00 00 80 d2 00 64 48 8b  @...d........dH.
+[ 1922.795284] ave +200: 000002d0: e1 03 0a aa 21 fc 4e d3 e2 03 10 aa e3 03 0f aa  ....!.N.........
+[ 1922.795284] ave +200: 000002e0: 7f 90 00 f1 c1 00 00 54 e5 03 12 aa a5 00 04 8b  .......T........
+[ 1922.795285] ave +200: 000002f0: 45 84 00 f8 21 04 00 d1 e2 03 12 aa 42 0c 00 8b  E...!.......B...
+[ 1922.795285] ave +200: 00000300: 43 0c 01 8b e5 03 14 aa a5 00 04 8b 45 84 00 f8  C...........E...
+[ 1922.795286] ave +200: 00000310: a5 10 40 91 5f 00 03 eb ab ff ff 54 64 90 80 d2  ..@._......Td...
+[ 1922.795286] ave +200: 00000320: e0 03 0d aa b4 00 00 94 e1 03 17 aa 21 a4 4e d3  ............!.N.
+[ 1922.795287] ave +200: 00000330: 24 6c 72 b3 04 84 00 f8 9f 3f 03 d5 84 10 40 91  $lr......?....@.
+[ 1922.795287] ave +200: 00000340: 04 00 00 f9 9f 3f 03 d5 c0 d5 01 10 00 00 17 cb  .....?..........
+[ 1922.795288] ave +200: 00000350: 00 00 0d 8b 00 c0 18 d5 90 00 00 94 00 10 38 d5  ..............8.
+[ 1922.795288] ave +200: 00000360: c1 10 00 58 00 00 01 aa 41 00 80 d2 00 00 21 8a  ...X....A.....!.
+[ 1922.795289] ave +200: 00000370: 00 10 18 d5 df 3f 03 d5 1f 87 0e d5 df 3f 03 d5  .....?.......?..
+[ 1922.795289] ave +200: 00000380: bf 40 00 d5 e0 03 1a aa e0 0b 00 b5 e0 03 0f aa  .@..............
+[ 1922.795290] ave +200: 00000390: 1f 90 00 f1 61 02 00 54 01 00 81 d2 21 64 48 cb  ....a..T....!dH.
+[ 1922.795290] ave +200: 000003a0: e0 03 0e aa 21 00 00 cb 02 00 80 d2 42 64 48 8b  ....!.......BdH.
+[ 1922.795291] ave +200: 000003b0: 03 00 80 d2 95 00 00 94 f5 03 00 aa 07 00 80 d2  ................
+[ 1922.795291] ave +200: 000003c0: 42 64 48 8b 22 00 07 8b 90 00 00 94 f3 03 00 aa  BdH."...........
+[ 1922.795292] ave +200: 000003d0: e3 03 02 aa 8d 00 00 94 f1 03 00 aa 11 00 00 14  ................
+[ 1922.795293] ave +200: 000003e0: e6 03 0e aa e0 03 0d aa 00 fc 59 d3 e1 03 00 aa  ..........Y.....
+[ 1922.795293] ave +200: 000003f0: c0 00 01 cb e1 03 0a aa 27 fc 43 d3 e1 00 00 cb  ........'.C.....
+[ 1922.795298] apple-ave 40d100000.video-encoder: stage 14 (recv-msg): OK
+[ 1922.795299] apple-ave 40d100000.video-encoder: stage 15 (probe-state): starting
+[ 1922.998032] apple-ave 40d100000.video-encoder:   CPU_STATUS 0x0000002c -> 0x0000002c
+[ 1922.998040] apple-ave 40d100000.video-encoder:   scratch[0] 0x08042006 -> 0x08042006
+[ 1922.998044] apple-ave 40d100000.video-encoder:   scratch[1] 0xb49b0000 -> 0xb49b0000
+[ 1922.998048] apple-ave 40d100000.video-encoder:   scratch[2] 0x00000102 -> 0x00000102
+[ 1922.998051] apple-ave 40d100000.video-encoder:   scratch[3] 0x00000000 -> 0x00000000
+[ 1922.998055] apple-ave 40d100000.video-encoder:   scratch[4] 0x00000000 -> 0x00000000
+[ 1922.998058] apple-ave 40d100000.video-encoder:   scratch[5] 0x00000000 -> 0x00000000
+[ 1922.998061] apple-ave 40d100000.video-encoder:   scratch[6] 0x00000000 -> 0x00000000
+[ 1922.998064] apple-ave 40d100000.video-encoder:   scratch[7] 0x00000000 -> 0x00000000
+[ 1922.998067] apple-ave 40d100000.video-encoder:   verdict: no observable activity - core may not be running
+[ 1922.998070] apple-ave 40d100000.video-encoder: stage 15 (probe-state): OK
+
+=== done. full log: /home/aquarat/Projects/apple-ave-driver/results/handshake-20260908-225151-2621373c.log ===
