@@ -546,4 +546,100 @@ static inline u32 ave_coded_data_size_max(u32 w, u32 h, bool hevc)
 /* Firmware must be mapped at DART IOVA 0 (assert at 0xfffffe0008bec408). */
 #define AVE_FW_IOVA		0
 
+/*
+ * ---------------------------------------------------------------------------
+ * AVE_PICMGMT_PARAMS - the per-frame encode parameters.
+ *
+ * A 0x5118-byte block at sCAveCmdAvcProcess + 0x12C0. Offsets below are into
+ * the block; add AVE_PICMGMT_OFF for the offset inside the Process command.
+ *
+ * For AVC the firmware only ever reads four sub-ranges of it:
+ * ProcessCmd_Process_AVC copies the wire command into a pooled internal buffer
+ * slice by slice and queues that copy, so anything outside a slice is dropped
+ * before the encoder sees it. Everything defined here falls inside one of the
+ * four; see docs/32-picmgmt-params.md for the copy sites.
+ *
+ * Note there is deliberately no per-frame QP field. QP is session-scoped:
+ * ConstantQpRateControl::processRateControl (fw 0x8bd4) selects one of the
+ * three Start-time QPs by slice type. Only FrameType varies per frame.
+ * ---------------------------------------------------------------------------
+ */
+#define AVE_PICMGMT_OFF			0x12c0
+#define AVE_PICMGMT_SIZE		0x5118
+
+/* Copied slices. Anything outside these never reaches the encoder. */
+#define AVE_PICMGMT_SLICE0_OFF		0x0000
+#define AVE_PICMGMT_SLICE0_LEN		0x03d0
+#define AVE_PICMGMT_SLICE1_OFF		0x1738
+#define AVE_PICMGMT_SLICE1_LEN		0x20	/* 0x28 when the DRC hdr is present */
+#define AVE_PICMGMT_SLICE1_LEN_DRC	0x28
+#define AVE_PICMGMT_DRC_OFF		0x1760	/* 8 bytes per entry, count at 0x175c */
+#define AVE_PICMGMT_SLICE3_OFF		0x4228
+#define AVE_PICMGMT_SLICE3_LEN		0x0ef0
+
+/* What frame this is. */
+#define AVE_PIC_FRAME_NUM		0x4f68	/* u64 */
+#define AVE_PIC_FRAME_TYPE		0x4f78	/* int, see AVE_FRAME_* */
+#define AVE_PIC_POC			0x4f80	/* int */
+#define AVE_PIC_CTX_INDEX		0x4fa4	/* u32, 0 for a single client */
+#define AVE_PIC_FRAME_RATE		0x4fa8	/* double, fps */
+
+#define AVE_FRAME_TYPE_I		0
+#define AVE_FRAME_TYPE_IDR		3
+
+/* Rate-control update sub-block (slice 1). Carries no QP. */
+#define AVE_PIC_FORCE_KEYFRAME		0x1738	/* int */
+#define AVE_PIC_INPUT_COMPRESSED	0x174e	/* u8, 0 for plain NV12 */
+#define AVE_PIC_DRC_COUNT		0x175c	/* int32, 0 if unused */
+
+/* Input surface: NV12, two planes, each 64-byte aligned. */
+#define AVE_PIC_IN_LUMA_ADDR		0x4570	/* u64 IOVA */
+#define AVE_PIC_IN_LUMA_SIZE		0x4578	/* u32 */
+#define AVE_PIC_IN_CHROMA_ADDR		0x4590	/* u64 IOVA */
+#define AVE_PIC_IN_CHROMA_SIZE		0x4598	/* u32 */
+
+/*
+ * Output bitstream. Coded must equal the CodedData[slot] IOVA published at
+ * Start time - the firmware asserts on it rather than using what we pass.
+ */
+#define AVE_PIC_OUT_CODED		0x4ef8	/* u64 IOVA */
+#define AVE_PIC_OUT_CODED_HDR		0x4f00	/* u64 IOVA */
+#define AVE_PIC_OUT_CODED_SIZE		0x4f08	/* u32, must exceed 3*W*H/4 */
+
+/* Reconstruction target: the DPB slot this frame writes. 128-byte aligned. */
+#define AVE_PIC_RECON_Y_MSB		0x4548	/* u64 */
+#define AVE_PIC_RECON_Y_LSB		0x4550	/* u64 */
+#define AVE_PIC_RECON_UV_MSB		0x4558	/* u64 */
+#define AVE_PIC_RECON_UV_LSB		0x4560	/* u64 */
+#define AVE_PIC_RECON_MV		0x4568	/* u64, colocated MV store */
+
+/* Per-frame scratch, all drawn from the Start-time pools. */
+#define AVE_PIC_SCRATCH_CMDINFO40	0x45f8	/* u64 */
+#define AVE_PIC_SCRATCH_SLOTPOOL	0x4608	/* u64 */
+#define AVE_PIC_SCRATCH_CMDINFO48	0x4618	/* u64 */
+#define AVE_PIC_SRC_NEIGH_INFO		0x4670	/* u64 */
+#define AVE_PIC_SRC_NEIGH_PIXEL		0x4690	/* u64 */
+#define AVE_PIC_SRC_NEIGH_DATA		0x46b0	/* u64 */
+#define AVE_PIC_SRC_NEIGH_FWDATA	0x46d0	/* u64 */
+#define AVE_PIC_LOWRES_LUMA_SCALED	0x4f10	/* u64 */
+#define AVE_PIC_LOWRES_RESULTS		0x4f48	/* u64 (+0x4f50 size) */
+#define AVE_PIC_LOWRES_RC_RESULTS	0x4f58	/* u64 (+0x4f60 size) */
+
+/* Reference lists. All zero for I-frame-only. */
+#define AVE_PIC_REF_Y_L0_MSB		0x4228	/* u64[4] */
+#define AVE_PIC_REF_UV_L0_MSB		0x4268	/* u64[4] */
+#define AVE_PIC_REF_Y_L1_MSB		0x4388	/* u64[4] */
+#define AVE_PIC_REF_UV_L1_MSB		0x43c8	/* u64[4] */
+#define AVE_PIC_REF_COLOCATED_L1	0x44e8	/* u64 */
+
+/* Session-scoped rate control, in sCAveCmdAvcStart. */
+#define AVE_START_RC_MODE		0x234	/* u32, see docs/35 */
+#define AVE_START_BITRATE		0x238	/* u32 */
+#define AVE_START_QP_I			0x240	/* u32 */
+#define AVE_START_QP_P			0x244	/* u32 */
+#define AVE_START_QP_B			0x248	/* u32 */
+#define AVE_START_GOP			0x2b8	/* u32 */
+#define AVE_START_WIDTH			0x368	/* u32 */
+#define AVE_START_HEIGHT		0x36c	/* u32 */
+
 #endif /* __AVE_ABI_H__ */

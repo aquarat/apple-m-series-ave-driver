@@ -5,14 +5,20 @@
 Answered items have been removed; the history is in the git log and in the
 individual docs. What remains:
 
-1. **Per-frame `Process` fields.** QP, frame type, input surface and output
-   buffer live in `AVE_PICMGMT_PARAMS` inside `sCAveCmdAvcProcess`. The block
-   map is done ([20](20-command-structs.md)) but the field-to-offset join is
-   not. **This is the last thing between here and a first encode.**
+1. ~~**Per-frame `Process` fields.**~~ **Answered** —
+   [32](32-picmgmt-params.md). Frame type, input surface, output buffer,
+   reconstruction target and the reference lists are located, and the useful
+   negative result is that **there is no per-frame QP at all**: QP is
+   session-scoped from `Start`, selected by slice type in
+   `ConstantQpRateControl::processRateControl` (fw `0x8bd4`). The block also
+   shrank from 0x5118 bytes to four copied sub-ranges; anything outside them
+   is dropped before the encoder sees it. Implemented as the `AVE_PIC_*`
+   offsets in `driver/ave_abi.h`.
 2. **`_E_AVE_RCMode` / `_E_AVE_EncMode` enumerator names.** Neither binary
    contains a name-string array for them. Constant-QP is believed to be
    `RCMode = 3` but that is **inferred, not read**, and it may not be
    statically recoverable at all. Needed to select fixed-QP for first light.
+   Now the **top blocking static question** — see [35](35-rc-modes.md).
 3. **PMGR phandles.** The ADT gives power-gate *indices*; they must be
    cross-referenced against the t6001 PMGR nodes. Not disassembly work.
 4. **`iAddr` alignment.** [21](21-buffer-publication.md) reports 64-byte for AVC
@@ -35,9 +41,11 @@ individual docs. What remains:
 | 1 — fwextract plumbing | not started (see note below) |
 | 2 — static host-side analysis | **substantially done** |
 | 2b — tracing | not started (not on the critical path) |
-| 3 — transport bring-up | **blocked** — see [25](25-bringup-results.md) |
-| 4 — first light | not started |
-| 5 — V4L2 driver | not started |
+| 3 — transport bring-up | **candidate fix pending hardware test** — [34](34-boot-handshake.md) |
+| 4 — IPC transport live | spec in progress — [36](36-ipc-implementation.md) |
+| 5 — session setup | struct map substantially done — [20](20-command-structs.md), [37](37-start-avc-session.md) |
+| 6 — one encoded frame | per-frame block mapped — [32](32-picmgmt-params.md) |
+| 7 — V4L2 driver | not started |
 
 Phase 2 has produced most of what a driver needs to reach a first `Open`:
 the power-up order, the firmware load contract, the ASC start sequence, the
@@ -51,11 +59,9 @@ missing before an encode can be attempted:
 - ~~**Coded-output buffer size.**~~ **Answered** — it is a closed form. See
   [18-coded-data-sizing.md](18-coded-data-sizing.md); implemented as
   `ave_coded_data_size()` in `driver/ave_abi.h`.
-- **Per-frame `Process` fields.** `Open`, `Config`, `Reset` and the session
-  parameters in `Start` are mapped ([20](20-command-structs.md),
-  [21](21-buffer-publication.md)). What is still missing is the per-frame QP,
-  frame type, input surface and output buffer, all inside `AVE_PICMGMT_PARAMS`.
-  This is now the last thing between here and a first encode.
+- ~~**Per-frame `Process` fields.**~~ **Done** — [32](32-picmgmt-params.md).
+  The remaining gap before a first encode is no longer a struct map: it is
+  that the firmware has not yet spoken to us at all (phase 3).
 - **`reg[3]`** (`0x8E588000`, 36 bytes) — no call site found by anyone.
 - **ADT interrupts 1024–1027** — unclaimed by the host driver; purpose unknown.
 
@@ -73,14 +79,30 @@ Phases 0-2 are done. What follows is the route to `ffmpeg` encoding.
 ### Phase 3 — the firmware boots  *(current blocker)*
 
 Everything up to starting the coprocessor works; it changes state and then says
-nothing ([31](31-bringup-state.md)). Leading suspect is stream IDs: `sids` is
-`0x8001` (SIDs 0 and 15) with `bypass = 0x8000`, so SID 15 runs in bypass under
-Apple, and `apple_dart_hw_reset` strips bypass on probe. If instruction fetch
-uses SID 15 it is now translating through an empty page table.
+nothing ([31](31-bringup-state.md)).
 
-- map firmware for SID 15 as well, or restore its bypass
+The leading suspect is now the **boot handshake**, not stream IDs, and two
+independent lines of evidence agree on it ([34](34-boot-handshake.md),
+[33](33-firmware-logging.md)): `StartUpIOP` writes `0x08042006` to scratch 0
+plus a 56-byte boot-config IOVA before releasing the core, and on the firmware
+side `AVE_Log_Output` is dead while `gs_psCfg` is NULL (`0xa9a0`) — a global
+populated only from that same block. The handshake and the log therefore stand
+or fall together, which is consistent with silence rather than being a second
+unknown. Implemented; awaiting a hardware test.
+
+That test needs a **power cycle**, not a module reload: nothing we have found
+ever clears ASC `CPU_CONTROL`, so the core has been running continuously since
+the first `asc-start` and a reload starts an already-started core. Earlier
+"still silent" results taken that way measured the wrong thing — the same
+shape of error as the address-translation bug ([30](30-address-translation-bug.md)).
+`tools/handshake-test.sh` enforces this by recording `boot_id`.
+
+Still on the list if the handshake is not the answer:
+
+- stream IDs: `sids` is `0x8001` (SIDs 0 and 15) with `bypass = 0x8000`, so SID
+  15 runs in bypass under Apple and `apple_dart_hw_reset` strips it on probe.
+  If instruction fetch uses SID 15 it is translating through an empty table.
 - watch for DART translation faults to confirm where the fetch goes
-- implement `RecvIOPMsg`, since Apple's model is that the firmware speaks first
 
 **Done when:** a scratch register changes, or an interrupt arrives, without us
 having written it.
