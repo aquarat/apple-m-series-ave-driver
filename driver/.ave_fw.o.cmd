@@ -1,8 +1,8 @@
-savedcmd_ave_drv.o := gcc -Wp,-MMD,./.ave_drv.o.d -nostdinc -I/usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/arch/arm64/include -I/usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/arch/arm64/include/generated -I/usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include -I/usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include -I/usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/arch/arm64/include/uapi -I/usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/arch/arm64/include/generated/uapi -I/usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/uapi -I/usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/generated/uapi -include /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/compiler-version.h -include /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/kconfig.h -include /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/compiler_types.h -D__KERNEL__ -mlittle-endian -DCC_USING_PATCHABLE_FUNCTION_ENTRY -DKASAN_SHADOW_SCALE_SHIFT= -Wundef -DKBUILD_EXTRA_WARN1 -fshort-wchar -funsigned-char -fno-common -fno-PIE -fno-strict-aliasing -std=gnu11 -fms-extensions -mgeneral-regs-only -DCONFIG_CC_HAS_K_CONSTRAINT=1 -Wno-psabi -mabi=lp64 -fno-asynchronous-unwind-tables -fno-unwind-tables -mbranch-protection=pac-ret -Wa,-march=armv8.5-a -DARM64_ASM_ARCH='"armv8.5-a"' -DKASAN_SHADOW_SCALE_SHIFT= -fno-delete-null-pointer-checks -O2 -fno-allow-store-data-races -fstack-protector-strong -fno-omit-frame-pointer -fno-optimize-sibling-calls -ftrivial-auto-var-init=zero -fzero-init-padding-bits=all -fno-stack-clash-protection -fdiagnostics-show-context=2 -fpatchable-function-entry=4,2 -fno-inline-functions-called-once -fmin-function-alignment=8 -fstrict-flex-arrays=3 -fno-strict-overflow -fno-stack-check -fconserve-stack -fno-builtin-wcslen -Wall -Wextra -Wundef -Werror=implicit-function-declaration -Werror=implicit-int -Werror=return-type -Werror=strict-prototypes -Wno-format-security -Wno-trigraphs -Wno-frame-address -Wno-address-of-packed-member -Wmissing-declarations -Wmissing-prototypes -Wframe-larger-than=2048 -Wno-main -Wno-type-limits -Wno-dangling-pointer -Wvla-larger-than=1 -Wno-pointer-sign -Wcast-function-type -Wno-unterminated-string-initialization -Wno-array-bounds -Wno-stringop-overflow -Wno-alloc-size-larger-than -Wimplicit-fallthrough=5 -Werror=date-time -Werror=incompatible-pointer-types -Werror=designated-init -Wenum-conversion -Wunused -Wmissing-format-attribute -Wmissing-include-dirs -Wunused-const-variable -Wno-missing-field-initializers -Wno-shift-negative-value -Wno-maybe-uninitialized -Wno-sign-compare -Wno-unused-parameter -g -mstack-protector-guard=sysreg -mstack-protector-guard-reg=sp_el0 -mstack-protector-guard-offset=2424  -fsanitize=bounds-strict -fsanitize=shift    -DMODULE  -DKBUILD_BASENAME='"ave_drv"' -DKBUILD_MODNAME='"apple_ave"' -D__KBUILD_MODNAME=apple_ave -c -o ave_drv.o ave_drv.c  
+savedcmd_ave_fw.o := gcc -Wp,-MMD,./.ave_fw.o.d -nostdinc -I/usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/arch/arm64/include -I/usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/arch/arm64/include/generated -I/usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include -I/usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include -I/usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/arch/arm64/include/uapi -I/usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/arch/arm64/include/generated/uapi -I/usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/uapi -I/usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/generated/uapi -include /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/compiler-version.h -include /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/kconfig.h -include /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/compiler_types.h -D__KERNEL__ -mlittle-endian -DCC_USING_PATCHABLE_FUNCTION_ENTRY -DKASAN_SHADOW_SCALE_SHIFT= -Wundef -DKBUILD_EXTRA_WARN1 -fshort-wchar -funsigned-char -fno-common -fno-PIE -fno-strict-aliasing -std=gnu11 -fms-extensions -mgeneral-regs-only -DCONFIG_CC_HAS_K_CONSTRAINT=1 -Wno-psabi -mabi=lp64 -fno-asynchronous-unwind-tables -fno-unwind-tables -mbranch-protection=pac-ret -Wa,-march=armv8.5-a -DARM64_ASM_ARCH='"armv8.5-a"' -DKASAN_SHADOW_SCALE_SHIFT= -fno-delete-null-pointer-checks -O2 -fno-allow-store-data-races -fstack-protector-strong -fno-omit-frame-pointer -fno-optimize-sibling-calls -ftrivial-auto-var-init=zero -fzero-init-padding-bits=all -fno-stack-clash-protection -fdiagnostics-show-context=2 -fpatchable-function-entry=4,2 -fno-inline-functions-called-once -fmin-function-alignment=8 -fstrict-flex-arrays=3 -fno-strict-overflow -fno-stack-check -fconserve-stack -fno-builtin-wcslen -Wall -Wextra -Wundef -Werror=implicit-function-declaration -Werror=implicit-int -Werror=return-type -Werror=strict-prototypes -Wno-format-security -Wno-trigraphs -Wno-frame-address -Wno-address-of-packed-member -Wmissing-declarations -Wmissing-prototypes -Wframe-larger-than=2048 -Wno-main -Wno-type-limits -Wno-dangling-pointer -Wvla-larger-than=1 -Wno-pointer-sign -Wcast-function-type -Wno-unterminated-string-initialization -Wno-array-bounds -Wno-stringop-overflow -Wno-alloc-size-larger-than -Wimplicit-fallthrough=5 -Werror=date-time -Werror=incompatible-pointer-types -Werror=designated-init -Wenum-conversion -Wunused -Wmissing-format-attribute -Wmissing-include-dirs -Wunused-const-variable -Wno-missing-field-initializers -Wno-shift-negative-value -Wno-maybe-uninitialized -Wno-sign-compare -Wno-unused-parameter -g -mstack-protector-guard=sysreg -mstack-protector-guard-reg=sp_el0 -mstack-protector-guard-offset=2424  -fsanitize=bounds-strict -fsanitize=shift    -DMODULE  -DKBUILD_BASENAME='"ave_fw"' -DKBUILD_MODNAME='"apple_ave"' -D__KBUILD_MODNAME=apple_ave -c -o ave_fw.o ave_fw.c  
 
-source_ave_drv.o := ave_drv.c
+source_ave_fw.o := ave_fw.c
 
-deps_ave_drv.o := \
+deps_ave_fw.o := \
   /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/compiler-version.h \
     $(wildcard include/config/CC_VERSION_TEXT) \
   /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/kconfig.h \
@@ -41,7 +41,35 @@ deps_ave_drv.o := \
     $(wildcard include/config/ARM64_PTR_AUTH_KERNEL) \
     $(wildcard include/config/ARM64_PTR_AUTH) \
     $(wildcard include/config/BUILTIN_RETURN_ADDRESS_STRIPS_PAC) \
-  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/array_size.h \
+  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/dma-mapping.h \
+    $(wildcard include/config/DMA_API_DEBUG) \
+    $(wildcard include/config/HAS_DMA) \
+    $(wildcard include/config/IOMMU_DMA) \
+    $(wildcard include/config/DMA_NEED_SYNC) \
+    $(wildcard include/config/NEED_DMA_MAP_STATE) \
+  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/device.h \
+    $(wildcard include/config/GENERIC_MSI_IRQ) \
+    $(wildcard include/config/ENERGY_MODEL) \
+    $(wildcard include/config/PINCTRL) \
+    $(wildcard include/config/ARCH_HAS_DMA_OPS) \
+    $(wildcard include/config/DMA_DECLARE_COHERENT) \
+    $(wildcard include/config/DMA_CMA) \
+    $(wildcard include/config/SWIOTLB) \
+    $(wildcard include/config/SWIOTLB_DYNAMIC) \
+    $(wildcard include/config/NUMA) \
+    $(wildcard include/config/ARCH_HAS_SYNC_DMA_FOR_DEVICE) \
+    $(wildcard include/config/ARCH_HAS_SYNC_DMA_FOR_CPU) \
+    $(wildcard include/config/ARCH_HAS_SYNC_DMA_FOR_CPU_ALL) \
+    $(wildcard include/config/DMA_OPS_BYPASS) \
+    $(wildcard include/config/PM) \
+    $(wildcard include/config/PM_SLEEP) \
+    $(wildcard include/config/LOCKDEP) \
+    $(wildcard include/config/OF) \
+    $(wildcard include/config/DEVTMPFS) \
+  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/dev_printk.h \
+    $(wildcard include/config/PRINTK) \
+    $(wildcard include/config/DYNAMIC_DEBUG) \
+    $(wildcard include/config/DYNAMIC_DEBUG_CORE) \
   /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/compiler.h \
     $(wildcard include/config/TRACE_BRANCH_PROFILING) \
     $(wildcard include/config/PROFILE_ALL_BRANCHES) \
@@ -75,19 +103,44 @@ deps_ave_drv.o := \
   /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/kcsan-checks.h \
     $(wildcard include/config/KCSAN_WEAK_MEMORY) \
     $(wildcard include/config/KCSAN_IGNORE_ATOMICS) \
-  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/delay.h \
-    $(wildcard include/config/HIGH_RES_TIMERS) \
-  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/math.h \
-  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/arch/arm64/include/generated/asm/div64.h \
-  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/asm-generic/div64.h \
-    $(wildcard include/config/CC_OPTIMIZE_FOR_PERFORMANCE) \
-  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/uapi/linux/kernel.h \
-  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/uapi/linux/sysinfo.h \
-  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/const.h \
+  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/ratelimit.h \
+  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/ratelimit_types.h \
+  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/bits.h \
+  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/vdso/bits.h \
   /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/vdso/const.h \
   /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/uapi/linux/const.h \
+  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/uapi/linux/bits.h \
+  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/build_bug.h \
+  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/overflow.h \
+  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/limits.h \
+  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/uapi/linux/limits.h \
+  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/vdso/limits.h \
+  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/const.h \
+  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/uapi/linux/param.h \
+  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/arch/arm64/include/uapi/asm/param.h \
+  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/asm-generic/param.h \
+    $(wildcard include/config/HZ) \
+  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/uapi/asm-generic/param.h \
+  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/spinlock_types_raw.h \
+    $(wildcard include/config/SMP) \
+    $(wildcard include/config/DEBUG_SPINLOCK) \
+    $(wildcard include/config/DEBUG_LOCK_ALLOC) \
+  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/arch/arm64/include/asm/spinlock_types.h \
+  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/asm-generic/qspinlock_types.h \
+    $(wildcard include/config/NR_CPUS) \
+  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/asm-generic/qrwlock_types.h \
+  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/arch/arm64/include/uapi/asm/byteorder.h \
+  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/byteorder/little_endian.h \
+  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/uapi/linux/byteorder/little_endian.h \
+  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/swab.h \
+  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/uapi/linux/swab.h \
+  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/arch/arm64/include/generated/uapi/asm/swab.h \
+  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/uapi/asm-generic/swab.h \
+  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/byteorder/generic.h \
+  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/lockdep_types.h \
+    $(wildcard include/config/PROVE_RAW_LOCK_NESTING) \
+    $(wildcard include/config/LOCK_STAT) \
   /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/sched.h \
-    $(wildcard include/config/LOCKDEP) \
     $(wildcard include/config/DEBUG_ATOMIC_SLEEP) \
     $(wildcard include/config/PREEMPT_RT) \
     $(wildcard include/config/VIRT_CPU_ACCOUNTING_NATIVE) \
@@ -146,7 +199,6 @@ deps_ave_drv.o := \
     $(wildcard include/config/COMPAT) \
     $(wildcard include/config/PERF_EVENTS) \
     $(wildcard include/config/DEBUG_PREEMPT) \
-    $(wildcard include/config/NUMA) \
     $(wildcard include/config/NUMA_BALANCING) \
     $(wildcard include/config/ARCH_HAS_LAZY_MMU_MODE) \
     $(wildcard include/config/FAULT_INJECTION) \
@@ -178,7 +230,6 @@ deps_ave_drv.o := \
     $(wildcard include/config/PREEMPT_DYNAMIC) \
     $(wildcard include/config/HAVE_PREEMPT_DYNAMIC_CALL) \
     $(wildcard include/config/HAVE_PREEMPT_DYNAMIC_KEY) \
-    $(wildcard include/config/SMP) \
     $(wildcard include/config/MEM_ALLOC_PROFILING_DEBUG) \
     $(wildcard include/config/SCHED_MM_CID) \
   /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/uapi/linux/sched.h \
@@ -192,20 +243,14 @@ deps_ave_drv.o := \
     $(wildcard include/config/ARM64_GCS) \
     $(wildcard include/config/ARM64_ACTLR_STATE) \
     $(wildcard include/config/ARM64_TAGGED_ADDR_ABI) \
-  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/build_bug.h \
   /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/cache.h \
     $(wildcard include/config/ARCH_HAS_CACHE_LINE_SIZE) \
+  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/uapi/linux/kernel.h \
+  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/uapi/linux/sysinfo.h \
   /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/vdso/cache.h \
   /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/arch/arm64/include/asm/cache.h \
     $(wildcard include/config/KASAN_HW_TAGS) \
   /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/bitops.h \
-  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/bits.h \
-  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/vdso/bits.h \
-  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/uapi/linux/bits.h \
-  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/overflow.h \
-  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/limits.h \
-  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/uapi/linux/limits.h \
-  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/vdso/limits.h \
   /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/typecheck.h \
   /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/asm-generic/bitops/generic-non-atomic.h \
   /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/arch/arm64/include/asm/barrier.h \
@@ -276,7 +321,6 @@ deps_ave_drv.o := \
     $(wildcard include/config/DEBUG_ATOMIC_LARGEST_ALIGN) \
   /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/bug.h \
     $(wildcard include/config/GENERIC_BUG) \
-    $(wildcard include/config/PRINTK) \
     $(wildcard include/config/BUG_ON_DATA_CORRUPTION) \
   /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/arch/arm64/include/asm/bug.h \
   /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/arch/arm64/include/asm/asm-bug.h \
@@ -297,33 +341,7 @@ deps_ave_drv.o := \
     $(wildcard include/config/CONSOLE_LOGLEVEL_QUIET) \
     $(wildcard include/config/EARLY_PRINTK) \
     $(wildcard include/config/PRINTK_INDEX) \
-    $(wildcard include/config/DYNAMIC_DEBUG) \
-    $(wildcard include/config/DYNAMIC_DEBUG_CORE) \
   /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/kern_levels.h \
-  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/ratelimit_types.h \
-  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/uapi/linux/param.h \
-  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/arch/arm64/include/uapi/asm/param.h \
-  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/asm-generic/param.h \
-    $(wildcard include/config/HZ) \
-  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/uapi/asm-generic/param.h \
-  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/spinlock_types_raw.h \
-    $(wildcard include/config/DEBUG_SPINLOCK) \
-    $(wildcard include/config/DEBUG_LOCK_ALLOC) \
-  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/arch/arm64/include/asm/spinlock_types.h \
-  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/asm-generic/qspinlock_types.h \
-    $(wildcard include/config/NR_CPUS) \
-  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/asm-generic/qrwlock_types.h \
-  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/arch/arm64/include/uapi/asm/byteorder.h \
-  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/byteorder/little_endian.h \
-  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/uapi/linux/byteorder/little_endian.h \
-  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/swab.h \
-  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/uapi/linux/swab.h \
-  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/arch/arm64/include/generated/uapi/asm/swab.h \
-  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/uapi/asm-generic/swab.h \
-  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/byteorder/generic.h \
-  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/lockdep_types.h \
-    $(wildcard include/config/PROVE_RAW_LOCK_NESTING) \
-    $(wildcard include/config/LOCK_STAT) \
   /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/dynamic_debug.h \
     $(wildcard include/config/JUMP_LABEL) \
   /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/jump_label.h \
@@ -362,6 +380,7 @@ deps_ave_drv.o := \
   /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/arch/arm64/include/asm/mte-def.h \
   /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/string.h \
     $(wildcard include/config/BINARY_PRINTF) \
+  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/array_size.h \
   /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/errno.h \
   /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/uapi/linux/errno.h \
   /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/uapi/linux/string.h \
@@ -378,6 +397,10 @@ deps_ave_drv.o := \
   /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/time64.h \
   /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/math64.h \
     $(wildcard include/config/ARCH_SUPPORTS_INT128) \
+  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/math.h \
+  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/arch/arm64/include/generated/asm/div64.h \
+  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/asm-generic/div64.h \
+    $(wildcard include/config/CC_OPTIMIZE_FOR_PERFORMANCE) \
   /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/vdso/math64.h \
   /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/vdso/time64.h \
   /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/uapi/linux/time.h \
@@ -666,53 +689,6 @@ deps_ave_drv.o := \
     $(wildcard include/config/CODE_TAGGING) \
   /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/mutex.h \
   /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/debug_locks.h \
-  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/jiffies.h \
-  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/time.h \
-  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/time32.h \
-  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/timex.h \
-  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/uapi/linux/timex.h \
-  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/arch/arm64/include/asm/timex.h \
-  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/arch/arm64/include/asm/arch_timer.h \
-    $(wildcard include/config/ARM_ARCH_TIMER_OOL_WORKAROUND) \
-  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/percpu.h \
-    $(wildcard include/config/RANDOM_KMALLOC_CACHES) \
-    $(wildcard include/config/PAGE_SIZE_4KB) \
-    $(wildcard include/config/NEED_PER_CPU_PAGE_FIRST_CHUNK) \
-  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/clocksource/arm_arch_timer.h \
-    $(wildcard include/config/ARM_ARCH_TIMER) \
-  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/timecounter.h \
-  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/asm-generic/timex.h \
-  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/vdso/time32.h \
-  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/vdso/time.h \
-  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/vdso/jiffies.h \
-  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/generated/timeconst.h \
-  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/arch/arm64/include/generated/asm/delay.h \
-  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/asm-generic/delay.h \
-  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/dma-mapping.h \
-    $(wildcard include/config/DMA_API_DEBUG) \
-    $(wildcard include/config/HAS_DMA) \
-    $(wildcard include/config/IOMMU_DMA) \
-    $(wildcard include/config/DMA_NEED_SYNC) \
-    $(wildcard include/config/NEED_DMA_MAP_STATE) \
-  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/device.h \
-    $(wildcard include/config/GENERIC_MSI_IRQ) \
-    $(wildcard include/config/ENERGY_MODEL) \
-    $(wildcard include/config/PINCTRL) \
-    $(wildcard include/config/ARCH_HAS_DMA_OPS) \
-    $(wildcard include/config/DMA_DECLARE_COHERENT) \
-    $(wildcard include/config/DMA_CMA) \
-    $(wildcard include/config/SWIOTLB) \
-    $(wildcard include/config/SWIOTLB_DYNAMIC) \
-    $(wildcard include/config/ARCH_HAS_SYNC_DMA_FOR_DEVICE) \
-    $(wildcard include/config/ARCH_HAS_SYNC_DMA_FOR_CPU) \
-    $(wildcard include/config/ARCH_HAS_SYNC_DMA_FOR_CPU_ALL) \
-    $(wildcard include/config/DMA_OPS_BYPASS) \
-    $(wildcard include/config/PM) \
-    $(wildcard include/config/PM_SLEEP) \
-    $(wildcard include/config/OF) \
-    $(wildcard include/config/DEVTMPFS) \
-  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/dev_printk.h \
-  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/ratelimit.h \
   /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/energy_model.h \
   /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/kobject.h \
     $(wildcard include/config/UEVENT_HELPER) \
@@ -723,6 +699,10 @@ deps_ave_drv.o := \
     $(wildcard include/config/KERNFS) \
   /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/idr.h \
   /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/radix-tree.h \
+  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/percpu.h \
+    $(wildcard include/config/RANDOM_KMALLOC_CACHES) \
+    $(wildcard include/config/PAGE_SIZE_4KB) \
+    $(wildcard include/config/NEED_PER_CPU_PAGE_FIRST_CHUNK) \
   /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/rcupdate.h \
     $(wildcard include/config/TINY_RCU) \
     $(wildcard include/config/RCU_STRICT_GRACE_PERIOD) \
@@ -816,6 +796,22 @@ deps_ave_drv.o := \
     $(wildcard include/config/DEBUG_OBJECTS_TIMERS) \
     $(wildcard include/config/NO_HZ_COMMON) \
   /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/ktime.h \
+  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/jiffies.h \
+  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/time.h \
+  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/time32.h \
+  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/timex.h \
+  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/uapi/linux/timex.h \
+  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/arch/arm64/include/asm/timex.h \
+  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/arch/arm64/include/asm/arch_timer.h \
+    $(wildcard include/config/ARM_ARCH_TIMER_OOL_WORKAROUND) \
+  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/clocksource/arm_arch_timer.h \
+    $(wildcard include/config/ARM_ARCH_TIMER) \
+  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/timecounter.h \
+  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/asm-generic/timex.h \
+  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/vdso/time32.h \
+  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/vdso/time.h \
+  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/vdso/jiffies.h \
+  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/generated/timeconst.h \
   /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/vdso/ktime.h \
   /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/timekeeping.h \
     $(wildcard include/config/POSIX_AUX_CLOCKS) \
@@ -1024,6 +1020,7 @@ deps_ave_drv.o := \
   /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/alarmtimer.h \
     $(wildcard include/config/RTC_CLASS) \
   /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/hrtimer.h \
+    $(wildcard include/config/HIGH_RES_TIMERS) \
     $(wildcard include/config/TIME_LOW_RES) \
     $(wildcard include/config/TIMERFD) \
   /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/hrtimer_defs.h \
@@ -1203,52 +1200,16 @@ deps_ave_drv.o := \
   /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/logic_pio.h \
     $(wildcard include/config/INDIRECT_PIO) \
   /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/fwnode.h \
-  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/interrupt.h \
-    $(wildcard include/config/IRQ_FORCED_THREADING) \
-    $(wildcard include/config/GENERIC_IRQ_PROBE) \
-  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/irqreturn.h \
-  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/hardirq.h \
-  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/context_tracking_state.h \
-    $(wildcard include/config/CONTEXT_TRACKING_USER) \
-    $(wildcard include/config/CONTEXT_TRACKING) \
-    $(wildcard include/config/RCU_DYNTICKS_TORTURE) \
-  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/ftrace_irq.h \
-    $(wildcard include/config/HWLAT_TRACER) \
-    $(wildcard include/config/OSNOISE_TRACER) \
-  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/vtime.h \
-    $(wildcard include/config/VIRT_CPU_ACCOUNTING) \
-    $(wildcard include/config/IRQ_TIME_ACCOUNTING) \
-  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/arch/arm64/include/asm/hardirq.h \
-  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/arch/arm64/include/asm/irq.h \
-  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/asm-generic/irq.h \
-  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/arch/arm64/include/asm/kvm_arm.h \
-  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/asm-generic/hardirq.h \
-  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/irq.h \
-    $(wildcard include/config/GENERIC_IRQ_EFFECTIVE_AFF_MASK) \
-    $(wildcard include/config/GENERIC_IRQ_IPI) \
-    $(wildcard include/config/IRQ_DOMAIN_HIERARCHY) \
-    $(wildcard include/config/DEPRECATED_IRQ_CPU_ONOFFLINE) \
-    $(wildcard include/config/GENERIC_IRQ_MIGRATION) \
-    $(wildcard include/config/GENERIC_PENDING_IRQ) \
-    $(wildcard include/config/HARDIRQS_SW_RESEND) \
-    $(wildcard include/config/GENERIC_IRQ_CHIP) \
-    $(wildcard include/config/GENERIC_IRQ_MULTI_HANDLER) \
-  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/irqhandler.h \
-  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/io.h \
-    $(wildcard include/config/STRICT_DEVMEM) \
-  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/arch/arm64/include/generated/asm/irq_regs.h \
-  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/asm-generic/irq_regs.h \
-  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/irqdesc.h \
-    $(wildcard include/config/GENERIC_IRQ_STAT_SNAPSHOT) \
-    $(wildcard include/config/GENERIC_IRQ_DEBUGFS) \
-    $(wildcard include/config/SPARSE_IRQ) \
-    $(wildcard include/config/IRQ_DOMAIN) \
-  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/irq_work.h \
-    $(wildcard include/config/IRQ_WORK) \
-  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/arch/arm64/include/asm/irq_work.h \
-  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/arch/arm64/include/generated/asm/hw_irq.h \
-  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/asm-generic/hw_irq.h \
-  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/iopoll.h \
+  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/firmware.h \
+    $(wildcard include/config/FW_LOADER) \
+    $(wildcard include/config/FW_UPLOAD) \
+  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/iommu.h \
+    $(wildcard include/config/IOMMU_API) \
+    $(wildcard include/config/FSL_PAMU) \
+    $(wildcard include/config/IRQ_MSI_IOMMU) \
+    $(wildcard include/config/IOMMU_DEBUGFS) \
+    $(wildcard include/config/IOMMU_SVA) \
+    $(wildcard include/config/IOMMU_IOPF) \
   /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/of.h \
     $(wildcard include/config/OF_DYNAMIC) \
     $(wildcard include/config/SPARC) \
@@ -1260,21 +1221,17 @@ deps_ave_drv.o := \
   /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/uapi/linux/mei.h \
   /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/uapi/linux/mei_uuid.h \
   /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/property.h \
-  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/platform_device.h \
-    $(wildcard include/config/SUSPEND) \
-    $(wildcard include/config/HIBERNATE_CALLBACKS) \
-    $(wildcard include/config/SUPERH) \
-  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/pm_domain.h \
-    $(wildcard include/config/CPU_IDLE) \
-    $(wildcard include/config/PM_GENERIC_DOMAINS_SLEEP) \
-    $(wildcard include/config/PM_GENERIC_DOMAINS_OF) \
-  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/pm_runtime.h \
+  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/iova_bitmap.h \
+    $(wildcard include/config/IOMMUFD_DRIVER) \
+  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/uapi/linux/iommufd.h \
+  ave.h \
+  /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/io.h \
+    $(wildcard include/config/STRICT_DEVMEM) \
   /usr/src/kernels/7.1.6-400.asahi.fc44.aarch64+16k/include/linux/reset.h \
     $(wildcard include/config/RESET_CONTROLLER) \
-  ave.h \
   ave_hw.h \
   ave_abi.h \
 
-ave_drv.o: $(deps_ave_drv.o)
+ave_fw.o: $(deps_ave_fw.o)
 
-$(deps_ave_drv.o):
+$(deps_ave_fw.o):

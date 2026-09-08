@@ -56,14 +56,17 @@ struct ave_device {
 	/* Power domains, in ADT power-gates order. */
 	struct dev_pm_domain_list *pd_list;
 
-	/* Firmware, adopted from iBoot via the "segment-ranges" property. */
+	/*
+	 * Firmware. We load it ourselves rather than adopting an iBoot
+	 * pre-load, so that no bootloader patch is needed. It must end up at
+	 * DART IOVA 0; see ave_fw.c.
+	 */
 	struct {
-		phys_addr_t	text_pa;
-		size_t		text_size;
-		phys_addr_t	data_pa;
-		size_t		data_size;
-		void		*data_snapshot;	/* restored before every start */
-		u64		fw_base;	/* reported back by the firmware */
+		void		*cpu;
+		dma_addr_t	iova;		/* where dma_alloc put it   */
+		size_t		size;
+		bool		mapped_at_zero;
+		u64		fw_base;	/* reported back by the fw  */
 	} fw;
 
 	struct ave_dma_buf	ipc;		/* the 20 MiB FwIPC region */
@@ -83,6 +86,10 @@ static inline void ave_write(struct ave_device *ave, unsigned int bank,
 {
 	writel_relaxed(val, ave->bank[bank].base + off);
 }
+
+/* ave_fw.c */
+int ave_fw_load(struct ave_device *ave);
+void ave_fw_unload(struct ave_device *ave);
 
 /* ave_ipc.c */
 int ave_ipc_init(struct ave_device *ave);
