@@ -63,8 +63,8 @@ enum ave_stage {
 	AVE_STAGE_READ_ASC	= 8,	/* read bank 1 */
 	AVE_STAGE_ASC_START	= 9,	/* the four-write start sequence */
 	AVE_STAGE_READ_SVE	= 10,	/* bank 2, only after the IOP is up */
-	AVE_STAGE_FW_ADOPT	= 11,
-	AVE_STAGE_IPC_ALLOC	= 12,
+	AVE_STAGE_IPC_ALLOC	= 11,	/* exercises the DART */
+	AVE_STAGE_FW_ADOPT	= 12,
 	AVE_STAGE_START		= 13,
 	AVE_STAGE_MAX		= 13,
 };
@@ -72,7 +72,7 @@ enum ave_stage {
 static const char * const ave_stage_name[] = {
 	"none", "map-banks", "dma-mask", "get-irq", "request-irq",
 	"power-attach", "power-on", "write-sve-idle", "read-asc-status", "asc-start",
-	"read-sve-status", "fw-adopt", "ipc-alloc", "start",
+	"read-sve-status", "ipc-alloc", "fw-adopt", "start",
 };
 
 /* Returns true if this stage should run. Logs the decision either way. */
@@ -486,20 +486,20 @@ static int ave_probe(struct platform_device *pdev)
 		return 0;
 	}
 
-	if (ave_stage(dev, AVE_STAGE_FW_ADOPT)) {
-		ret = ave_fw_adopt(ave);
-		if (ret)
-			return dev_err_probe(dev, ret, "firmware adoption\n");
-		ave_stage_ok(dev, AVE_STAGE_FW_ADOPT);
-	} else {
-		return 0;
-	}
-
 	if (ave_stage(dev, AVE_STAGE_IPC_ALLOC)) {
 		ret = ave_ipc_init(ave);
 		if (ret)
 			return dev_err_probe(dev, ret, "IPC setup\n");
 		ave_stage_ok(dev, AVE_STAGE_IPC_ALLOC);
+	} else {
+		return 0;
+	}
+
+	if (ave_stage(dev, AVE_STAGE_FW_ADOPT)) {
+		ret = ave_fw_adopt(ave);
+		if (ret)
+			return dev_err_probe(dev, ret, "firmware adoption\n");
+		ave_stage_ok(dev, AVE_STAGE_FW_ADOPT);
 	} else {
 		return 0;
 	}
