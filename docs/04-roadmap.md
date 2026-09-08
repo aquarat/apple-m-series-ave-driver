@@ -68,47 +68,77 @@ like DCP/ISP than like a `request_firmware()` blob.
 
 ## Sequencing
 
-**Phase 0 — static (done).** Firmware and ADT obtained and analysed; RTKit
-established; command set and state machine recovered.
+Phases 0-2 are done. What follows is the route to `ffmpeg` encoding.
 
-**Phase 1 — extraction plumbing.** Patch `asahi-fwextract` to collect
-`AppleAVE2FW_*.im4p`. Small, self-contained, upstreamable, useful before any
-driver exists, and a reasonable way to open the conversation with upstream.
+### Phase 3 — the firmware boots  *(current blocker)*
 
-**Phase 2 — static host-side analysis (no hardware).** *In progress.* The
-kext is extracted and its 91 classes mapped, which established the transport
-model and the wire command set. What remains is the disassembly that turns
-names into values: `AVE_HwC`, `AVE_IPC`, `AVE_PMGR`, `AVE_FwImg` and the
-`AVE_CHM_MakeFwCmd_*` builders. This was previously assumed
-to require tracing; it does not. See [06-kext.md](06-kext.md). Expected to
-yield the wire ids, the channel layout, the power sequence and the bring-up
-order.
+Everything up to starting the coprocessor works; it changes state and then says
+nothing ([31](31-bringup-state.md)). Leading suspect is stream IDs: `sids` is
+`0x8001` (SIDs 0 and 15) with `bypass = 0x8000`, so SID 15 runs in bypass under
+Apple, and `apple_dart_hw_reset` strips bypass on probe. If instruction fetch
+uses SID 15 it is now translating through an empty page table.
 
-**Phase 2b — tracing, if still needed.** Requires a second machine for the
-m1n1 hypervisor serial console. Run `ffmpeg -c:v h264_videotoolbox` under the hypervisor with
-MMIO/DART tracing on `ave0`. Trace at **two levels**, not one:
+- map firmware for SID 15 as well, or restore its bypass
+- watch for DART translation faults to confirm where the fetch goes
+- implement `RecvIOPMsg`, since Apple's model is that the firmware speaks first
 
-- hypervisor MMIO + DART underneath, and
-- `IOConnectCallMethod` interposition in userspace on macOS.
+**Done when:** a scratch register changes, or an interrupt arrives, without us
+having written it.
 
-The upper trace matters because VideoToolbox does real work in userspace, and
-the split between framework / kext / firmware is not yet known. MMIO traces
-alone will not show it.
+### Phase 4 — IPC transport live
 
-Best treated as confirmation of the static work rather than the primary
-source, and as the way to close anything Phase 2 could not.
+- second mailbox exchange yields the channel descriptor array
+- `CreateChannel` for `"IO"` and `"IO_T2H"`; ring send/receive with the
+  phase-bit protocol ([08](08-ipc-transport.md))
+- **get the firmware's syslog out.** It carries `AVE_Log` with per-subsystem
+  levels and format strings that name fields verbatim; from here on it is the
+  best oracle we have ([23](23-empirical-bringup.md))
 
-**Phase 3 — transport.** Bring up `apple-rtkit` against AVE: boot the firmware,
-attach endpoints, get crashlog and syslog endpoints responding. Standard RTKit
-endpoints exist in this firmware (`RTK_crashlog_*`, `RTK_tracekit_*`), so
-there is a self-check available before any encode is attempted.
+**Done when:** we can send a command and read a reply.
 
-**Phase 4 — first light.** `Open` → `Config` → `Start_AVC` → `Process_AVC` →
-`Complete`, fixed QP, I-frames only, one resolution. Success criterion: the
-output decodes in `ffmpeg` without error. It does not need to look good.
+### Phase 5 — session setup
 
-**Phase 5 — V4L2 stateful M2M driver.** Then FFmpeg and GStreamer work without
-new userspace.
+Command ids, sizes and the 64-byte header are known and firmware-enforced
+([07](07-commands-abi.md)). Bodies:
+
+- `Config` (`0x78`) — mapped ([20](20-command-structs.md))
+- `Open` (`0x48`) — mapped; the 8 bytes past the header are unused
+- `Start_AVC` (`0x3180`) — key fields located: width `+0x368`, height `+0x36c`,
+  QP `+0x240/244/248`, GOP `+0x2b8`, bitrate `+0x238`, RCMode `+0x234`
+
+**Done when:** the firmware accepts `Config` -> `Open` -> `Start_AVC` without
+rejecting them. It rejects wrong sizes outright, so mistakes are loud.
+
+### Phase 6 — one encoded frame
+
+The real remaining unknown. `Process` is `0x63D8` and its per-frame fields —
+QP, frame type, input surface, output buffer — live in `AVE_PICMGMT_PARAMS`
+(`0x5118` bytes) which is **not** mapped. Surface sizes and the 64-byte stride
+rule are known ([14](14-frame-size-formulas.md)-[17](17-aux-engines-pools.md));
+buffer publication is partly mapped ([21](21-buffer-publication.md)).
+
+Fixed QP, I-frames only, one resolution. With the firmware log working, the
+field hunt becomes differential testing against a self-describing oracle: set a
+candidate offset, encode, parse the output, read back what changed
+([23](23-empirical-bringup.md)).
+
+**Done when:** `ffmpeg -v error -i out.h264 -f null -` is silent.
+
+### Phase 7 — V4L2 M2M driver
+
+Conventional work once the hardware path exists: `videobuf2`, m2m ops, format
+negotiation enforcing the 64-byte stride and 2-plane rules, `V4L2_CID_MPEG_*`
+controls onto the `Start_AVC` fields, and the capture-side buffer sized by
+`ave_coded_data_size()`.
+
+**Done when:** `ffmpeg -c:v h264_v4l2m2m` works with an unmodified ffmpeg.
+
+### Phase 8 — beyond first light
+
+Rate-control modes, B-frames and real GOP structures, HEVC, the second encoder
+instance, concurrent sessions, zero-copy Interchange input, power management.
+Then upstreaming: proper DT bindings, m1n1 support for the AVE node, and
+firmware packaging via `asahi-fwextract`.
 
 ## Reality check
 
