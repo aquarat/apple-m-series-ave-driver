@@ -101,10 +101,10 @@ not listed here is **not required for first light** (§9 says why).
 0x0058 u64  buf1_iova     0x0060 u32 buf1_size
 
 /* ---- session algorithm config (docs/20 §3.3) -------------------------- */
-0x0220 u32  sComm.FrameRate                = 30       /* MUST be > 0, §5.7 */
+0x0220 u32  sComm.FrameRate                = 30       /* MUST be > 0, §5.4 */
 0x0234 int  sRC.RCMode                     = 3        /* const-QP; INFERRED */
 0x0240 int  sRC.QP[I]                      = 26
-0x0244 int  sRC.QP[P]                      = 26       /* set anyway, see §5.4 */
+0x0244 int  sRC.QP[P]                      = 26       /* set anyway, see §5.9 */
 0x0248 int  sRC.QP[B]                      = 26
 0x0298 int  sRC.RCQPRange.min              = 0
 0x029C int  sRC.RCQPRange.max              = 51
@@ -114,7 +114,7 @@ not listed here is **not required for first light** (§9 says why).
 
 /* ---- geometry -------------------------------------------------------- */
 0x0368 u32  VideoParams.ui32Width          = 1920
-0x036C u32  VideoParams.ui32Height         = 1088     /* MB-aligned; see §8 risk */
+0x036C u32  VideoParams.ui32Height         = 1088     /* MB-aligned; see §12 risk 1 */
 
 /* ---- DPB / reconstruction pool: 16 surfaces, stride 0x20 ------------- */
 0x0390 u64  sBufSet.saRecon[0][0].iAddr    = <recon IOVA 0>
@@ -141,7 +141,7 @@ not listed here is **not required for first light** (§9 says why).
 0x2930 u32  constraint_set4_flag           = 0
 0x2934 u32  constraint_set5_flag           = 0
 0x2938 u32  eLevel                         = 12       /* -> level_idc 40 (4.0) */
-0x293C u32  seq_parameter_set_id           = 0        /* MUST be 0, §5.8 */
+0x293C u32  seq_parameter_set_id           = 0        /* MUST be 0, §5.5 */
 0x2940 u32  chroma_format_idc              = 1        /* 4:2:0 */
 0x2944 u32  separate_colour_plane_flag     = 0
 0x2948 u32  bit_depth_luma_minus8          = 0
@@ -149,7 +149,8 @@ not listed here is **not required for first light** (§9 says why).
 0x2951 u8   qpprime_y_zero_transform_bypass_flag = 0
 0x2958 u8   seq_scaling_matrix_present_flag= 0
 0x2D34 u32  log2_max_frame_num_minus4      = 0
-0x2D38 u32  pic_order_cnt_type             = 2        /* 2 = display order == coding order */
+0x2D38 u32  pic_order_cnt_type             = 2        /* 2 = display order == coding order.
+                                                        1 is unusable, §5.6 */
 0x2D3C u32  log2_max_pic_order_cnt_lsb_minus4 = 0     /* unused when poc_type == 2 */
 0x2D44 u32  max_num_ref_frames             = 1        /* see §8 risk */
 0x2D48 u8   gaps_in_frame_num_value_allowed_flag = 0
@@ -164,13 +165,14 @@ not listed here is **not required for first light** (§9 says why).
 0x2DC0 u32  frame_crop_top_offset          = 0
 0x2DC4 u32  frame_crop_bottom_offset       = 4        /* (1088-1080)/2, CropUnitY=2 */
 0x2DC8 u8   bFWCreatesHeader               = 1        /* MUST equal PPS's, see §5.1 */
+0x2DCC u32  SPS header_len                 = 0        /* MUST be 0 on input, §5.2 */
 
 /* ===== H264_PICTURE_HEADER_PARAMS  (PPSParams), 0x180 bytes =========== */
-0x2FD0 u32  pic_parameter_set_id           = 0
-0x2FD4 u32  seq_parameter_set_id           = 0
-0x2FD8 u32  entropy_coding_mode_flag       = 1        /* 1 CABAC, 0 CAVLC; §5.2 */
+0x2FD0 u32  pic_parameter_set_id           = 0        /* forced to 0 anyway, §5.5 */
+0x2FD4 u32  seq_parameter_set_id           = 0        /* forced to 0 anyway, §5.5 */
+0x2FD8 u32  entropy_coding_mode_flag       = 1        /* 1 CABAC, 0 CAVLC; §5.8 */
 0x2FDC u8   bottom_field_pic_order_in_frame_present_flag = 0
-0x2FE0 u32  num_slice_groups_minus1        = 0
+0x2FE0 u32  num_slice_groups_minus1        = 0        /* MUST be 0, §5.7 */
 0x2FE8 u32  num_ref_idx_l0_default_active_minus1 = 0
 0x2FEC u32  num_ref_idx_l1_default_active_minus1 = 0
 0x2FF0 u8   weighted_pred_flag             = 0
@@ -429,9 +431,33 @@ itself from the two structs**, and `= 0` means the host must have supplied the
 RBSP bytes and the bit lengths. For a driver, 1 is strictly less work and is
 what `AVC_SPS::SetDefaultParams` (kext `0xfffffe0008cbe75c`) writes.
 
-### 5.2 Combined header size ≤ 2048 bytes → else **-1019**
+### 5.2 `SPS.header_len` must be zero on input → else **-1001**
 
-`0x6d820`–`0x6d834`:
+`AVC_SPS::Generate` (`0x41b24`) constructs the bit writer over
+`SPSparams + 0x4B4` with a 512-byte cap and emulation-prevention on
+(`0x41b50`–`0x41b5c`), and then refuses to run if the length field is not clear:
+
+```
+41b68:  ldr  w8, [x8, #1200]      ; SPSparams + 1200 = header_len
+41b6c:  cbz  w8, 0x41bcc          ; zero -> proceed to seq_parameter_set_rbsp
+        ... log "%s::%s:%d %s | m_psParams->header_len(%d) %p" (0x123faa)
+41bc4:  mov  w20, #0xfffffc17     ; -1001
+```
+
+**Confirmed.** A driver that memsets the command and never touches `0x2DCC`
+is fine; one that "helpfully" fills in a length is not. `AVC_PPS::Generate`
+(`0x42f10`) does **not** have this trap — it zeroes `PPSparams + 124` itself at
+`0x42f9c` when its 5th argument is non-zero, and the AVC call site passes
+`w5 = 1` (`0x6d818`). **Confirmed.**
+
+### 5.3 Header size caps
+
+Two separate caps, both **confirmed**:
+
+* `AVC_PPS::pic_parameter_set_rbsp` returns **-1003** if the accumulated PPS
+  length reaches `0x800` **bits** (`0x42ee4`–`0x42ef8`).
+* `InitEncodingParameters` returns **-1019** if the two lengths together exceed
+  `0x800` **bytes**:
 
 ```
 6d820:  ldr w8, [x28, #1204]       ; SPSparams + 1200 = SPS header length (bits)
@@ -442,10 +468,71 @@ what `AVC_SPS::SetDefaultParams` (kext `0xfffffe0008cbe75c`) writes.
 6d834:  b.hi 0x6e0c0               ; -> mov w0, #0xfffffc05 = -1019
 ```
 
-**Confirmed.** With `bFWCreatesHeader = 1` the lengths are whatever the
-generator produced, so this only bites on an absurd VUI/scaling-list load.
+`AVE_PSInfo_Make` (`0xe8f64`) adds three more: `psType ∈ 1..3` (2 = SPS,
+3 = PPS), the index argument `< 2`, `(bits & 7) == 0`, and the total
+parameter-set payload `< 0x801` bytes (`0xe8fd8`, `0xe8fe4`, `0xe8fec`,
+`0xe9198`). With `bFWCreatesHeader = 1` all of these are the generator's
+problem, not the driver's.
 
-### 5.3 `entropy_coding_mode_flag` must be 0 or 1
+### 5.4 `sComm.FrameRate` must be greater than zero
+
+`CAVCController::InitFlatMbLowQPParams` (`0x6e504`, called from
+`InitEncodingParameters` at `0x6d6b0`) panics:
+
+```
+6e690:  bl   0xe08fc               ; abort
+6e6a4:  add  x19, x19, #0x2cf      ; "EncCommParams.sAlgCfg.sComm.iFrameRate > 0"
+```
+
+(string file `0x1262cf`, VA `0x1262cf`). **Confirmed.** `cmd + 0x220` must be
+non-zero. `CAVECommonController::GetFrameType` also divides the per-frame
+bitrate by it (`0x73610`), so zero would be a divide-by-zero later even without
+the assert.
+
+### 5.5 Parameter-set ids
+
+`InitEncodingParameters` calls `AVC_PPS::Generate` with `w1 = 0, w2 = 0`
+(`0x6d800`–`0x6d804`), and `Generate` stores those into
+`PPSParams.seq_parameter_set_id` and `PPSParams.pic_parameter_set_id`
+(`0x43000`, `0x43010`). So the PPS always references SPS **0** and always calls
+itself PPS **0**, whatever the host wrote.
+
+`SPS.seq_parameter_set_id` (`cmd + 0x293C`) is **not** overridden — it goes
+straight to `WriteUE` at `0x41d50`. **So it must be set to 0**, or the PPS will
+reference a sequence parameter set that does not exist and no decoder will
+start. **Confirmed**, and this is a genuine foot-gun: the kext's
+`AVC_SPS::SetDefaultParams` sets it to **1**.
+
+### 5.6 `pic_order_cnt_type = 1` is unusable
+
+`AVC_SPS::AVC_SPS` (`0x41adc`) zeroes the object fields the writer uses for
+`offset_for_non_ref_pic`, `offset_for_top_to_bottom_field`,
+`num_ref_frames_in_pic_order_cnt_cycle` and `offset_for_ref_frame[]`
+(`stp wzr,wzr,[x19,#8]`/`[x19,#16]`; read back at `0x42374`–`0x423d8`), and
+those fields are **not** in `H264_SEQUENCE_HEADER_PARAMS`. `mb_adaptive_frame_
+field_flag` is the same (`0x423fc`). **Confirmed.** Use `pic_order_cnt_type`
+0 or 2; 2 is right for I-only. The writer additionally errors `-1001` if
+`num_ref_frames_in_pic_order_cnt_cycle > 256` (`0x423a8`) — unreachable from
+the host.
+
+### 5.7 `num_slice_groups_minus1` — a fatal combination
+
+`AVC_Slice::slice_header` (`0x433a0`) with `x19 = H264_PICTURE_HEADER_PARAMS*`:
+
+```
+43750:  ldr w8, [x19, #16]         ; num_slice_groups_minus1
+43754:  cbz w8, 0x437fc            ; 0 -> fine
+43758:  ldr w8, [x19, #20]         ; slice_group_map_type
+4375c:  sub w8, w8, #0x3
+43760:  cmp w8, #0x2
+43764:  b.hi 0x437fc               ; map type outside 3..5 -> fine
+43768:  bl  0xe08fc                ; abort, then log + spin
+```
+
+**Confirmed.** `num_slice_groups_minus1 != 0` with `slice_group_map_type ∈
+{3,4,5}` is a firmware abort, not an error return. Keep `cmd + 0x2FE0` at 0.
+
+### 5.8 `entropy_coding_mode_flag` must be 0 or 1
 
 `CAVCController::ProcessRateControlAccumulateBits` (`0x7075c`) reads the flag
 and dispatches; any value other than 0 or 1 logs
@@ -454,7 +541,7 @@ at `0x70828` and `0x70878`) and falls back to 0 or 1 depending on the branch.
 **Confirmed as a range check.** It does not abort the session, but a stream
 built on the fallback would disagree with the emitted PPS.
 
-### 5.4 `RCMode` is checked, and QP is bit-depth-shifted
+### 5.9 `RCMode` is checked, and QP is bit-depth-shifted
 
 `CRateControl::Check_RCMode` (`0xf830`) is documented in docs/20 §3.3: it
 *rejects* 20 and 100 and accepts everything else. `RCMode = 3` for constant QP
@@ -479,7 +566,7 @@ offsets them by `6 * bit_depth_luma_minus8` internally. With
 confirmation of the `0x240/0x244/0x248` and `0x298/0x29C` offsets from docs/20
 §3.3, read out of a completely different function. **Confirmed.**
 
-### 5.5 `sSliceMap.iNum`
+### 5.10 `sSliceMap.iNum`
 
 `AVE_CreateSliceMapRows(const _S_AVE_SliceMap*, _E_AVE_DevCap_Type, u8*)`
 (`0x721d4`) is called from `InitEncodingParameters` at `0x6e014` with
@@ -503,7 +590,7 @@ with 8-byte entries starting at `+8` whose first word is a row count
 `iNum = 1` gives one slice per frame, and the derived slice count the encoder
 reports is then `map[height_in_mbs - 1] + 1 = 1` (`0x5877c`, `0xb3fc8`).
 
-### 5.6 Width and height are *not* range-rejected at Start
+### 5.11 Width and height are *not* range-rejected at Start
 
 docs/20 §3.4 recorded `cmd[0x2708] == 1` as gating "the width ≤ 4096 path".
 Reading it wide (`ProcessCmd_Start` `0x326c8`–`0x327fc`) shows it is **not a
@@ -587,68 +674,134 @@ found. Do not rely on it being enforced; rely on it being required.
 
 ---
 
-## 7. `_S_AVE_PSContext` — `cmd + 0x27C8`, 0x154 bytes
+## 7. `_S_AVE_PSContext` — `cmd + 0x27C8`, 0x154 bytes of a 0x954 struct
 
 The 0x154-byte block docs/20 §3.1 listed as "`memcpy` from `client + 0x417C`"
-is the **parameter-set index table**, the output side of the header generator:
-`AVC_SPS::Generate(_S_AVE_PSContext*)` and `AVC_PPS::Generate(…,
-_S_AVE_PSContext*)` both take it (fw `0x41b24`, `0x42f10`; the AVC path passes
-`x21 = this + 0xFAC` at `0x6d7d4`, its own copy).
+is the **parameter-set descriptor table**, the output side of the header
+generator: `AVC_SPS::Generate(_S_AVE_PSContext*)` (`0x41b24`) and
+`AVC_PPS::Generate(…, _S_AVE_PSContext*)` (`0x42f10`) both take one, and the AVC
+call site passes its own copy at `this + 0xFAC` (`0x6d7d4`). The finished
+context is `memcpy`'d to the hardware by
+`CAVECommonController::SetPSContext(const _S_AVE_PSContext*, u64)` (`0x782a0`),
+which moves `0x954` bytes to `hwbase + 0xB150` (`0x78338`).
 
 Layout, from `AVE_PSInfo_Make(const u8*, _E_AVE_PSType, int, int,
 _S_AVE_PSContext*)` (kext `0xfffffe0008c491f0`, fw `0xe8f64`):
 
 ```c
-struct _S_AVE_PSContext {          /* 0x154 */
-    /* 0x000 */ uint32_t iNum;                 /* entry count */
-    /* 0x004 */ struct { uint32_t eType;       /* _E_AVE_PSType, checked 1..3 */
+struct _S_AVE_PSContext {              /* 0x954 total */
+    /* 0x000 */ uint32_t iNum;                 /* descriptor count */
+    /* 0x004 */ struct { uint32_t eType;       /* _E_AVE_PSType, checked 1..3
+                                                  (2 = SPS, 3 = PPS) */
                          uint32_t iLayerID;    /* checked < 2 */
-                         uint32_t iOffset;     /* bits  -- inferred */
-                         uint32_t iSize; }     /* bits  -- inferred */
-                saBuf[21];
+                         uint32_t iOffset;     /* bytes  -- inferred */
+                         uint32_t iSize; }     /* bytes  -- inferred */
+                saBuf[21];                     /* ends at 0x154 */
+    /* 0x154 */ uint8_t  iaPSData[2048];       /* the SPS/PPS NAL bytes */
 };
 ```
 
-`4 + 21*16 = 340 = 0x154` exactly. The `iOffset`/`iSize` names come from the
-assert `(psPSInfo->saBuf[iNum].sBuf.iOffset + psPSInfo->saBuf[iNum].sBuf.iSize)
-<= (int32_t)sizeof(psPSContext->iaPSData)` (file `0x136615`) and from the
+`4 + 21*16 = 340 = 0x154` and `0x154 + 0x800 = 0x954`. **The Start command
+carries only the first `0x154`** — the descriptor table, not the payload. That
+resolves docs/20 §4.1's open question: `sCAveCmdAvcProcess + 0x48` is a `0x954`
+block from the *same* source (`client + 0x417C`), i.e. **the Process command
+carries the whole `_S_AVE_PSContext` including the parameter-set NAL bytes**,
+and Start carries the header of it. `0x954 = 0x154 + 0x800` is the arithmetic
+that makes docs/20 §4.1's "0x954-byte per-picture parameter block, Start sends a
+prefix" concrete. **Inferred** from the two sizes and the shared source; the
+`Process + 0x48` consumer was not disassembled.
+
+The `iOffset`/`iSize` names come from the assert
+`(psPSInfo->saBuf[iNum].sBuf.iOffset + psPSInfo->saBuf[iNum].sBuf.iSize) <=
+(int32_t)sizeof(psPSContext->iaPSData)` (file `0x136615`) and from the
 running-offset computation `ldp w8,w9,[x8,#-8]; add w8,w8,w9` (kext
 `0xfffffe0008c49568`); the *field-to-offset* binding is **inferred**, the size
 arithmetic is confirmed.
 
-**Not required for first light**: with `bFWCreatesHeader = 1` the firmware fills
-its own copy. Leave the block zero. The firmware logs
-`"%s::%s:%d PSInfo num %d"` (`0x6d868`) and `"no PSInfo"` (file `0x12bf1b`)
-around it.
+**Not required for first light**: with `bFWCreatesHeader = 1` the firmware
+builds its own context from scratch. Leave `cmd + 0x27C8 … 0x291B` zero. The
+firmware logs `"%s::%s:%d PSInfo num %d"` (`0x6d868`) and `"no PSInfo"`
+(file `0x12bf1b`) around it.
 
 ---
 
-## 8. `_S_AVE_Session_PFCfg`
+## 8. `_S_AVE_Session_PFCfg` — located, and it is not in this command
 
-The roadmap lists this as unmapped. What is now established:
+The roadmap lists this as unmapped. It is now placed: **`_S_AVE_Session_PFCfg`
+is `AVE_PICMGMT_PARAMS + 0x0000 .. 0x1737`** — the *per-frame* head that lives
+at `sCAveCmdAvcProcess + 0x12C0`, which docs/32 §4 already partly mapped without
+having a name for it. The "Session" in the name means "this session's per-frame
+config"; it is the per-frame sibling of the `_S_AVE_*_Cfg` family docs/20 §3.2
+mapped into the Start command. **It is not in `sCAveCmdAvcStart` at all.**
 
-* It is **argument 4 of `H264VideoEncoderDPB::ManageDPBBuffer`** (fw `0x1b0f8`),
-  alongside `AVE_PICMGMT_RC_UPDATE_DATA*` (arg 3) and `AVE_PICMGMT_PARAMS*`
-  (arg 8). **Confirmed** from the mangled symbol.
-* The kext has a matching family of printers — `AVE_GOP_PrintPFCfg`,
-  `AVE_RC_PrintPFCfg`, `AVE_Ref_PrintPFCfg`, `AVE_QPMod_PrintPFCfg`,
-  `AVE_MCTF_PrintPFCfg`, `AVE_GGM_PrintPFCfg`, `AVE_LambdaMod_PrintPFCfg`,
-  `AVE_Enc_PrintPFCfg` — parallel to the `_S_AVE_*_Cfg` family that docs/20 §3.2
-  mapped into `cmd + 0x208 … 0x367`. **Confirmed** that the family exists (the
-  os_log format symbols are in `data/derived/kext-symbols.txt`).
-* **Not required for first light.** Nothing in `ProcessCmd_Start`
-  (`0x31e44`–`0x32800`) or `CAVCController::InitEncodingParameters`
-  (`0x6b8b0`–`0x6e440`) reads a per-frame config family; the DPB manager is the
-  only consumer found, it runs per frame, and every field the minimal recipe
-  needs was located elsewhere. A driver can leave whatever region it occupies
-  zero for a first bring-up.
+Four independent confirmations:
 
-Its **offset inside `sCAveCmdAvcStart` is unknown**. It is not in the SPS block,
-not in the PPS block, and not in `_S_AVE_PSContext`; if it is in the command at
-all it is inside `VideoParams` (`0x368 … 0x27C7`) or the `0x68 … 0x207` head.
-Recording the honest answer rather than a guess: **unknown**, with the entry
-point for the next pass being a caller of `0x1b0f8` — read what it passes in
-`x4` and walk that pointer back.
+1. `CAVCController::PipePrepareParam` stores the `AVE_PICMGMT_PARAMS*` into the
+   `_S_AVE_Session_PFCfg*` slot: `0x586b8` `mov w9,#0x37d8` / `add x9,x19,x9` /
+   `0x586c4` `str x21,[x9,x8,lsl#3]`, where `x21` is provably the PICMGMT
+   pointer (it is dereferenced at `+20328` = `sFrameInfo.FrameNum` @ `0x4F68`
+   and `+20392` = fps @ `0x4FA8`, both from docs/32 §3). `CAVCController::
+   setLRME` does the same at `0xb3f64`.
+2. `CAVCController::ManageDPB` loads argument 4 of `ManageDPBBuffer` out of that
+   array (`0x59588` `ldr x4,[x11,#14296]`) and passes the current PICMGMT as
+   argument 8 (`0x595c4`).
+3. The three offsets `ManageDPBBuffer` reads off `x4` — `0x000` (`0x1b17c`),
+   `0x360` (`0x1b188`), `0x3A0` (`0x1b174`) — are exactly the offsets docs/32
+   §4 had already named as the firmware-read fields of the PICMGMT head.
+4. `CAVECommonController::GetThroughputMode` (`0x813d8`) dereferences the same
+   array and reads `+960` = `0x3C0` = `eThroughputMode`, which docs/32 §4 named
+   from the host-side log.
+
+Host side: `AVE_CHM_SetDataInfo_RC` does `memcpy(PICMGMT+0, FrameInfo+0x5CB8,
+0x1738)` (`0xfffffe0008b69184`), and `sRCUpdateData` starts at PICMGMT `0x1738`
+— so **`sizeof(_S_AVE_Session_PFCfg) = 0x1738`**, and only its first `0x3D0`
+bytes ever reach the AVC firmware (docs/32 §0). **Confirmed.**
+
+### Layout, for whoever needs it later
+
+`_S_AVE_Alg_PFCfg` sits at `+0x348`. The anchor is `_S_AVE_GOP_PFCfg` at
+`_S_AVE_FrameInfo + 0x6050` = PFCfg `+0x398` (three consumers agree:
+`AVE_MD_SVE::DispatchCmd` `0xfffffe0008c8f1a0`, `AVE_LAGOP::GOPDecision`
+`0xfffffe0008c347e8`, `AVE_MD::ProcessInputCmd_Process` `0xfffffe0008b4d370`),
+and `AVE_Alg_PrintPFCfg` (`0xfffffe0008cd41d4`) puts GOP at `Alg + 0x50`.
+
+| PFCfg off | member | status |
+|---:|---|---|
+| `0x000` | `u64` session feature word; firmware reads bits 0 and 1 | confirmed |
+| `0x348` | `_S_AVE_Alg_PFCfg` | inferred from the `+0x50` anchor |
+| `0x350` | `int FrameRate` | confirmed (`"%p FrameRate: %d"`) |
+| `0x358` | `_S_AVE_RC_PFCfg`: `+0 u64 OpFlag`, `+8 int Bitrate`, `+0xC int QP`, `+0x10 int DRL`, `+0x18..+0x30` 4×double, `+0x38 double CRFScale` | confirmed (`AVE_RC_PrintPFCfg` `0xfffffe0008bffe98`) |
+| `0x398` | `_S_AVE_GOP_PFCfg`: `+0 u32 OpFlag`, `+4 int GOPSwitch` | confirmed |
+| `0x3A0` | `_S_AVE_Ref_PFCfg`: `+0 u32 OpFlag` (firmware reads bit 1) | confirmed |
+| `0x3A4` | `_S_AVE_QPMod_PFCfg`: `OpFlag`, `+4 Feature` | confirmed |
+| `0x3AC` | `_S_AVE_LambdaMod_PFCfg`: `OpFlag`, `+4 Feature` | confirmed |
+| `0x3B4` | `_S_AVE_ModeDec_PFCfg`: `OpFlag` | confirmed |
+| `0x3C0` | `int eThroughputMode` | confirmed (docs/32 §4) |
+| `0x3D0` | `_S_AVE_GGM_PFCfg` — mode enum, host checks `∈ {1,2}` | confirmed offset, fields unnamed |
+
+None of the `*_PrintPFCfg` functions has a caller anywhere in the kext (a `bl`
+scan over `__TEXT_EXEC` finds none), which is why this family was never reached
+from `AVE_Client_Enc_PrintAll` the way the `_Cfg` family was.
+
+### Verdict: leave it zero
+
+The AVC firmware reads exactly five things out of these 5944 bytes:
+
+| PFCfg off | field | read at |
+|---:|---|---|
+| `0x000` bits 0,1 | session feature word | `0x73634`, `0x1b17c`, `0xb39b0` |
+| `0x360` | `sAlg.sRC.Bitrate` | `0x73610` (divided by the session frame rate), `0x1b188`, `0xb399c` |
+| `0x3A0` bit 1 | `sAlg.sRef.OpFlag` | `0x73624`, `0x1b174`, `0xb3994` |
+| `0x3AA` bit 0 | byte 2 of `sAlg.sQPMod.Feature` | `CAVCController::setPipe` `0xb73f8` |
+| `0x3C0` | `eThroughputMode` | `0x81404`; falls back to the session value at `0x81434` when 0 |
+
+All-zero is not merely tolerated, it is the safest value: both feature bits off,
+the Ref bit off, `setPipe` on its plain path, and `GetThroughputMode` falling
+back to the Start-time session setting. No range check or assert reads any of
+them. **`sAlg.sRC.QP` at `0x364` has no observed firmware read at all** — a
+per-frame QP field exists in the wire block, and the AVC firmware ignores it,
+which sharpens docs/32 §1's "per-frame QP does not exist" into "it exists and is
+dead".
 
 ---
 
@@ -695,7 +848,7 @@ Stated so the next person does not spend a day on them.
   read". Its first member is `saRecon[16]`, stride `0x20`. §6.
 * **docs/20 §3.4** described `cmd[0x2708]` as gating "the width ≤ 4096 path",
   which reads as validation. It is a large-frame boolean; there is no width or
-  height validation at Start at all. §5.6.
+  height validation at Start at all. §5.11.
 * **docs/32 §6.4** left `EncCommParams.bitstream_addr_dst[index]` unlocated. It
   is `sCAveCmdAvcStart + 0x0D50 + 16·index`. §6.
 * **docs/04 roadmap** lists `_S_AVE_Session_PFCfg` as the unmapped struct to
