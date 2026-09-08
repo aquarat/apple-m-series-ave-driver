@@ -61,6 +61,7 @@ struct ave_device {
 	 * instead of dropping it, and ave_recv_iop_msg() accepts either
 	 * source.
 	 */
+	bool			powered;   /* holds a runtime-PM ref from stage 6 */
 	bool			hs_seen;
 	u32			hs_status;
 	u32			hs_scratch[4];
@@ -101,6 +102,11 @@ static inline void ave_write(struct ave_device *ave, unsigned int bank,
 			     u32 off, u32 val)
 {
 	writel_relaxed(val, ave->bank[bank].base + off);
+}
+
+static inline u64 ave_read64(struct ave_device *ave, unsigned int bank, u32 off)
+{
+	return readq_relaxed(ave->bank[bank].base + off);
 }
 
 static inline void ave_write64(struct ave_device *ave, unsigned int bank,

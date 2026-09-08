@@ -217,6 +217,7 @@ int ave_fw_load(struct ave_device *ave)
 	const struct firmware *fw;
 	struct iommu_domain *domain;
 	phys_addr_t pa;
+	u64 fwreg, map_iova;
 	size_t span, size;
 	int ret;
 
@@ -262,6 +263,29 @@ int ave_fw_load(struct ave_device *ave)
 	}
 
 	pa = iommu_iova_to_phys(domain, ave->fw.iova);
+
+	/*
+	 * Map where the coprocessor actually fetches, not where we would like
+	 * it to.
+	 *
+	 * The ASC firmware-base register (ASC+0x50000) is programmed by iBoot
+	 * and our writes to it are ignored - it reads back unchanged. Its base
+	 * field is an IOVA, not a physical address, and the core fetches
+	 * through this DART at that IOVA. Mapping the image at 0 instead
+	 * produced a translation fault on stream 0 at base+0x200, repeating
+	 * forever (docs/31).
+	 *
+	 * So we take the address from the register rather than choosing one.
+	 */
+	fwreg = ave_read64(ave, AVE_BANK_ASC, AVE_ASC_FW_BASE);
+	map_iova = fwreg & AVE_ASC_FW_BASE_MASK;
+	if (!map_iova) {
+		dev_warn(ave->dev,
+			 "fw-base register is %#llx; falling back to IOVA 0\n", fwreg);
+		map_iova = AVE_FW_IOVA;
+	}
+	dev_info(ave->dev, "  fw-base register %#llx -> mapping image at IOVA %#llx\n",
+		 fwreg, map_iova);
 	if (!pa) {
 		dev_err(ave->dev, "cannot resolve iova %pad to a phys addr\n",
 			&ave->fw.iova);
@@ -272,10 +296,11 @@ int ave_fw_load(struct ave_device *ave)
 	dev_info(ave->dev, "  iova %pad -> phys %pa, mapping at IOVA 0\n",
 		 &ave->fw.iova, &pa);
 
-	ret = iommu_map(domain, 0, pa, size,
+	ret = iommu_map(domain, map_iova, pa, size,
 			IOMMU_READ | IOMMU_WRITE, GFP_KERNEL);
 	if (ret) {
-		dev_err(ave->dev, "iommu_map at IOVA 0 failed: %d\n", ret);
+		dev_err(ave->dev, "iommu_map at IOVA %#llx failed: %d\n",
+			map_iova, ret);
 		goto err_free;
 	}
 	ave->fw.mapped_at_zero = true;

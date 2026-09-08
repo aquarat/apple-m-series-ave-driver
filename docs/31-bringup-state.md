@@ -270,3 +270,44 @@ as opposed to a status mirror, and whether the core is executing anything.
 Do not read the silence as evidence about the handshake, the DART mapping or
 the boot config. If the core is not fetching our image, none of those have
 been tested yet.
+
+### Resolved: the core runs, and it fetches at an IOVA we never mapped
+
+The DART log settles it. During and after the run:
+
+```
+apple-dart 40d040000.iommu: translation fault: status:0x80000800
+    stream:0 code:0x800 (unknown) at 0x10000b28200
+```
+
+`0x10000b28200` is the fw-base register's base field (`0x10000b28000`) plus
+`0x200`. So:
+
+- **The core is executing.** It is not dead, not held in reset, and it did not
+  fault internally - it is issuing instruction fetches.
+- **The register's base field is an IOVA, not a physical address.** The fetch
+  goes through DART `40d040000` and faults because we mapped the image at
+  IOVA 0 and it is reading at `0x10000b28000`.
+- **Instruction fetch uses stream 0**, not stream 15. That retires the
+  standing SID-15/bypass hypothesis in [04](04-roadmap.md) phase 3 as the
+  explanation for the silence: fetch translates, on SID 0, and the DART is
+  configured well enough to report the fault.
+- **We cannot repoint it**, since the register ignores our writes. So the
+  driver must map the image *where the register says*, which is what
+  `ave_fw.c` now does - it reads the base out of the register instead of
+  choosing IOVA 0.
+
+This also explains the silence completely without needing the handshake, the
+boot config or cache coherency to be wrong: the core never executed a single
+instruction of our image, so none of that had been exercised.
+
+Note the first fetch is at `base + 0x200`, not `base`. Unexplained; possibly a
+vector table or header offset. Worth watching once it boots.
+
+### Hazard found the hard way: the fault storm outlives the driver
+
+Left alone, the faulting core generated roughly **260,000 DART interrupts per
+second** and kept doing so after `rmmod`, because the staged probe takes a
+runtime-PM reference at stage 6 and `ave_stop()` only unwinds a fully started
+device. `ave_remove()` now halts the core (`CPU_CONTROL = 0`) and drops that
+reference, so unbinding really does stop it.
