@@ -211,3 +211,62 @@ write as "we are writing to a core that has been running since an earlier
 experiment" has no support. And the real cause of the silence is now
 [40](40-firmware-io-base.md) — the firmware's I/O base is zero in the image we
 load, so it was never addressing the registers this document describes.
+
+---
+
+## Run of 2026-09-08, first with a non-zero I/O base
+
+Kernel `7.1.13-401.asahi.vrr1`, commit `3aa5493` plus the tag-stride fix.
+Logs: `results/handshake-20260908-2116*.log`.
+
+**No hang, no crash, no reset.** Stages 1-15 all completed and the module
+unloaded cleanly afterwards.
+
+What changed and what did not:
+
+| | |
+|---|---|
+| `IOBA` patch | applied: `0x0 -> 0x20c000000`, `IOSZ -> 0x2000000` |
+| firmware | mapped at IOVA 0, `0x268000` bytes, phys `0x10008800000` |
+| boot config | staged; scratch0 `0x08042006`, scratch1 = cfg IOVA |
+| `CPU_STATUS` | `0x2a -> 0x2c` (the core starts) |
+| firmware message | **none**, 2 s timeout |
+| `gs_psCfg` | still 0 |
+| `__rtk_crashlog_local_buffer` | still 0 |
+| log ring | `rd=0 wr=0` |
+
+So the I/O base was necessary but not sufficient. Note the crashlog buffer is
+*also* zero: this is not a firmware that ran and faulted, it is a firmware
+that appears not to have executed our image at all.
+
+### The next lead: the ASC firmware-base register write is ignored
+
+Stage 12 writes the image base to `ASC+0x50000` and reads it straight back:
+
+```
+ASC+0x50000 BEFORE any write = 0x102010000b28001  (base field 0x10000b28000)
+writing fw base 0x102000000000000 ...
+readback                     = 0x102010000b28001   <- unchanged
+```
+
+**On a cold boot, before we have written anything, the register already holds
+a fully-formed value**: tag `0x0102` — exactly `AVE_ASC_FW_BASE_TAG` — bit 0
+set, and a base field of `0x10000b28000`. That is iBoot's programming, and our
+write does not take.
+
+Two things follow. First, our image is at phys `0x10008800000`, so whatever
+that register points at, **it is not what we loaded**. Second, `0x10000b28000`
+is not in `/proc/device-tree/reserved-memory` either — the `asc-firmware`
+carve-outs on this machine begin at `0x10000c68000` — so it is not simply a
+pointer to a preserved iBoot copy of the AVE firmware sitting in a region we
+could adopt.
+
+The register being pre-programmed and write-ignored is consistent with it
+being locked at a higher security level than Linux runs at, which is the class
+of thing m1n1 exists to set up. **Confirmed:** the write is ignored (readback).
+**Unknown:** whether it is locked, whether `0x50000` is the write path at all
+as opposed to a status mirror, and whether the core is executing anything.
+
+Do not read the silence as evidence about the handshake, the DART mapping or
+the boot config. If the core is not fetching our image, none of those have
+been tested yet.
