@@ -198,7 +198,7 @@ int ave_boot_config(struct ave_device *ave)
 	 * Size is a guess: gs_saAVE_SurfaceCfg carries no size field, and the
 	 * real size comes from a per-surface calculation we have not mapped.
 	 */
-	ave->fwlog.size = SZ_1M;
+	ave->fwlog.size = AVE_FWLOG_SIZE;
 	ave->fwlog.cpu = dma_alloc_coherent(ave->dev, ave->fwlog.size,
 					    &ave->fwlog.iova, GFP_KERNEL);
 	if (!ave->fwlog.cpu)
@@ -212,6 +212,25 @@ int ave_boot_config(struct ave_device *ave)
 				  ave->fwlog.iova);
 		ave->fwlog.cpu = NULL;
 		return -ENOMEM;
+	}
+
+	/*
+	 * Initialise the log ring header before the firmware ever looks at it.
+	 * The per-subsystem level table is host memory that the firmware reads
+	 * live but never writes, and it maps the buffer once at init - so
+	 * levels must be set now, not later.
+	 */
+	{
+		u8 *h = ave->fwlog.cpu;
+
+		memset(h, 0, AVE_FWLOG_RING_OFF);
+		*(__le32 *)(h + AVE_FWLOG_HDR_RING_OFF)  = cpu_to_le32(AVE_FWLOG_RING_OFF);
+		*(__le32 *)(h + AVE_FWLOG_HDR_RING_SIZE) = cpu_to_le32(AVE_FWLOG_RING_SIZE);
+		*(__le32 *)(h + AVE_FWLOG_HDR_UNK_10C)   = cpu_to_le32(25);
+		*(__le32 *)(h + AVE_FWLOG_HDR_UNK_110)   = cpu_to_le32(20000);
+		h[AVE_FWLOG_HDR_CONF + AVE_LOG_SUBSYS_CMDPROC] = AVE_LOG_LEVEL_DBG;
+		h[AVE_FWLOG_HDR_CONF + AVE_LOG_SUBSYS_AVC]     = AVE_LOG_LEVEL_DBG;
+		h[AVE_FWLOG_HDR_CONF + AVE_LOG_SUBSYS_HEVC]    = AVE_LOG_LEVEL_DBG;
 	}
 
 	cfg = ave->fwcfg.cpu;
@@ -270,24 +289,77 @@ int ave_recv_iop_msg(struct ave_device *ave, u32 out[4], unsigned int timeout_ms
 	return -ETIMEDOUT;
 }
 
-/* Dump whatever the firmware has written into its log surface. */
+/*
+ * Drain the firmware log ring.
+ *
+ * Entries are NUL-terminated strings packed back to back; the counters are
+ * free-running and wrap modulo the ring size.
+ */
 void ave_fw_log_dump(struct ave_device *ave)
 {
-	const u8 *p = ave->fwlog.cpu;
-	size_t i, nonzero = 0;
+	u8 *h = ave->fwlog.cpu;
+	u32 rd, wr, ring;
+	char line[256];
+	unsigned int n = 0;
 
-	if (!p)
+	if (!h)
 		return;
-	for (i = 0; i < ave->fwlog.size; i++)
-		if (p[i])
-			nonzero++;
 
-	dev_info(ave->dev, "  fw log surface: %zu non-zero bytes of %zu\n",
-		 nonzero, ave->fwlog.size);
-	if (nonzero)
-		print_hex_dump(KERN_INFO, "ave fwlog: ", DUMP_PREFIX_OFFSET,
-			       16, 1, p, min_t(size_t, 256, ave->fwlog.size),
-			       true);
+	ring = le32_to_cpu(*(__le32 *)(h + AVE_FWLOG_HDR_RING_SIZE));
+	rd   = le32_to_cpu(*(__le32 *)(h + AVE_FWLOG_HDR_RD));
+	wr   = le32_to_cpu(*(__le32 *)(h + AVE_FWLOG_HDR_WR));
+
+	dev_info(ave->dev, "  fw log: rd=%u wr=%u ring=%#x\n", rd, wr, ring);
+	if (!ring || rd == wr)
+		return;
+
+	while (rd != wr && n < 64) {
+		unsigned int i = 0;
+		char c;
+
+		do {
+			c = h[AVE_FWLOG_RING_OFF + (rd++ % ring)];
+			if (i < sizeof(line) - 1)
+				line[i++] = c;
+		} while (c && rd != wr);
+		line[i] = 0;
+		if (line[0])
+			dev_info(ave->dev, "  fw| %s\n", line);
+		n++;
+	}
+	*(__le32 *)(h + AVE_FWLOG_HDR_RD) = cpu_to_le32(rd);
+}
+
+/*
+ * Read the firmware image's own globals.
+ *
+ * The image is mapped at IOVA 0 out of a buffer we still hold a CPU pointer
+ * to, and it is linked at vmaddr 0, so a firmware VA is just an offset into
+ * that buffer. This needs no protocol at all and works even if the core is
+ * dead - which is exactly what makes it useful: it distinguishes "never
+ * executed" from "booted and rejected our configuration".
+ */
+void ave_fw_globals_dump(struct ave_device *ave)
+{
+	static const struct { u32 off; const char *name; } g[] = {
+		{ 0x195090, "gs_psCfg (NULL => AVE_Log_Output disabled)" },
+		{ 0x1950b0, "gs_psCfg+0x20" },
+		{ 0x2649a0, "__rtk_crashlog_local_buffer" },
+		{ 0x2649c8, "crashlog related" },
+	};
+	unsigned int i;
+
+	if (!ave->fw.cpu)
+		return;
+
+	dev_info(ave->dev, "  firmware globals (read straight out of our image buffer):\n");
+	for (i = 0; i < ARRAY_SIZE(g); i++) {
+		if (g[i].off + 8 > ave->fw.size)
+			continue;
+		dev_info(ave->dev, "    %#08x = %#018llx  %s\n", g[i].off,
+			 le64_to_cpup((__le64 *)((u8 *)ave->fw.cpu + g[i].off)),
+			 g[i].name);
+	}
 }
 
 int ave_ipc_init(struct ave_device *ave)

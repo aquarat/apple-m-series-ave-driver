@@ -487,6 +487,7 @@ static int ave_probe(struct platform_device *pdev)
 				 msg[0], msg[1], msg[2], msg[3]);
 		}
 		ave_fw_log_dump(ave);
+		ave_fw_globals_dump(ave);
 		ave_stage_ok(dev, AVE_STAGE_RECV_MSG);
 	} else {
 		return 0;
