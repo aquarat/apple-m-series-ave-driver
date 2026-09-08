@@ -102,7 +102,7 @@ not listed here is **not required for first light** (§9 says why).
 
 /* ---- session algorithm config (docs/20 §3.3) -------------------------- */
 0x0220 u32  sComm.FrameRate                = 30       /* MUST be > 0, §5.4 */
-0x0234 int  sRC.RCMode                     = 3        /* const-QP; INFERRED */
+0x0234 int  sRC.RCMode                     = 3        /* const-QP; CONFIRMED, doc 35 */
 0x0240 int  sRC.QP[I]                      = 26
 0x0244 int  sRC.QP[P]                      = 26       /* set anyway, see §5.9 */
 0x0248 int  sRC.QP[B]                      = 26
@@ -130,7 +130,7 @@ not listed here is **not required for first light** (§9 says why).
 0x25D4 s32  VideoParams.sSliceMap.iNum     = 1        /* one slice per frame */
 
 /* ---- input chroma ---------------------------------------------------- */
-0x26DC u32  input_chroma_format            = 1        /* 4:2:0; INFERRED name */
+/* 0x26DC RETRACTED - overwritten at fw 0x6c378; see doc 39. Do not set. */
 
 /* ===== H264_SEQUENCE_HEADER_PARAMS  (SPSparams), 0x6B4 bytes ========== */
 0x291C u32  eProfile                       = 6        /* -> profile_idc 100, High */
