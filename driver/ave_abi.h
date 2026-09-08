@@ -214,6 +214,42 @@ struct ave_fw_cfg {
 #define AVE_SURF_IDX_FWLOG	29
 
 /*
+ * Firmware log ring.
+ *
+ * The sink is a host-allocated shared buffer whose DART address goes in the
+ * boot config at +0x20. It needs no IPC channel, no doorbell and no interrupt:
+ * the firmware appends NUL-terminated strings into a byte ring and both sides
+ * track free-running counters. So this is readable even when nothing else
+ * works - including crash output, since RTK_platform_crashlog_complete prints
+ * the exception and call stack through AVE_Log_Output at subsystem 2.
+ *
+ * Header is 0x1DC bytes, ring starts at +0x200.
+ */
+#define AVE_FWLOG_HDR_RING_OFF	0x04	/* u32, = AVE_FWLOG_RING_OFF        */
+#define AVE_FWLOG_HDR_RING_SIZE	0x08	/* u32                              */
+#define AVE_FWLOG_HDR_CONF	0x0c	/* 256 bytes, one level per subsys  */
+#define AVE_FWLOG_HDR_UNK_10C	0x10c	/* u32, Apple writes 25             */
+#define AVE_FWLOG_HDR_UNK_110	0x110	/* u32, Apple writes 20000          */
+#define AVE_FWLOG_HDR_RD	0x154	/* u32 host read counter            */
+#define AVE_FWLOG_HDR_WR	0x198	/* u32 firmware write counter       */
+#define AVE_FWLOG_RING_OFF	0x200
+#define AVE_FWLOG_RING_SIZE	0x20000
+#define AVE_FWLOG_SIZE		(AVE_FWLOG_RING_OFF + AVE_FWLOG_RING_SIZE)
+
+/*
+ * Per-subsystem log levels: emit iff (abs(level) & 0xf) <= (conf & 0xf).
+ * 3 = CRIT ... 8 = DBG. Subsystems 0-4 bypass the table entirely, so crash and
+ * assertion output is unconditional.
+ *
+ * These three carry the dumps that name structure fields verbatim - 602, 1018
+ * and the command-processor sites respectively.
+ */
+#define AVE_LOG_LEVEL_DBG	8
+#define AVE_LOG_SUBSYS_CMDPROC	130
+#define AVE_LOG_SUBSYS_AVC	140
+#define AVE_LOG_SUBSYS_HEVC	145
+
+/*
  * Pixel formats.
  *
  * Enum names are not inferred - they come from the string pointer array at
