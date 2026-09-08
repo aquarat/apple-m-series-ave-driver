@@ -426,7 +426,20 @@ static int ave_probe(struct platform_device *pdev)
 		u64 v = (ave->fw.mapped_at_zero ? 0 : ave->fw.iova) &
 			AVE_ASC_FW_BASE_MASK;
 
+		u64 pre = readq_relaxed(ave->bank[AVE_BANK_ASC].base +
+					AVE_ASC_FW_BASE);
+
 		v |= AVE_ASC_FW_BASE_TAG;
+
+		/*
+		 * Read before writing. If iBoot pre-loaded AVE firmware this
+		 * register already points at it, and overwriting it would be
+		 * actively wrong. ISP is the precedent: its firmware IS
+		 * iBoot-preloaded and m1n1 reserves it, and ISP has the same
+		 * sids/bypass shape as AVE.
+		 */
+		dev_info(dev, "  ASC+0x%x BEFORE any write = %#llx  (base field %#llx)\n",
+			 AVE_ASC_FW_BASE, pre, pre & AVE_ASC_FW_BASE_MASK);
 		dev_info(dev, "  writing fw base %#llx to ASC+0x%x ...\n",
 			 v, AVE_ASC_FW_BASE);
 		ave_write64(ave, AVE_BANK_ASC, AVE_ASC_FW_BASE, v);
