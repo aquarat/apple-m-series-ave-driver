@@ -642,4 +642,58 @@ static inline u32 ave_coded_data_size_max(u32 w, u32 h, bool hevc)
 #define AVE_START_WIDTH			0x368	/* u32 */
 #define AVE_START_HEIGHT		0x36c	/* u32 */
 
+/*
+ * The H.264 parameter sets inside sCAveCmdAvcStart.
+ *
+ * These are verbatim H264_SEQUENCE_HEADER_PARAMS / H264_PICTURE_HEADER_PARAMS
+ * blocks, and the firmware carries its own exp-Golomb writer that turns them
+ * into the actual NAL units (AVC_SPS::seq_parameter_set_rbsp at fw 0x41c8c,
+ * AVC_PPS at 0x4288c). Fill these in correctly and the emitted stream is
+ * conformant by construction rather than by our getting the bit packing right.
+ *
+ * CAVCController::InitEncodingParameters copies both out of the command:
+ *   SPS  src cmd+0x291C  size 0x6B4  -> controller +0x247C4  (fw 0x6c024)
+ *   PPS  src cmd+0x2FD0  size 0x180  -> controller +0x24E78  (fw 0x6c070)
+ */
+#define AVE_START_SPS_OFF		0x291c
+#define AVE_START_SPS_SIZE		0x6b4
+#define AVE_START_PPS_OFF		0x2fd0
+#define AVE_START_PPS_SIZE		0x180
+
+/*
+ * Firmware-enforced preconditions on Start_AVC. Each is one instruction, so
+ * the offset and the legal value come from the same place.
+ *
+ * bFWCreatesHeader must be EQUAL in the SPS and PPS blocks or Start returns
+ * -1001 (fw 0x6d7bc). Set both to 1 to have the firmware emit the headers.
+ *
+ * header_len must be ZERO on input or Start returns -1001 (fw 0x41b68). This
+ * one is a trap: it is an output field the firmware fills in, so a driver
+ * that round-trips a previously returned block back into Start fails.
+ *
+ * seq_parameter_set_id must be 0. The PPS-side ids are force-zeroed by the
+ * call site but the SPS id is not, and Apple's own defaults use 1.
+ *
+ * sComm.FrameRate must be > 0 - not an error return but a hard panic
+ * (fw 0x6e690).
+ */
+#define AVE_SPS_FW_CREATES_HDR		0x2dc8	/* == AVE_PPS_FW_CREATES_HDR */
+#define AVE_SPS_HEADER_LEN		0x2dcc	/* must be 0 on input        */
+#define AVE_SPS_SEQ_PARAM_SET_ID	0x293c	/* must be 0                 */
+#define AVE_PPS_FW_CREATES_HDR		0x3048
+#define AVE_START_SLICE_MAP_NUM		0x25d4	/* 1 slice per frame         */
+#define AVE_START_RECON_SET		0x0390
+#define AVE_START_CODED_DATA_SET	0x0d50
+#define AVE_START_CODED_HDR_SET		0x0f50
+
+#define AVE_ERR_BAD_HEADER_CFG		(-1001)
+#define AVE_ERR_HEADER_TOO_BIG		(-1019)
+#define AVE_ERR_PPS_TOO_SMALL		(-1003)
+
+/* sRC.Feature bit 31 selects the modern RateControl framework (fw 0x6d36c). */
+#define AVE_START_RC_FEATURE		0x228
+#define AVE_RC_FEATURE_NEW_FRAMEWORK	BIT(31)
+#define AVE_RC_MODE_CBR			2
+#define AVE_RC_MODE_CONST_QP		3
+
 #endif /* __AVE_ABI_H__ */

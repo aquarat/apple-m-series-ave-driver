@@ -144,6 +144,12 @@ varies `sFrameInfo.FrameType` per frame. The per-frame block carries no QP
 field that was found; `sRCUpdateData` carries *rate-control updates* (bitrate
 change, parameter-set refresh, force key frame), not a QP.
 
+> **Sharpened by [37](37-start-avc-session.md).** A per-frame QP field does
+> exist, at `+0x364`, inside copied slice 0 — so it does reach the firmware —
+> and the AVC path simply never reads it. The conclusion above is unaffected,
+> but "absent" and "accepted then silently ignored" are different failure
+> modes, and only the second one looks like the hardware disobeying you.
+
 ---
 
 ## 2. Who writes the block on the host
