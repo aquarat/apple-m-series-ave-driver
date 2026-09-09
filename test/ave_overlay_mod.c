@@ -22,14 +22,42 @@
 #include <linux/of.h>
 
 #include "ave_overlay_dtbo.h"
+#include "ave_overlay_noiommu_dtbo.h"
 
 static int ovcs_id;
 
+/*
+ * variant=0 (default): AVE node plus the real DART, iommus = <&dart 0>.
+ *                      apple-dart binds and resets it, and the IOMMU catches
+ *                      stray coprocessor accesses as loud translation faults.
+ *
+ * variant=1:           no DART node and no iommus, so apple-dart never binds
+ *                      and iBoot's DART configuration survives - which is the
+ *                      thing we want to test. It also removes the backstop:
+ *                      a stray write from the coprocessor then lands in
+ *                      physical RAM rather than raising a fault, and we would
+ *                      be running iBoot's firmware, whose addressing
+ *                      assumptions we have not read.
+ *
+ * Selected here rather than at build time so the risk is chosen when the
+ * module is loaded, with the consequence in front of whoever types it.
+ */
+static int variant;
+module_param(variant, int, 0444);
+MODULE_PARM_DESC(variant,
+		 "0 = with DART (default), 1 = no IOMMU: preserves iBoot's DART config, NO backstop");
+
 static int __init ave_ov_init(void)
 {
+	const void *fdt = variant ? ave_overlay_noiommu_dtbo : ave_overlay_dtbo;
+	unsigned int len = variant ? ave_overlay_noiommu_dtbo_len
+				   : ave_overlay_dtbo_len;
 	int ret;
 
-	ret = of_overlay_fdt_apply(ave_overlay_dtbo, ave_overlay_dtbo_len,
+	if (variant)
+		pr_warn("ave-overlay: variant=1 - NO IOMMU, the coprocessor is unconstrained\n");
+
+	ret = of_overlay_fdt_apply((void *)fdt, len,
 				   &ovcs_id, NULL);
 	if (ret) {
 		pr_err("ave-overlay: apply failed: %d\n", ret);
