@@ -556,6 +556,30 @@ int ave_dapf_write_probe(struct ave_device *ave)
 	}
 
 	v = readl(ave->cpudart + DART_TCR(0));
+	if (dapf_probe == 4) {
+		/*
+		 * N1i: 60 s between the announcement and the write, printing
+		 * every 2 s with no register access (N1e: such holds are
+		 * safe), so there is no doubt the lines reach disk before the
+		 * write happens.
+		 */
+		dev_info(ave->dev, "PROBE N1i next: same-value write TCR[0] <- %#x after a 60 s no-access wait\n", v);
+		for (t = 0; t <= 60; t += 2) {
+			dev_info(ave->dev, "PROBE N1i pre-write wait, no register access: t=%us\n", t);
+			msleep(2000);
+		}
+		dev_info(ave->dev, "PROBE N1i writing TCR[0] now\n");
+		msleep(3000);
+		writel(v, ave->cpudart + DART_TCR(0));
+		dev_info(ave->dev, "PROBE N1i wrote TCR[0]; readback %#x\n",
+			 readl(ave->cpudart + DART_TCR(0)));
+		for (t = 0; t <= 20; t += 2) {
+			dev_info(ave->dev, "PROBE N1i hold after write: t=%us\n", t);
+			msleep(2000);
+		}
+		dev_info(ave->dev, "PROBE N1i survived the write\n");
+		return 0;
+	}
 	dev_info(ave->dev, "PROBE next: same-value write TCR[0] <- %#x (in 5 s)\n", v);
 	/*
 	 * 5 s, not 2: a fabric hang blocks NVMe MMIO too, so the capture's
