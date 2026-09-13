@@ -106,6 +106,9 @@ module prints `NEGATIVE CONTROL FAILED` and the RVBAR line is not evidence.
 DAPF slots are compared slot for slot with the 13.5 ADT's `dart-isp0` list
 (15 entries, compiled in):
 
+- *(As run, E1 gave 0/15 slot-for-slot because of the injected TEXT slot and
+  masked ends — see Results. The layout test that matters is that every slot
+  decodes to a sane range, which it did.)*
 - **15/15 MATCH, slot 15 `no ADT entry` and empty:** the layout `ave_dapf.c`
   uses is right, and m1n1's programming survived ISP power cycles, which is
   evidence against H3 for ISP. This is the positive control E3 depends on.
@@ -217,8 +220,10 @@ hang, then a reboot. **Bootability:** unaffected; nothing persists.
 
 ## E3 - Admit iBoot's firmware through the DAPF, keep translation
 
-**Only if** E1 showed 15/15 MATCH (layout confirmed) **and** E2 showed
-`DAPF_LOCK` clear.
+**Only if** E1 decoded every slot to a sane range (layout confirmed — it did:
+the live list is the ADT's shifted by one injected TEXT slot, with ends masked,
+so a slot-for-slot match was never going to happen) **and** E2 showed
+`DAPF_LOCK` clear (it did).
 
 **Needs a fresh boot:** yes (variant=3). The video-encoder group must be `DMA`
 (the boot default; do not set it to identity).
@@ -316,9 +321,10 @@ E3a, registers only:
 E3b, the negative control, **must** still log
 `apple-dart 40d040000.iommu: translation fault: status:0x80000800 stream:0 code:0x800 ... at 0x10000b28200`.
 
-- If it stops faulting, the DAPF writes are not doing what we think, or a
-  stale entry admits TEXT. **All E3 results are then invalid.** Check the
-  `E3 before` dump.
+- If it stops faulting, the DAPF writes are not doing what we think.
+  **All E3 results are then invalid.** Check the `E3 before`/`E3 after`
+  dumps. (Stale entries can no longer admit TEXT: every run rewrites all 16
+  slots and clears slot 0 for the control.)
 
 E3c, the run (compare against E3b; the only difference is the TEXT slot):
 
@@ -326,17 +332,16 @@ E3c, the run (compare against E3b; the only difference is the TEXT slot):
 |---|---|
 | no fault at `0x10000b28xxx`, and `NO PTE`/`NO PMD`/`NO TTBR` at `0xb28xxx` (or `0x10000b28xxx` with a code other than `0x800`) | The DAPF admits TEXT, and **the DART translates the admitted address by its low 32 bits**. TEXT needs a DART mapping → run E3d. |
 | no fault at TEXT at all, then faults at `0x1f0000ecxxx` / DVA `0xecxxx` with `NO PTE` | TEXT fetched **physically** (H1), and the bootstrap reached DATA through the window. The DATA mapping is wrong or absent: check the `iboot DATA` line. |
-| no TEXT fault, then `NO_DAPF_MATCH` (code `0x800`) at a **new** address | Progress. The address names the next range the firmware needs. A `0x40d...`/`0x506...` address means MMIO: rerun with `dapf_mmio=adt` or `both` (same boot is fine for `adt`; `both` changes n, so reboot to go back). |
+| no TEXT fault, then `NO_DAPF_MATCH` (code `0x800`) at a **new** address | Progress. The address names the next range the firmware needs. A `0x40d...`/`0x506...` address means MMIO: rerun with `dapf_mmio=adt` or `both` in the same boot (every run rewrites all 16 slots, so switching back needs no reboot). `adt`/`both` admit ave1's probably-gated MMIO: a hang risk. |
 | `CPU_STATUS` shows `RUNNING`, scratch or IRQ activity, no faults | H1 confirmed end to end. |
-| still `code:0x800 at 0x10000b28200`, readback verified | The entry is present but does not admit. Either r0 `0x33` lacks the needed permission, the inclusivity is wrong, or the DAPF is not the gate. **H1 as programmed is refuted**; next step is a code change (r0 variants), not a rerun. |
+| still `code:0x800 at 0x10000b28200`, readback verified | The entry is present but does not admit. Either r0 `0x11` (ISP's TEXT value) lacks the needed permission here, the inclusivity is wrong, or the DAPF is not the gate. **H1 as programmed is refuted**; next step is a code change (r0 variants), not a rerun. |
 
 E3d is the same table with TEXT mapped: "no fault at `0xb28xxx`" is the
 expected success.
 
 ### Abort criteria
 
-- Any `REFUSING` line: stop and resolve it. (`dapf_allow_stale` no longer exists.) Never pass `dapf_allow_stale=1`
-  just to get past a refusal on a boot whose history you do not know.
+- Any `REFUSING` line: stop and resolve it.
 - E3a readback mismatch; E3b not faulting; `Disabling IRQ #` between runs.
 - The desktop stuttering badly for more than a few seconds after `rmmod`, or
   any sign the core is still running after power-off: reboot rather than
@@ -441,3 +446,12 @@ Overlay `variant=2` (no DART bound), `stop_after=8 dapf_dump=1`.
   refusal and `dapf_allow_stale`.
 - E2c (`variant=3` control) is folded into E3a, whose stage-8 dump runs on
   `variant=3` before anything is programmed.
+- **Range alone does not admit.** E2's slot 5 (`r0 0x100 r4 0xac2
+  0x04004a24100 - 0x10014604100`, start below end) covers TEXT+0x200 by
+  range, yet every earlier run faulted NO_DAPF_MATCH there. Admission
+  therefore depends on the r0/r4 bits, which is why E3 copies ISP's TEXT
+  values rather than any range-only reasoning. *Inferred*: it assumes the
+  garbage was the same on those earlier boots, as it was across E2's power
+  cycle.
+- Each slot is now disabled (r0 = 0) before being rewritten, enabled slots
+  included (review of 8958777).
