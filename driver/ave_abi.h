@@ -929,6 +929,17 @@ struct ave_start_avc_layout {
 	u32	key_interval;		/* u32 MaxKeyFrameInterval / IdrPeriod */
 	u32	key_interval_strict;	/* u32, 26.6.2 only */
 	u32	slice_num;		/* s32 sSliceMap.iNum */
+	/*
+	 * Where the firmware writes the SPS+PPS NAL bytes it generates
+	 * (Apple: pVP->p_ParameterSetsBuffer / _BufferSize). 13.5 dereferences
+	 * it unguarded in CAVCController::InitEncodingParameters (fw 0x5df28 ->
+	 * MappedMemory 0x20bc0), which is the "MappedMemory.cpp, 39: paddr != 0"
+	 * assert we hit with it zero (docs/52). The kext refuses to send the
+	 * command with either half zero (AVE_CHM_SetFwBuf, -1015,
+	 * 0xfffffe0008eaf4c8).
+	 */
+	u32	param_sets_addr;	/* u64 DART IOVA */
+	u32	param_sets_size;	/* u32, must be non-zero */
 	/* DPB (recon) table: recon_max entries, recon_stride apart */
 	u32	recon_set;
 	u32	recon_stride;
@@ -1134,6 +1145,8 @@ const struct ave_cmd_abi ave_cmd_abi_13_5 = {
 		/* AVE_FW_RC_PARAMS at cmd+0xff30 (x10 = payload+0xfed0, 0x5cdf0) */
 		.frame_rate	= 0xff4c,	/* fw 0x5d9c4, assert 0x5ef00 */
 		.bitrate	= 0xff30,	/* fw 0x5d9b4 */
+		.param_sets_addr = 0xfb30,	/* fw ldr x20,[x23,#880] 0x5df28; kext VP+0xFAD0 0xfffffe0008eaee10 */
+		.param_sets_size = 0xfb38,	/* fw ldr w2,[x23,#888] 0x5de44 */
 		.rc_mode	= 0xff50,	/* ui32RCFlag, ldr w8,[x10,#32] 0x5ceb4 */
 		.rc_mode_fixed_qp = 2,		/* AVE_RC_FIXQP: cmp w10,#0x2 0x41158,
 						 * string 0x4e69c */

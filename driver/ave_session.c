@@ -98,6 +98,14 @@ MODULE_PARM_DESC(session_qp, "Start_AVC fixed QP for I/P/B (0..51, default 30)")
 
 /* One coded (bitstream) output buffer must exceed 3*W*H/4 at encode time. */
 #define AVE_SESS_CODED_SIZE		0x200000
+/*
+ * The SPS+PPS the firmware generates (docs/52). A pair is a few hundred bytes,
+ * but the firmware's copies into this buffer are NOT bounded by the size we
+ * declare - the only length check in InitEncodingParameters compares against a
+ * field that is still zero on a first init (fw 0x5de44) - so give it a whole
+ * page rather than a tight fit.
+ */
+#define AVE_SESS_PARAM_SETS_SIZE	0x1000
 
 /* ------------------------------------------------------------------------ */
 /* Reply capture (written from hard IRQ by the ipc_rx hook)                 */
@@ -347,9 +355,13 @@ static int ave_session_config(struct ave_device *ave,
 	p.shmem_addr = shmem_iova;
 	p.shmem_size = AVE_SESS_SHMEM_SIZE;
 
-	if (!session_reg_dart)
-		dev_warn(ave->dev,
-			 "session: Config reg-DART addr is 0 (unknown); pass session_reg_dart= if the firmware faults in ProcessInitStage2\n");
+	/*
+	 * 0 is correct here on 13.5: Config +0x48 reaches
+	 * CFlowController::SetPipeClockGating (fw 0x3c8f8), which returns early
+	 * on a gate byte no instruction in the image ever writes, and whose own
+	 * assert names "pmgrAddr" - not the MappedMemory one we hit (docs/52).
+	 * The parameter left overridable in case that changes.
+	 */
 
 	ret = ave_cmd_build_config(abi, cmd, cmd_len, &ctx, &p);
 	if (ret < 0) {
@@ -400,6 +412,7 @@ static int ave_session_start_avc(struct ave_device *ave,
 	struct ave_recon_buf recon;
 	struct ave_buf coded, coded_hdr;
 	dma_addr_t cmd_iova, fwc_iova, fwcm_iova, recon_iova, coded_iova, hdr_iova;
+	dma_addr_t psets_iova;
 	u32 cw, ch, recon_size, fwc_size;
 	size_t cmd_len;
 	void *cmd;
@@ -422,7 +435,8 @@ static int ave_session_start_avc(struct ave_device *ave,
 	    !ave_sess_dma_alloc(bufs, AVE_SESS_FWCLIENTMEM_SIZE, &fwcm_iova) ||
 	    !ave_sess_dma_alloc(bufs, recon_size, &recon_iova) ||
 	    !ave_sess_dma_alloc(bufs, AVE_SESS_CODED_SIZE, &coded_iova) ||
-	    !ave_sess_dma_alloc(bufs, abi->start_avc.coded_hdr_bytes, &hdr_iova))
+	    !ave_sess_dma_alloc(bufs, abi->start_avc.coded_hdr_bytes, &hdr_iova) ||
+	    !ave_sess_dma_alloc(bufs, AVE_SESS_PARAM_SETS_SIZE, &psets_iova))
 		return -ENOMEM;
 
 	recon.addr = recon_iova;
@@ -447,6 +461,9 @@ static int ave_session_start_avc(struct ave_device *ave,
 	s.fw_client_mem_addr = fwcm_iova;
 	s.fw_client_mem_size = AVE_SESS_FWCLIENTMEM_SIZE;
 
+	s.param_sets_addr = psets_iova;
+	s.param_sets_size = AVE_SESS_PARAM_SETS_SIZE;
+
 	s.recon = &recon;
 	s.n_recon = 1;
 	s.coded = &coded;
@@ -462,10 +479,11 @@ static int ave_session_start_avc(struct ave_device *ave,
 		 "session: Start_AVC: %ux%u (coded %ux%u) QP %u I-only, profile 66 level 40\n",
 		 session_width, session_height, cw, ch, session_qp);
 	dev_info(ave->dev,
-		 "session: Start_AVC: fw_client %pad/%#x mem %pad/%#x recon %pad/%#x coded %pad/%#x hdr %pad/%#x\n",
+		 "session: Start_AVC: fw_client %pad/%#x mem %pad/%#x recon %pad/%#x coded %pad/%#x hdr %pad/%#x psets %pad/%#x\n",
 		 &fwc_iova, fwc_size, &fwcm_iova, (u32)AVE_SESS_FWCLIENTMEM_SIZE,
 		 &recon_iova, recon_size, &coded_iova, (u32)AVE_SESS_CODED_SIZE,
-		 &hdr_iova, abi->start_avc.coded_hdr_bytes);
+		 &hdr_iova, abi->start_avc.coded_hdr_bytes,
+		 &psets_iova, (u32)AVE_SESS_PARAM_SETS_SIZE);
 
 	return ave_session_cmd(ave, abi, AVE_OP_START_AVC, "Start_AVC",
 			       cmd_iova, cmd_len, client_id);

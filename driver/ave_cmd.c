@@ -283,6 +283,10 @@ int ave_cmd_build_start_avc(const struct ave_cmd_abi *abi, u8 *buf, size_t len,
 	if (!s->fw_client_addr || !s->fw_client_size ||
 	    !s->fw_client_mem_addr || !s->fw_client_mem_size)
 		return -EINVAL;
+	/* Zero here is what tripped the firmware assert; refuse it here. */
+	if (l->param_sets_addr &&
+	    (!s->param_sets_addr || !s->param_sets_size))
+		return -EINVAL;
 	if (!s->recon || !s->n_recon || s->n_recon > l->recon_max)
 		return -EINVAL;
 	if (!s->coded || !s->coded_hdr || !s->n_coded ||
@@ -308,6 +312,8 @@ int ave_cmd_build_start_avc(const struct ave_cmd_abi *abi, u8 *buf, size_t len,
 	wr64(&w, l->fw_client_addr, s->fw_client_addr);
 	wr32(&w, l->fw_client_size, s->fw_client_size);
 	wr64(&w, l->fw_client_mem_addr, s->fw_client_mem_addr);
+	wr64(&w, l->param_sets_addr, s->param_sets_addr);
+	wr32(&w, l->param_sets_size, s->param_sets_size);
 	wr32(&w, l->fw_client_mem_size, s->fw_client_mem_size);
 
 	/* ---- geometry: MB-aligned, display size via SPS cropping (docs/38) */
