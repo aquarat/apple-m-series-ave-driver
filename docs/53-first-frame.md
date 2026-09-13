@@ -1029,3 +1029,34 @@ The new `session_selftest` checks: `LowResSrcLumaScaled` lands at
 controls — a `+1` address, a 32-but-not-64-aligned address, and the deliberate
 zero (which must still build, because it is the `session_lowres=0` bisect and
 must leave the field zero).
+
+## 12. SrcNeighbor sizes checked against the 13.5 kext (risk 1 closed)
+
+§11.7 ranked "the SrcNeighbor slot sizes were never checked against the 13.5
+arms" first, because an undersized slot corrupts silently. Read directly
+(`AVE_MACOS=13.5`):
+
+`AVE_CalcBufSizeOfSrcNeighborInfo(_E_AVE_CodecType codec, uint w, uint h)`
+(`0xfffffe0008ea5960`) branches on the **codec**, not the DevType:
+
+```
+ea5964: cmp w0,#1 ; b.eq 0x5980     -> codec 1 (HEVC): 2-D block formula
+ea596c: cbnz w0,  0x59b8            -> anything else: return 0
+ea5970: lsl w8,w1,#4 ; add #0xf0 ; and #0xffffff00   -> codec 0 (AVC)
+ea59a8: max(w8, 0x4000)
+```
+
+So for **AVC** (13.5 codec id 0, docs/46):
+
+| group | size | at 1280 wide |
+|---|---|---|
+| Info | `ALIGN(16·W, 256)` (`0xea5970`) | 20 KiB |
+| Pixel | `ALIGN(64·W, 1024)` (`0xea59e8`) | 80 KiB |
+| floor | `0x4000` (`0xea59a8`, `0xea5a20`) | 16 KiB |
+
+**Confirmed:** these match docs/47 line 302's per-macroblock-column numbers
+(256·mbW = 16·W, 1024·mbW = 64·W), so the driver's computed slot - the
+maximum across the four groups, 80 KiB at 1280 - is right for AVC. The
+two-dimensional formula the §11 analysis found (`(((H+31)>>5)+1)/2-1` by
+`(W+31)>>5`, ×3, ×64 or ×256) is the **HEVC** arm and does not apply to this
+session; it would demand 330 KiB for Pixel, so it matters for HEVC later.
