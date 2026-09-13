@@ -180,10 +180,10 @@ module_param(dapf_quiesce, bool, 0444);
 MODULE_PARM_DESC(dapf_quiesce,
 		 "E3: zero every TCR and ENABLED_STREAMS around the DAPF writes, then restore (default 1; docs/49 N1)");
 
-static bool dapf_probe;
-module_param(dapf_probe, bool, 0444);
+static int dapf_probe;
+module_param(dapf_probe, int, 0444);
 MODULE_PARM_DESC(dapf_probe,
-		 "N1b (docs/49): after stage 12, hold 30 s with NO DART writes, then write TCR[0] with its current value and hold 10 s");
+		 "docs/49: 1 = N1b (30 s hold reading TCR every 2 s, then a same-value TCR write); 2 = N1e (30 s hold with NO register access at all, no write)");
 
 static bool dapf_dump;
 module_param(dapf_dump, bool, 0444);
@@ -525,6 +525,16 @@ int ave_dapf_write_probe(struct ave_device *ave)
 	ret = ave_dapf_map(ave);
 	if (ret)
 		return ret;
+
+	if (dapf_probe == 2) {
+		/* N1e: same hold inside probe, but no register access at all. */
+		for (t = 0; t <= 30; t += 2) {
+			dev_info(ave->dev, "PROBE hold, NO register access: t=%us\n", t);
+			msleep(2000);
+		}
+		dev_info(ave->dev, "PROBE N1e hold complete; returning to probe\n");
+		return 0;
+	}
 
 	for (t = 0; t <= 30; t += 2) {
 		dev_info(ave->dev, "PROBE hold, no DART writes: t=%us TCR[0]=%#x ENABLED_STREAMS=%#x\n",
