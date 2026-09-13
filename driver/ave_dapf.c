@@ -363,7 +363,7 @@ static bool ave_dapf_covers(const struct ave_dapf_entry *e, u64 addr)
 	return e->r0 && e->start <= e->end && addr >= e->start && addr <= e->end;
 }
 
-static void ave_dapf_dump_entries(struct ave_device *ave, const char *tag)
+static unsigned int ave_dapf_dump_entries(struct ave_device *ave, const char *tag)
 {
 	/* The addresses the questions in docs/44 E2 are about. */
 	static const u64 probe_addr[] = {
@@ -398,6 +398,7 @@ static void ave_dapf_dump_entries(struct ave_device *ave, const char *tag)
 			 i, e.r0, e.r4, e.start, e.end, hits);
 	}
 	dev_info(ave->dev, "dapf: [%s] %u non-empty slot(s)\n", tag, used);
+	return used;
 }
 
 /*
@@ -408,7 +409,8 @@ static void ave_dapf_dump_entries(struct ave_device *ave, const char *tag)
  * fatal SError (docs/49) - so if a reset clears them, nothing after it can
  * fetch and the only way back is a reboot.
  */
-int ave_dapf_dump_now(struct ave_device *ave, const char *tag)
+int ave_dapf_dump_now(struct ave_device *ave, const char *tag,
+		      unsigned int *used)
 {
 	int ret;
 
@@ -420,7 +422,9 @@ int ave_dapf_dump_now(struct ave_device *ave, const char *tag)
 		return ret;
 
 	ave_dapf_dump_dart(ave, tag);
-	ave_dapf_dump_entries(ave, tag);
+	ret = ave_dapf_dump_entries(ave, tag);
+	if (used)
+		*used = ret;
 	return 0;
 }
 

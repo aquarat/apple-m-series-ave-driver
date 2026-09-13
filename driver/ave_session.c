@@ -1522,6 +1522,25 @@ int ave_session_halt(struct ave_device *ave)
 
 	if (!fw_halt)
 		return 0;
+	/*
+	 * Everything below touches AVE registers, and a register access in a
+	 * gated block hangs the fabric (docs/24, docs/25 7a). ave_ipc_send()
+	 * checks the transport, but that is too late - the scratch write comes
+	 * first. stop_after=15 drops power inside probe, so without this gate
+	 * an rmmod with fw_halt=1 would write bank 2 in a gated block; with
+	 * stop_after=0 the bank base is NULL and it would oops inside rmmod.
+	 *
+	 * ave->running is also the driver's stand-in for the precondition
+	 * macOS enforces as AVE_HwC::m_state == 3, "handshake completed"
+	 * (docs/55 §2.1): Halt is only defined for a firmware that is up.
+	 * (Review 2026-09-13, finding 1.)
+	 */
+	if (!ave->powered || !ave->running ||
+	    !ave->bank[AVE_BANK_SVE].base || !ave->bank[AVE_BANK_ASC].base) {
+		dev_info(dev, "halt: firmware is not up (powered %d, running %d); nothing to halt\n",
+			 ave->powered, ave->running);
+		return -ENODEV;
+	}
 	/* Advisory, but macOS fills it in; match the shape. */
 	put_unaligned_le32(AVE_HALT_CMD_TIMEOUT_MS, ctx.timeout);
 	if (!abi) {
@@ -1571,7 +1590,13 @@ int ave_session_halt(struct ave_device *ave)
 	if (ret) {
 		dev_err(dev, "halt: scratch 0 is %#010x, never became %#010x - the firmware did not halt\n",
 			v, AVE_SCRATCH0_STOPPED);
-		/* The core may still be running; it still owns this buffer. */
+		/*
+		 * Do not return it to the pool: the core may still be running
+		 * and still reading it. This is presentational only - ave_ipc_
+		 * fini() frees the whole FwIPC region a moment later either
+		 * way, so the unload is exactly as hard as it is today.
+		 * (Review 2026-09-13, finding 7.)
+		 */
 		return ret;
 	}
 	dev_info(dev, "halt: scratch 0 = %#010x, the firmware reached its wfi\n", v);
