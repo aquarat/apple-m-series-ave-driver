@@ -239,8 +239,17 @@ New `apple-ave` parameters in `ave_dapf.c`:
 
 | parameter | default | meaning |
 |---|---|---|
-| `dapf_order` | `m1n1` | `m1n1`: ADT order from slot 0, only the needed slots, r4/start/end/r0, **no pre-clear**, other slots untouched. `clear16`: the sequence that reset the machine (all 16 slots, r0 = 0 first). |
+| `dapf_order` | `m1n1` | `m1n1`: ADT order from slot 0, only the needed slots, r4/start/end/r0, **no pre-clear**, other slots untouched. `clear16-resets-machine`: the sequence that reset the machine (all 16 slots, r0 = 0 first). |
 | `dapf_quiesce` | 1 | around the writes: save all 16 TCRs and `ENABLED_STREAMS`, write TCRs 0, `ENABLED_STREAMS` 0, program, then restore both |
+
+How the implementation differs from N1 as first written above (review of
+59bfe35): it runs **after stage 12**, not at stage 8, so apple-dart has
+already done `ave_fw_load()`'s `iommu_map` (stream commands, TLB
+invalidation) and TTBR[0][0] is VALID during the writes (m1n1's AOP
+experiment had TTBRs invalid). Both parameters default **on**. The quiesce
+is meant to neutralise that state; if N1 still resets, "stage 8, TTBRs
+untouched" is the remaining untested difference (N2). `clear16` is now only
+selectable as `dapf_order=clear16-resets-machine`.
 
 Every quiesce and write step is a `STEP` marker, so `step_ms=` plus
 `tools/e3-run.sh` pins any reset to one register write.

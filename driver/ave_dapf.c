@@ -173,7 +173,7 @@ static const struct ave_dapf_entry ave_dapf_cleared = {
 static char *dapf_order = "m1n1";
 module_param(dapf_order, charp, 0444);
 MODULE_PARM_DESC(dapf_order,
-		 "E3: m1n1 (default; ADT order, only the needed slots, r4/start/end/r0, no pre-clear) | clear16 (all 16 slots with r0=0 first - RESET THE MACHINE on 2026-09-13)");
+		 "E3: m1n1 (default; ADT order, only the needed slots, r4/start/end/r0, no pre-clear) | clear16-resets-machine (all 16 slots, r0=0 first - this reset the SoC on 2026-09-13)");
 
 static bool dapf_quiesce = true;
 module_param(dapf_quiesce, bool, 0444);
@@ -568,10 +568,14 @@ int ave_dapf_program_selected(struct ave_device *ave)
 	ave_dapf_dump_dart(ave, "E3 before");
 	ave_dapf_dump_entries(ave, "E3 before");
 
-	if (sysfs_streq(dapf_order, "clear16")) {
+	/*
+	 * The spelling is the interlock: the old sequence reset the machine,
+	 * so it can only be selected by a name that says so.
+	 */
+	if (sysfs_streq(dapf_order, "clear16-resets-machine")) {
 		clear16 = true;
 	} else if (!sysfs_streq(dapf_order, "m1n1")) {
-		dev_err(ave->dev, "dapf: unknown dapf_order=\"%s\" (m1n1|clear16)\n", dapf_order);
+		dev_err(ave->dev, "dapf: unknown dapf_order=\"%s\" (m1n1|clear16-resets-machine)\n", dapf_order);
 		return -EINVAL;
 	}
 

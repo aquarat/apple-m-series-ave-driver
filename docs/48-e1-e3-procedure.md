@@ -233,6 +233,8 @@ so a slot-for-slot match was never going to happen) **and** E2 showed
 | parameter | default | values |
 |---|---|---|
 | `dapf_set` | `off` | `control` = 0x1f0 window + MMIO, **no TEXT** (negative control); `text` = window + MMIO + TEXT |
+| `dapf_order` | `m1n1` | `m1n1` = only needed slots, m1n1 write order, no pre-clear; `clear16-resets-machine` = the all-16 sequence that reset the SoC |
+| `dapf_quiesce` | 1 | zero all TCRs and `ENABLED_STREAMS` around the DAPF writes, then restore |
 | `dapf_mmio` | `ave0` | `ave0` = `0x40d050000-0x40dc69000` (ave0's own span, listed under dart-ave1); `adt` = `0x506000000-0x507c6c000` (as dart-ave0 lists it; ave1's span); `both`; `none` |
 | `fw_map_data` | 0 | 1 = DART map DVA `0xec000` → phys `0x10001a90000`, `0x134000`, RW |
 | `fw_map_text` | 0 | 0 = legacy: our image at DVA `0xb28000`; 1 = iBoot TEXT phys `0x10000b28000` at DVA `0xb28000`, read-only; 2 = nothing at DVA `0xb28000` |
@@ -317,6 +319,16 @@ E3a, registers only:
   shows them: the writes take. Go on.
 - `readback MISMATCH`: the layout or the lock semantics are wrong. **Stop**,
   and do not start the core with a filter in an unknown state.
+
+> **Superseded for now (2026-09-13, after the DAPF-write reset).** The E3
+> sequence above assumed every run rewrites all 16 slots. That sequence reset
+> the machine, and the default is now `dapf_order=m1n1` with
+> `dapf_quiesce=1` (docs/49 N1), which writes only the needed slots and
+> leaves the rest holding E2's uninitialised contents. In that mode a
+> `control` run is **not a clean negative control**: a non-faulting E3b is
+> ambiguous rather than invalidating. Run N1 (docs/49) for survivability
+> first; design a clean control only once DAPF writes are known to be
+> survivable.
 
 E3b, the negative control, **must** still log
 `apple-dart 40d040000.iommu: translation fault: status:0x80000800 stream:0 code:0x800 ... at 0x10000b28200`.
