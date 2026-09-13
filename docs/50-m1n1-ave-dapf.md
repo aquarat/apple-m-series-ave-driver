@@ -204,3 +204,7 @@ again, `sudo update-m1n1` regenerates a stock `boot.bin`.
   expected for an untagged-patch build - the ESP hash is what identifies it).
   No new kernel errors versus the previous boot. The self-built toolchain is
   cleared; step B next.
+- **2026-09-13** — **step B installed:** `/boot/efi/m1n1/boot.bin` =
+  `73577b99…49fd` (patched, guard, tag `v1.6.1-1-g1ae6361`), via `.new` +
+  rename, verified on the ESP. `boot.bin.pre-ave`, `restore-m1n1.sh` and the
+  README remain alongside. Awaiting reboot.
