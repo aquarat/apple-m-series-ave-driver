@@ -1,0 +1,91 @@
+=== e3a: insmod driver/apple-ave.ko stop_after=12 dapf_dump=1 dapf_set=control fw_map_data=1 fw_map_text=2 ===
+[  161.969211] apple-ave 40d100000.video-encoder: probe: staged bring-up, stop_after=12 (max 16)
+[  161.969223] apple-ave 40d100000.video-encoder: OS firmware 13.5: using macOS 13.5 AVE ABI
+[  161.969224] apple-ave 40d100000.video-encoder: stage 1 (map-banks): starting
+[  161.969225] apple-ave 40d100000.video-encoder:   mapping bank 0 (dpe)
+[  161.969237] apple-ave 40d100000.video-encoder:   mapping bank 1 (asc)
+[  161.969241] apple-ave 40d100000.video-encoder:   mapping bank 2 (sve)
+[  161.969243] apple-ave 40d100000.video-encoder:   mapping bank 3 (unk3)
+[  161.969245] apple-ave 40d100000.video-encoder:   mapping bank 4 (axi2af)
+[  161.969249] apple-ave 40d100000.video-encoder: stage 1 (map-banks): OK
+[  161.969250] apple-ave 40d100000.video-encoder: stage 2 (dma-mask): starting
+[  161.969250] apple-ave 40d100000.video-encoder: stage 2 (dma-mask): OK
+[  161.969251] apple-ave 40d100000.video-encoder: stage 3 (get-irq): starting
+[  161.969265] apple-ave 40d100000.video-encoder:   irq = 130
+[  161.969266] apple-ave 40d100000.video-encoder: stage 3 (get-irq): OK
+[  161.969266] apple-ave 40d100000.video-encoder: stage 4 (request-irq): starting
+[  161.969274] apple-ave 40d100000.video-encoder: stage 4 (request-irq): OK
+[  161.969275] apple-ave 40d100000.video-encoder: stage 5 (power-attach): starting
+[  161.969456] apple-ave 40d100000.video-encoder:   attached 5 power domain(s)
+[  161.969457] apple-ave 40d100000.video-encoder: stage 5 (power-attach): OK
+[  161.969458] apple-ave 40d100000.video-encoder: stage 6 (power-on): starting
+[  161.969461] apple-ave 40d100000.video-encoder:   resumed; left powered for inspection
+[  161.969462] apple-ave 40d100000.video-encoder: stage 6 (power-on): OK
+[  161.969462] apple-ave 40d100000.video-encoder: stage 7 (write-sve-idle): starting
+[  161.969463] apple-ave 40d100000.video-encoder:   writing 1 to SVE+0x38 (Apple's first access) ...
+[  161.969463] apple-ave 40d100000.video-encoder:   write returned
+[  161.969464] apple-ave 40d100000.video-encoder: stage 7 (write-sve-idle): OK
+[  161.969465] apple-ave 40d100000.video-encoder: stage 8 (read-asc-status): starting
+[  161.969465] apple-ave 40d100000.video-encoder:   reading ASC+0x400048 (CPU_STATUS) ...
+[  161.969466] apple-ave 40d100000.video-encoder:   ASC CPU_STATUS = 0x0000002a
+[  161.969483] apple-ave 40d100000.video-encoder: dapf: mapped CPUDART 0x000000040d040000 and DAPF 0x000000040d044000 (not requested)
+[  161.969484] apple-ave 40d100000.video-encoder: dapf: E2 read-only dump (domain attached)
+[  161.969486] apple-ave 40d100000.video-encoder: dapf: [E2] CPUDART 0x000000040d040000
+[  161.969488] apple-ave 40d100000.video-encoder: dapf:   PARAMS1 = 0x1ed01020  PARAMS2 = 0x00021037
+[  161.969488] apple-ave 40d100000.video-encoder: dapf:   ERROR   = 0x0e000400 stream 14 code 0x400 WRITE  addr 0x256fc3c6
+[  161.969490] apple-ave 40d100000.video-encoder: dapf:   CONFIG  = 0x1e010000
+[  161.969491] apple-ave 40d100000.video-encoder: dapf:   REMAP[0] = 0x03020100
+[  161.969492] apple-ave 40d100000.video-encoder: dapf:   REMAP[1] = 0x07060504
+[  161.969493] apple-ave 40d100000.video-encoder: dapf:   REMAP[2] = 0x0b0a0908
+[  161.969494] apple-ave 40d100000.video-encoder: dapf:   REMAP[3] = 0x0f0e0d0c
+[  161.969495] apple-ave 40d100000.video-encoder: dapf:   DAPF_LOCK = 0x00000000  UNK1(0xf8) = 0x00000000  ENABLED_STREAMS = 0x0000ffff
+[  161.969497] apple-ave 40d100000.video-encoder: dapf:   TCR[ 0]  = 0x00000080 TRANSLATE
+[  161.969499] apple-ave 40d100000.video-encoder: dapf:   TTBR[ 0][0] = 0x9026335c VALID
+[  161.969500] apple-ave 40d100000.video-encoder: dapf:   TTBR[ 0][1] = 0x00000000
+[  161.969502] apple-ave 40d100000.video-encoder: dapf:   TTBR[ 0][2] = 0x00000000
+[  161.969503] apple-ave 40d100000.video-encoder: dapf:   TTBR[ 0][3] = 0x00000000
+[  161.969504] apple-ave 40d100000.video-encoder: dapf:   TCR[ 1]  = 0x00000000
+[  161.969505] apple-ave 40d100000.video-encoder: dapf:   TTBR[ 1][0] = 0x00000000
+[  161.969506] apple-ave 40d100000.video-encoder: dapf:   TTBR[ 1][1] = 0x00000000
+[  161.969507] apple-ave 40d100000.video-encoder: dapf:   TTBR[ 1][2] = 0x00000000
+[  161.969508] apple-ave 40d100000.video-encoder: dapf:   TTBR[ 1][3] = 0x00000000
+[  161.969509] apple-ave 40d100000.video-encoder: dapf:   TCR[15]  = 0x00000000
+[  161.969511] apple-ave 40d100000.video-encoder: dapf:   TTBR[15][0] = 0x00000000
+[  161.969512] apple-ave 40d100000.video-encoder: dapf:   TTBR[15][1] = 0x00000000
+[  161.969513] apple-ave 40d100000.video-encoder: dapf:   TTBR[15][2] = 0x00000000
+[  161.969514] apple-ave 40d100000.video-encoder: dapf:   TTBR[15][3] = 0x00000000
+[  161.969515] apple-ave 40d100000.video-encoder: dapf: [E2] DAPF 0x000000040d044000, 16 entries x {r0 +0, r4 +4, start +8, end +0x10 (incl)}
+[  161.969517] apple-ave 40d100000.video-encoder: dapf:   [ 0] r0 0x0200 r4 0x00c3  0x010000d0000 - 0x0000e048400
+[  161.969519] apple-ave 40d100000.video-encoder: dapf:   [ 1] r0 0x0000 r4 0x1640  0x02002060000 - 0x1a00808c00c
+[  161.969522] apple-ave 40d100000.video-encoder: dapf:   [ 2] r0 0x0010 r4 0x1021  0x00041e21124 - 0x00900061000 admits:0x40d050000 admits:0x506000000
+[  161.969525] apple-ave 40d100000.video-encoder: dapf:   [ 3] r0 0x0030 r4 0x3428  0x00402060640 - 0x04000005080 admits:0x40d050000 admits:0x506000000
+[  161.969528] apple-ave 40d100000.video-encoder: dapf:   [ 4] r0 0x0200 r4 0x7023  0x00002200800 - 0x00004400000
+[  161.969530] apple-ave 40d100000.video-encoder: dapf:   [ 5] r0 0x0000 r4 0x0a42  0x04004a24100 - 0x11014204000
+[  161.969533] apple-ave 40d100000.video-encoder: dapf:   [ 6] r0 0x0010 r4 0x1000  0x00008860800 - 0x00000080804
+[  161.969535] apple-ave 40d100000.video-encoder: dapf:   [ 7] r0 0x0030 r4 0xc040  0x20071200160 - 0x02094a60004
+[  161.969538] apple-ave 40d100000.video-encoder: dapf:   [ 8] r0 0x0100 r4 0x0c44  0x00058490200 - 0x00006484800
+[  161.969541] apple-ave 40d100000.video-encoder: dapf:   [ 9] r0 0x0010 r4 0x0000  0x00012042804 - 0x0204e003808 admits:0x40d050000 admits:0x506000000
+[  161.969543] apple-ave 40d100000.video-encoder: dapf:   [10] r0 0x0100 r4 0x1a00  0x204040c2000 - 0x00520020100
+[  161.969546] apple-ave 40d100000.video-encoder: dapf:   [11] r0 0x0000 r4 0x1094  0x0103c204208 - 0x00019034010
+[  161.969549] apple-ave 40d100000.video-encoder: dapf:   [12] r0 0x0200 r4 0x00cc  0x00080524000 - 0x0080a300210 admits:0x40d050000 admits:0x506000000
+[  161.969551] apple-ave 40d100000.video-encoder: dapf:   [13] r0 0x0320 r4 0x0400  0x0400a002200 - 0x00007010400
+[  161.969554] apple-ave 40d100000.video-encoder: dapf:   [14] r0 0x0000 r4 0x8000  0x00082541c00 - 0x00000100000
+[  161.969557] apple-ave 40d100000.video-encoder: dapf:   [15] r0 0x0200 r4 0x0004  0x08032002900 - 0x00400000000
+[  161.969557] apple-ave 40d100000.video-encoder: dapf: [E2] 16 non-empty slot(s)
+[  161.969558] apple-ave 40d100000.video-encoder: stage 8 (read-asc-status): OK
+[  161.969559] apple-ave 40d100000.video-encoder: stage 9 (ipc-alloc): starting
+[  161.969767] apple-ave 40d100000.video-encoder: IPC (macOS 13.5): FwIPC surface 24, 7168 KiB at iova 0x00000000ff800000
+[  161.969769] apple-ave 40d100000.video-encoder: stage 9 (ipc-alloc): OK
+[  161.969769] apple-ave 40d100000.video-encoder: stage 10 (fw-load): starting
+[  161.972865] apple-ave 40d100000.video-encoder: firmware image: 2622936 bytes
+[  161.972869] apple-ave 40d100000.video-encoder:   image spans 0x268000, allocating 0x268000 contiguous
+[  161.974336] apple-ave 40d100000.video-encoder:   __TEXT       vm 0x0+0x134000 file 0x4000+0x134000
+[  161.974399] apple-ave 40d100000.video-encoder:   __DATA       vm 0x134000+0x134000 file 0x138000+0x134000
+[  162.090368] apple-ave 40d100000.video-encoder:   IOBA at image +0x1341fd: 0x0 -> 0x40c000000
+[  162.090374] apple-ave 40d100000.video-encoder:   IOSZ at image +0x13420d: 0 -> 0x2000000
+[  162.205650] apple-ave 40d100000.video-encoder:   fw-base register 0x102010000b28001 -> mapping image at IOVA 0xb28000
+[  162.205651] apple-ave 40d100000.video-encoder:   iova 0x00000000ff400000 -> phys 0x0000010008800000, mapping at IOVA 0xb28000
+[  162.205737] pc : ave_fw_map_iboot+0x11c/0x248 [apple_ave]
+[  162.205744] lr : ave_fw_map_iboot+0xf8/0x248 [apple_ave]
+[  162.205762]  ave_fw_map_iboot+0x11c/0x248 [apple_ave] (P)
+insmod rc=139
