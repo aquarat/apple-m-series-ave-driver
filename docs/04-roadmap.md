@@ -43,7 +43,7 @@ individual docs. What remains:
 | 2b — tracing | not started (not on the critical path) |
 | 3 — transport bring-up | **done 2026-09-13: firmware boots and sends message 1** (needs the patched m1n1 that programs the AVE DAPF) — [31](31-bringup-state.md), [49](49-dapf-write-reset.md), [50](50-m1n1-ave-dapf.md) |
 | 4 — IPC transport live | **handshake done 2026-09-13**: messages 1-5, 7 channels bound, firmware log over TERMINAL; commands not yet sent — [31](31-bringup-state.md), [45](45-abi-13.5-boot-ipc.md) |
-| 5 — session setup | struct map substantially done — [20](20-command-structs.md), [37](37-start-avc-session.md) |
+| 5 — session setup | **done 2026-09-13**: Config, Open and Start_AVC all accepted (`0xEE0000`) by the live firmware — [31](31-bringup-state.md), [46](46-abi-13.5-commands-session.md) |
 | 6 — one encoded frame | statically specified — [32](32-picmgmt-params.md), [37](37-start-avc-session.md), [38](38-dimension-convention.md), [39](39-input-format.md) |
 | 7 — V4L2 driver | not started |
 

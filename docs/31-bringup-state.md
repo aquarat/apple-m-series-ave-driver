@@ -801,3 +801,38 @@ caller in the 13.5 firmware and identify which field it maps.
 
 The firmware log is now a working oracle: it names the source file, line and
 assertion, and dumps a command history with client ids.
+
+## 2026-09-13 21:13 — START_AVC ACCEPTED: an encoder session is open
+
+`results/cmd2-1789330374.kmsg`, fresh boot, `stop_after=16 fw_map_data=1
+fw_map_text=2 session_selftest=1` (no DATA restore; first start of the boot).
+The only change since the previous run is the parameter-sets buffer
+([52](52-start-avc-assert.md)).
+
+| command | size | reply | status |
+|---|---|---|---|
+| Config | 0x70 | id `0x0e01`, cid 0, slot `0xffffffff` | **`0xee0000` ACCEPTED** |
+| Open | 0x40 | id `0x0e02`, cid 1, slot 3 | **`0xee0000` ACCEPTED** |
+| **Start_AVC** | **0x10E10** | id `0x0e04`, cid 1, slot 6 | **`0xee0000` ACCEPTED** |
+
+Session: 1280x720 (coded 1280x720), fixed QP 30, I-only, profile 66 level 40,
+1 recon / 1 coded / 1 coded-header buffer. No assert, no DART fault, no
+SError, no disabled IRQ; the firmware logged only its startup banner.
+
+**Confirmed:** the macOS 13.5 command ABI reconstructed statically in
+[46](46-abi-13.5-commands-session.md)/[47](47-abi-13.5-frame-rc-surfaces.md)
+is right for the whole session-setup path - command ids, sizes, the header
+layout, the client-id echo, the `0xEE0000` status, the fixed-QP selector
+(`ui32RCFlag = 2`), the SPS/PPS fields, and the buffer tables. **Phase 5
+(session setup) is done**: the firmware accepts Config -> Open -> Start_AVC
+without rejecting anything.
+
+**Confirmed by the fix:** the earlier `MappedMemory.cpp:39 paddr != 0` was
+the parameter-sets buffer at Start_AVC +0xFB30/+0xFB38, exactly as
+[52](52-start-avc-assert.md) argued from the disassembly, and `Config +0x48`
+(`reg_dart_addr`) is genuinely unused on 13.5 - we still send 0 and the
+session starts.
+
+Next: phase 6, one encoded frame. `Process` (13.5 id 7, 0x1940 bytes,
+picture block at +0x9C8) with an input surface, then read the coded buffer
+back and check it with ffmpeg.
