@@ -344,3 +344,34 @@ every 5 s):
 2. if 1 survives: `rmmod apple_ave`, then `stop_after=11 fw_map_text=2`
    (no `fw_map_data`) — (b) without (a).
 3. if both survive: `stop_after=11 fw_map_data=1 fw_map_text=2` — both.
+
+## N1c result — 2026-09-13: neither suspect freezes the machine
+
+All three steps on one boot (overlay `variant=3`), each left loaded for
+120 s with a userspace heartbeat every 5 s, then `rmmod` (VENC gated,
+`venc_sys off-0`), no faults, no disabled IRQ:
+
+| step | params | result |
+|---|---|---|
+| 1 `results/n1c1-*.kmsg` | `stop_after=10 fw_map_data=1 fw_map_text=2` | 24/24 heartbeats, survived |
+| 2 `results/n1c2-*.kmsg` | `stop_after=11 fw_map_text=2` | 24/24, survived |
+| 3 `results/n1c3-*.kmsg` | `stop_after=11 fw_map_data=1 fw_map_text=2` | 24/24, survived |
+
+**Confirmed:** the iBoot DATA mapping and the 13.5 scratch values, alone
+or together, do not freeze the machine in two minutes.
+
+What the three freezing runs had that N1c did not:
+
+- `dapf_dump=1` and/or `dapf_probe`/`dapf_set`: `devm_ioremap` of CPUDART
+  and DAPF and reads of their registers (TCR/TTBR/REMAP/ERROR/`0xf8`/
+  `ENABLED_STREAMS`, all 16 DAPF slots) **while apple-dart owns the DART**;
+- `stop_after=12` with the probe still running (long marker holds inside
+  probe) when the freeze came.
+
+Against "the reads alone": E3a attempt 1 did the full stage-8 dump on
+`variant=3` and then sat powered for minutes without freezing (its probe
+had died at stage 10). So the leading remaining candidate is **those reads
+combined with the later stages** (after the DATA map and scratch writes),
+or a long-running probe. N1d: repeat N1c step 3 adding `dapf_dump=1`
+(stage-8 reads only), `HOLD=120`; if it survives, N1e = N1b's configuration
+with its 30 s read loop replaced by a no-read hold.
