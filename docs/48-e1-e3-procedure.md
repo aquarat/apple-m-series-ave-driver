@@ -535,3 +535,12 @@ apple-dart has enabled translation and streams; m1n1 writes ISP's DAPF
 before any of that), a lock not represented by `DAPF_LOCK`, or that
 `0x40d044000` is not the t8020 DAPF the ADT decode suggests. **Do not
 repeat E3 until one of those is resolved statically.**
+
+**Analysis: [49](49-dapf-write-reset.md).** The block is confirmed as the
+DAPF (Apple's `pmap-io-ranges` tag). Best-supported cause: the DAPF was
+written after apple-dart had configured the DART, and with `r0 = 0` written
+first into slots holding garbage high r0 bits — both unlike every known-good
+DAPF write. **Do not rerun E3 as written.** Before any rerun: record whether
+the machine rebooted by itself or froze, run the attempt from a text VT so a
+panic prints on screen, and use docs/49 §6 N1 (quiesce DART, m1n1 write
+order, restore) or N3 (m1n1 at boot).
