@@ -765,6 +765,17 @@ static inline u32 ave_coded_data_size_max(u32 w, u32 h, bool hevc)
  * computes ((w + 31) >> 4) & 0x7fe (fw 0xb4514-0xb4524).
  */
 #define AVE_MB_SIZE			16
+/*
+ * Source-neighbour scratch tables: four groups (Info, Pixel, Data, FwData) of
+ * four IOVAs each, published both at Start_AVC and per frame. The 13.5 kext
+ * writes exactly four entries per group in AVE_CHM_SetFwBuf
+ * (0xfffffe0008eaf174-0xfffffe0008eaf210, "cmp x27,#0x4") and in
+ * AVE_CHM_SetDataInfo_FwBuf (0xfffffe0008eb0be8-0xfffffe0008eb0cb4).
+ */
+#define AVE_SRC_NBR_GROUPS		4
+#define AVE_SRC_NBR_MAX			4
+/* Loose per-frame scratch IOVAs (13.5 PICMGMT 0x8E0/0x8E8/0x8F0/0x900). */
+#define AVE_PIC_SCRATCH_MAX		4
 #define ave_mb_align(v)			(((v) + AVE_MB_SIZE - 1) & ~(AVE_MB_SIZE - 1))
 #define ave_src_luma_rows(h)		ave_mb_align(h)
 #define ave_src_chroma_rows(h)		(ave_mb_align(h) / 2)
@@ -954,9 +965,44 @@ struct ave_start_avc_layout {
 	u32	coded_hdr_addr, coded_hdr_addr_stride;	/* u64[] */
 	u32	coded_hdr_size, coded_hdr_size_stride;	/* u32[] */
 	u32	coded_hdr_bytes;	/* AVE_CalcBufSizeOfCodedHeader */
+	/*
+	 * Source-neighbour scratch tables (Apple: sExtraBuff.SrcNbr*). Four
+	 * groups of src_nbr_max u64 IOVAs each. Start_AVC is accepted with
+	 * these zero, but the first Process is NOT: CAVCController::setPipe
+	 * asserts "EncCommParams.encoder_addr_src_nbr_info != 0" (fw 0x55618,
+	 * line 6990) and "..._pixels != 0" (0x556b8, line 6993), and
+	 * SetTranscode asserts "..._src_nbr_data != 0" (0x5869c, line 7928).
+	 * InitEncodingParameters loads them from the wire at 0x5d874-0x5d8bc.
+	 */
+	u32	src_nbr_set[AVE_SRC_NBR_GROUPS];
+	u32	src_nbr_max;		/* entries per group; 0 = no such table */
 	/* parameter-set blocks */
 	u32	sps_block, sps_block_size;
 	u32	pps_block, pps_block_size;
+};
+
+/*
+ * CODED_DATA_HDR - what the firmware writes into the coded-header buffer.
+ * Offsets read out of the 13.5 kext's AVE_PrintCodedHeader
+ * (0xfffffe0008eb6584, named by its own os_log format strings) and
+ * AVE_RetrieveRCStats (0xfffffe0008ec4e38), and confirmed on the firmware
+ * side where CAVCController::ProcessTranscodeDone (fw 0x5be18) and
+ * CollectDataFromCpus (fw 0x5a7d4) store the same three fields.
+ */
+struct ave_coded_hdr_layout {
+	u32	i_mb_cnt;		/* u32[4] */
+	u32	p_mb_cnt;		/* u32[4] */
+	u32	skip_mb_cnt;		/* u32[4] */
+	u32	b_mb_cnt;		/* u32 */
+	u32	sps_pps_bits;		/* u32, SPS+PPS length in BITS */
+	u32	frame_num;		/* u32 FrameNumberFromDriverReturned */
+	u32	frame_type;		/* u32 FrameTypeReturned */
+	/* Per-slice records: slice_max of them, slice_stride bytes apart. */
+	u32	slice_stride;		/* 0 = layout unknown for this ABI */
+	u32	slice_max;
+	u32	slice_bytes_written;	/* u32, offset from the record base */
+	u32	slice_bytes_removed;	/* s8, bytes to drop at the slice end */
+	u32	min_bytes;		/* smallest buffer these offsets need */
 };
 
 /* Absolute command offsets of H264 SPS/PPS parameter fields. */
@@ -1019,6 +1065,20 @@ struct ave_process_avc_layout {
 	u32	recon_y;		/* u64 sRecon.Y_MSB */
 	u32	recon_uv;		/* u64 sRecon.UV_MSB */
 	u32	recon_mv;		/* u64 colocated MV store */
+	/* Added for the first-frame work (docs/53). */
+	u32	recon_y_lsb;		/* u64 sRecon.Y_LSB, NONE if absent */
+	u32	recon_uv_lsb;		/* u64 sRecon.UV_LSB */
+	u32	ctx_index;		/* u32 per-context index */
+	u32	force_key_frame;	/* s32 */
+	u32	force_non_ref;		/* u8 */
+	u32	update_param_sets;	/* u8 */
+	u32	scaling_matrix_mode;	/* u32 */
+	/* Per-frame SrcNbr tables, same shape as start_avc.src_nbr_set. */
+	u32	src_nbr_set[AVE_SRC_NBR_GROUPS];
+	u32	src_nbr_max;
+	/* Loose scratch IOVAs the host publishes per frame. */
+	u32	scratch[AVE_PIC_SCRATCH_MAX];
+	u32	scratch_n;
 };
 
 struct ave_cmd_abi {
@@ -1032,6 +1092,7 @@ struct ave_cmd_abi {
 	struct ave_sps_layout		sps;
 	struct ave_pps_layout		pps;
 	struct ave_process_avc_layout	process_avc;
+	struct ave_coded_hdr_layout	coded_hdr;
 };
 
 extern const struct ave_cmd_abi ave_cmd_abi_13_5;
@@ -1181,6 +1242,19 @@ const struct ave_cmd_abi ave_cmd_abi_13_5 = {
 						 * no fw read in that loop */
 		.coded_hdr_size_stride = 4,
 		.coded_hdr_bytes = 0x23000,	/* kext 0xfffffe0008ea4fb8 */
+		/*
+		 * Wire = VP + 0x60. kext AVE_CHM_SetFwBuf writes VP+0xF770,
+		 * 0xF790, 0xF7B0 and 0xF7D0, four u64 each
+		 * (0xfffffe0008eaf16c/1a8/1e4/2b8). The firmware reads the
+		 * first three in InitEncodingParameters: [x23,#16] (= wire
+		 * 0xF7D0) -> encoder_addr_src_nbr_info (fw 0x5d88c),
+		 * [x23,#48] (= 0xF7F0) -> _src_nbr_pixels (0x5d89c), and
+		 * VP+0xF7B0+8*idx (= 0xF810) -> _src_nbr_data (0x5d8bc).
+		 * The fourth (wire 0xF830) is a 4x16 table with a size array
+		 * at 0xFA30; not read on any path found - left out.
+		 */
+		.src_nbr_set	= { 0xf7d0, 0xf7f0, 0xf810, AVE_OFF_NONE },
+		.src_nbr_max	= 4,
 		.sps_block	= 0x105b0,	/* memcpy 0x6ac from payload+0x10550 0x5ce68-90 */
 		.sps_block_size	= 0x6ac,
 		.pps_block	= 0x10c5c,	/* memcpy 0x184 from payload+0x10bfc 0x5ce94-ac */
@@ -1247,6 +1321,59 @@ const struct ave_cmd_abi ave_cmd_abi_13_5 = {
 		.recon_y	= 0x898,	/* fw dumper 0x3c0c4; setRefPointers 0x2c338 */
 		.recon_uv	= 0x8a8,	/* fw dumper 0x3c0d0 */
 		.recon_mv	= 0x8b8,	/* fw setRefPointers 0x2c4b0 */
+		/* setPipe asserts on these two only when the 10-bit LSB gate
+		 * is set ([x24,#1312] fw 0x54f7c, [x19,#2692] fw 0x55404);
+		 * the offsets are the ones those gated loads use. */
+		.recon_y_lsb	= 0x8a0,	/* fw ldr [x27,#2208] 0x54f84 */
+		.recon_uv_lsb	= 0x8b0,	/* fw ldr [x27,#2224] 0x5540c */
+		.ctx_index	= 0xcb0,	/* kext 0xfffffe0008eaaa58; fw
+						 * ldr w27,[x23,#3248] 0x23d14,
+						 * strb [x22] 0x5823c */
+		.force_key_frame = 0x038,	/* kext str [x19,#56] 0xfffffe0008eab8e4;
+						 * fw GetFrameType ldr [x23,#56] 0x23cf0 */
+		.force_non_ref	= 0x03c,	/* kext ldrb [x19,#60] 0xfffffe0008eac0f8 */
+		.update_param_sets = 0x6f1,	/* same kext log line */
+		.scaling_matrix_mode = 0x6f4,	/* same kext log line */
+		/*
+		 * kext AVE_CHM_SetDataInfo_FwBuf writes four u64 at each of
+		 * PICMGMT+0x980/0x9A0/0x9C0/0x9E0
+		 * (0xfffffe0008eb0be4/0c1c/0c54/0c8c, "cmp x22,#0x4").
+		 * ProcessTranscodeStart re-reads PICMGMT+0x9C0+8*k into
+		 * encoder_addr_src_nbr_data (fw 0x583ac-0x583b4), which
+		 * SetTranscode then asserts non-zero and 64-aligned
+		 * (0x5869c / 0x58654, lines 7928/7929) - so the third entry
+		 * is CONFIRMED. The other three are matched to the 26.6.2
+		 * SrcNeighbor{Info,Pixel,FwData} group by their identical
+		 * 0x20 stride and order; that mapping is INFERRED.
+		 */
+		.src_nbr_set	= { 0x980, 0x9a0, 0x9c0, 0x9e0 },
+		.src_nbr_max	= 4,
+		/* kext 0xfffffe0008eb0b10/b44/b68/b84; meanings unknown. */
+		.scratch	= { 0x8e0, 0x8e8, 0x8f0, 0x900 },
+		.scratch_n	= 4,
+	},
+	.coded_hdr = {
+		/* kext AVE_PrintCodedHeader 0xfffffe0008eb6584, field offsets
+		 * taken from the loads next to each os_log format string. */
+		.i_mb_cnt		= 0x00,	/* ldr [x21,x28,lsl#2] 0xeb6728 */
+		.p_mb_cnt		= 0x10,	/* ldr [x26,#16]       0xeb681c */
+		.skip_mb_cnt		= 0x20,	/* ldr [x26,#32]       0xeb6918 */
+		.b_mb_cnt		= 0x70,	/* ldr [x21,#112]      0xeb6a1c */
+		.sps_pps_bits		= 0x98,	/* ldr [x21,#152]      0xeb6b24;
+						 * fw str [x0,#152] 0x5be18 */
+		.frame_num		= 0x10c,/* ldr [x21,#268]      0xeb6c2c;
+						 * fw str [x0,#268] 0x5be30 */
+		.frame_type		= 0x110,/* ldr [x21,#272]      0xeb6d34;
+						 * fw str [x0,#272] 0x5be3c */
+		/* AVE_RetrieveRCStats 0xfffffe0008ec4e38: x25 = hdr, stepped
+		 * by 0x220 (0xec4efc) for up to 0x100 records (0xec4f00). */
+		.slice_stride		= 0x220,
+		.slice_max		= 0x100,
+		.slice_bytes_written	= 0x180,/* ldr w9,[x25,#384]  0xec4ec0 */
+		.slice_bytes_removed	= 0x38c,/* ldrsb  [x25,#908]  0xec4ee8 */
+		/* The firmware maps 0x22c60 of it (fw 0x59f50/0x5bde4) and
+		 * RetrieveRCStats reads up to +0x221ac. */
+		.min_bytes		= 0x22c60,
 	},
 };
 
@@ -1361,6 +1488,12 @@ const struct ave_cmd_abi ave_cmd_abi_26_6 = {
 		.coded_hdr_size	= AVE_START_CODED_HDR_SET + 8,
 		.coded_hdr_size_stride = AVE_START_BUF_STRIDE,
 		.coded_hdr_bytes = AVE_CODED_HEADER_SIZE,
+		/* The 26.6.2 counterparts of the 13.5 sExtraBuff.SrcNbr*
+		 * tables in the Start command were not located; the per-frame
+		 * ones (process_avc.src_nbr_set) are documented. */
+		.src_nbr_set	= { AVE_OFF_NONE, AVE_OFF_NONE,
+				    AVE_OFF_NONE, AVE_OFF_NONE },
+		.src_nbr_max	= 0,
 		.sps_block	= AVE_START_SPS_OFF,
 		.sps_block_size	= AVE_START_SPS_SIZE,
 		.pps_block	= AVE_START_PPS_OFF,
@@ -1425,7 +1558,33 @@ const struct ave_cmd_abi ave_cmd_abi_26_6 = {
 		.recon_y	= AVE_PIC_RECON_Y_MSB,
 		.recon_uv	= AVE_PIC_RECON_UV_MSB,
 		.recon_mv	= AVE_PIC_RECON_MV,
+		.recon_y_lsb	= AVE_PIC_RECON_Y_LSB,
+		.recon_uv_lsb	= AVE_PIC_RECON_UV_LSB,
+		.ctx_index	= AVE_PIC_CTX_INDEX,
+		.force_key_frame = AVE_PIC_FORCE_KEYFRAME,
+		.force_non_ref	= AVE_OFF_NONE,		/* not located on 26.6.2 */
+		.update_param_sets = 0x174d,		/* docs/47 §1.2 */
+		.scaling_matrix_mode = 0x1750,		/* docs/47 §1.2 */
+		/* 0x20 apart, four u64 each - the shape the 13.5 groups were
+		 * matched against. */
+		.src_nbr_set	= { AVE_PIC_SRC_NEIGH_INFO, AVE_PIC_SRC_NEIGH_PIXEL,
+				    AVE_PIC_SRC_NEIGH_DATA, AVE_PIC_SRC_NEIGH_FWDATA },
+		.src_nbr_max	= 4,
+		.scratch	= { AVE_PIC_SCRATCH_CMDINFO40,
+				    AVE_PIC_SCRATCH_SLOTPOOL,
+				    AVE_PIC_SCRATCH_CMDINFO48, AVE_OFF_NONE },
+		.scratch_n	= 3,
 	},
+	/*
+	 * CODED_DATA_HDR on 26.6.2 has NOT been read. The 26.6.2 kext carries
+	 * the same AVE_PrintCodedHeader format strings, so the field names are
+	 * the same, but nothing here was checked against that binary and the
+	 * per-slice stride in particular is a version-sensitive number (13.5's
+	 * coded-header buffer is 0x23000, 26.6.2's is 0xC000, so it cannot
+	 * hold 256 x 0x220 records and the layout must differ). slice_stride
+	 * = 0 makes ave_cmd_coded_length() refuse rather than guess.
+	 */
+	.coded_hdr = { .slice_stride = 0 },
 };
 #endif /* AVE_CMD_ABI_DEFINE_TABLES */
 

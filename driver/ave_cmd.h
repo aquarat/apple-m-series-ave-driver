@@ -78,6 +78,17 @@ struct ave_avc_session {
 	const struct ave_buf	*coded;		/* bitstream buffers */
 	const struct ave_buf	*coded_hdr;	/* coded-header buffers, same count */
 	u32	n_coded;			/* 1..abi coded_max */
+
+	/*
+	 * Source-neighbour scratch, [group][index]. Optional: with
+	 * n_src_nbr == 0 the builder writes nothing there, which is what the
+	 * pre-first-frame self-test sent and what the firmware accepted at
+	 * Start. The first Process asserts on them, though - see
+	 * ave_start_avc_layout.src_nbr_set. Every entry written must be
+	 * non-zero and 64-byte aligned.
+	 */
+	u64	src_nbr[AVE_SRC_NBR_GROUPS][AVE_SRC_NBR_MAX];
+	u32	n_src_nbr;			/* 0 or <= abi src_nbr_max */
 };
 
 struct ave_avc_frame {
@@ -101,6 +112,35 @@ struct ave_avc_frame {
 	u64	recon_luma_addr;	/* 0 = leave to the firmware; % 128 */
 	u64	recon_chroma_addr;
 	u64	recon_mv_addr;
+	/*
+	 * 10-bit MSB/LSB split planes. Only read when the session was started
+	 * with the LSB gate set, which we never do - but setPipe dereferences
+	 * them behind that gate without a null check, so filling them costs
+	 * nothing and removes one way to assert. 0 = leave the field zero.
+	 */
+	u64	recon_luma_lsb_addr;	/* % 128 */
+	u64	recon_chroma_lsb_addr;	/* % 128 */
+
+	u32	ctx_index;		/* per-context slot; 0 for one client */
+	bool	force_key_frame;
+	bool	update_param_sets;	/* re-emit SPS/PPS accounting on an IDR */
+
+	/* Per-frame source-neighbour scratch, [group][index]; % 64. */
+	u64	src_nbr[AVE_SRC_NBR_GROUPS][AVE_SRC_NBR_MAX];
+	u32	n_src_nbr;		/* 0 = write none */
+	/* Loose per-frame scratch IOVAs; 0 = write none. */
+	u64	scratch[AVE_PIC_SCRATCH_MAX];
+	u32	n_scratch;
+};
+
+/* What ave_cmd_coded_length() recovers from a completed frame's header. */
+struct ave_coded_info {
+	u32	bytes;			/* the encoded frame length */
+	u32	slices;			/* records with a non-zero byte count */
+	u32	bytes_removed;		/* sum of the per-slice tail trims */
+	u32	frame_type;		/* CODED_DATA_HDR FrameTypeReturned */
+	u32	frame_num;
+	u32	sps_pps_bits;		/* SPS+PPS length in bits, at Start */
 };
 
 size_t ave_cmd_size(const struct ave_cmd_abi *abi, enum ave_op op);
@@ -145,5 +185,26 @@ int ave_cmd_build_process_avc(const struct ave_cmd_abi *abi, u8 *buf,
  */
 int ave_cmd_check_reply(const struct ave_cmd_abi *abi, enum ave_op op,
 			const u8 *msg, size_t len, u64 client_id, u32 *status);
+
+/*
+ * Decode the coded-header buffer the firmware wrote for one completed frame.
+ *
+ * This is the *only* place the encoded length comes from: the ENCODE_DONE
+ * completion carries no byte count (its extra word at +0x40 is the slice
+ * number, fw ProcessEncDone 0x14e14-0x14e74). Apple's kext computes the
+ * length in AVE_RetrieveRCStats (0xfffffe0008ec4e38) as
+ *
+ *     sum over slices of ui32BytesWritten
+ *   - sum over slices of ui32BytesToRemoveAtTheEndOfTheSliceForContextSwitch
+ *
+ * stopping at the first record whose byte count is zero. This reproduces that
+ * exactly. Returns 0 and fills @out, -EINVAL (bad argument, a buffer smaller
+ * than the layout needs, or an ABI whose coded-header layout has not been read
+ * - check abi->coded_hdr.slice_stride first to tell those apart), or -EPROTO
+ * (a negative trim count or an impossible byte count, which is what Apple
+ * treats as a corrupt header).
+ */
+int ave_cmd_coded_length(const struct ave_cmd_abi *abi, const void *hdr,
+			 size_t hdr_len, struct ave_coded_info *out);
 
 #endif /* __AVE_CMD_H__ */
