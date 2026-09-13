@@ -182,3 +182,12 @@ older DTBs/u-boot), so it very probably boots this machine. Do not run
 `update-m1n1` while the custom file is installed unless you intend to revert:
 it rotates the current `boot.bin` into `boot.bin.old`. Once Linux boots
 again, `sudo update-m1n1` regenerates a stock `boot.bin`.
+
+## 5. Install log
+
+- **2026-09-13 18:51** — steps 0-2 done. `/etc/sysconfig/update-m1n1` backed up
+  to `update-m1n1.bak-ave` and `M1N1_UPDATE_DISABLED=1` appended.
+  `/boot/efi/m1n1/boot.bin.pre-ave` = `2227cf97…94f7` (verified). Step A
+  installed: `/boot/efi/m1n1/boot.bin` = `bd040b64…75da8` (unpatched self-built
+  v1.6.1, verified on the ESP). `boot.bin.old` unchanged (`8270538d…`).
+  Awaiting reboot.
