@@ -375,3 +375,26 @@ combined with the later stages** (after the DATA map and scratch writes),
 or a long-running probe. N1d: repeat N1c step 3 adding `dapf_dump=1`
 (stage-8 reads only), `HOLD=120`; if it survives, N1e = N1b's configuration
 with its 30 s read loop replaced by a no-read hold.
+
+## N1d, N1e — 2026-09-13: survived; the remaining factor is DART/DAPF reads late in probe
+
+| run | params | result |
+|---|---|---|
+| N1d `results/n1d-*.kmsg` | N1c step 3 + `dapf_dump=1` (one full DART/DAPF read dump at stage 8) | 120 s, 24/24 heartbeats, survived |
+| N1e `results/n1e-*.kmsg` | N1b's config (`stop_after=12 dapf_dump=1 fw_map_data=1 fw_map_text=2`), 30 s in-probe hold with **no** register access (`dapf_probe=2`), then stage-12 snapshot | 120 s, survived |
+
+Excluded, each **confirmed** by a surviving run: the iBoot DATA mapping, the
+13.5 scratch values, a single stage-8 read dump, a long-running probe, the
+stage-12 path and snapshot.
+
+The only thing every freezing run did and no surviving run did is **read
+CPUDART/DAPF registers again after stage 11**: E3a and N1 re-ran the full
+dumps, the TCR check and the per-slot reads; N1b read TCR[0] and
+ENABLED_STREAMS every 2 s and froze after ~16 such pairs. Freezes came
+~1.5 s to ~32 s after those reads began.
+
+Two readings remain: the reads themselves hang the fabric, either
+cumulatively or at some low rate (surviving runs made ~100 reads, freezing
+ones considerably more); or reads only hang once the later stages have run.
+N1f discriminates directly: N1b without the write, reading TCR[0] and
+ENABLED_STREAMS every 2 s for 120 s (`dapf_probe=3`).
