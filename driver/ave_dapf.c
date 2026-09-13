@@ -183,7 +183,7 @@ MODULE_PARM_DESC(dapf_quiesce,
 static int dapf_probe;
 module_param(dapf_probe, int, 0444);
 MODULE_PARM_DESC(dapf_probe,
-		 "docs/49: 1 = N1b (30 s hold reading TCR every 2 s, then a same-value TCR write); 2 = N1e (30 s hold with NO register access at all, no write)");
+		 "docs/49: 1 = N1b (30 s hold reading TCR every 2 s, then a same-value TCR write); 2 = N1e (30 s hold with NO register access at all, no write); 3 = N1f (120 s of N1b's reads, no write)");
 
 static bool dapf_dump;
 module_param(dapf_dump, bool, 0444);
@@ -525,6 +525,18 @@ int ave_dapf_write_probe(struct ave_device *ave)
 	ret = ave_dapf_map(ave);
 	if (ret)
 		return ret;
+
+	if (dapf_probe == 3) {
+		/* N1f: N1b's read loop without the write, for 120 s. */
+		for (t = 0; t <= 120; t += 2) {
+			dev_info(ave->dev, "PROBE N1f read loop: t=%us TCR[0]=%#x ENABLED_STREAMS=%#x\n",
+				 t, readl(ave->cpudart + DART_TCR(0)),
+				 readl(ave->cpudart + DART_ENABLED_STREAMS));
+			msleep(2000);
+		}
+		dev_info(ave->dev, "PROBE N1f survived 120 s of late DART reads\n");
+		return 0;
+	}
 
 	if (dapf_probe == 2) {
 		/* N1e: same hold inside probe, but no register access at all. */
