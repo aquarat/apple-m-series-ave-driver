@@ -63,7 +63,9 @@ that work is, the firmware could not have reached the registers it describes.
 
 > **Correction (2026-09-13): the value is AP-physical `0x40C000000`, not bus
 > `0x20C000000`.** The reasoning below was never tested, and the live machine
-> contradicts it. iBoot's filled-in tag list in the running AVE DATA segment
+> contradicts it. Observed on the macOS 13.5 firmware iBoot loads here
+> ([43](43-macos-13.5-firmware.md)); nothing suggests a 26.6.2 loader would
+> use a different address space, but that is inferred, not observed. iBoot's filled-in tag list in the running AVE DATA segment
 > (physical `0x10001a93a30`, found by `tools/rtkit_tags.py` on the 16 MiB dump,
 > [31](31-bringup-state.md)) reads `IOBA = 0x40c000000`, `CpAd = 0x40d800000`,
 > `WrAd = 0x40dc00000`, `SOC_ = 0x6001`, `SOCR = 0x11`, `IOSZ = 0`. The GPU's
