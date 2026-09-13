@@ -305,3 +305,42 @@ single same-value write (`TCR[0] <- its current 0x80`) with a marker after
 it and a 10 s hold. Reset during the hold → H-delay; reset right at the
 same-value write → H-write (value-independent); survival → the value (TCR
 0 / DAPF r0 0) matters.
+
+## N1b result — 2026-09-13, `results/n1b-1789304276.kmsg`: it is not the writes
+
+The 30 s no-write hold ran to completion: 16 markers, TCR[0] `0x80` and
+ENABLED_STREAMS `0xffff` read every 2 s. After the `t=30s` line nothing more
+reached disk; the next code was a 2 s sleep, a TCR read, and a log line - the
+same-value write was still 2 s further on. The operator saw **the UI freeze,
+then a reset about 30 s later**. **Confirmed:** the machine freezes with no
+DART or DAPF write from us. No other kernel line (DART faults, warnings)
+appears in any of the three captures.
+
+This is the 2026-09-07 signature (docs/24): a fabric-level hang that stalls
+the CPUs, followed by a PMU reset. The earlier "reset at the first write"
+readings were an artefact of the markers: each write followed a hold, and
+the freeze landed in or just after a hold.
+
+Freeze times are not fixed (about 3 s after the scratch-write marker in
+E3a/N1, about 33 s in N1b), so the trigger is asynchronous or armed earlier.
+Comparing runs:
+
+| run | overlay | reached | froze? |
+|---|---|---|---|
+| 26.6 handshake runs (09-08, 09-13 10:21) | variant 0 | scratch writes (IOVA values), core started, storm ~2 min | no |
+| E2 (variant 2), twice | variant 2 | stage 8 | no |
+| E3a attempt 1 (oops) | variant 3 | stage 10, inside the literal check; sat powered for minutes | no |
+| E3a attempt 3, N1, N1b | variant 3 | **iBoot DATA RW `iommu_map`**, **13.5 scratch values**, stage 12 | **yes** |
+
+So the suspects are **(a)** the RW DART mapping of iBoot's DATA at DVA
+`0xec000`, and **(b)** the 13.5 pre-start scratch values (`scratch0
+0x08042006, scratch1 0, scratch2 0xe`, with no firmware running). Neither
+has an obvious mechanism.
+
+N1c, split them, no DART writes, `HOLD=120` (driver left loaded, heartbeat
+every 5 s):
+
+1. `stop_after=10 fw_map_data=1 fw_map_text=2` — (a) without (b).
+2. if 1 survives: `rmmod apple_ave`, then `stop_after=11 fw_map_text=2`
+   (no `fw_map_data`) — (b) without (a).
+3. if both survive: `stop_after=11 fw_map_data=1 fw_map_text=2` — both.
