@@ -503,3 +503,35 @@ echo b | sudo tee /proc/sysrq-trigger   # reboot immediately
 
 or hold the power button. Either is equivalent in effect to the forced
 power-off that was needed here, minus the unsynced writes.
+
+### E3a, attempts 2 and 3 — 2026-09-13: the first DAPF write resets the machine
+
+Attempt 2 (13:09) crashed within about a second and left nothing: no pstore
+backend, journald lag, and the runner lived in `/tmp`. Commit e6497f4 added
+`step_ms=` markers, an fsync-per-line `/dev/kmsg` capture
+(`tools/kmsg_capture.py`) and an in-repo runner (`tools/e3-run.sh`).
+
+Attempt 3 (`results/e3a-1789301710.kmsg`, `stop_after=12 step_ms=1500
+dapf_dump=1 dapf_set=control fw_map_data=1 fw_map_text=2`, overlay
+`variant=3`), in order, all **completed**:
+
+- iBoot placement check: RVBAR base `0x10000b28000`, DATA literal
+  `0x1f0000ec000`;
+- DATA range refusal checks passed; `iommu_map` DVA `0xec000` -> phys
+  `0x10001a90000` +`0x134000` RW, verified at both ends;
+- 13.5 pre-start scratch: `scratch0=0x8042006 scratch1=0x0 scratch2=0xe`;
+- stage 12 (RVBAR write skipped on 13.5);
+- DART/DAPF reads: `DAPF_LOCK 0`, TCR[0] `0x80`, `ENABLED_STREAMS 0xffff`,
+  16 garbage slots, "clearing 14 non-empty slots".
+
+The last line on disk is `STEP next: first write to DAPF slot 0 (r0 = 0)`,
+held 1.5 s. The next statements are one `dev_info` and
+`writel(0, dapf + 0x00)`. **The machine reset.** **Confirmed** to the
+resolution of one printk: reads of the AVE DAPF are harmless, the first
+write is fatal from Linux at this point, even though `DAPF_LOCK` reads 0.
+
+Not established: whether it is the privilege level, the timing (after
+apple-dart has enabled translation and streams; m1n1 writes ISP's DAPF
+before any of that), a lock not represented by `DAPF_LOCK`, or that
+`0x40d044000` is not the t8020 DAPF the ADT decode suggests. **Do not
+repeat E3 until one of those is resolved statically.**
