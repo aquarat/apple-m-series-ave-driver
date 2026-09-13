@@ -449,6 +449,15 @@ int ave_cmd_build_process_avc(const struct ave_cmd_abi *abi, u8 *buf,
 	if ((f->recon_luma_addr & 127) || (f->recon_chroma_addr & 127) ||
 	    (f->recon_luma_lsb_addr & 127) || (f->recon_chroma_lsb_addr & 127))
 		return -EINVAL;
+	/*
+	 * LowResSrcLumaScaled: optional (0 = leave the field zero, which makes
+	 * the firmware assert at setLRME:5782 - a deliberate bisect), but if
+	 * given it must be 64-aligned, and the ABI must have the field.
+	 */
+	if (f->low_res_src_addr &&
+	    ((f->low_res_src_addr & (AVE_STRIDE_ALIGN - 1)) ||
+	     l->low_res_src == AVE_OFF_NONE))
+		return -EINVAL;
 	if (f->n_src_nbr) {
 		u32 g, i;
 
@@ -525,6 +534,9 @@ int ave_cmd_build_process_avc(const struct ave_cmd_abi *abi, u8 *buf,
 	if (l->update_param_sets != AVE_OFF_NONE)
 		wr8(&w, base + l->update_param_sets, f->update_param_sets);
 	wr32_opt(&w, base + l->scaling_matrix_mode, 0);
+
+	if (f->low_res_src_addr && l->low_res_src != AVE_OFF_NONE)
+		wr64(&w, base + l->low_res_src, f->low_res_src_addr);
 
 	for (i = 0; i < f->n_src_nbr; i++) {
 		u32 g;

@@ -119,6 +119,45 @@ module_param(session_nbr_kb, uint, 0444);
 MODULE_PARM_DESC(session_nbr_kb,
 	"size of each SrcNeighbor scratch slot in KiB (default 256; size is unknown, this is a guess)");
 
+/*
+ * sLowResOutput.LowResSrcLumaScaled - the low-resolution motion-estimation
+ * (LRME) scaled-source-luma surface.
+ *
+ * CAVCController::setPipe calls setLRME for every frame (fw 0x57d30). The two
+ * gates in front of that call - the byte at controller+0x23FEC and the word at
+ * controller+0x13A3C - are both cleared by the CAVCController constructor
+ * (fw 0x460fc / 0x46104) and are only ever written by the firmware's own LRME
+ * state machine (ProcessLRMEStart, ProcessLRMEDone, ProcessPipeReset,
+ * ResetBetweenPasses). There is NO host-settable flag in Start_AVC or in
+ * PICMGMT that switches the pass off, so the buffer has to be supplied.
+ * (docs/53 §9.)
+ *
+ * Size, from the kext's AVE_CalcBufSizeOfLowResRef (0xfffffe0008ea560c), AVC
+ * arm, DevType 12 < 0x13:
+ *
+ *     lr_stride = ALIGN(4 * W, 256)
+ *     size      = ALIGN(lr_stride * ((H + 63) >> 4), 512)
+ *
+ * lr_stride matches the firmware's own expression bit for bit
+ * (fw 0x523c0-0x523c8: lsl #2, add #0xfc, and #0xffffff00), which is what
+ * makes this the right formula and not a guess. At 1280x720: 0x3C000.
+ *
+ * session_lowres=0 sends the field zero, which reproduces the 2026-09-13
+ * hardware failure exactly ("ASSERT: CAVCController_H13C.cpp, 5782") and is
+ * the negative control for this change. session_lowres_kb overrides the size;
+ * the FORMULA is confirmed but the number of rows the engine actually writes
+ * is inferred, so the override exists to raise it without a rebuild.
+ */
+static bool session_lowres = true;
+module_param(session_lowres, bool, 0444);
+MODULE_PARM_DESC(session_lowres,
+	"publish sLowResOutput.LowResSrcLumaScaled in Process (default on; 0 reproduces the setLRME:5782 assert)");
+
+static unsigned int session_lowres_kb;	/* 0 = the kext formula above */
+module_param(session_lowres_kb, uint, 0444);
+MODULE_PARM_DESC(session_lowres_kb,
+	"size of the LRME scaled-luma surface in KiB (0 = AVE_CalcBufSizeOfLowResRef formula)");
+
 /* AVE_FRAME_TYPE_IDR (3) by default; 0 = I (non-IDR). */
 static unsigned int session_frame_type = AVE_FRAME_TYPE_IDR;
 module_param(session_frame_type, uint, 0444);
@@ -747,6 +786,71 @@ static void ave_session_alloc_nbr(struct ave_device *ave,
 }
 
 /*
+ * Bytes the LRME scaled-source-luma surface needs for a @cw x @ch coded frame,
+ * and the row stride the firmware will program for it. Both come from the
+ * comment on session_lowres above; *stride is only for the log line.
+ */
+static size_t ave_session_lowres_size(u32 cw, u32 ch, u32 *stride)
+{
+	u32 lr_stride = ALIGN(4 * cw, 256);
+
+	if (stride)
+		*stride = lr_stride;
+	return ALIGN((size_t)lr_stride * ((ch + 63) >> 4), 512);
+}
+
+/*
+ * Allocate it and return the IOVA, or 0 to send the field zero. Never fatal:
+ * a zero here is a known, named firmware assert rather than a silent fault.
+ */
+static dma_addr_t ave_session_alloc_lowres(struct ave_device *ave,
+					   struct ave_sess_bufs *bufs,
+					   u32 cw, u32 ch)
+{
+	u32 lr_stride;
+	size_t size = ave_session_lowres_size(cw, ch, &lr_stride);
+	dma_addr_t iova;
+	void *cpu;
+
+	if (!session_lowres) {
+		dev_warn(ave->dev,
+			 "session: session_lowres=0: LowResSrcLumaScaled left zero, expect ASSERT CAVCController_H13C.cpp:5782\n");
+		return 0;
+	}
+	if (session_lowres_kb) {
+		size = (size_t)session_lowres_kb << 10;
+		if (size > SZ_64M) {
+			dev_warn(ave->dev,
+				 "session: session_lowres_kb=%u out of range\n",
+				 session_lowres_kb);
+			return 0;
+		}
+	}
+	size = ALIGN(size, SZ_4K);
+
+	cpu = ave_sess_dma_alloc(bufs, size, &iova);
+	if (!cpu) {
+		dev_warn(ave->dev,
+			 "session: LRME scaled-luma surface (%zu bytes) allocation failed\n",
+			 size);
+		return 0;
+	}
+	memset(cpu, 0, size);
+	if (iova & (AVE_STRIDE_ALIGN - 1)) {
+		dev_err(ave->dev,
+			"session: LRME scaled-luma surface %pad is not 64-aligned\n",
+			&iova);
+		return 0;
+	}
+	dev_info(ave->dev,
+		 "session: LRME scaled luma %pad +%#zx, lr_stride %u, %u rows%s\n",
+		 &iova, size, lr_stride, (ch + 63) >> 4,
+		 session_lowres_kb ? " (size overridden by session_lowres_kb)"
+				   : " (AVE_CalcBufSizeOfLowResRef formula)");
+	return iova;
+}
+
+/*
  * A deterministic, legal, non-uniform NV12 frame: a horizontal luma ramp over
  * the legal 16..235 range that also steps per macroblock row, near-grey chroma
  * with a slow horizontal Cr drift. The content does not matter; what matters
@@ -968,6 +1072,17 @@ static int ave_session_process(struct ave_device *ave,
 	f.force_key_frame = session_frame_type == AVE_FRAME_TYPE_IDR;
 	f.update_param_sets = false;
 
+	/*
+	 * The LRME pass runs even for an I-frame with no references, and
+	 * setLRME asserts on its scaled-luma target. LowResResults[] stay zero
+	 * on purpose: every firmware read of them is cbz-skipped and only the
+	 * alignment is checked when non-zero (fw 0x51e88 / 0x51ed8 / 0x52050 /
+	 * 0x520a4), so publishing an address there would only add a way to be
+	 * wrong.
+	 */
+	if (abi->process_avc.low_res_src != AVE_OFF_NONE)
+		f.low_res_src_addr = ave_session_alloc_lowres(ave, bufs, cw, ch);
+
 	if (bufs->n_nbr && abi->process_avc.src_nbr_max) {
 		memcpy(f.src_nbr, bufs->nbr, sizeof(f.src_nbr));
 		f.n_src_nbr = min(bufs->n_nbr, abi->process_avc.src_nbr_max);
@@ -988,6 +1103,9 @@ static int ave_session_process(struct ave_device *ave,
 		 "session: Process: coded %pad/%#x hdr %pad/%#x recon Y %pad UV %pad MV %pad\n",
 		 &bufs->coded_iova, bufs->coded_size, &bufs->coded_hdr_iova,
 		 bufs->coded_hdr_size, &ry, &ruv, &rmv);
+	dev_info(ave->dev,
+		 "session: Process: LowResSrcLumaScaled %#llx at PICMGMT+%#x (LowResResults left zero)\n",
+		 f.low_res_src_addr, abi->process_avc.low_res_src);
 
 	ret = ave_session_cmd(ave, abi, AVE_OP_PROCESS_AVC, "Process",
 			      cmd_iova, cmd_len, client_id);
