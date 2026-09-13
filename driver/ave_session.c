@@ -94,12 +94,19 @@ MODULE_PARM_DESC(session_frame,
 	"after Start_AVC, encode one I-frame with Process and publish the bitstream under /sys/kernel/debug/apple_ave (default off; implies session_selftest)");
 
 /*
- * The source-neighbour scratch tables. Their sizes are NOT known (nothing in
- * either binary sizes them - the kext takes them from pre-allocated surfaces
- * whose InfoSet entry we have not decoded). session_nbr_kb is the per-slot
- * size; 16 slots are allocated. If the first hardware run faults inside one of
- * these, raise it. session_nbr=0 sends the tables zero, which is what the
- * pre-phase-6 self-test did - useful as a bisect: it should then assert
+ * The source-neighbour scratch tables. Their sizes ARE known - docs/47 line
+ * 302, from the kext (0xea5970, 0x59e8, 0x5a70, 0x5adc): per macroblock
+ * column, Info 256, Pixel 1024, Data 56, FwData 64 bytes, with a 16 KiB
+ * floor. At 1280 wide (80 MB columns) that is 20/80/4.5/5 KiB, so the floor
+ * dominates all but Pixel. session_nbr_kb overrides the per-slot size for
+ * bisecting; 0 means "use the formula".
+ *
+ * Note for a failure: the 16 slots are one contiguous mapping, so a slot that
+ * is too small overruns into the next slot rather than faulting - the symptom
+ * is wrong output, not a DART fault (review of 19b9d93, finding 2).
+ *
+ * session_nbr=0 sends the tables zero, which is what the pre-phase-6 self-test
+ * did - useful as a bisect: it should then assert
  * "encoder_addr_src_nbr_info != 0" at setPipe line 6990.
  */
 static bool session_nbr = true;
@@ -107,7 +114,7 @@ module_param(session_nbr, bool, 0444);
 MODULE_PARM_DESC(session_nbr,
 	"publish the SrcNeighbor scratch tables at Start_AVC and in Process (default on; 0 to prove the assert)");
 
-static unsigned int session_nbr_kb = 256;
+static unsigned int session_nbr_kb;	/* 0 = size from the docs/47 formula */
 module_param(session_nbr_kb, uint, 0444);
 MODULE_PARM_DESC(session_nbr_kb,
 	"size of each SrcNeighbor scratch slot in KiB (default 256; size is unknown, this is a guess)");
@@ -166,6 +173,18 @@ struct ave_sess_rx {
 	/* The IO echo of the command buffer, which is an ack, not the answer. */
 	u32			ack_size;
 	bool			ack_seen;
+	/*
+	 * The id this command is waiting for. The encode path has seven
+	 * NotificationToHost sites (0xE03/E04/E06/E07/E09/E0A/E0B) and
+	 * LRME_DONE (0xE07) is raised inside the same ProcessEncDone as
+	 * ENCODE_DONE (fw 0x14d38 vs 0x14e70). Completing on whatever lands
+	 * first would report a frame that actually succeeded as -EPROTO, with
+	 * the real completion going to the restored hook. Keep waiting
+	 * instead, and log what was skipped. (Review of 19b9d93, finding 1.)
+	 */
+	u16			want_id;
+	u32			other_id;
+	unsigned int		other_count;
 };
 
 /*
@@ -205,6 +224,16 @@ static void ave_session_ipc_rx(struct ave_device *ave, u32 chan_id,
 	}
 	if (chan_id != AVE_CH_IO_T2H)
 		return;
+
+	if (rx->want_id && size >= 2 && buf) {
+		u16 id = get_unaligned_le16(buf);
+
+		if (id != rx->want_id) {
+			rx->other_id = id;
+			rx->other_count++;
+			return;		/* not ours: keep waiting */
+		}
+	}
 
 	rx->flags = flags;
 	rx->overflow = size > sizeof(rx->buf);
@@ -271,6 +300,20 @@ static void *ave_sess_dma_alloc(struct ave_sess_bufs *b, size_t size,
 	cpu = dma_alloc_coherent(b->ave->dev, size, iova, GFP_KERNEL);
 	if (!cpu)
 		return NULL;
+	/*
+	 * SetTranscode programs only the low 32 bits of the coded address and
+	 * size (fw str w10 0x592fc / 0x59310). Today the DART aperture is
+	 * 32-bit so every IOVA fits, but nothing enforces that, and a buffer
+	 * above 4 GiB would be silently truncated into someone else's mapping.
+	 * (Review of 19b9d93, finding 5.)
+	 */
+	if ((u64)*iova + size > SZ_4G) {
+		dev_err(b->ave->dev,
+			"session: IOVA %pad +%#zx crosses 4 GiB; the firmware would truncate it\n",
+			iova, size);
+		dma_free_coherent(b->ave->dev, size, cpu, *iova);
+		return NULL;
+	}
 	b->dma[b->ndma].cpu = cpu;
 	b->dma[b->ndma].iova = *iova;
 	b->dma[b->ndma].size = size;
@@ -361,6 +404,9 @@ static int ave_session_cmd(struct ave_device *ave, const struct ave_cmd_abi *abi
 	rx->overflow = false;
 	rx->ack_seen = false;
 	rx->ack_size = 0;
+	rx->other_id = 0;
+	rx->other_count = 0;
+	rx->want_id = abi->cmd[op].reply_id;
 
 	dev_info(ave->dev, "session: %s: sending %zu bytes at IOVA %pad on IO\n",
 		 name, cmd_len, &cmd_iova);
@@ -376,10 +422,11 @@ static int ave_session_cmd(struct ave_device *ave, const struct ave_cmd_abi *abi
 					   msecs_to_jiffies(AVE_SESS_TIMEOUT_MS));
 	if (!left) {
 		dev_err(ave->dev,
-			"session: %s: TIMEOUT after %d ms - no completion on IO_T2H (IO ack %s)\n",
-			name, AVE_SESS_TIMEOUT_MS,
+			"session: %s: TIMEOUT after %d ms - no id %#06x on IO_T2H (IO ack %s; %u other completion(s), last %#06x)\n",
+			name, AVE_SESS_TIMEOUT_MS, rx->want_id,
 			rx->ack_seen ? "did arrive: the firmware took the command"
-				     : "did not arrive either");
+				     : "did not arrive either",
+			rx->other_count, rx->other_id);
 		return -ETIMEDOUT;
 	}
 	/*
@@ -389,6 +436,10 @@ static int ave_session_cmd(struct ave_device *ave, const struct ave_cmd_abi *abi
 	 * interrupts the completion wins the race and the ack lands just after
 	 * this point. Logged at info for that reason.
 	 */
+	if (rx->other_count)
+		dev_info(ave->dev,
+			 "session: %s: skipped %u other completion(s), last id %#06x, while waiting for %#06x\n",
+			 name, rx->other_count, rx->other_id, rx->want_id);
 	if (!rx->ack_seen)
 		dev_info(ave->dev,
 			 "session: %s: completion arrived before the IO ack echo (expected ordering)\n",
@@ -648,13 +699,28 @@ static int ave_session_start_avc(struct ave_device *ave,
 static void ave_session_alloc_nbr(struct ave_device *ave,
 				  struct ave_sess_bufs *bufs)
 {
+	static const unsigned int per_mb_col[AVE_SRC_NBR_GROUPS] = {
+		256, 1024, 56, 64,	/* Info, Pixel, Data, FwData - docs/47 */
+	};
 	struct ave_sess_arena a = {};
+	unsigned int mb_cols = ave_mb_align(session_width) / 16;
 	size_t slot = (size_t)session_nbr_kb << 10;
 	unsigned int g, i;
 
 	if (!session_nbr || !session_frame)
 		return;
-	if (!slot || slot > SZ_16M) {
+	if (!slot) {
+		/* Largest group's requirement, so one slot size fits all four. */
+		slot = SZ_16K;
+		for (g = 0; g < AVE_SRC_NBR_GROUPS; g++)
+			slot = max_t(size_t, slot,
+				     (size_t)per_mb_col[g] * mb_cols);
+		slot = ALIGN(slot, SZ_16K);
+		dev_info(ave->dev,
+			 "session: SrcNeighbor slot %zu KiB for %u MB columns (docs/47 formula)\n",
+			 slot >> 10, mb_cols);
+	}
+	if (slot > SZ_16M) {
 		dev_warn(ave->dev, "session: session_nbr_kb=%u out of range\n",
 			 session_nbr_kb);
 		return;

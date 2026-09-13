@@ -714,3 +714,38 @@ tools/abi_selftest      698 checks, 0 failures
 tools/session_selftest  141 checks, 0 failures   (was 29)
 tools/ipc_selftest    32120 checks, 0 failures
 ```
+
+## Review of 19b9d93 (Fable) — changes applied
+
+Verdict was **SAFE TO RUN**; no path handed the firmware unowned memory, and
+the retrieval chain (length formula, offset-0 bitstream, Annex B start codes,
+parameter-set scan-back) was re-derived independently and confirmed. Applied:
+
+1. **Completion filtering (finding 1).** The capture hook completed on the
+   first IO_T2H message of any id, and the encode path has seven
+   `NotificationToHost` sites - `LRME_DONE` (`0xE07`) is raised in the same
+   `ProcessEncDone` as `ENCODE_DONE` (fw `0x14d38` vs `0x14e70`). A frame that
+   actually succeeded could have been reported as `-EPROTO` with the real
+   completion going to the restored hook. The hook now waits for the id this
+   command expects and logs how many others it skipped.
+2. **SrcNeighbor sizes are not unknown (finding 2).** docs/47 line 302 already
+   has them from the kext (`0xea5970`, `59e8`, `5a70`, `5adc`): per macroblock
+   column, Info 256, Pixel 1024, Data 56, FwData 64 bytes, 16 KiB floor. The
+   driver now sizes the slot from that formula (80 KiB at 1280 wide);
+   `session_nbr_kb` remains as an override. The failure mode description was
+   also wrong: the 16 slots are one contiguous mapping, so an undersized slot
+   **overruns into the next slot silently** - wrong output, not a DART fault.
+3. **Unload under live DMA (finding 4).** After a Process timeout the core may
+   still be writing, and `venc_sys` is not gated on this m1n1, so unmapping
+   would give a fault storm and cost a reboot. `ave_remove()` now reads
+   `CPU_STATUS` **before** dropping power - a read after gating would hang the
+   fabric (docs/24) - and leaks the session buffers rather than unmapping
+   under a running core.
+4. **4 GiB guard (finding 5).** `SetTranscode` programs only the low 32 bits
+   of the coded address and size (fw `0x592fc`/`0x59310`). Allocation now
+   refuses any buffer crossing 4 GiB instead of relying on the aperture.
+
+Left as-is, with the reasoning recorded: the Process recon pointers are
+overwritten by `setRefPointers` before `setPipe` reads them (finding 3), so
+they are inert either way; and the debugfs directory is a weaker success
+signal than the `encoded one frame OK` log line (finding 6).
