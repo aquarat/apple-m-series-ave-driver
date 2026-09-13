@@ -228,6 +228,17 @@ firmware info block. The only field iBoot filled is the 64-bit DATA base at
 TEXT's DRAM extent from the dump (`0x10000b2c000`-`0x10000c15000` non-zero)
 agrees with `0xec000` from `0x10000b28000` to within one 4 KiB page.
 
+> **Update (2026-09-13, [49](49-dapf-write-reset.md)).** E3a showed that
+> programming this DAPF from Linux *after* apple-dart has reset and enabled
+> the DART (overlay `variant=3`) resets the machine on the first write. The
+> block identity is not in doubt — Apple's own `pmap-io-ranges` tags
+> `0x40d044000` as `'DAPF'` — but E3's "keep translation, then program the
+> DAPF" order is the opposite of every known-good DAPF write (m1n1 writes
+> DAPFs before any DART is configured, and its `aop.py` programs the DAPF
+> before `dart.initialize()`). The E3 plan below stands as the *goal*; the
+> *mechanism* for installing the entries is revised in docs/49 §6 (N1: quiesce
+> the DART, write in m1n1's order, restore; N3: have m1n1 do it at boot).
+
 ## 3. dart-ave0 in the ADT, decoded (restore tree)
 
 | property | dart-ave0 | dart-isp0 | meaning |
