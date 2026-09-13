@@ -958,6 +958,38 @@ struct ave_start_avc_layout {
 	u32	recon_addr;		/* u64, offset inside an entry */
 	u32	recon_size;		/* u32 luma bytes, inside entry; NONE = absent */
 	u32	recon_meta_addr;	/* u64 second-plane addr, inside entry */
+	/*
+	 * Low-resolution (LRME) reference table - Apple's LowResRef surfaces.
+	 * ONE u64 IOVA PER DPB SLOT, same slot index as recon_set, and this is
+	 * what actually reaches sLowResOutput.LowResSrcLumaScaled: the per-frame
+	 * PICMGMT field is overwritten before setLRME reads it. The chain, all
+	 * 13.5 image VAs (docs/53 s13):
+	 *
+	 *   host  AVE_CHM_SetFwBuf    kext 0xfffffe0008eaefcc / 0xeaf004
+	 *         -> AVE_VIDEO_PARAMS + 0x248 + set*0x88 + slot*8
+	 *            (= command wire 0x2A8, since VideoParams sits at cmd+0x60)
+	 *   fw    CAVECommonDPB::ProvideReferenceFrames 0x2b780 / 0x2b788
+	 *         -> DPBContext + 0x10A0 + set*0x80 + slot*8
+	 *   fw    CAVECommonDPB::InitPointerAndVariables 0x2bddc / 0x2bde8
+	 *         -> DPB entry + 64        (entry = ctx + 0x680 + slot*0x50)
+	 *   fw    H264VideoEncoderDPB::ManageDPBBuffer 0x2d544 / 0x2d55c
+	 *         -> ReferenceFrameInfoData + 224
+	 *   fw    CAVECommonDPB::setRefPointers 0x2c318 / 0x2c320
+	 *         -> AVE_PICMGMT_PARAMS + 0xC20
+	 *   fw    CAVCController::setLRME 0x523bc, assert 5782 / 5783
+	 *
+	 * How many entries the firmware reads: ProvideReferenceFrames is called
+	 * with numRefs = SPS max_num_ref_frames (fw ldr w1,[x24,#1072] 0x5dd14)
+	 * and copies slots 0..numRefs inclusive, for sets 0..[dpb+32]; the
+	 * H264VideoEncoderDPB constructor sets [dpb+32] = 1 (fw 0x2d1c4), so
+	 * only set 0 is used and exactly max_num_ref_frames+1 slots must be
+	 * valid. Apple allocates the same count: AVE_CalcBufNumOfLowResRef
+	 * (kext 0xfffffe0008ea55d8) returns n+1, and AVE_CreateInternalSurfaces
+	 * (0xfffffe0008f3a414) creates one surface per slot at SurfaceSet+0x9A8.
+	 */
+	u32	low_res_ref_set;	/* u64[] per DPB slot; NONE = not located */
+	u32	low_res_ref_stride;	/* bytes between slots */
+	u32	low_res_ref_max;	/* slots in one set */
 	/* coded data / coded header tables */
 	u32	coded_max;
 	u32	coded_addr, coded_addr_stride;		/* u64[] */
@@ -1259,6 +1291,12 @@ const struct ave_cmd_abi ave_cmd_abi_13_5 = {
 		.recon_meta_addr = AVE_OFF_NONE, /* +8: second-plane addr, 0 on the
 						 * linear arm (kext stp x8,xzr 0xfffffe0008eae710);
 						 * not read by the fw loop */
+		/* LowResRef: VideoParams+0x248 = wire 0x2A8, set stride 0x88,
+		 * slot stride 8, 17 slots (kext 0xfffffe0008eaefcc/0xeaf010;
+		 * fw ProvideReferenceFrames ldr x23,[x21,#584] 0x2b780). */
+		.low_res_ref_set    = 0x2a8,
+		.low_res_ref_stride = 0x08,
+		.low_res_ref_max    = AVE_DPB_MAX,
 		.coded_max	= 20,		/* kext cmp w1,#0x14 0xfffffe0008ea4ce8 */
 		.coded_addr	= 0x4b8,	/* fw ldr x8,[x20,#1112] 0x5d4c8 */
 		.coded_addr_stride = 8,
@@ -1519,6 +1557,13 @@ const struct ave_cmd_abi ave_cmd_abi_26_6 = {
 		.recon_addr	= 0x00,		/* docs/21 §3.2 _S_AVE_DPBBuf */
 		.recon_size	= 0x08,
 		.recon_meta_addr = 0x10,
+		/* 26.6.2: no counterpart located. The 26.6.2 Start command has
+		 * no AVE_VIDEO_PARAMS sub-block at a known offset and its
+		 * ProvideReferenceFrames was not read, so the builder writes
+		 * nothing and the per-frame PICMGMT field stands alone. */
+		.low_res_ref_set    = AVE_OFF_NONE,
+		.low_res_ref_stride = 0,
+		.low_res_ref_max    = 0,
 		.coded_max	= AVE_CODED_MAX_BUFS,
 		.coded_addr	= AVE_START_CODED_DATA_SET,
 		.coded_addr_stride = AVE_START_BUF_STRIDE,

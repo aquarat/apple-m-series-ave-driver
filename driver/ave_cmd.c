@@ -295,6 +295,23 @@ int ave_cmd_build_start_avc(const struct ave_cmd_abi *abi, u8 *buf, size_t len,
 	for (i = 0; i < s->n_recon; i++)
 		if (!s->recon[i].addr || (s->recon[i].addr & 127))
 			return -EINVAL;
+	if (s->n_low_res_ref) {
+		/*
+		 * One LowResRef per DPB slot, in slot order, or none at all.
+		 * Publishing them for a layout that has no such table, or an
+		 * address the setLRME alignment assert (fw 0x523dc, line 5783)
+		 * would reject, is a silent wrong answer - refuse it here.
+		 */
+		if (s->n_low_res_ref != s->n_recon ||
+		    s->n_low_res_ref > AVE_DPB_MAX ||
+		    l->low_res_ref_set == AVE_OFF_NONE ||
+		    s->n_low_res_ref > l->low_res_ref_max)
+			return -EINVAL;
+		for (i = 0; i < s->n_low_res_ref; i++)
+			if (!s->low_res_ref[i] ||
+			    (s->low_res_ref[i] & (AVE_STRIDE_ALIGN - 1)))
+				return -EINVAL;
+	}
 	for (i = 0; i < s->n_coded; i++)
 		if (!s->coded[i].addr || !s->coded[i].size ||
 		    !s->coded_hdr[i].addr ||
@@ -363,6 +380,9 @@ int ave_cmd_build_start_avc(const struct ave_cmd_abi *abi, u8 *buf, size_t len,
 		if (l->recon_meta_addr != AVE_OFF_NONE)
 			wr64(&w, e + l->recon_meta_addr, s->recon[i].addr);
 	}
+	for (i = 0; i < s->n_low_res_ref; i++)
+		wr64(&w, l->low_res_ref_set + i * l->low_res_ref_stride,
+		     s->low_res_ref[i]);
 	for (i = 0; i < s->n_coded; i++) {
 		wr64(&w, l->coded_addr + i * l->coded_addr_stride, s->coded[i].addr);
 		wr32(&w, l->coded_size + i * l->coded_size_stride, s->coded[i].size);
