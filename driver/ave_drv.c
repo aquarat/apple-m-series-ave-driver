@@ -404,6 +404,11 @@ static int ave_probe(struct platform_device *pdev)
 
 	ave_ctl_asc_sample(dev);
 
+	/* Before any stage: every later layout depends on it. */
+	ret = ave_detect_fw_abi(ave);
+	if (ret)
+		return ret;
+
 	if (ave_stage(dev, AVE_STAGE_MAP_BANKS)) {
 		for (i = 0; i < AVE_NUM_BANKS; i++) {
 			struct resource *res;

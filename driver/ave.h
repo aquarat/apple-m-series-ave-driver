@@ -17,6 +17,7 @@
 
 #include "ave_hw.h"
 #include "ave_abi.h"
+#include "ave_version.h"
 
 /* One mapped MMIO bank; index matches the ADT reg index. */
 struct ave_bank {
@@ -51,6 +52,13 @@ struct ave_channel {
 struct ave_device {
 	struct device		*dev;
 	struct ave_bank		bank[AVE_NUM_BANKS];
+	enum ave_fw_abi		fw_abi;		/* chosen before any command */
+
+	/* --- boot/IPC state (owner: ave_ipc.c work) --- */
+	/* --- end boot/IPC --- */
+
+	/* --- DAPF / fetch-path state (owner: ave_fw.c / ave_dapf.c work) --- */
+	/* --- end DAPF --- */
 
 	/*
 	 * Boot-handshake capture. The IRQ is requested before the firmware
