@@ -10,14 +10,22 @@ Examples:
   disas.py --kext 'AVE_CHM_MakeFwCmd_Open' -n 0x400
   disas.py --fw  'InitMailboxRoute'
   disas.py --kext --addr 0xfffffe0008c06478 -n 0x200
+  disas.py --macos 13.5 --fw 'CmdProcessor' --list   # the build iBoot loads (docs/43)
+
+--macos selects which build's blobs to read (default 26.6.2, the one every doc
+before docs/43 cites). AVE_MACOS=13.5 in the environment does the same.
 """
 import argparse, struct, subprocess, sys, os, re, tempfile
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-KC   = os.path.join(REPO, "data/blobs/kc.macho")
-FW   = os.path.join(REPO, "data/blobs/ave_h13c.bin")
-KSYM = os.path.join(REPO, "data/derived/kext-symbols.txt")
-FSYM = os.path.join(REPO, "data/derived/symbols.txt")
+# (kernelcache, firmware, kext symbols, firmware symbols) per macOS build.
+BUILDS = {
+    "26.6.2": ("data/blobs/kc.macho", "data/blobs/ave_h13c.bin",
+               "data/derived/kext-symbols.txt", "data/derived/symbols.txt"),
+    "13.5":   ("data/blobs/macos-13.5/kc.macho", "data/blobs/macos-13.5/ave_h13c.bin",
+               "data/blobs/macos-13.5/derived/kext-symbols.txt",
+               "data/blobs/macos-13.5/derived/symbols.txt"),
+}
 
 def segments(path):
     """[(name, vmaddr, vmsize, fileoff, filesize)] from a Mach-O."""
@@ -60,9 +68,14 @@ def main():
     ap.add_argument("--addr", type=lambda x: int(x, 0), help="disassemble this VA instead")
     ap.add_argument("-n", "--length", type=lambda x: int(x, 0), default=0x300)
     ap.add_argument("--list", action="store_true", help="only list matching symbols")
+    ap.add_argument("--macos", choices=sorted(BUILDS), default=os.environ.get("AVE_MACOS", "26.6.2"),
+                    help="which build's blobs to read (default 26.6.2, or $AVE_MACOS)")
     a = ap.parse_args()
+    if a.macos not in BUILDS:
+        sys.exit(f"AVE_MACOS={a.macos!r}: choose one of {sorted(BUILDS)}")
 
-    image, symfile = (KC, KSYM) if a.kext else (FW, FSYM)
+    kc, fw, ksym, fsym = (os.path.join(REPO, p) for p in BUILDS[a.macos])
+    image, symfile = (kc, ksym) if a.kext else (fw, fsym)
     for p in (image, symfile):
         if not os.path.exists(p):
             sys.exit(f"missing {p} -- see docs/05-reproducing.md")
