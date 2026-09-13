@@ -222,3 +222,41 @@ entry. Not possible with this setup; recorded for completeness.
   entry?).
 - macOS PPL's exact write order and whether it quiesces the DART first.
 - The meaning of r0/r4 bits and of the garbage high r0 bits.
+
+## N0 answered (operator, 2026-09-13)
+
+**The machine reset by itself** during E3a attempt 3; the next thing on
+screen was the Fedora boot logo. With `kernel.panic = 0` an SError or oops
+would have frozen the machine with a panic on screen, so this was a
+**SoC-level reset**, not a CPU exception Linux took. **Confirmed** by
+observation. That favours a hardware watchdog/protection mechanism tripped
+by the write over a synchronous abort, and makes the order/state hypotheses
+(H-order, H-first) the ones N1 tests.
+
+## N1 as implemented (commit after e24431c)
+
+New `apple-ave` parameters in `ave_dapf.c`:
+
+| parameter | default | meaning |
+|---|---|---|
+| `dapf_order` | `m1n1` | `m1n1`: ADT order from slot 0, only the needed slots, r4/start/end/r0, **no pre-clear**, other slots untouched. `clear16`: the sequence that reset the machine (all 16 slots, r0 = 0 first). |
+| `dapf_quiesce` | 1 | around the writes: save all 16 TCRs and `ENABLED_STREAMS`, write TCRs 0, `ENABLED_STREAMS` 0, program, then restore both |
+
+Every quiesce and write step is a `STEP` marker, so `step_ms=` plus
+`tools/e3-run.sh` pins any reset to one register write.
+
+Registers-only run (fresh boot; core not started):
+
+```sh
+sudo insmod test/ave-overlay.ko variant=3
+tools/e3-run.sh n1 stop_after=12 step_ms=1500 dapf_dump=1 \
+    dapf_set=control fw_map_data=1 fw_map_text=2
+```
+
+Outcomes: survives with "programmed and verified by readback" and "DART
+restored" → the reset was order/state, and E3 can proceed in `m1n1` order
+(the negative control then needs a separate clean-slot design); resets at
+a quiesce marker → touching this DART's TCR/`ENABLED_STREAMS` is itself
+fatal (unlikely: apple-dart writes both); resets at the first slot write
+even quiesced and in m1n1 order → Linux cannot write this DAPF at runtime,
+go to N3 (m1n1).
