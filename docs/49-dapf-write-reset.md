@@ -453,3 +453,51 @@ N1i removes the fsync ambiguity: after the announcement, wait 60 s printing
 a line every 2 s **with no register access** (N1e showed such holds are
 safe), then write, then print. Lines landing through the wait followed by a
 reset pins it to the write; a reset during the wait pins it elsewhere.
+
+## N1i — 2026-09-13, `results/n1i-*.kmsg`: the write hangs; the capture loses ~5 s
+
+N1b's 30 s read loop, then a 60 s wait printing every 2 s with **no register
+access**, then `PROBE N1i writing TCR[0] now`, `msleep(3000)`, the same-value
+write. **The machine reset.** Every wait line through `t=60s` is on disk;
+"writing now" is not.
+
+Lining up the three same-value-write runs by how long before the write each
+line was printed:
+
+| run | last line on disk (printed before the write) | first lost line |
+|---|---|---|
+| N1b | `t=30s`, ~4 s | "next", ~2 s |
+| N1h | `t=30s`, ~7 s | "next", ~5 s |
+| N1i | `t=60s`, ~5 s | "writing now", ~3 s |
+
+**Anything printed within about 5 s of the hang is lost from disk**, even
+though the capture fsyncs each line. **Inferred:** the SoC reset discards
+data the Apple NVMe controller has acknowledged but not yet persisted. This
+retracts the earlier reading of N1b as "froze before any write": it wrote,
+and the evidence of it fell in the loss window.
+
+With that window every run is consistent:
+
+- **all five runs that wrote to CPUDART or its DAPF hung the machine**
+  (E3a attempt 3: DAPF slot 0 r0; N1: TCR[0] ← 0; N1b, N1h, N1i: TCR[0] ←
+  its own value `0x80`);
+- **all eight runs that did not write survived** (N1c1-3, N1d, N1e, N1f,
+  N1g, N1g2), including 120 s of the same reads.
+
+**Confirmed, to the capture's ~5 s resolution:** a write by this driver to
+the AVE CPUDART register block - even a same-value TCR write - hangs the
+fabric, in the state after stage 11 with apple-dart bound. apple-dart's own
+writes to the same block (STREAM_COMMAND TLB invalidation during stages
+9-10 of the same runs) did not. Why is unknown.
+
+Next discriminators, each needing waits of 15 s or more around the write:
+
+- **N1j**: the same-value TCR[0] write at **stage 8**, right after the
+  read dump and before the DATA map or scratch writes (`variant=3`).
+  Survives → the hazard depends on later stages or elapsed session time;
+  hangs → any write of ours to the block hangs.
+- **N1k** (if N1j hangs): the same write on `variant=2` (no apple-dart) at
+  stage 8. Separates "apple-dart bound" from "any write at all".
+- A static question for the reviewer: how our `devm_ioremap` mapping and
+  `writel` differ from apple-dart's for the same register (mapping
+  attributes, access width, the regulator/clock/PM state apple-dart holds).
