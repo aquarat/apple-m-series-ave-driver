@@ -36,7 +36,15 @@ against tag `v1.6.1`, `src/dapf.c` only:
   end masked to the last 4-byte word, `r0 0x11`, `r4 1` - copied from ISP's
   live TEXT entry. If `ave0` has no `segment-ranges`, nothing is appended.
 - existing entries are untouched: `dapf_init()` keeps its signature and
-  behaviour for every other caller.
+  behaviour for every other caller;
+- **guarded** (Fable review F1): the AVE writes run with
+  `exc_guard = GUARD_MARK`, then `dsb sy; isb; udelay(300 ms)`, then the guard
+  is restored. Unguarded, an SError here makes `exc_serr()` reboot, and since
+  stage 1 chainloads the same file every time, that would be a boot loop.
+  Guarded, `exc_serr()` logs it and returns, m1n1 prints
+  `dapf: /arm-io/dart-ave0: N exception(s) while programming; continuing
+  boot`, and Linux boots with the DAPF unprogrammed. An SError arriving later
+  than 300 ms would still escape the guard.
 
 Build (native aarch64; needs `rust-std-static-aarch64-unknown-none-softfloat`):
 
@@ -57,51 +65,80 @@ Artefacts (gitignored, `data/blobs/m1n1/`):
 |---|---|---|
 | `esp-boot.bin` | `2227cf97eac6d5f2db08e43a81693ef96aea168532933bfec9602c8c580d94f7` | copy of the current ESP `boot.bin` |
 | `boot.bin.stock-src` | `bd040b64842cbe07752312725f774dd11870c462712b6fdbb75d442d92275da8` | **unpatched** v1.6.1 built here, same assembly |
-| `boot.bin.ave-dapf` | `fd7ab4e104bd88f2851894cc3da1a2ac14b3b81deba91545b0d2282d8a92441c` | patched, version tag `v1.6.1-1-g9f9850d` |
+| `boot.bin.ave-dapf` | `73577b9903d8b2735bb439e42787341821ae83a5e2c5fd016778a4dbfdd049fd` | patched + guard, version tag `v1.6.1-1-g1ae6361` |
 
-Differences from Fedora's own build, besides the patch: compiler version and
+m1n1 finds appended payloads at the linker symbol `_payload_start`; in the
+patched ELF it is `0x10c000` = 1 097 728 = the binary's length, so the logo,
+DTBs and u-boot stay aligned (verified with `nm`, not assumed).
+
+Differences from Fedora's own build, besides the patch (109 492 bytes of the
+unpatched self-built image differ from the package): compiler version and
 the console font (Fedora regenerates `font.bin` from Source Code Pro; this
 build uses the font committed in the m1n1 tree). The boot logo is Fedora's,
 byte for byte.
 
 ## 3. Install
 
-Two steps are possible; step A isolates "a self-built m1n1 boots" from "the
-patch is safe". Each is one reboot.
+Step A is **mandatory** (review F7): it proves a self-built v1.6.1 boots
+here before the patch is added. Each step is one reboot. Copies go to a
+`.new` file and are renamed into place, as `update-m1n1` does, so a crash
+mid-copy cannot leave a truncated `boot.bin` (F3).
 
 ```sh
-# once: back up the known-good file on the ESP itself, under a new name
-sudo cp -p /boot/efi/m1n1/boot.bin /boot/efi/m1n1/boot.bin.pre-ave
+# 0. stop package updates from silently replacing boot.bin while testing (F5)
+#    (update-m1n1 runs on every kernel install/removal and on m1n1/u-boot
+#    updates; it would also rotate the custom file into boot.bin.old)
+echo 'M1N1_UPDATE_DISABLED=1' | sudo tee -a /etc/sysconfig/update-m1n1
+
+# 1. back up the known-good file on the ESP itself
+sudo cp -p /boot/efi/m1n1/boot.bin /boot/efi/m1n1/boot.bin.pre-ave && sync
 sudo sha256sum /boot/efi/m1n1/boot.bin.pre-ave   # must be 2227cf97...94f7
 
-# optional step A: unpatched self-built
-sudo cp data/blobs/m1n1/boot.bin.stock-src /boot/efi/m1n1/boot.bin && sync
-# reboot; check: tr -d '\0' < /proc/device-tree/chosen/asahi,m1n1-stage2-version  -> v1.6.1
+# 2. step A: unpatched self-built
+sudo cp data/blobs/m1n1/boot.bin.stock-src /boot/efi/m1n1/boot.bin.new && sync
+sudo mv -f /boot/efi/m1n1/boot.bin.new /boot/efi/m1n1/boot.bin && sync
+sudo sha256sum /boot/efi/m1n1/boot.bin           # must be bd040b64...75da8
+# reboot; then: tr -d '\0' < /proc/device-tree/chosen/asahi,m1n1-stage2-version  -> v1.6.1
 
-# step B: patched
-sudo cp data/blobs/m1n1/boot.bin.ave-dapf /boot/efi/m1n1/boot.bin && sync
-# reboot; check: ... asahi,m1n1-stage2-version -> v1.6.1-1-g9f9850d
+# 3. step B: patched
+sudo cp data/blobs/m1n1/boot.bin.ave-dapf /boot/efi/m1n1/boot.bin.new && sync
+sudo mv -f /boot/efi/m1n1/boot.bin.new /boot/efi/m1n1/boot.bin && sync
+sudo sha256sum /boot/efi/m1n1/boot.bin           # must be 73577b99...49fd
+# reboot; then: ... asahi,m1n1-stage2-version -> v1.6.1-1-g1ae6361
 ```
 
-Verification after booting the patched m1n1 (read-only, no core start):
+Verification after booting the patched m1n1:
 
-```sh
-sudo insmod test/ave-overlay.ko variant=3
-HOLD=10 tools/e3-run.sh n3-dump stop_after=8 dapf_dump=1
-```
+- **Primary evidence (F2): the m1n1 console during boot.** Look for
+  `dapf: Initialized /arm-io/dart-ave0` and possibly `dapf: /arm-io/dart-ave0:
+  appended TEXT entry 2: 0x10000b28000-0x10000c13ffc r0 0x11` (or `... TEXT
+  ... already covered` / `no segment-ranges`, or the guard's `exception(s)
+  while programming`). It scrolls fast; filming the screen during boot is the
+  reliable way to catch it.
+- **Secondary, read-only, as early after boot as practical:**
 
-Expect the DAPF slots to hold the ADT entries (`0x1f0` window r0 `0x33`, the
-MMIO entry r0 `0x31`) and, if appended, TEXT `0x10000b28000 -
-0x10000c13ffc` r0 `0x11`, instead of E2's uninitialised contents.
+  ```sh
+  sudo insmod test/ave-overlay.ko variant=3
+  HOLD=10 tools/e3-run.sh n3-dump stop_after=8 dapf_dump=1
+  ```
 
-**Note:** `update-m1n1` runs on m1n1/u-boot/kernel package updates and will
-replace the custom `boot.bin` with a stock one (moving the custom one to
-`boot.bin.old`). That is safe, but it silently removes the AVE entry.
+  Expect slot 0 `0x1f000000000 - 0x1f0fffffffc r0 0x33 r4 1`, slot 1
+  `0x506000000 - 0x507c6c000 r0 0x31 r4 1`, and, if appended, slot 2 TEXT
+  `0x10000b28000 - 0x10000c13ffc r0 0x11`. m1n1's power-down of VENC-DART is a
+  no-op (virtual device), so `venc_sys` stays on into Linux and is gated by
+  Linux later; that DAPF contents survive gating is inferred from ISP (E1),
+  so garbage here would not by itself prove m1n1 failed.
+
+After testing, remove `M1N1_UPDATE_DISABLED=1` from
+`/etc/sysconfig/update-m1n1` (or keep it while the patched stage 2 is wanted).
 
 ## 4. Fallback - if Linux no longer boots
 
 Symptoms of a bad stage 2: black screen or a hang after the Asahi/m1n1 logo,
-or m1n1 printing an exception, before U-Boot/GRUB appears. The fix is to put
+m1n1 printing "Unhandled exception, rebooting...", or the machine rebooting
+over and over, before U-Boot/GRUB appears. Holding the power button still
+reaches the startup options picker in all of these cases: iBoot handles it
+before any m1n1 code runs. The fix is to put
 `boot.bin.pre-ave` back as `boot.bin` on the ESP from another OS.
 
 ### From macOS (preferred)
@@ -118,11 +155,13 @@ or m1n1 printing an exception, before U-Boot/GRUB appears. The fix is to put
    must be `89A77CF4-32BA-4A03-8BCA-DB0F62925CA4`.
 3. Mount it and restore:
    ```sh
-   sudo diskutil mount disk0s4          # mounts at /Volumes/EFI - FEDRA (name may vary)
-   cd "/Volumes/EFI - FEDRA/m1n1"
-   ls -l                                 # boot.bin, boot.bin.pre-ave, boot.bin.old
-   shasum -a 256 boot.bin.pre-ave       # must be 2227cf97...94f7
-   cp boot.bin.pre-ave boot.bin
+   sudo diskutil mount disk0s4
+   diskutil info disk0s4 | grep "Mount Point"   # e.g. /Volumes/EFI - FEDRA (may have " 1" appended)
+   cd "/Volumes/EFI - FEDRA/m1n1"               # use the Mount Point shown above
+   ls -l                                        # boot.bin, boot.bin.pre-ave, boot.bin.old
+   shasum -a 256 boot.bin.pre-ave               # must be 2227cf97...94f7
+   sudo cp boot.bin.pre-ave boot.bin            # the mounted ESP is root-owned: sudo is needed
+   shasum -a 256 boot.bin                       # must now be 2227cf97...94f7
    cd / && sudo diskutil unmount disk0s4
    ```
 4. Shut down, hold the power button, choose the Fedora/Asahi volume.
@@ -131,11 +170,15 @@ or m1n1 printing an exception, before U-Boot/GRUB appears. The fix is to put
 
 1. Shut down, hold the power button until startup options appear, choose
    **Options** (recoveryOS), log in if asked.
-2. Utilities → **Terminal**, then the same `diskutil list`,
-   `diskutil mount disk0s4`, `cd "/Volumes/EFI - FEDRA/m1n1"`,
-   `cp boot.bin.pre-ave boot.bin`, `diskutil unmount disk0s4`.
+2. Utilities → **Terminal** (runs as root, no sudo needed), then the same
+   `diskutil list`, `diskutil mount disk0s4`, `diskutil info disk0s4 | grep
+   "Mount Point"`, `cd` there, `cp boot.bin.pre-ave boot.bin`,
+   `diskutil unmount disk0s4`.
 3. Restart and choose Fedora/Asahi.
 
 Second fallback if `boot.bin.pre-ave` is somehow missing: `boot.bin.old` on
-the same ESP (the Sep 3 stage 2) also boots this machine, and a stock file can
-be regenerated from Fedora with `sudo update-m1n1` once booted.
+the same ESP was the live stage 2 from Sep 3 to Sep 9 (same packaged m1n1,
+older DTBs/u-boot), so it very probably boots this machine. Do not run
+`update-m1n1` while the custom file is installed unless you intend to revert:
+it rotates the current `boot.bin` into `boot.bin.old`. Once Linux boots
+again, `sudo update-m1n1` regenerates a stock `boot.bin`.

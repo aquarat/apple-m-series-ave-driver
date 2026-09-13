@@ -1,18 +1,28 @@
-From 9f9850d0e110c2f64ccfdcebf62288354fb18985 Mon Sep 17 00:00:00 2001
+From 1ae6361a69df2c699eff5a65c0350f3d87c05b77 Mon Sep 17 00:00:00 2001
 From: apple-ave-driver <blue@aquarat.co.uk>
 Date: Sun, 13 Sep 2026 18:26:27 +0100
 Subject: [PATCH] dapf: program dart-ave0 and append the AVE TEXT entry if
  missing
 
+Guarded with GUARD_MARK so an SError from the AVE DAPF writes is logged
+and boot continues, instead of rebooting in a loop.
 ---
- src/dapf.c | 77 +++++++++++++++++++++++++++++++++++++++++++++++++-----
- 1 file changed, 70 insertions(+), 7 deletions(-)
+ src/dapf.c | 104 ++++++++++++++++++++++++++++++++++++++++++++++++-----
+ 1 file changed, 96 insertions(+), 8 deletions(-)
 
 diff --git a/src/dapf.c b/src/dapf.c
-index 3b4b773..9c50774 100644
+index 3b4b773..ec59878 100644
 --- a/src/dapf.c
 +++ b/src/dapf.c
-@@ -19,7 +19,56 @@ struct dapf_t8020_config {
+@@ -3,6 +3,7 @@
+ #include "dapf.h"
+ #include "adt.h"
+ #include "assert.h"
++#include "exception.h"
+ #include "malloc.h"
+ #include "memory.h"
+ #include "pmgr.h"
+@@ -19,7 +20,57 @@ struct dapf_t8020_config {
      u32 r4;
  } PACKED;
  
@@ -52,9 +62,10 @@ index 3b4b773..9c50774 100644
 +    }
 +
 +    if (count >= 16 || !seg[0].size) {
++        /* The ADT entries are programmed; report, but do not fail the init. */
 +        printf("dapf: %s: cannot add TEXT entry (count %d, size 0x%x)\n", path, count,
 +               seg[0].size);
-+        return -1;
++        return 0;
 +    }
 +
 +    base += 0x40 * count;
@@ -70,7 +81,7 @@ index 3b4b773..9c50774 100644
  {
      u32 length;
      const char *prop = "filter-data-instance-0";
-@@ -39,6 +88,9 @@ static int dapf_init_t8020(const char *path, u64 base, int node)
+@@ -39,6 +90,9 @@ static int dapf_init_t8020(const char *path, u64 base, int node)
          write32(base + 0x00, (config[i].r0_hi << 4) | config[i].r0_lo);
          base += 0x40;
      }
@@ -80,7 +91,7 @@ index 3b4b773..9c50774 100644
      return 0;
  }
  
-@@ -123,7 +175,7 @@ static int dapf_init_t8110(const char *path, u64 base, int node)
+@@ -123,7 +177,7 @@ static int dapf_init_t8110(const char *path, u64 base, int node)
      }
  }
  
@@ -89,9 +100,21 @@ index 3b4b773..9c50774 100644
  {
      int ret;
      int dart_path[8];
-@@ -146,9 +198,9 @@ int dapf_init(const char *path, int index)
+@@ -145,15 +199,38 @@ int dapf_init(const char *path, int index)
+         return -1;
      }
  
++    /*
++     * Linux's writes to AVE's DAPF raise an asynchronous SError. If m1n1's do
++     * too, an unguarded SError here reboots (exc_serr, GUARD_OFF) and loops
++     * every boot. Mark instead: exc_serr then logs and returns, the wait lets
++     * an asynchronous SError arrive while the guard is still set, and boot
++     * continues with an unprogrammed AVE DAPF.
++     */
++    int exc_before = exc_count;
++    if (asc_path)
++        exc_guard = GUARD_MARK;
++
      if (adt_is_compatible(adt, node, "dart,t8020")) {
 -        ret = dapf_init_t8020(path, base, node);
 +        ret = dapf_init_t8020(path, base, node, asc_path);
@@ -101,7 +124,25 @@ index 3b4b773..9c50774 100644
      } else if (adt_is_compatible(adt, node, "dart,t8110")) {
          ret = dapf_init_t8110(path, base, node);
      } else {
-@@ -165,14 +217,25 @@ int dapf_init(const char *path, int index)
+         printf("dapf: DAPF %s at 0x%lx is of an unknown type\n", path, base);
+-        return -1;
++        ret = -1;
++    }
++
++    if (asc_path) {
++        sysop("dsb sy");
++        sysop("isb");
++        udelay(300000);
++        exc_guard = GUARD_OFF;
++        if (exc_count != exc_before) {
++            printf("dapf: %s: %d exception(s) while programming; continuing boot\n", path,
++                   exc_count - exc_before);
++            ret = -1;
++        }
+     }
+ 
+     if (pwr)
+@@ -165,14 +242,25 @@ int dapf_init(const char *path, int index)
      return ret;
  }
  
@@ -129,7 +170,7 @@ index 3b4b773..9c50774 100644
  };
  
  int dapf_init_all(void)
-@@ -186,7 +249,7 @@ int dapf_init_all(void)
+@@ -186,7 +274,7 @@ int dapf_init_all(void)
              entry++;
              continue;
          }
