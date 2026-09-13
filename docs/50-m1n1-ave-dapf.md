@@ -208,3 +208,26 @@ again, `sudo update-m1n1` regenerates a stock `boot.bin`.
   `73577b99…49fd` (patched, guard, tag `v1.6.1-1-g1ae6361`), via `.new` +
   rename, verified on the ESP. `boot.bin.pre-ave`, `restore-m1n1.sh` and the
   README remain alongside. Awaiting reboot.
+- **2026-09-13 19:22** — **step B booted.** `chosen/asahi,m1n1-stage2-version`
+  = `v1.6.1-1-g1ae6361`, no SError, normal boot. Read-only dump
+  (`results/n3-dump-1789323781.kmsg`, overlay `variant=3`, `stop_after=8
+  dapf_dump=1`):
+
+  | slot | range | r0 | r4 |
+  |---|---|---|---|
+  | 0 | `0x10000b28000 - 0x10000c13ffc` | `0x11` | 1 |
+  | 1 | `0x1f000000000 - 0x1f0fffffffc` | `0x33` | 1 |
+  | 2 | `0x506000000 - 0x507c6c000` | `0x31` | 1 |
+  | 3-15 | E2's uninitialised contents, untouched | | |
+
+  **Confirmed:**
+  - **the live ADT's `dart-ave0` `filter-data-instance-0` carries iBoot's
+    AVE TEXT entry first** (r0 `0x11`), exactly like ISP's; m1n1 programmed
+    three entries and the patch's append was not needed ("already covered").
+    The restore ADT lacks it, as it lacks `segment-ranges`: both are
+    injected by iBoot.
+  - m1n1's DAPF writes succeed at boot where Linux's raise SErrors.
+  - DAPF contents survive the `venc_sys` power gating Linux did during boot
+    (E1's inference, now shown directly for AVE).
+  - The MMIO entry is the ADT's as listed (`0x506…`, ave1's span, docs/44
+    addendum); ave0's own `0x40d050000-0x40dc69000` is not admitted.
