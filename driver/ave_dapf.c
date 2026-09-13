@@ -400,6 +400,30 @@ static void ave_dapf_dump_entries(struct ave_device *ave, const char *tag)
 	dev_info(ave->dev, "dapf: [%s] %u non-empty slot(s)\n", tag, used);
 }
 
+/*
+ * Ungated dump, for callers that have their own reason to look. The block
+ * reset path (ave_drv.c, core_reset) uses it to answer the question that
+ * decides whether resetting the core is viable at all: the DAPF entries are
+ * written once by m1n1 at boot and Linux cannot rewrite them - a write is a
+ * fatal SError (docs/49) - so if a reset clears them, nothing after it can
+ * fetch and the only way back is a reboot.
+ */
+int ave_dapf_dump_now(struct ave_device *ave, const char *tag)
+{
+	int ret;
+
+	ret = ave_dapf_check_power(ave);
+	if (ret)
+		return ret;
+	ret = ave_dapf_map(ave);
+	if (ret)
+		return ret;
+
+	ave_dapf_dump_dart(ave, tag);
+	ave_dapf_dump_entries(ave, tag);
+	return 0;
+}
+
 int ave_dapf_dump(struct ave_device *ave)
 {
 	int ret;

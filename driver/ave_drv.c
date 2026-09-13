@@ -59,6 +59,11 @@ static int rvbar_probe;
 module_param(rvbar_probe, int, 0444);
 MODULE_PARM_DESC(rvbar_probe, "walk test values through the ASC RVBAR and report which bits move");
 
+static int core_reset;
+module_param(core_reset, int, 0444);
+MODULE_PARM_DESC(core_reset,
+		 "at stage 13, when the core is still running from an earlier load: 0 = leave it (default), 1 = pulse the block reset and report whether it stops and whether the DAPF survived, 2 = pulse it even when already STOPPED");
+
 static bool asc_timer;
 module_param(asc_timer, bool, 0444);
 MODULE_PARM_DESC(asc_timer, "also read the ASC timebase at +0x178000 during liveness sampling");
@@ -284,6 +289,85 @@ static void ave_power_off(struct ave_device *ave, const char *why)
 static void ave_power_off_action(void *data)
 {
 	ave_power_off(data, "devres");
+}
+
+/*
+ * Pulse the block reset when the core is still running from an earlier load.
+ *
+ * venc_sys no longer gates off under the patched m1n1 (docs/31, 2026-09-13),
+ * so a second insmod in the same boot finds the core RUNNING on drifted DATA,
+ * and CPU_CONTROL = 0 cannot stop a core that has been started (docs/31,
+ * stage 15). That is the whole reason every experiment currently costs a
+ * reboot, which is by far the most expensive thing about this bring-up.
+ *
+ * The DT does give this node a reset, and the two data points we have
+ * disagree: experiment 7c hung the fabric (docs/25), but the later RVBAR-lock
+ * test called reset_control_reset() and it returned 0 with no incident
+ * (docs/41). 7c ran before any successful bring-up, in the state where every
+ * access hung, so the disagreement is explainable - but it is not resolved,
+ * which is why this is off by default and opted into per run.
+ *
+ * Two things must hold for this to be worth anything, and neither is
+ * established yet:
+ *
+ *   - the reset leaves CPU_STATUS STOPPED, so stage 13 can start the core
+ *     again over a restored DATA segment (docs/51); and
+ *   - m1n1's DAPF entries survive it. They live in the DART, whose power
+ *     domain is a child of venc_sys, and Linux cannot rewrite them: the write
+ *     is a fatal SError (docs/49). If they are gone, the core cannot fetch
+ *     and only a reboot puts them back.
+ *
+ * Both are reported, not assumed. The DAPF readback is the one that decides
+ * whether this path is viable at all, so it runs even when the reset leaves
+ * the core running - that answer is worth the same either way.
+ */
+static int ave_core_reset(struct ave_device *ave)
+{
+	struct device *dev = ave->dev;
+	struct reset_control *rst;
+	u32 st;
+	int ret;
+
+	if (!core_reset)
+		return 0;
+
+	st = ave_read(ave, AVE_BANK_ASC, AVE_ASC_CPU_STATUS);
+	if ((st & AVE_ASC_ST_STOPPED) && core_reset < 2) {
+		dev_info(dev, "core reset: CPU_STATUS %#010x is STOPPED already, nothing to do\n",
+			 st);
+		return 0;
+	}
+	dev_info(dev, "core reset: CPU_STATUS %#010x%s, pulsing the block reset\n",
+		 st, st & AVE_ASC_ST_STOPPED ? " STOPPED (core_reset=2)" : " not STOPPED");
+
+	rst = devm_reset_control_get_optional_exclusive(dev, NULL);
+	if (IS_ERR(rst))
+		return dev_err_probe(dev, PTR_ERR(rst), "core reset: reset control\n");
+	if (!rst) {
+		dev_warn(dev, "core reset: this node has no reset in the DT\n");
+		return -ENODEV;
+	}
+
+	ret = reset_control_reset(rst);
+	dev_info(dev, "core reset: reset_control_reset() = %d\n", ret);
+	if (ret)
+		return ret;
+
+	st = ave_read(ave, AVE_BANK_ASC, AVE_ASC_CPU_STATUS);
+	dev_info(dev, "core reset: CPU_STATUS now %#010x%s\n",
+		 st, st & AVE_ASC_ST_STOPPED ? " STOPPED" : " NOT STOPPED");
+
+	/* The decisive readback; failures here are reported, not fatal. */
+	ret = ave_dapf_dump_now(ave, "after core reset");
+	if (ret)
+		dev_warn(dev, "core reset: DAPF readback unavailable (%d) - needs overlay variant=2 or 3\n",
+			 ret);
+
+	if (!(st & AVE_ASC_ST_STOPPED)) {
+		dev_warn(dev, "core reset: the core did not stop; not starting it again\n");
+		return -EBUSY;
+	}
+	return 0;
 }
 
 /*
@@ -835,6 +919,15 @@ iop_config_done:
 	}
 
 	if (ave_stage(dev, AVE_STAGE_ASC_START)) {
+		/*
+		 * If the core is still running from an earlier load in this
+		 * boot, stop it first - the restore below writes the DATA
+		 * segment out from under it otherwise. No-op unless
+		 * core_reset=1.
+		 */
+		ret = ave_core_reset(ave);
+		if (ret)
+			return dev_err_probe(dev, ret, "stage-13 core reset\n");
 		/*
 		 * macOS restores a pristine DATA segment before every start
 		 * (docs/31 2026-09-13, docs/45 row 32). Without it the second
