@@ -143,9 +143,10 @@
 #define AVE_ARM_IO_BUS_OFFSET	0x200000000ULL
 
 /*
- * The firmware's own I/O window, as it must appear in the image's IOBA tag:
- * the 32 MiB region based at bus 0x20C000000 (bank 4's AP-physical
- * 0x40C000000 less the translation). The firmware forms every register
+ * The firmware's own I/O window. Its IOBA tag takes the AP-PHYSICAL base
+ * 0x40C000000 (bank 4), as iBoot writes it on this machine - not the bus
+ * address 0x20C000000 this comment once claimed (docs/40 §4). iBoot leaves
+ * IOSZ at 0; this size is ours. The firmware forms every register
  * address as base + a fixed offset, e.g. base + 0x1800000 = the ASC bank and
  * base + 0x1050000 = the SVE bank.
  */

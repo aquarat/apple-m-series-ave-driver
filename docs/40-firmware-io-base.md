@@ -61,6 +61,20 @@ that work is, the firmware could not have reached the registers it describes.
 
 ## 4. The value
 
+> **Correction (2026-09-13): the value is AP-physical `0x40C000000`, not bus
+> `0x20C000000`.** The reasoning below was never tested, and the live machine
+> contradicts it. iBoot's filled-in tag list in the running AVE DATA segment
+> (physical `0x10001a93a30`, found by `tools/rtkit_tags.py` on the 16 MiB dump,
+> [31](31-bringup-state.md)) reads `IOBA = 0x40c000000`, `CpAd = 0x40d800000`,
+> `WrAd = 0x40dc00000`, `SOC_ = 0x6001`, `SOCR = 0x11`, `IOSZ = 0`. The GPU's
+> list in the same dump uses AP-physical addresses too (`WrAd = 0x406400000`
+> = Linux's `gpu@406400000`). `ave_fw.c` now writes the AP-physical value. The
+> firmware-side arithmetic in §1 (base + `0x1800000` = ASC bank) holds with
+> either base, which is why it could not discriminate. Note also that iBoot
+> leaves `IOSZ` at 0, so our `0x2000000` is not what Apple does either.
+>
+> Historical text follows.
+
 The tag takes a **bus** address — the coprocessor sits on the far side of the
 `/arm-io` translation — so it is `0x20C000000`, *not* the AP-physical
 `0x40C000000`. This is [30](30-address-translation-bug.md) in reverse, and

@@ -122,7 +122,11 @@ Next steps, cheapest first:
 1. ~~**A liveness test that can say "no".**~~ **Done 2026-09-13**
    ([31](31-bringup-state.md)): the started AVE core never shows `RUNNING`,
    where DCP's live core shows it 95% of the time.
-2. **Identify iBoot's image.** Scan the proven-safe 16 MiB window from
+2. ~~**Identify iBoot's image.**~~ **Done 2026-09-13** ([31](31-bringup-state.md)
+   "the dump"): TEXT at `0x10000b28000`, DATA at `0x10001a90000`, from
+   **macOS 13.5** firmware — not the 26.6.2 image all ABI work was done on.
+   Re-deriving the ABI from 13.5 is now a prerequisite for phases 4–6.
+   Original item: Scan the proven-safe 16 MiB window from
    `0x10000b28000` for the `IOBA`/`IOSZ` tags, AVE strings and the extent of
    non-zero memory — where DATA lives settles §3.4.
 3. **Trace macOS AVE start-up under the m1n1 hypervisor.** Needs a second
