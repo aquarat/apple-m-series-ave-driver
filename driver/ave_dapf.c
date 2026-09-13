@@ -185,12 +185,12 @@ module_param(dapf_probe, int, 0444);
 MODULE_PARM_DESC(dapf_probe,
 		 "docs/49: 1 = N1b (30 s hold reading TCR every 2 s, then a same-value TCR write); 2 = N1e (30 s hold with NO register access at all, no write); 3 = N1f (120 s of N1b's reads, no write)");
 
-static bool dapf_early;
-module_param(dapf_early, bool, 0444);
+static int dapf_early;
+module_param(dapf_early, int, 0444);
 MODULE_PARM_DESC(dapf_early,
-		 "program the DAPF at stage 8, before IPC alloc, the DATA map and the IOP flag (docs/49: late host writes to CPUDART raise SError)");
+		 "1 = program the DAPF at stage 8 (reset the SoC, N1j); 2 = at the end of stage 6, before the stage-7 SVE idle/clock-gating write (N1k)");
 
-bool ave_dapf_early(void)
+int ave_dapf_early(void)
 {
 	return dapf_early;
 }

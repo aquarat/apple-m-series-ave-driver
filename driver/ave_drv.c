@@ -579,6 +579,24 @@ static int ave_probe_stages(struct platform_device *pdev)
 			ave->irq_enabled = true;
 		}
 		dev_info(dev, "  resumed; left powered for inspection\n");
+
+		/*
+		 * N1k (docs/49): program the DAPF straight after power-on,
+		 * before stage 7's SVE+0x38 write (AVE_SVECtrl::SetIdle, called
+		 * from SetClockGating(true)). apple-dart's resume-time writes to
+		 * this DART succeed; every rejected write of ours came after
+		 * stage 7.
+		 */
+		if (ave_dapf_early() == 2) {
+			ret = ave_dapf_dump(ave);
+			if (ret)
+				return dev_err_probe(dev, ret, "DAPF dump\n");
+			ave_step(ave, "stage 6: DAPF programming before the SVE idle write, next");
+			ret = ave_dapf_program_selected(ave);
+			if (ret)
+				return dev_err_probe(dev, ret, "stage-6 DAPF program\n");
+			ave_step(ave, "stage 6: DAPF programming returned");
+		}
 		ave_stage_ok(dev, AVE_STAGE_POWER_ON);
 	} else {
 		return 0;
@@ -642,7 +660,7 @@ static int ave_probe_stages(struct platform_device *pdev)
 		 * while apple-dart's writes at runtime resume succeed. With
 		 * dapf_early=1 program it here, before any of that.
 		 */
-		if (ave_dapf_early()) {
+		if (ave_dapf_early() == 1) {
 			ave_step(ave, "stage 8: early DAPF programming next");
 			ret = ave_dapf_program_selected(ave);
 			if (ret)

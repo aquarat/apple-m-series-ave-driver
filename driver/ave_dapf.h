@@ -74,7 +74,7 @@ int ave_dapf_program(struct ave_device *ave,
  */
 int ave_dapf_write_probe(struct ave_device *ave);
 bool ave_dapf_program_requested(void);
-bool ave_dapf_early(void);
+int ave_dapf_early(void);
 int ave_dapf_program_selected(struct ave_device *ave);
 
 #endif /* __AVE_DAPF_H__ */
