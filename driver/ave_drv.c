@@ -635,6 +635,20 @@ static int ave_probe_stages(struct platform_device *pdev)
 		ret = ave_dapf_dump(ave);
 		if (ret)
 			return dev_err_probe(dev, ret, "DAPF dump\n");
+
+		/*
+		 * docs/49: host writes to CPUDART/DAPF raise a fatal SError once
+		 * the later stages have run (plausibly the stage-11 IOP flag),
+		 * while apple-dart's writes at runtime resume succeed. With
+		 * dapf_early=1 program it here, before any of that.
+		 */
+		if (ave_dapf_early()) {
+			ave_step(ave, "stage 8: early DAPF programming next");
+			ret = ave_dapf_program_selected(ave);
+			if (ret)
+				return dev_err_probe(dev, ret, "early DAPF program\n");
+			ave_step(ave, "stage 8: early DAPF programming returned");
+		}
 		ave_stage_ok(dev, AVE_STAGE_READ_ASC);
 	} else {
 		return 0;
