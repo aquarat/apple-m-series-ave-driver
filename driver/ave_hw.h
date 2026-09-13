@@ -82,6 +82,25 @@
 #define AVE_ASC_STATUS_BUSY	0x3	/* idle when (status & 0x3) == 0 */
 
 /*
+ * CPU_STATUS bit names, from m1n1 proxyclient/m1n1/hw/asc.py. m1n1 itself
+ * marks IRQ_NOT_PEND and FIQ_NOT_PEND as guesses.
+ */
+#define AVE_ASC_ST_RUNNING	BIT(0)
+#define AVE_ASC_ST_STOPPED	BIT(1)
+#define AVE_ASC_ST_IRQ_NOT_PEND	BIT(2)
+#define AVE_ASC_ST_FIQ_NOT_PEND	BIT(3)
+#define AVE_ASC_ST_IDLE		BIT(5)
+
+/*
+ * ASC timebase, from AVE_IOP_GetCurrTime64 (0xfffffe0008c400e8) for the
+ * 0x400000 family: counter / (freq / 1e6) = microseconds. A timebase can tick
+ * with the CPU held in reset, so it shows the block is clocked, not that the
+ * core executes - see docs/42 §7.
+ */
+#define AVE_ASC_TIMER		0x178000	/* 64-bit */
+#define AVE_ASC_TIMER_FREQ	0x160020	/* 32-bit */
+
+/*
  * Start sequence, in order (AVE_IOP_Start_Nyx). All writes are to AVE_BANK_ASC:
  *
  *	write32(AVE_ASC_AUX_808,     AVE_ASC_AUX_808_VAL);

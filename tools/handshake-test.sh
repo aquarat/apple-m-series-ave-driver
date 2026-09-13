@@ -89,8 +89,24 @@ if lsmod | grep -q '^apple_ave'; then
     sleep 2
 fi
 
-echo ">>> insmod apple-ave.ko stop_after=15"
-sudo insmod driver/apple-ave.ko stop_after=15 &
+# Positive control for the liveness test: DCP's ASC, whose firmware is running.
+# The driver only READS it, but a read of a power-gated block hangs the fabric,
+# so pass the address only when DCP is bound and its domain reports on.
+CTL=0x38bc00000
+CTL_DEV=38bc00000.dcp
+CTL_DOM=$(sudo awk -v d="$CTL_DEV" '
+    /^[^ ]/ { dom=$1; st=$2 }
+    $1 == d { print dom, st; exit }' /sys/kernel/debug/pm_genpd/pm_genpd_summary 2>/dev/null)
+PARAMS="stop_after=15 asc_timer=1"
+if [ -e /sys/bus/platform/devices/$CTL_DEV/driver ] && [ "${CTL_DOM#* }" = "on" ]; then
+    PARAMS="$PARAMS ctl_asc=$CTL"
+    echo ">>> positive control: $CTL_DEV bound, domain ${CTL_DOM% *} on"
+else
+    echo ">>> positive control SKIPPED: $CTL_DEV domain '${CTL_DOM:-not found}'"
+fi
+
+echo ">>> insmod apple-ave.ko $PARAMS"
+sudo insmod driver/apple-ave.ko $PARAMS &
 INS=$!
 
 # Capture continuously rather than once at the end: if the machine dies mid

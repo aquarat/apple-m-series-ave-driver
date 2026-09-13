@@ -53,6 +53,14 @@ static int rvbar_probe;
 module_param(rvbar_probe, int, 0444);
 MODULE_PARM_DESC(rvbar_probe, "walk test values through the ASC RVBAR and report which bits move");
 
+static bool asc_timer;
+module_param(asc_timer, bool, 0444);
+MODULE_PARM_DESC(asc_timer, "also read the ASC timebase at +0x178000 during liveness sampling");
+
+static ulong ctl_asc;
+module_param(ctl_asc, ulong, 0444);
+MODULE_PARM_DESC(ctl_asc, "phys base of a known-running ASC (e.g. DCP coproc) to sample READ-ONLY as a positive control");
+
 module_param(stop_after, int, 0444);
 MODULE_PARM_DESC(stop_after, "stop probe after this stage (0 = do nothing)");
 
@@ -260,6 +268,121 @@ static void ave_stop(struct ave_device *ave)
 	pm_runtime_put(ave->dev);
 }
 
+/*
+ * Is the core executing? A liveness test that can say "no".
+ *
+ * The page-checksum test cannot: base+0x200 is the synchronous exception
+ * vector and holds "b .", so a core that aborts on its first fetch spins
+ * there forever writing nothing, exactly like a core that never ran.
+ *
+ * CPU_STATUS can, in principle. m1n1 names bit 0 RUNNING, bit 1 STOPPED and
+ * bit 5 IDLE; a core spinning in a branch-to-self is not idle. One read tells
+ * us little, so sample it a couple of thousand times and report the
+ * histogram, which also catches a core that alternates.
+ *
+ * It is only evidence against controls, so it is taken three ways:
+ *   - this block, halted, before CPU_CONTROL gets RUN   (negative control)
+ *   - this block, started                               (the measurement)
+ *   - this block, halted again at the end of probe      (negative control)
+ * and, separately, on an ASC whose firmware is known to be running - DCP -
+ * as the positive control. That one is strictly read-only.
+ */
+#define AVE_STATUS_SAMPLES	2000
+
+static void ave_status_histogram(struct device *dev, const char *tag,
+				 void __iomem *status)
+{
+	struct { u32 v; unsigned int n; } h[8];
+	unsigned int nh = 0, other = 0, i, j;
+	ktime_t t0 = ktime_get();
+
+	for (i = 0; i < AVE_STATUS_SAMPLES; i++) {
+		u32 v = readl_relaxed(status);
+
+		for (j = 0; j < nh && h[j].v != v; j++)
+			;
+		if (j < nh)
+			h[j].n++;
+		else if (nh < ARRAY_SIZE(h))
+			h[nh].v = v, h[nh].n = 1, nh++;
+		else
+			other++;
+		usleep_range(50, 100);
+	}
+
+	dev_info(dev, "  [%s] CPU_STATUS: %u samples over %lld ms, %u distinct%s\n",
+		 tag, AVE_STATUS_SAMPLES,
+		 ktime_ms_delta(ktime_get(), t0), nh,
+		 other ? " (histogram full, some values uncounted)" : "");
+	for (j = 0; j < nh; j++) {
+		u32 v = h[j].v;
+
+		dev_info(dev, "  [%s]   %#06x x%-4u%s%s%s%s%s%s\n", tag, v, h[j].n,
+			 v & AVE_ASC_ST_RUNNING ? " RUNNING" : "",
+			 v & AVE_ASC_ST_STOPPED ? " STOPPED" : "",
+			 v & AVE_ASC_ST_IRQ_NOT_PEND ? " IRQ_NOT_PEND?" : "",
+			 v & AVE_ASC_ST_FIQ_NOT_PEND ? " FIQ_NOT_PEND?" : "",
+			 v & AVE_ASC_ST_IDLE ? " IDLE" : "",
+			 v & ~(u32)(AVE_ASC_ST_RUNNING | AVE_ASC_ST_STOPPED |
+				    AVE_ASC_ST_IRQ_NOT_PEND |
+				    AVE_ASC_ST_FIQ_NOT_PEND | AVE_ASC_ST_IDLE)
+			 ? " +unnamed bits" : "");
+	}
+}
+
+static void ave_asc_liveness(struct ave_device *ave, const char *tag)
+{
+	struct device *dev = ave->dev;
+
+	dev_info(dev, "  [%s] CPU_CONTROL = %#x\n", tag,
+		 ave_read(ave, AVE_BANK_ASC, AVE_ASC_CPU_CONTROL));
+	ave_status_histogram(dev, tag,
+			     ave->bank[AVE_BANK_ASC].base + AVE_ASC_CPU_STATUS);
+
+	if (!asc_timer)
+		return;
+
+	/*
+	 * First read of this register by us. Announce it and give the test
+	 * script time to get the line onto disk, so that if it hangs the log
+	 * says which access did it.
+	 */
+	dev_info(dev, "  [%s] reading ASC timer +%#x ...\n", tag, AVE_ASC_TIMER);
+	msleep(500);
+	{
+		u64 c0 = ave_read64(ave, AVE_BANK_ASC, AVE_ASC_TIMER);
+		u32 f = ave_read(ave, AVE_BANK_ASC, AVE_ASC_TIMER_FREQ);
+		u64 c1;
+
+		msleep(100);
+		c1 = ave_read64(ave, AVE_BANK_ASC, AVE_ASC_TIMER);
+		dev_info(dev, "  [%s] timer %#llx -> %#llx (delta %llu over ~100 ms), freq %u\n",
+			 tag, c0, c1, c1 - c0, f);
+	}
+}
+
+/*
+ * Positive control: sample a different, known-running ASC. Reads only -
+ * that block belongs to another driver. The address is supplied by the test
+ * script, which checks the owning power domain is on before passing it.
+ */
+static void ave_ctl_asc_sample(struct device *dev)
+{
+	void __iomem *b;
+
+	if (!ctl_asc)
+		return;
+	b = ioremap(ctl_asc, SZ_4K);
+	if (!b) {
+		dev_info(dev, "  [ctl] cannot map %#lx\n", ctl_asc);
+		return;
+	}
+	dev_info(dev, "  [ctl] ASC at %#lx: CPU_CONTROL = %#x\n", ctl_asc,
+		 readl_relaxed(b + 0x44));
+	ave_status_histogram(dev, "ctl", b + 0x48);
+	iounmap(b);
+}
+
 static int ave_probe(struct platform_device *pdev)
 {
 	static const char * const bank_names[AVE_NUM_BANKS] = {
@@ -278,6 +401,8 @@ static int ave_probe(struct platform_device *pdev)
 	platform_set_drvdata(pdev, ave);
 	dev_info(dev, "probe: staged bring-up, stop_after=%d (max %d)\n",
 		 stop_after, AVE_STAGE_MAX);
+
+	ave_ctl_asc_sample(dev);
 
 	if (ave_stage(dev, AVE_STAGE_MAP_BANKS)) {
 		for (i = 0; i < AVE_NUM_BANKS; i++) {
@@ -555,6 +680,10 @@ static int ave_probe(struct platform_device *pdev)
 	}
 
 	ave_fw_snapshot_phys(ave);
+	if (stop_after >= AVE_STAGE_ASC_START) {
+		ave_fw_identify_phys(ave);
+		ave_asc_liveness(ave, "halted ");
+	}
 
 	if (ave_stage(dev, AVE_STAGE_ASC_START)) {
 		ret = ave_asc_start(ave);
@@ -612,6 +741,17 @@ static int ave_probe(struct platform_device *pdev)
 			 (moved || st0 != st1)
 			 ? "something is executing"
 			 : "no observable activity - core may not be running");
+
+		ave_asc_liveness(ave, "started");
+
+		/*
+		 * Halt, then sample again: the second negative control. It also
+		 * means a core that faults on every fetch is not left storming
+		 * the DART for as long as the module stays loaded.
+		 */
+		ave_write(ave, AVE_BANK_ASC, AVE_ASC_CPU_CONTROL, 0);
+		msleep(50);
+		ave_asc_liveness(ave, "re-halt");
 		ave_stage_ok(dev, AVE_STAGE_PROBE_STATE);
 	} else {
 		return 0;
