@@ -30,6 +30,7 @@
 
 #include "ave.h"
 #include "ave_dapf.h"
+#include "ave_session.h"
 
 #define AVE_ASC_IDLE_TIMEOUT_US		100000
 
@@ -922,6 +923,13 @@ iop_config_done:
 		if (ret)
 			return dev_err_probe(dev, ret, "coprocessor start\n");
 		dev_info(dev, "Apple AVE video encoder ready\n");
+
+		/*
+		 * First commands over the IO channel: Config -> Open ->
+		 * Start_AVC (docs/46). Self-gated; no-op unless
+		 * session_selftest=1.
+		 */
+		ave_session_selftest(ave);
 	}
 
 	return 0;
