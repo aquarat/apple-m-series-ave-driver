@@ -480,3 +480,26 @@ fw_map_text=2`.
   author agent nor two review passes caught this; the lesson is recorded
   here rather than softened — *check map size against the largest offset
   read, in bytes, for every mapping*.
+
+**Consequence: the next reboot hung.** The operator's `reboot` from that
+boot never completed and needed a forced power-off. The previous boot's
+journal ends normally at "Journal stopped" (12:59:28) and nothing after is
+recorded (pstore empty). **Inferred:** the kernel's final `device_shutdown()`
+takes each device's lock, and `apple_ave`'s was held forever by the insmod
+task that died in the oops, so shutdown blocked. systemd had armed the
+Apple SoC watchdog with a 10-minute timeout, which would probably have
+reset the machine eventually. Nothing persisted; the next boot was clean.
+
+**Recovery rule after any oops or hang inside the driver's probe or
+remove:** do not `rmmod` and do not use a normal `reboot` — both wait on the
+held device lock. Instead reboot without device shutdown, after syncing:
+
+```sh
+sudo sysctl kernel.sysrq=1
+echo s | sudo tee /proc/sysrq-trigger   # sync
+echo u | sudo tee /proc/sysrq-trigger   # remount read-only
+echo b | sudo tee /proc/sysrq-trigger   # reboot immediately
+```
+
+or hold the power button. Either is equivalent in effect to the forced
+power-off that was needed here, minus the unsynced writes.
