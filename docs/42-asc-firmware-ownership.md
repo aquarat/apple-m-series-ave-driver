@@ -498,6 +498,12 @@ Per `AGENTS.md`, these are written down, not run.
    `bank1+0x178000` (the `GetCurrTime64` counter, `0xfffffe0008c40118`). A
    counter that advances proves the core is clocked and running; the image
    checksum cannot.
+   **Correction (2026-09-13):** that overstates the counter.
+   `AVE_IOP_GetCurrTime64` divides it by a frequency register (`0x160020`)
+   to get microseconds, so it is a timebase, and a timebase can tick with the
+   CPU held in reset. It proves the block is *clocked*, not that the core
+   *executes*, unless it is also shown to stop when `CPU_CONTROL` is 0 — which
+   is the negative control the test must include.
 
 ---
 

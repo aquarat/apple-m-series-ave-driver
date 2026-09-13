@@ -41,7 +41,7 @@ individual docs. What remains:
 | 1 — fwextract plumbing | not started (see note below) |
 | 2 — static host-side analysis | **substantially done** |
 | 2b — tracing | not started (not on the critical path) |
-| 3 — transport bring-up | **candidate fix pending hardware test** — [34](34-boot-handshake.md) |
+| 3 — transport bring-up | **blocked: the core cannot fetch its first instruction** — [41](41-apple-fetch-path.md), [42](42-asc-firmware-ownership.md) |
 | 4 — IPC transport live | spec in progress — [36](36-ipc-implementation.md) |
 | 5 — session setup | struct map substantially done — [20](20-command-structs.md), [37](37-start-avc-session.md) |
 | 6 — one encoded frame | statically specified — [32](32-picmgmt-params.md), [37](37-start-avc-session.md), [38](38-dimension-convention.md), [39](39-input-format.md) |
@@ -50,8 +50,9 @@ individual docs. What remains:
 Phase 2 has produced most of what a driver needs to reach a first `Open`:
 the power-up order, the firmware load contract, the ASC start sequence, the
 IPC ring and doorbell, the interrupt path, the wire command ids and the
-command header. Still no driver code exists, and the following are still
-missing before an encode can be attempted:
+command header. All of that is now implemented as the staged bring-up in
+`driver/`; the list below records what was once missing before an encode
+could be attempted:
 
 - ~~**Surface size and alignment formulas.**~~ **Done** — see docs 14–17.
   Frame-size primitives, the enforced 64-byte stride rule, the 35-slot
@@ -61,7 +62,7 @@ missing before an encode can be attempted:
   `ave_coded_data_size()` in `driver/ave_abi.h`.
 - ~~**Per-frame `Process` fields.**~~ **Done** — [32](32-picmgmt-params.md).
   The remaining gap before a first encode is no longer a struct map: it is
-  that the firmware has not yet spoken to us at all (phase 3).
+  that the coprocessor cannot fetch its first instruction (phase 3).
 - **`reg[3]`** (`0x8E588000`, 36 bytes) — no call site found by anyone.
 - **ADT interrupts 1024–1027** — unclaimed by the host driver; purpose unknown.
 
@@ -78,31 +79,58 @@ Phases 0-2 are done. What follows is the route to `ffmpeg` encoding.
 
 ### Phase 3 — the firmware boots  *(current blocker)*
 
-Everything up to starting the coprocessor works; it changes state and then says
-nothing ([31](31-bringup-state.md)).
+Everything up to starting the coprocessor works. The core then never executes
+a useful instruction, and the reason is now known precisely even though the
+fix is not ([31](31-bringup-state.md), [41](41-apple-fetch-path.md),
+[42](42-asc-firmware-ownership.md)):
 
-The leading suspect is now the **boot handshake**, not stream IDs, and two
-independent lines of evidence agree on it ([34](34-boot-handshake.md),
-[33](33-firmware-logging.md)): `StartUpIOP` writes `0x08042006` to scratch 0
-plus a 56-byte boot-config IOVA before releasing the core, and on the firmware
-side `AVE_Log_Output` is dead while `gs_psCfg` is NULL (`0xa9a0`) — a global
-populated only from that same block. The handshake and the log therefore stand
-or fall together, which is consistent with silence rather than being a second
-unknown. Implemented; awaiting a hardware test.
+- The ASC reset vector (RVBAR, `bank1+0x50000`) holds `0x0102010000b28001`:
+  base `0x10000b28000`, bit 0 = lock. It is **hard-locked** — writes of `0`,
+  all-ones and tag-only are all ignored, and neither `reset_control_reset()`
+  nor power-gating the VENC domains clears it. iBoot set it; Apple's kext never
+  writes it on t6001 (its only writer is gated off when iBoot pre-loaded the
+  image, and its formula cannot produce bit 0).
+- The core fetches at `0x10000b28200`, a 41-bit address. The DART in front of
+  it (`40d040000`) resolves at most 38 bits, so **no mapping can satisfy the
+  fetch**. With a translating domain it faults; with an identity domain nothing
+  faults and nothing observable happens.
+- iBoot left code at that physical address from the same source family as
+  `AppleAVE2FW`, but TEXT and DATA cannot both fit contiguously below the ISP
+  carve-out ([42](42-asc-firmware-ownership.md) §3.4), which argues the address
+  is meant to be *translated*. That contradicts the DART's width, and the
+  contradiction is unresolved.
 
-That test needs a **power cycle**, not a module reload: nothing we have found
-ever clears ASC `CPU_CONTROL`, so the core has been running continuously since
-the first `asc-start` and a reload starts an already-started core. Earlier
-"still silent" results taken that way measured the wrong thing — the same
-shape of error as the address-translation bug ([30](30-address-translation-bug.md)).
-`tools/handshake-test.sh` enforces this by recording `boot_id`.
+Retired along the way, so nobody re-derives them:
 
-Still on the list if the handshake is not the answer:
+- ~~The boot handshake is the leading suspect.~~ The handshake is implemented
+  but **untested**: it cannot be tested until the core runs, and it was derived
+  from our image, not the one iBoot loaded.
+- ~~A power cycle is needed between runs because nothing clears
+  `CPU_CONTROL`.~~ False. `ave_asc_start` writes `CPU_CONTROL = 0`, the driver
+  halts the core on remove, and the VENC domains gate off on `rmmod`.
+- ~~Preserve iBoot's DART configuration by not binding apple-dart
+  (`variant=1` overlay).~~ Almost certainly void: on a fresh boot, before
+  anything of ours is loaded, `venc_sys` — the DART's power domain — is
+  already **off**, so whatever iBoot programmed into the DART has been lost to
+  power gating before we could preserve it.
 
-- stream IDs: `sids` is `0x8001` (SIDs 0 and 15) with `bypass = 0x8000`, so SID
-  15 runs in bypass under Apple and `apple_dart_hw_reset` strips it on probe.
-  If instruction fetch uses SID 15 it is translating through an empty table.
-- watch for DART translation faults to confirm where the fetch goes
+Next steps, cheapest first:
+
+1. **A liveness test that can say "no".** Page checksums cannot distinguish a
+   dead core from one spinning in the `b .` exception vector at `+0x200`.
+   `CPU_STATUS` bits (m1n1 names: `RUNNING`=0, `STOPPED`=1, `IRQ_NOT_PEND`=2,
+   `FIQ_NOT_PEND`=3, `IDLE`=5) sampled with the core halted, started, and
+   halted again, against a known-running ASC (DCP) as positive control.
+2. **Identify iBoot's image.** Scan the proven-safe 16 MiB window from
+   `0x10000b28000` for the `IOBA`/`IOSZ` tags, AVE strings and the extent of
+   non-zero memory — where DATA lives settles §3.4.
+3. **Trace macOS AVE start-up under the m1n1 hypervisor.** Needs a second
+   machine; the most decisive option if 1 and 2 do not resolve it.
+
+`AVE_IOP::Stop` and `ResetPSD`, once proposed as missing steps
+([41](41-apple-fetch-path.md) §8), are not: `Stop` writes nothing and only
+polls `CPU_STATUS` ([09](09-firmware-load.md) §2.5), and `ResetPSD` returns
+early on t6001 ([10](10-power.md)).
 
 **Done when:** a scratch register changes, or an interrupt arrives, without us
 having written it.

@@ -1,15 +1,13 @@
 #!/bin/bash
-# Post-reboot boot-handshake test.
+# AVE bring-up test: overlay (with the DART) + staged driver probe.
 #
-# MUST BE RUN ON A FRESH BOOT. Nothing in the driver, and nothing we have
-# found in the hardware, ever clears ASC CPU_CONTROL. The core has therefore
-# been running continuously since the first asc-start of the previous boot,
-# and a module reload does not undo that: it starts an already-started core,
-# which is not the experiment we want to run. Only a power cycle gives the
-# firmware a first instruction to execute.
+# Does NOT need a fresh boot. ave_asc_start writes CPU_CONTROL = 0 before
+# starting the core, the driver halts the core on remove, and the VENC domains
+# gate off on rmmod, so every run starts from a halted, power-cycled core. (An
+# earlier version of this header claimed the opposite; that was wrong.)
 #
-# Everything lands in results/handshake-<boot>.log so it survives the reboot
-# and can be read back later.
+# Everything lands in results/handshake-<time>-<boot>.log, synced as it goes,
+# so it survives a hang.
 #
 #   AVE_I_MEAN_IT=1 ./tools/handshake-test.sh
 #
@@ -45,11 +43,10 @@ echo "commit    : $(git -C "$REPO" rev-parse --short HEAD)"
 echo "log       : $LOG"
 echo
 
-# Three kernels are installed on this machine (a 7.0 safety net, the 7.1.6
-# these modules were first developed against, and the 7.1.13 VRR build that is
-# now the default boot entry). A module built for one will not load on
-# another, and the resulting insmod error is far less clear than saying so
-# here - so check, and rebuild rather than fail.
+# Several kernels are installed (the 7.1.13 VRR builds; dnf installonly_limit
+# is 5). A module built for one will not load on another, and the resulting
+# insmod error is far less clear than saying so here - so check, and rebuild
+# rather than fail.
 WANT=$(uname -r)
 for m in driver/apple-ave.ko test/ave-overlay.ko; do
     HAVE=$(modinfo "$m" 2>/dev/null | awk '/^vermagic:/{print $2}')

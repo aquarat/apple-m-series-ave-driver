@@ -313,6 +313,14 @@ the register is unwritable at the moment we write it:
   PSD reset is the obvious thing that would clear it. **Confirmed that the call
   exists; unknown whether it runs on this SoC or whether it clears RVBAR.**
 
+> **Correction (2026-09-13).** Neither step is actually missing.
+> `AVE_IOP::Stop` performs **no register write** — it only polls
+> `CheckIdle` (`CPU_STATUS & 3`) until three consecutive reads are idle
+> ([09](09-firmware-load.md) §2.5), so it cannot unlock anything. `ResetPSD`
+> is gated on `HwFeature & 2` and **returns without doing anything on t6001**,
+> where `HwFeature == 1` ([10](10-power.md)). The call sites exist; on this SoC
+> they do nothing that could clear the lock.
+
 ## 9. Proposed experiments — for the operator, not for an agent
 
 None of these have been run. In rough order of value per reboot:
@@ -399,3 +407,14 @@ gives the AVE node no `iommus`, so `apple_dart` never binds and never resets
 it. If iBoot's configuration is what makes the fetch work, the core should
 execute with the DART untouched. This needs a reboot, since the DART on this
 boot has already been reset.
+
+> **Update (2026-09-13): the premise is almost certainly void.** On a fresh
+> boot, with nothing of ours loaded, `pm_genpd_summary` already shows
+> `venc_sys` **off-0** — and `venc_sys` is the DART's power domain
+> (`power-domains = <0x1d>`). Whatever iBoot programmed into the DART was lost
+> to power gating (or never existed, if iBoot never powered VENC) before any
+> overlay could preserve it. The `variant=1` overlay would therefore test a
+> freshly reset DART with no IOMMU backstop, which is all cost and no
+> information. Not run. The one thing that would revive it is evidence that
+> DART register state survives a power-off — RVBAR does survive, but it is a
+> lock register and plausibly not in the gated domain at all.
