@@ -130,7 +130,11 @@ Next steps, cheapest first:
 2. ~~**Identify iBoot's image.**~~ **Done 2026-09-13** ([31](31-bringup-state.md)
    "the dump"): TEXT at `0x10000b28000`, DATA at `0x10001a90000`, from
    **macOS 13.5** firmware — not the 26.6.2 image all ABI work was done on.
-   Re-deriving the ABI from 13.5 is now a prerequisite for phases 4–6.
+   Verifying the ABI on 13.5 is now a prerequisite for phases 4–6. The 26.6.2
+   analysis is **kept, not superseded**: Asahi may rebase its stub firmware
+   onto a newer macOS, and newer firmware likely carries more SoC/codec
+   support. Docs annotate differences per version, and the driver should
+   select its ABI by detected firmware version, as Asahi's DCP driver does.
    Original item: Scan the proven-safe 16 MiB window from
    `0x10000b28000` for the `IOBA`/`IOSZ` tags, AVE strings and the extent of
    non-zero memory — where DATA lives settles §3.4.
