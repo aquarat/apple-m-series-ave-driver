@@ -191,3 +191,10 @@ again, `sudo update-m1n1` regenerates a stock `boot.bin`.
   installed: `/boot/efi/m1n1/boot.bin` = `bd040b64…75da8` (unpatched self-built
   v1.6.1, verified on the ESP). `boot.bin.old` unchanged (`8270538d…`).
   Awaiting reboot.
+- **2026-09-13 19:11** — `restore-m1n1.sh` and `RESTORE-README.txt` copied
+  next to `boot.bin` on the ESP (sources in `tools/m1n1/`, ESP copies verified
+  identical). From recovery: `diskutil mount 89A77CF4-32BA-4A03-8BCA-DB0F62925CA4`
+  then `sh "/Volumes/EFI - FEDRA/m1n1/restore-m1n1.sh"` (prefix both with
+  `sudo` in macOS). Tested on a simulated ESP with a space in the path: it
+  restores and verifies, keeps the replaced file as `boot.bin.failed`, and
+  refuses to change anything when `boot.bin.pre-ave` is corrupt or missing.
