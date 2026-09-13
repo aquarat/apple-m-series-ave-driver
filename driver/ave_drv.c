@@ -834,6 +834,14 @@ iop_config_done:
 	}
 
 	if (ave_stage(dev, AVE_STAGE_ASC_START)) {
+		/*
+		 * macOS restores a pristine DATA segment before every start
+		 * (docs/31 2026-09-13, docs/45 row 32). Without it the second
+		 * start in a boot is silent. No-op unless fw_restore_data=1.
+		 */
+		ret = ave_fw_restore_data(ave);
+		if (ret)
+			return dev_err_probe(dev, ret, "stage-13 DATA restore\n");
 		ave_step(ave, "next: ASC start (core released)");
 		ret = ave_asc_start(ave);
 		if (ret)
