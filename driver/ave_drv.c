@@ -745,13 +745,17 @@ static int ave_probe(struct platform_device *pdev)
 		ave_asc_liveness(ave, "started");
 
 		/*
-		 * Halt, then sample again: the second negative control. It also
-		 * means a core that faults on every fetch is not left storming
-		 * the DART for as long as the module stays loaded.
+		 * Power off rather than halt. Writing CPU_CONTROL = 0 to a
+		 * started core does nothing observable: on 2026-09-13 status
+		 * stayed 0x2c (not STOPPED) and the DART kept faulting at
+		 * ~70k/s. Only gating VENC stops it. Leaving it powered made
+		 * the desktop stutter for as long as the module stayed loaded.
 		 */
-		ave_write(ave, AVE_BANK_ASC, AVE_ASC_CPU_CONTROL, 0);
-		msleep(50);
-		ave_asc_liveness(ave, "re-halt");
+		if (stop_after < AVE_STAGE_START && ave->powered) {
+			ave->powered = false;
+			pm_runtime_put_sync(dev);
+			dev_info(dev, "  powered off: CPU_CONTROL = 0 cannot stop a started core\n");
+		}
 		ave_stage_ok(dev, AVE_STAGE_PROBE_STATE);
 	} else {
 		return 0;
@@ -783,16 +787,22 @@ static void ave_remove(struct platform_device *pdev)
 	 * instruction fetch then sits there generating a DART interrupt storm
 	 * (measured: ~260k/s) that survives the driver being unloaded.
 	 *
-	 * Halt the core before dropping the reference. Clearing CPU_CONTROL is
-	 * what stops the fetches; the power-down is what makes it stay stopped.
+	 * Clearing CPU_CONTROL does NOT stop a started core (measured
+	 * 2026-09-13: status stays 0x2c, faults continue). The write is kept
+	 * because it is harmless and matches the state a fresh power-on reads
+	 * back, but the power-down is what actually stops it.
+	 *
+	 * Known hazard: after the domain gates, the DART's shared IRQ line has
+	 * been seen to stay asserted with nothing to report for ~9 s, until the
+	 * kernel disables IRQ 129 as "nobody cared". The fault handler is then
+	 * reading a gated DART. It has not hung, but it is not benign.
 	 */
 	if (ave->powered) {
-		if (ave->bank[AVE_BANK_ASC].base) {
+		if (ave->bank[AVE_BANK_ASC].base)
 			ave_write(ave, AVE_BANK_ASC, AVE_ASC_CPU_CONTROL, 0);
-			dev_info(ave->dev, "halted the core (CPU_CONTROL = 0)\n");
-		}
 		ave->powered = false;
 		pm_runtime_put(ave->dev);
+		dev_info(ave->dev, "powered off\n");
 	}
 
 	ave_fw_unload(ave);

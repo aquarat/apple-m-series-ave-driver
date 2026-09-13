@@ -1,10 +1,13 @@
 #!/bin/bash
 # AVE bring-up test: overlay (with the DART) + staged driver probe.
 #
-# Does NOT need a fresh boot. ave_asc_start writes CPU_CONTROL = 0 before
-# starting the core, the driver halts the core on remove, and the VENC domains
-# gate off on rmmod, so every run starts from a halted, power-cycled core. (An
-# earlier version of this header claimed the opposite; that was wrong.)
+# Does not need a fresh boot for the core's sake: the VENC domains gate off
+# when the driver drops power, and a fresh power-on reads CPU_STATUS 0x2a
+# (STOPPED). Writing CPU_CONTROL = 0 does NOT stop a started core; power does.
+#
+# DOES need a fresh boot if the kernel has disabled the AVE DART IRQ
+# ("Disabling IRQ #129" in dmesg). Faults are then no longer reported, and a
+# run would be blind to exactly what it is measuring. The script refuses.
 #
 # Everything lands in results/handshake-<time>-<boot>.log, synced as it goes,
 # so it survives a hang.
@@ -31,6 +34,12 @@ if [ -f "$MARK" ] && [ "$(cat "$MARK" 2>/dev/null)" = "$BOOT" ]; then
     echo ">>> note: this boot has already run the handshake test at least once."
     echo "    That is fine: the VENC domains gate off on rmmod and asc_start"
     echo "    clears CPU_CONTROL, so the core is power-cycled between runs."
+fi
+
+# Any disabled IRQ, not just 129: the number is assigned at overlay time.
+if sudo dmesg | grep -q "Disabling IRQ #"; then
+    echo "REFUSING: the kernel disabled an IRQ on this boot (dmesg: Disabling IRQ); reboot first." >&2
+    exit 1
 fi
 
 exec > >(tee -a "$LOG") 2>&1

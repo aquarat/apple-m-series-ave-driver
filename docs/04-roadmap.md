@@ -106,8 +106,11 @@ Retired along the way, so nobody re-derives them:
   but **untested**: it cannot be tested until the core runs, and it was derived
   from our image, not the one iBoot loaded.
 - ~~A power cycle is needed between runs because nothing clears
-  `CPU_CONTROL`.~~ False. `ave_asc_start` writes `CPU_CONTROL = 0`, the driver
-  halts the core on remove, and the VENC domains gate off on `rmmod`.
+  `CPU_CONTROL`.~~ False, but for a different reason than first given.
+  Writing `CPU_CONTROL = 0` does **not** stop a started core (measured
+  2026-09-13); gating the VENC domains does, and a fresh power-on reads back
+  `STOPPED`. So no reboot is needed between runs — unless the kernel has
+  disabled the DART IRQ, which blinds the next run.
 - ~~Preserve iBoot's DART configuration by not binding apple-dart
   (`variant=1` overlay).~~ Almost certainly void: on a fresh boot, before
   anything of ours is loaded, `venc_sys` — the DART's power domain — is
@@ -116,11 +119,9 @@ Retired along the way, so nobody re-derives them:
 
 Next steps, cheapest first:
 
-1. **A liveness test that can say "no".** Page checksums cannot distinguish a
-   dead core from one spinning in the `b .` exception vector at `+0x200`.
-   `CPU_STATUS` bits (m1n1 names: `RUNNING`=0, `STOPPED`=1, `IRQ_NOT_PEND`=2,
-   `FIQ_NOT_PEND`=3, `IDLE`=5) sampled with the core halted, started, and
-   halted again, against a known-running ASC (DCP) as positive control.
+1. ~~**A liveness test that can say "no".**~~ **Done 2026-09-13**
+   ([31](31-bringup-state.md)): the started AVE core never shows `RUNNING`,
+   where DCP's live core shows it 95% of the time.
 2. **Identify iBoot's image.** Scan the proven-safe 16 MiB window from
    `0x10000b28000` for the `IOBA`/`IOSZ` tags, AVE strings and the extent of
    non-zero memory — where DATA lives settles §3.4.
