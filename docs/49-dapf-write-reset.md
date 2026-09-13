@@ -580,3 +580,37 @@ the DART/DAPF reject writes (reads still work).
 
 N1k: `dapf_early=2` programs the DAPF at the end of stage 6, before the
 stage-7 write, with `stop_after=6`.
+
+## N1k — 2026-09-13, `results/n1k-*.kmsg`: rejected immediately after power-on
+
+`stop_after=6 dapf_dump=1 dapf_early=2 dapf_set=control dapf_quiesce=0
+fw_map_text=2`: DAPF programming at the end of stage 6, straight after
+runtime resume and **before** stage 7's SVE idle write. **The machine
+reset.** Last line on disk: `STEP next: first write to DAPF slot 0 (r4,
+m1n1 order)`. The stage-7 hypothesis is refuted.
+
+**Confirmed across N1j/N1k/E3a: Linux cannot write the AVE DAPF at any point
+of a power session** - right after power-on, at stage 8, or late; m1n1 order
+or with a pre-clear; quiesced DART or not. Every first write raises a fatal
+SError. Reads always work.
+
+Why m1n1's DAPF writes at boot succeed and ours do not is unexplained. Ruled
+out on the m1n1 side (source, `src/dapf.c`, `src/kboot.c`):
+
+- power: `dapf_init()` enables the DART node's `clock-gates` device first,
+  but for `dart-ave0` that is `VENC-DART` (508, `0x1fc`), a `psreg == 0`
+  virtual device (docs/25) whose parent `VENC_SYS` we already hold on;
+- access width: m1n1 uses `write32`/`write64`, as we do;
+- a later lock by m1n1: `kboot_boot()` calls `dapf_init_all()` late, and
+  the only lock m1n1 applies is `dart_lock_adt("/arm-io/dart-disp0")`.
+
+Two ways forward:
+
+- **ISP control (no boot-chain change):** a same-value write to one of
+  ISP's live DAPF slots from Linux, camera streaming. SError → DAPF writes
+  are refused from Linux for every DART, i.e. something between m1n1's
+  programming and the running kernel locks them, and only m1n1 can do it
+  (N3). Survives → the refusal is AVE-specific, and the difference is
+  something ISP has and AVE lacks.
+- **N3:** add `{"/arm-io/dart-ave0", 3}` to m1n1's `dapf_entries[]`
+  (boot-chain change; recovery via macOS/1TR).
