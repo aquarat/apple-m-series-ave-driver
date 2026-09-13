@@ -1,3 +1,58 @@
+> ## Version note (2026-09-13) — macOS 13.5
+>
+> On macOS 13.5 (the firmware and kext this machine runs,
+> [43](43-macos-13.5-firmware.md)) several things below are different; the
+> 26.6.2 values in this document stand for 26.6.2. Summary table in
+> [47](47-abi-13.5-frame-rc-surfaces.md). 13.5 kext VAs, read with
+> `AVE_MACOS=13.5 tools/disas.py --kext`:
+>
+> - **The frame-size primitives are different functions.** The 13.5 kext has no
+>   `AVE_Linear_/Packed_/HTPC_/PixelFmt_CalcFrameSize`,
+>   `AVE_PixelFmt_FindByType`, `AVE_Enc_AlignDimension`,
+>   `AVE_DevCap_FindResolution` or `AVE_Analytics_Print` symbols (the same
+>   symbol-table grep finds every one of them on 26.6.2). Its primitive is
+>   `AVE_CalcFrameSize(u32 w, u32 h, u32 bits, CHROMA_FORMAT cf)` at
+>   `0xfffffe0008f43d88`: `luma = w*h*((bits+7)>>3)`, one chroma component =
+>   `luma>>2` (cf 1), `luma>>1` (cf 2), `luma` (cf 3), `0` (cf 0); returns
+>   `luma + 2*component`, or 0 for cf > 3. No divisor table, shifts instead of
+>   `sdiv`, and **no mono quirk** in this function. NV12 1920x1080 is still
+>   3 110 400. **Confirmed.** Its only callers are the four in
+>   `AVE_CalcBufSizeOfCodedData` (`0xfffffe0008ea4dd0`, `…4e4c`, `…4f4c`,
+>   `…4f68`), passing `(ALIGN(w,mb), h, 8, 1)` (`0xfffffe0008ea4dc0`–`4dd0`);
+>   `mb` is 16 when the codec argument is **0**, 32 otherwise
+>   (`cmp w0,#0` / `csel` at `0xfffffe0008ea4da0`–`4db0`) — on 26.6.2 it is
+>   16 when encType is 1.
+> - **No enum-name string arrays.** A byte search of the 13.5 `kc.macho` for
+>   `"400\0420\0"` and `"Lossy75\0"` finds nothing; the same search finds them
+>   at kc file `0x2896c7` / `0x289714` on 26.6.2. On 13.5 the chroma ordering
+>   rests on the `AVE_CalcFrameSize` arithmetic above and the table rows below.
+> - **Interchange is the same on both**: `CalcLumaSize` `0xfffffe0008f1c5dc`,
+>   `CalcChromaSize` `0xfffffe0008f1c720`, `CalcFrameSize` `0xfffffe0008f1c7d8`;
+>   bytes-per-tile tables at `0xfffffe000723ccd0/…ce0/…cf0/…d00` hold the same
+>   values. Chroma divisors are computed inline (`0xfffffe0008f1c724`–`c74c`)
+>   and give `(1,1) (2,2) (2,1) (1,1)`, so the mono quirk persists here.
+> - **`gs_sAVE_PixelFormatConversion`** is at `0xfffffe000723d6f8`, **85**
+>   entries (`AVE_PixelFmt_Convert` loop bound `0xe9c/0x2c` at
+>   `0xfffffe0008f2b780`; `GetNumberOfTypes` returns 85 at `…f2b79c`); `L00h`
+>   is absent. Fields `+0`..`+32` hold the same values. `+36`/`+40` differ and
+>   are now read, by `AVE_PixelFmt_GetSupportedListByProfile`
+>   (`0xfffffe0008f2b5b4`–`b5c4`: `+36` if the codec argument is 1, else `+40`).
+>   `+40` is `66/100/110/122/244` and `+36` is `1/2/1008/1010/1210/1308/1310`
+>   — H.264 `profile_idc` and HEVC profile codes respectively (values
+>   confirmed, profile meaning **inferred**).
+> - **Resolution limits are hard-coded and live on 13.5.**
+>   `AVE_AVC_CheckFrameDimension` (`0xfffffe0008ea3d9c`) accepts
+>   `192 <= w <= 4096` and `96 <= h <= 4096`, no `% 16`; it is called from
+>   `AVE_AVC_CheckInfo` (`0xfffffe0008ec90a4`) on the `AVE_Client_Config` path.
+>   HEVC: `AVE_HEVC_CheckFrameDimension` (`0xfffffe0008efa400`), minimum
+>   160x64. Same numbers as the 26.6.2 `Nyx_C` tables in §7. **Confirmed.**
+> - `GetLinearBuf` / `GetCompressedBuf` do not exist on 13.5; see the version
+>   note in [15](15-surface-layout.md).
+>
+> Much of the extra 26.6.2 surface (Packed/HTPC primitives, AV1 and extra
+> name tables, the per-SoC DevCap tables) is plausibly support for newer SoCs
+> and codecs — **inferred**, not established.
+
 > ## Verification note
 >
 > Independently re-checked against the binaries before committing:
