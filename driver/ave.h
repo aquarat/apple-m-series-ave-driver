@@ -125,6 +125,7 @@ struct ave_device {
 	u32			snap[AVE_SNAP_PAGES];	/* CRC of iBoot's image */
 	bool			snap_valid;
 	bool			powered;   /* holds a runtime-PM ref from stage 6 */
+	bool			irq_enabled;	/* enabled only while powered */
 	bool			hs_seen;
 	u32			hs_status;
 	u32			hs_scratch[4];
@@ -182,6 +183,7 @@ static inline void ave_write64(struct ave_device *ave, unsigned int bank,
 /* ave_fw.c */
 int ave_fw_load(struct ave_device *ave);
 void ave_fw_unload(struct ave_device *ave);
+int ave_fw_map_text_mode(void);
 
 /* ave_ipc.c */
 int ave_boot_config(struct ave_device *ave);

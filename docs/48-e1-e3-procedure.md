@@ -370,21 +370,22 @@ a reboot, and no file outside `results/` is written.
 
 ---
 
-## Integration the driver still needs (not in this change)
+## Integration (done, commit after 09d20e9)
 
-`ave_drv.c` and `driver/Makefile` are owned elsewhere. Until the following
-lands, `dapf_dump`, `dapf_set` and `dapf_mmio` exist but are never called.
-`fw_map_data`/`fw_map_text` work already: they live inside `ave_fw_load()`.
+Wired into `ave_drv.c`: `ave_dapf_dump()` at stage 8 and again after the
+stage-15 liveness sample (both self-gated by `dapf_dump`), and
+`ave_dapf_program_selected()` after stage 12, reachable with
+`stop_after=12` so E3a really does verify the writes without starting the
+core (self-gated by `dapf_set`).
 
-1. `driver/Makefile`: `apple-ave-y := ... ave_dapf.o`.
-2. `ave_drv.c`: `#include "ave_dapf.h"`.
-3. Stage 8, immediately before `ave_stage_ok(dev, AVE_STAGE_READ_ASC)`:
-   `ret = ave_dapf_dump(ave); if (ret) return dev_err_probe(dev, ret, "DAPF dump\n");`
-   The call is self-gated by `dapf_dump`.
-4. After stage 12 and before `ave_fw_snapshot_phys(ave)` (so before
-   `AVE_STAGE_ASC_START`):
-   `ret = ave_dapf_program_selected(ave); if (ret) return dev_err_probe(dev, ret, "DAPF program\n");`
-   The call is self-gated by `dapf_set`.
-5. Stage 15, after `ave_asc_liveness(ave, "started")` and before the
-   power-off: `ave_dapf_dump(ave);`. This dump shows the post-run ERROR/DAPF
-   state while still powered. It is self-gated by `dapf_dump`.
+Guards added after review (2026-09-13):
+
+- `dapf_set=` other than `off` is refused at probe unless `fw_map_text` is 1
+  or 2, so an admitted TEXT fetch can never run our own (different) image.
+- The AVE IRQ is requested disabled and enabled only once VENC is powered;
+  every power-off (stage 15, remove, probe failure, devres) disables it
+  synchronously first, because gating is asynchronous and the handler reads
+  SVE registers.
+- Any probe failure after stage 9 unwinds FwIPC, the firmware buffer and the
+  iBoot DART mappings, so a refused E3 run (e.g. the stale-slot refusal) no
+  longer leaves DATA mapped and blocks a rerun in the same boot.

@@ -448,6 +448,11 @@ int ave_dapf_program(struct ave_device *ave,
 	return 0;
 }
 
+bool ave_dapf_program_requested(void)
+{
+	return dapf_set && *dapf_set && !sysfs_streq(dapf_set, "off");
+}
+
 int ave_dapf_program_selected(struct ave_device *ave)
 {
 	struct ave_dapf_entry set[AVE_DAPF_MAX_ENTRIES];

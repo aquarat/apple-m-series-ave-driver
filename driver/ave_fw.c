@@ -282,6 +282,11 @@ module_param(fw_map_text, int, 0444);
 MODULE_PARM_DESC(fw_map_text,
 		 "E3: DVA 0xb28000 holds 0 = our image (legacy, default) | 1 = iBoot TEXT phys 0x10000b28000 read-only | 2 = nothing");
 
+int ave_fw_map_text_mode(void)
+{
+	return fw_map_text;
+}
+
 #define AVE_IBOOT_DATA_LITERAL_OFF	0x423c	/* image offset, docs/44 §2.4 */
 #define AVE_IBOOT_DATA_LITERAL		0x1f0000ec000ULL
 
