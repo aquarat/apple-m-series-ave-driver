@@ -611,3 +611,12 @@ Separately and more urgently for everything after stage 3: obtain the
 ABI docs against them. Otherwise even a booting core will be spoken to in a
 dialect it rejects.
 
+> **Correction (2026-09-13, [44](44-reset-fetch-path.md)).** Throughout this
+> document "the fetch cannot be satisfied by translation" / "untranslatable"
+> misreads the fault. `code:0x800` is `NO_DAPF_MATCH`: the CPUDART's address
+> filter (DAPF, AP `0x40d044000`, never programmed by Linux or m1n1) rejected a
+> *physical* TEXT fetch. The identity-domain "no execution" result is
+> explained by the firmware reaching DATA at `0x1f0000ec000`, a DART window,
+> which bypass passes out untranslated. In "the dump", the list at
+> `0x1000165eaa0` is **ANE** (`ane0` at bus `0x84000000`).
+

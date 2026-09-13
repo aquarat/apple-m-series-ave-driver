@@ -136,6 +136,14 @@ translated fetch, on stream 0, at a small address.
 That is consistent with the fault Linux reports: `stream:0`. The stream is
 right. Only the address is wrong.
 
+> **Correction (2026-09-13, [44](44-reset-fetch-path.md)).** The logged fault
+> code `0x800` is `NO_DAPF_MATCH` (DART error bit 11, m1n1 `dart8020.py`), not
+> a translation miss. Linux printed it as `(unknown)`. The DVA-width
+> arithmetic below is correct but was never the obstacle. The 13.5 firmware
+> bootstrap fetches TEXT **physically** (through the CPUDART's DAPF, which has
+> no entry for it on Linux) and reaches DATA via a `0x1f0_0000_0000` DVA
+> window.
+
 ## 3. No page table on this DART can ever hold `0x10000b28200`
 
 Two independent sources give the same page-table geometry.
@@ -367,6 +375,9 @@ nothing useful, which is what the page checksums said.
 ---
 
 ## Hardware verification (run on the machine, 2026-09-08)
+
+> See the correction at §3: the "cannot be translated" row is arithmetically
+> true, but the fault was a DAPF rejection ([44](44-reset-fetch-path.md)).
 
 | Claim | Test | Result |
 |---|---|---|
