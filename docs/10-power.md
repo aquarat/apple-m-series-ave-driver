@@ -6,6 +6,22 @@ from. Anything not read out of the image is marked **inferred** or **unknown**.
 
 Target part throughout is `t6001` (M1 Max, `j314c`).
 
+> **Version note (2026-09-13).** Everything below is **macOS 26.6.2** and
+> stands for 26.6.2. On **macOS 13.5** ([43](43-macos-13.5-firmware.md)),
+> **confirmed** in [45](45-abi-13.5-boot-ipc.md) §1.12:
+> the `_E_AVE_PMGR_PD` name table (`0xfffffe0007bc3ca8`) is ordered
+> IOP, IOP_Mid, **DCS**, Pipe4, Pipe5, ME0, ME1, **DMA**, IOP_Max, IOP_Mid2, FAB;
+> `AVE_PMGR_GetPDMap(chipType)` (`0xfffffe0008f2b7a4`) maps `ave0`'s ChipType 8
+> to `gs_iaAVE_PMGR_PDMap_Nyx` (`0xfffffe000b84b9a8`) = identity `0..10`, so
+> each named domain lands on the same ADT gate as below for the ten shared
+> names, and index 2 (gate 458) is `DCS` on 13.5. `PS` names are unchanged.
+> The dependency tables are restructured (`gs_iaAVE_PMGR_PDDependency_IOP` /
+> `_HW`) and were **not decoded** — the graph below cannot be verified on 13.5.
+> Clock gating is the same mechanism: `SetClockGating` → `SetIdle` →
+> `Write32(bank 2, 0x38)` (`0xfffffe0008f2cdf8`, `…f419ac`), with the offset
+> at table `+0x2c` instead of `+0x10c`; the 13.5 table is selected by ChipType
+> 4–15 ([08](08-ipc-transport.md) §6 note).
+
 ## Headline
 
 **`AVE_PMGR` performs no MMIO of its own.** It is a bookkeeping layer over

@@ -13,6 +13,23 @@ wrapper over a **generic Apple `IOProcessorChannel` library that is statically
 linked into both the kext and the firmware**, with byte-identical code on both
 sides.
 
+> **Version note (2026-09-13).** This document is **macOS 26.6.2** and stands
+> for 26.6.2. On **macOS 13.5** (the firmware this machine runs,
+> [43](43-macos-13.5-firmware.md)) the ring library, the descriptor layout
+> (stride `0x100`, `+0x40/+0x44/+0x48/+0x4C`), the bank-2 register table
+> (`0x0C`, `0x10`, 8 scratch at `0x18`), `SetIOPFlag`'s `0x08042006` and the
+> four translation helpers are the same. These differ on 13.5, all
+> **confirmed** with VAs in [45](45-abi-13.5-boot-ipc.md): §2 `FwIPC` is
+> surface index **24**, size **`0x700000`**, flags `0x10d08`, instance bound
+> ≤ 7 (`0xfffffe0008f22ac0`, `…f22ad4`, `…f22a34`); §3 the host name table has
+> **8** entries (`""`, `IO`, `IO_T2H`, `SHAREDMALLOC`, `TERMINAL`, `DEBUG`,
+> `BUF_H2T`, `BUF_T2H`, `0xfffffe0007bc3c20`) and `Send`/`Recv` accept ids
+> 1..7; the 64-bit path is selected by `GetChipType() >= 6`, not
+> `GetDevArch() == 0x40`; §6 `SetIdle`'s offset sits at table `+0x2c` (value
+> still `0x38`); §7 `ave0` is DevID **14**, DevType **11**, ChipType **8**
+> (`t6001`: 15/12/9), from a single 28-entry table at `0xfffffe0007bc2a38`.
+> §9 on 13.5 the firmware offers **7** channels and the host accepts 1..8.
+
 ---
 
 ## 1. Layers

@@ -20,6 +20,22 @@ graph built from `bl` / tail-`b` edges, with the logging idiom
 discriminator plus the vtable slot identifies them uniquely — see
 [Resolving `blraa`](#resolving-blraa).
 
+> **Version note (2026-09-13).** This document is **macOS 26.6.2** and stands
+> for 26.6.2. On **macOS 13.5** ([43](43-macos-13.5-firmware.md)) the headline
+> holds: the first register access is still `SetClockGating(true)` →
+> `SetIdle(1)` → `Write32(bank 2, 0x38, 1)`, called from `AVE_HwC::Init` at
+> `0xfffffe0008f0f1bc` after `AVE_Reg::Init` (`…f0eecc`) and `AVE_SVECtrl::Init`
+> (`…f0f04c`); the offset comes from table `+0x2c` (`…f419a0`). Differences,
+> **confirmed** in [45](45-abi-13.5-boot-ipc.md) §1.10/§1.12: the preceding
+> power-on is `SetPS(PD 7, ClockOn, 1)` (`…f0e604..…f0e614`) in 13.5's PD
+> numbering (entry 7 of the name table is `"DMA"`; that this is the DMA domain
+> is inferred); the interrupt event source is created in `AVE_HwC::Init`
+> (`…f0f8ac`); there is no DevType-`0x1e` `Read32(bank 5, 0x9C000)` —
+> `HwC::Init` contains no `Read32` and `AVE_Reg::Read32` rejects bank > 4
+> (`…f2fa64`); `Init` ends with `SetPS(PD 0, PowerOff)` (`…f10174`). The
+> `AVE_FwImg`/`AVE_FwLog` steps are `AVE_Firmware::Init` (`…f0f5f4`) and absent
+> respectively.
+
 ---
 
 ## 1. Headline

@@ -26,6 +26,34 @@ scratch registers **before** `AVE_IOP::Config`, and the firmware reads them as
 its first act. That is almost certainly why our core starts and then says
 nothing. See §4.
 
+> **Version note (2026-09-13).** This document is **macOS 26.6.2** and stands
+> for 26.6.2. On **macOS 13.5**, the firmware this machine runs
+> ([43](43-macos-13.5-firmware.md)), the primitives in §1–§2, the standalone
+> test on scratch 0, messages 2–5's register assignment, the 16 KiB checks,
+> `0x100`, the IPC info block's `+0x08/+0x1C/+0x24/+0x28/+0x4C` and the ready
+> flag are the same. These differ, all **confirmed** with VAs in
+> [45](45-abi-13.5-boot-ipc.md) §1.4–1.6 and §2.1:
+>
+> * **§4:** no `_S_AVE_Fw_Cfg`. Before Start the host writes
+>   `scratch0 = 0x08042006`, **`scratch1 = instance index`**,
+>   **`scratch2 = DevID`** (`0xfffffe0008f11d08`, `…f12004`, `…f1211c`); the
+>   firmware reads 1/2 as integers and later uses them as
+>   `(DevID, index)` bytes for `_AVE_FindByDevID` (`0xa63c8`, `0xa9cb0`).
+>   DevID for `ave0` is **14** on 13.5.
+> * **§5:** firmware sends **7** channels, block size **`0x9BC0`**; host
+>   accepts 1..8 (`…f126dc`). Heap default still `0xC0000`.
+> * **§6:** no time-base write to scratch 4/5 on either side.
+> * **§5/§7 order:** the host creates the heap after message 3 (`…f128b0`).
+> * **§9:** `+0x10`/`+0x18` (64 KiB block) not written; 64-bit layout chosen
+>   by `GetChipType() >= 6`; `+0x28` DevType is **11** for `ave0`.
+> * **§10:** client buffer size limit **`0x100000`** (`…f13ec8`), firmware
+>   sends `0xB4000`.
+> * **§11:** the firmware clears scratch 3 in `CPlatformEnvironment` after
+>   busy-waiting for the host's magic (`0xa6264..0xa6288`, `0xa6348..0xa6360`),
+>   not in `CFlowControllerBase`; scratch 7 `Write(7,1)` is still in
+>   `CFlowControllerBase` (`0xb95c`).
+> * **§14:** the `FwIPC` surface on 13.5 is `0x700000` (`…f22ad4`).
+
 ---
 
 ## 1. The register block — confirmed from both sides

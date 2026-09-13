@@ -21,6 +21,28 @@ them** — see §11.
 
 Reproduce block at §13.
 
+> **Version note (2026-09-13).** This document is **macOS 26.6.2** and stands
+> for 26.6.2. On **macOS 13.5** ([43](43-macos-13.5-firmware.md)), **confirmed**
+> in [45](45-abi-13.5-boot-ipc.md) §1.3, §1.8–1.10 and §2.4: the bank-2 map
+> including the firmware-side `+0x08`/`+0x14` pair (`0xa6a8c..0xa6abc`), the
+> descriptor stride and field offsets, the ring algorithm on both sides
+> (`0xfffffe0008f44d2c`, `…f44fa4`, `…f450d0`; fw `0x92a2c`, `0x92b44`), the
+> NULL cache hooks and `TypeAdjust {1,0,0}` are the same. The **channel table
+> differs**: `ChannelTableCreate(void*)` (`0xa5c50`) takes no flag and always
+> builds **7** descriptors — `TERMINAL` (dir 2, bit 0, 512 slots, `base+0x700`),
+> `IO` (dir 0, bit 1, **32**, `base+0x8700`), `DEBUG` (0, 1, 8, `+0x8f00`),
+> `BUF_H2T` (0, 2, 1, `+0x9100`), `BUF_T2H` (1, 3, 1, `+0x9140`),
+> `SHAREDMALLOC` (1, 3, 8, `+0x9180`), `IO_T2H` (1, 3, **32**, `+0x9380`) —
+> total **`0x9BC0`** (`0xa5bdc`) with the same `0x40` slop. The 13.5 host knows
+> all seven names (`0xfffffe0007bc3c20`), binds every descriptor, accepts ids
+> 1..7 in `Send`/`Recv`, and its interrupt loop runs `ch = 1..7`, sending
+> `SHAREDMALLOC` to `ProcessIntr_IPCMem` and `TERMINAL` to `ProcessIntr_Log`.
+> Doorbell bits are shared between channels on 13.5 (bit 1: `IO`, `DEBUG`;
+> bit 3: `BUF_T2H`, `SHAREDMALLOC`, `IO_T2H`). §3's message-1 prediction on
+> 13.5 is `7 / 0x9BC0 / 0x100 / 0xC0000`; §10 step 4 has no scratch 4/5 write,
+> step 6 has no 64 KiB log block, step 7's limit is `0x100000`, and `FwIPC` is
+> `0x700000`.
+
 ---
 
 ## 0. The results that matter

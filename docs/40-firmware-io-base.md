@@ -6,6 +6,18 @@ none of the boot-handshake work could have fixed it on its own.*
 Found by an adversarial review on 2026-09-08, after the boot-handshake work in
 [34](34-boot-handshake.md) was already implemented and about to be tested.
 
+> **Version note (2026-09-13).** §1–§2 VAs are **macOS 26.6.2** and stand for
+> 26.6.2. On **macOS 13.5** ([43](43-macos-13.5-firmware.md)) the mechanism is
+> the same and the addresses differ: `RTK_platform_init` is `0xa64ec`; the
+> `IOBA` tag is at VA **`0xefbdc`** (payload `0xefbe4`, zero in the image) with
+> `IOSZ` at `0xefbec`; it is copied into `_gui64SoCRegPhysAd` **`0x21a7b0`**;
+> base `+0x1800000` and `+0x1c00000` are formed at `0xa653c`/`0xa6554`; the
+> mapped window pointer the GPIO/IPI managers use is `_gRtkDevControlVbase`
+> **`0x21a7b8`** (`0xa65e8`); the first MMIO write is still
+> `base + 0x1c00808 = 0` (`0xa6658..0xa6664`). **Confirmed**;
+> [45](45-abi-13.5-boot-ipc.md) §1.5. `ave_fw.c`'s byte-wise tag scan finds
+> both tags in either image.
+
 ---
 
 ## 1. The firmware does not hard-code its register base
