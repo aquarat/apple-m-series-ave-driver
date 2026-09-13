@@ -1,3 +1,39 @@
+> ## Version note (2026-09-13) — macOS 13.5
+>
+> On macOS 13.5 (the firmware this machine runs, [43](43-macos-13.5-firmware.md))
+> the following are different; the 26.6.2 values below stand for 26.6.2.
+>
+> - **No `AVE_Work_*_CalcSurfaceInfo` engines, no `AVE_DevCap` table, no
+>   `AVE_BufPool`.** Sizing is `AVE_Client_CalcSurfaceInfo`
+>   (`0xfffffe0008ec67c4`) and `AVE_Client_CalcSurfaceInfo_LRME`
+>   (`0xfffffe0008ec6fe4`); the latter fills only CodedData, CodedHeader,
+>   SliceHeader, `LowResRef`/`LowResResult`/`LowResRCResult` and FwClient.
+>   The InfoSet is a `0x1ec`-byte named struct, not 35×48 (see
+>   [19](19-infoset-slot-map.md) version note). **Confirmed** (symbols, memset).
+> - **DevType on 13.5:** `gs_saAVE_DevID_Conversion` (`0xfffffe0007bc2a38`,
+>   40-byte rows `{ChipType, DevType, DevID, ...}`, read by
+>   `AVE_DevInfo::GetDevType` `ldr w0,[x0,#4]` at `0xfffffe0008ede5e4`):
+>   `t6000` → ChipType 8, **DevType 11**, DevID 14; `t6001` → ChipType 9,
+>   **DevType 12**, DevID 15. **Confirmed.**
+> - `LFSRef/LFSResult/LRSResult` are `LowResRef/LowResResult/LowResRCResult`.
+>   `LowResResult` size equals the §5 LFSResult middle-line formula (AVC,
+>   DevType 11–24, `0xfffffe0008ea5840`); count is 4 for DevType > 10
+>   (`0xfffffe0008ea570c`). `LowResRCResult` is 0 below DevType 12
+>   (`0xfffffe0008ea58e8`).
+> - `CodedHeader` size is `0x23000`, not `0xc000` (`0xfffffe0008ea4fb8`);
+>   `FwClient` default is `0x100000`, not `0x13c000` (`0xfffffe0008ea5cd0`).
+>   **Confirmed.**
+> - `AVE_BlkBuf_CalcSize` overhead is 16 B/unit + 104 B header
+>   (`0xfffffe0008ea3e38`–`3e40`), not 24 + 168; `AVE_ChkBuf_CalcSize` header
+>   term is `+0x87` (`0xfffffe0008ea8184`), not `+0xa7`. The 64-byte default
+>   chunk (`0xfffffe0008ea81a8`), 2²¹ cap (`0xfffffe0008ea8178`) and
+>   `ChkPool::Alloc` alignment 0 → 64 (`0xfffffe0008ea8e8c`) are the same on
+>   both. The FwIPC surface it carves is `0x700000` (7 MiB) on 13.5
+>   (`mov w2,#0x700000` at `0xfffffe0008f22ad4`), carved with unit 0 → 64
+>   (`0xfffffe0008f22c30`).
+> - Probably much of the MCTF/GGM/DMV/MSC machinery in 26.6.2 is support for
+>   newer SoCs; **inferred**.
+
 > ## Verification note — RESOLVED; this document was wrong
 >
 > The slot-mapping disagreement recorded below has been settled in

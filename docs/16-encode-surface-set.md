@@ -1,3 +1,57 @@
+> ## Version note (2026-09-13) — macOS 13.5
+>
+> On macOS 13.5 (the firmware this machine runs, [43](43-macos-13.5-firmware.md))
+> the surface set differs as below; the 26.6.2 values in this document stand
+> for 26.6.2. All from the 13.5 kext (`AVE_MACOS=13.5`), **confirmed** unless
+> marked.
+>
+> - **InfoSet:** `0x1ec` bytes of named members, no flags word, count at member
+>   `+0x0c`, size at `+0x10` — see [19](19-infoset-slot-map.md) version note.
+>   Surface enum has 30 kinds, FwIPC is index 24.
+> - **Allocators.** `AVE_CreateExternalSurfaces` (`0xfffffe0008f38f84`)
+>   *imports* client IOSurface IDs (the `task*` `CreateSurface` overload,
+>   ID from the SurfaceIDSet, e.g. `ldr w3,[x21]` at `0xfffffe0008f39160`) for
+>   ParameterSet, MBInputCtrl, MBStats, LRMEStats, **CodedData, CodedHeader,
+>   SliceHeader** and Recon; `AVE_Client_CheckExternalSurface`
+>   (`0xfffffe0008ecaa58`) enforces `GetSize() >= ia<Name>[Size]` and count.
+>   `AVE_CreateInternalSurfaces` (`0xfffffe0008f3a1fc`) kernel-allocates Recon
+>   (only null slots, `cbnz` at `0xfffffe0008f3a2c0`, no size re-check),
+>   Colocated, LowRes{Ref,Result,RCResult}, SrcNeighbor×4, TranscodedData,
+>   EntropyCoding, CrcQPMod, FwClient, FwClientMem, InitParamsCopy, MCTFOutput,
+>   with **literal** options `0x508` (`0xd08` for InitParamsCopy), not
+>   `(info.flags | cfg.flags) & ~0x10000`.
+> - **DevType:** t6000 = 11, t6001 = 12 (not 9/10) — [17](17-aux-engines-pools.md)
+>   version note. Size functions take `_E_AVE_CodecType` with **0 = AVC,
+>   1 = HEVC** (16- vs 32-pixel alignment, e.g. `0xfffffe0008ea4bfc`–`4c30`;
+>   **inferred** name mapping).
+> - **Sizes, 1920×1080 AVC:** same on both — Recon 2,088,960 + 1,044,480
+>   (`0xfffffe0008ea51c4`–`5218`), Colocated 1,044,480 (`0xfffffe0008ea558c`),
+>   MBStats 3,526,656 (`0xfffffe0008ea4d20`), SrcNeighborInfo 30,720
+>   (`0xfffffe0008ea5970`), Pixel 122,880 (`0xfffffe0008ea59e8`), Data 16,384
+>   (`0xfffffe0008ea5a70`), FwData 16,384 (`0xfffffe0008ea5adc`), EntropyCoding
+>   formula (`0xfffffe0008ea5be0`), FwClientMem `n<<16`. **Different:**
+>   MBInputCtrl is rounded to 4 KiB → 131,072 (`0xfffffe0008ea4c34`);
+>   CodedHeader `0x23000` (`0xfffffe0008ea4fb8`); SliceHeader constant
+>   `0x40000` (`0xfffffe0008ea4ffc`); InitParamsCopy `0x32d68`
+>   (`0xfffffe0008ea5cb8`); FwClient default `0x100000` (`0xfffffe0008ea5cd0`);
+>   new ParameterSet (AVC 512, `0xfffffe0008ea4bb8`) and CrcQPMod
+>   (`align4K(16·mbW·mbH)`, `0xfffffe0008ea5c8c`).
+> - **Counts:** Recon cap 17 (`0xfffffe0008ea505c`) and refNum cap 16
+>   (`0xfffffe0008ec67b0`) same on both. SrcNeighborInfo/Pixel = 4 only for
+>   DevType 17/18, else 1 (`0xfffffe0008ea594c`); SrcNeighborData from a table
+>   (DevType 12 → 4, 11 → 1; `0xfffffe000722f1e8`); SrcNeighborFwData 1 on
+>   DevType 12, 0 on 11 (`0xfffffe0008ea5aac`); TranscodedData 2 when a client
+>   word is 0 on DevType ≥ 9 (`0xfffffe0008ea5b18`); SliceHeader count is 0
+>   for codec 0 (`0xfffffe0008ea4fc8`); MCTFOutput 0 below DevType 19.
+> - **§5 buffer table:** still published once by `AVE_CHM_SetFwBuf`
+>   (`0xfffffe0008eaed44`) from `MakeFwCmd_Start_AVC`/`_HEVC`, but its 4th
+>   argument is `AVE_VIDEO_PARAMS*` and addresses and sizes are separate arrays
+>   (`str x0,[x21,x28,lsl #3]` / `str w0,[x8,#1272]` at
+>   `0xfffffe0008eaee74`/`0xfffffe0008eaee84`); DPB entries are 16 bytes
+>   (`str q0,[x20,x21,lsl #4]` at `0xfffffe0008eaef38`), 17 per set, 2 sets.
+> - Most of the extra 26.6.2 kinds are probably newer-SoC/codec support;
+>   **inferred**.
+
 > ## Correction — the coded-data claim below is wrong
 >
 > This document concludes that `AVE_CalcBufSizeOfCodedData` is not a closed

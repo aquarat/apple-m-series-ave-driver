@@ -1,5 +1,18 @@
 # `_E_AVE_RCMode` and `_E_AVE_EncMode` — which value is constant QP
 
+> ## Version note (2026-09-13) — macOS 13.5
+>
+> Everything below describes macOS **26.6.2** and stands for 26.6.2: `RCMode = 3` is constant QP, CBR is 2, and `sRC.Feature` bit 31 selects the framework. On macOS 13.5 (the firmware this machine runs, [43](43-macos-13.5-firmware.md)), the rate-control ABI is a different one. Details and every VA are in [47](47-abi-13.5-frame-rc-surfaces.md) §2.
+>
+> - **Classes.** The 13.5 firmware has no `RateControl::CreateInstance`, no `ConstantQpRateControl` and no `Check_RCMode`. The same symbol grep finds all three in 26.6.2. Only the legacy `CRateControl` exists, so there is no Feature-bit switch, and the vtables at `0x135938`/`0x135988` have no 13.5 counterpart.
+> - **Selector field.** The wire selector is `AVEFWRCSettings.ui32RCFlag` at `sCAveCmdAvcInit+0xFF50`.
+>   - Enumeration: **0 = `AVE_RC_OFF`, 1 = `AVE_RC_ON`, 2 = `AVE_RC_FIXQP`**, from the firmware string `"rate control flag: %d(0: AVE_RC_OFF, 1: AVE_RC_ON, 2: AVE_RC_FIXQP)"`.
+>   - That string prints the field the host writes, with no remap: host pInfo `+0x20` → cmd `+0xFF50` → fw `0x5ceb4`–`b8` → print `0x4e69c`.
+>   - **Constant QP is 2 on 13.5.** `CRateControl::ProcessInit` takes its fixed-QP arm on `cmp w11,#2` (`0x403a8`).
+> - **QP words.** QP I/P/B are `AvcInit+0xFFB4/+0xFFB8/+0xFFBC`, named by the kext `"QP (I %d P %d B %d)"` print (`0xfffffe0008eba188`).
+> - **The log-string enumeration.** It is the wire value on 13.5, not an internal flag.
+> - **CBR.** "CBR = 2" cannot be verified on 13.5, because value 2 of the 13.5 field is FIXQP.
+
 *Roadmap open question #2. The answer is **`RCMode = 3`**, and it is now
 **confirmed**, not inferred: the firmware's rate-controller factory compares
 the field against `3` and installs the `ConstantQpRateControl` vtable, and that

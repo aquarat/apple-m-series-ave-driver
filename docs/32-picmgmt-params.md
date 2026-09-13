@@ -1,5 +1,25 @@
 # `AVE_PICMGMT_PARAMS` — the per-frame encode parameters
 
+> ## Version note (2026-09-13) — macOS 13.5
+>
+> Everything below describes macOS **26.6.2** and stands for 26.6.2. On macOS 13.5 (the firmware this machine runs, [43](43-macos-13.5-firmware.md)), the layout is different. Full per-version table in [47](47-abi-13.5-frame-rc-surfaces.md) §1.
+>
+> - **Container.** The block is `0xF68` bytes at `sCAveCmdAvcEncode+0x9C8` (command `0x1940`), and `PICMGMT[0]` holds its own size. Evidence: kext `0xfffffe0008eac99c`–`9c8`, fw `add x27,x21,#0x9c8` `0x145c8`.
+> - **Copy.** The firmware copies the whole command, not four slices. Evidence: fw `0xf04c`–`0xf05c`.
+> - **Offsets** (13.5 value, with the 26.6.2 value in brackets):
+>   - `FrameType` `0xCAC` (was `0x4F78`)
+>   - context index `0xCB0`
+>   - `forceKeyFrame` `0x038`
+>   - `bInputCompressed` `0x6F3`
+>   - input Y addr/stride `0x8C0/0x8C8`, input UV addr/stride `0x8D0/0x8D8`. There is no plane-size field.
+>   - `sOutput` mode/index/Coded/header/size `0xC00/0xC04/0xC08/0xC10/0xC18`
+>   - `sRecon` `Y_MSB/Y_LSB/UV_MSB/UV_LSB/MV` `0x898/0x8A0/0x8A8/0x8B0/0x8B8`. The LSB pairing is **confirmed** on 13.5 by a firmware msb/lsb log (`0x54cac`).
+>   - `sRef.Y_L0_MSB` `0x6F8`, `UV_L0_MSB` `0x738`, `Y_L1_MSB` `0x798`, `UV_L1_MSB` `0x7D8`, `Colocated_L1` `0x838`.
+> - **Frame number and POC.** The 13.5 host sends no `FrameNum` or `POC`.
+> - **Frame type 5** (`IMG_UNDECIDED`) makes the 13.5 firmware choose the frame type itself.
+> - **Frame types 6 and 7.** 6 is rejected by the 13.5 slice-header builder; 7 is handled as B.
+> - **What is the same on both.** Values 0/1/2/3, the `CodedBufSize > 3·W·H/4` rule and session-scoped QP.
+
 *The `0x5118`-byte block at `sCAveCmdAvcProcess + 0x12C0`. Offsets, types and
 names for the per-frame controls: frame type, input surface, output buffer,
 reference lists, and where the QP actually comes from.*

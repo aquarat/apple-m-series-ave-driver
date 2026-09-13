@@ -1,3 +1,66 @@
+> ## Version note (2026-09-13) — macOS 13.5
+>
+> On macOS 13.5 (the firmware and kext this machine runs,
+> [43](43-macos-13.5-firmware.md)) the following is different or re-confirmed;
+> the 26.6.2 values in this document stand for 26.6.2. Summary table in
+> [47](47-abi-13.5-frame-rc-surfaces.md). 13.5 kext VAs unless marked `fw`.
+>
+> - **The stride rule is the same on both**, enforced differently.
+>   `AVE_CHM_SetDataInfo_FwBuf` (`0xfffffe0008eb04bc`) has no `GetLinearBuf`
+>   (the symbol does not exist on 13.5). It calls `AVE_Surface::GetYUVDARTAddr`
+>   (`0xfffffe0008eb0740`) — or `GetYUVCompData` for compressed input
+>   (`…eb05d0`) — then `GetYUVStride` (`…eb0754`), and checks luma addr != 0
+>   (`…eb075c`), luma stride != 0 (`…eb0764`), `luma stride & 0x3f`
+>   (`…eb0768`), `chroma stride & 0x3f` (`…eb0770`–`0778`); failure returns
+>   **-1015** (`…eb0a14`). Assertion text at `0xfffffe00071ea0c4`:
+>   `lumaAddr != 0 && lumaStride != 0 && lumaStride % 64 == 0 && chromaStride % 64 == 0`.
+>   Differences: there is **no `iSize != 0` test**, the rule also applies to
+>   compressed input (both paths join at `…eb0744`), and there is no second
+>   check for a scaled source (the only `#0x3f` tests on strides in the
+>   function are these two). **Confirmed.**
+> - **Input descriptor in `AVE_PICMGMT_PARAMS`**: 13.5 stores luma addr u64 at
+>   `+0x8C0`, luma stride u32 at `+0x8C8`, chroma addr at `+0x8D0`, chroma
+>   stride at `+0x8D8` (`0xfffffe0008eb0904`–`0914`), and **no plane size**. The
+>   firmware agrees: `CAVCController::setPipe` (fw `0x52f38`, `x27` = the
+>   params) asserts `sInput.Y` at `+0x8C0` non-zero and `& 63 == 0`
+>   (fw `0x54234`–`54240`) and `sInput.UV` at `+0x8D0` (fw `0x54344`–`5434c`);
+>   the dumper prints `+0x8C0` as `pInPicParams.sInput.Y` (fw `0x3c10c`).
+>   **Confirmed.** On 26.6.2 this is the 64-byte `_S_AVE_LinearBuf` at `+0x4570`.
+> - **Two planes, the third out-pointer aliases plane 1: same on both**
+>   (`GetYUVDARTAddr` `getPlaneOffset(1)` for the third pointer at
+>   `0xfffffe0008f36970`; `GetYUVStride` `getPlaneBytesPerRow(1)` at
+>   `…f36cc4`–`cc8`).
+> - **`AVE_Surface` layout differs**: `IOSurface*` at `+0x58`
+>   (`0xfffffe0008f36b48`), `m_iOpFlag` at `+0x118` (bit 10 tested at
+>   `…f36ac8`), DART entries at `+0xC8` indexed by `euID`, **bounded `< 8`**
+>   (`cmp w1,#7` at `…f3671c`), IOVA at entry `+0x18` (`…f367d8`).
+> - **`IOSurface::getWidth`/`getHeight`: never called, same on both** (branch
+>   scan of the 13.5 AVE text; the same scan finds the three
+>   `getPlaneBytesPerRow` calls in `GetYUVStride`).
+> - **The `65520 x 8192` pixel-product limit was not found on 13.5**: no
+>   `movk #0x1ffe` in the kext text (that pattern is at `0xfffffe0008b909c4` on
+>   26.6.2) and no `iPixelProduct` string. What 13.5 enforces instead is AVC
+>   `192..4096 x 96..4096` (see the version note in [14](14-frame-size-formulas.md)).
+> - **Allocation granularity `max(PAGE_SIZE, 0x4000)`: same on both**
+>   (`AVE_Surface::Create` `0xfffffe0008f33128`–`3144`, again in `CreateDict`
+>   `…f32134`–`2150`). `CreateDict` on 13.5 takes four u32s and builds four
+>   32-bit numbers (no protection-options key). `AVE_SurfaceMgr::CreateSurface`
+>   passes cache mode `0x400` (`…f3ee28`), map-cache attribute `2` (`…f3ee2c`)
+>   and pixel format `'AVE2'` = `0x41564532` (`…f3ee30`–`ee34`) — on 26.6.2 the
+>   cache mode is flag-dependent (always 0 in practice) and the pixel format 0.
+>   Values confirmed; the key bound to each argument is **inferred** from the
+>   26.6.2 order.
+> - **Internal `]` family**: `(fmt & ~0x1004) == ']8f0'` (`0xfffffe0008f32928`),
+>   i.e. `]8v0 ]8f0 ]8v4 ]8f4`.
+> - **Plane-offset rule**: string at `0xfffffe00071ea157` is
+>   `StillOffsetW % 64 == 0 && StillOffsetH % 16 == 0 && totalOffset % 64 == 0`
+>   (code `0xfffffe0008eb0e24`–`0e44`, only when a still-image flag is set), and
+>   `pInfo->sInput.Y % 64 == 0` (`…eb11f0`); no `offset <= size` term. The 64/16
+>   granularities are the same on both.
+> - **Compressed input** (`GetYUVCompData`, `0xfffffe0008f36cf0`, into
+>   `AVE_COMPRESSED_DATA` at params `+0x910`): not decoded — §5 cannot be
+>   verified on 13.5.
+
 > ## Verification note
 >
 > **The stride rule is confirmed verbatim.** Apple's own assertion text at

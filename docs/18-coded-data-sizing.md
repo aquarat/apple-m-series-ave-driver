@@ -27,6 +27,53 @@ DevType 10 = `t6001` = M1 Max ([17-aux-engines-pools.md](17-aux-engines-pools.md
 Every constant carries the VA of the instruction it came from. Anything not
 read directly out of an instruction is marked **inferred** or **unknown**.
 
+> **Version note (2026-09-13) — macOS 13.5.** On macOS 13.5 (the firmware
+> this machine runs, [43](43-macos-13.5-firmware.md)) several details below are
+> different; the 26.6.2 values in this document stand for 26.6.2. Read from
+> `data/blobs/macos-13.5/kc.macho` (`AVE_MACOS=13.5 tools/disas.py --kext`):
+>
+> * **Default-path size is the same on both.** For 8-bit 4:2:0, not lossless,
+>   `bMaxBufSize`/`bufSize`/`bufSizeFactor` zero, RC flag `< 2`, not HEIF, the
+>   13.5 function returns the §7.1 value; 1280x720 / 1920x1080 / 3840x2160 give
+>   1,384,448 / 3,112,960 / 12,443,648 for both codecs (confirmed, emulated
+>   from `0xfffffe0008ea4d58`–`0xfffffe0008ea4f88`).
+> * **Signature:** `AVE_CalcBufSizeOfCodedData(_E_AVE_CodecType, W, H,
+>   CHROMA_FORMAT, bitDepth, bufSize, bLossless, bufSizeFactor, bMaxBufSize,
+>   isHEIF, ui32RCFlag, QP[I])` at `0xfffffe0008ea4d58` — 12 arguments, no
+>   `devType`, no log calls. Codec `0` = AVC (MB 16), else 32 (`0xea4da0`–`0xea4db0`);
+>   `DEBUG_PrintEncoderSession` sends codec `0` to the AVC printer and `1` to
+>   the HEVC one (`0xfffffe0008ebc890`–`0xebc8d4`). Arg 11 is
+>   `client+0xd06a8` = `ui32RCFlag`, arg 12 `client+0xd070c` = `QP I`
+>   (names from `DEBUG_PrintEncoderSessionAVC` `0xeb764c`, `0xeb7b64`);
+>   arg 10 is `client+0xe0de9` = `isHEIF` (`DEBUG_PrintEncoderSessionHEVC`
+>   `0xeb9b08`); arg 8 `client+0xe1098` = `iOutputBufSizeFactor` (`0xebc048`).
+>   `bufSize`/`bMaxBufSize` names are inferred from the same `+0/+4/+8` triple
+>   as 26.6.2. Caller `AVE_Client_CalcSurfaceInfo` `0xfffffe0008ec6b44`.
+> * **RC term:** gated on `ui32RCFlag >= 2` (unsigned, `b.cc` at `0xea4e9c`)
+>   and not lossless, instead of `RCMode == 3`; the divisor is `6*bitDepth+3`
+>   in single precision (`0xea4eb0`–`0xea4ecc`), i.e. `(102-QP)/51` at 8-bit.
+>   The mapping of that flag to 26.6.2's `RCMode` is not settled here.
+> * **The `encMode == 2` arm is an `isHEIF` bool** (`0xea4ee0`), same maths.
+> * **Lossless:** `2 x base` (`0xea4e60`), with the RC and HEIF terms skipped;
+>   the ceiling is `2 x base` unconditionally (`0xea4f70`–`0xea4f78`). No 2.8 /
+>   2.5 factors; the float table at `0xfffffe000722f1d0` holds only 1.3, 1.6, 1.2.
+>   `bMaxBufSize` gives `base444 << bLossless` (`0xea4e54`).
+> * No `devType == 11` guard and no `W*H >= 2^31` overflow guard.
+>   `AVE_Linear_CalcFrameSize` is `AVE_CalcFrameSize` `0xfffffe0008f43d88`
+>   (inline `csel`, no divisor table; same 400/420/422/444 ordering).
+> * **`AVE_CalcBufSizeOfCodedHeader` returns `0x23000`** (143,360;
+>   `0xfffffe0008ea4fb8`–`0xea4fbc`), not `0xC000`.
+> * **`AVE_CalcBufNumOfCodedData` clamps to 20**, not 30 (`0xea4cc4`–`0xea4cf4`);
+>   `AVE_CalcBufNumOfCodedHeader` tail-calls it with no work-type arms
+>   (`0xea4fb0`). Results go to InfoSet `+92/+96` (`0xec6ae8`, `0xec6b48`).
+> * `AVE_CalcBufSizeOfProtectedData` does not exist on 13.5 (2 symbols in the
+>   26.6.2 table, 0 in 13.5's); `TranscodedData` is still `align(CodedData/2, 4096)`
+>   (`0xfffffe0008ea5b70`).
+>
+> Inferred: the `devType` argument, AV1 (`"AV1"` present in the 26.6.2 kext,
+> absent in 13.5's) and the wider enums on 26.6.2 are likely support for newer
+> SoCs and codecs.
+
 ---
 
 ## 0. Summary

@@ -1,3 +1,32 @@
+> ## Version note (2026-09-13) — macOS 13.5
+>
+> On macOS 13.5 (the firmware this machine runs, [43](43-macos-13.5-firmware.md))
+> there is no index-to-slot map; the 26.6.2 map below stands for 26.6.2.
+> Read from the 13.5 kext (`AVE_MACOS=13.5`):
+>
+> - `gs_saAVE_SurfaceCfg` (`0xfffffe0007bc3db8`) has **30** entries, bound
+>   `cmp w0,#0x1e` at `0xfffffe0008f37408`: 0 `FrameInfo`, 1 `ParameterSet`,
+>   2 `MBInputCtrl`, 3 `MBStats`, 4 `LRMEStats`, 5 `MultiPassStats`,
+>   6 `CodedData`, 7 `CodedHeader`, 8 `SliceHeader`, 9 `Recon`, 10 `Colocated`,
+>   11 `LowResRef`, 12 `LowResResult`, 13 `LowResRCResult`, 14–17
+>   `SrcNeighbor{Info,Pixel,Data,FwData}`, 18 `TranscodedData`,
+>   19 `EntropyCoding`, 20 `CrcQPMod`, 21 `IOPIPC`, 22 `FwImage`, 23 `FwHeap`,
+>   24 `FwIPC` (flags `0x10d08`), 25 `FwClient`, 26 `FwClientMem`,
+>   27 `InitParamsCopy`, 28 `MCTFOutput`, 29 `InputData`. `UCInfo`, `FwLog`,
+>   `Link`, `ProtectedData`, `DirectRecon`, `InputScaledData`, the
+>   `StaticArea*`/`HSCOutput`/`LRSNeighborMV` kinds and `MCTFRef`/`GGM*`/
+>   `DMVOutput` do not exist (their name strings are absent from the 13.5 kext
+>   and present in 26.6.2's; the four new names are the reverse). **Confirmed.**
+> - `AVE_GetSurfaceCfg` has only 8 call sites kext-wide, none in a function that
+>   takes a `_S_AVE_SurfaceInfoSet*`. `_S_AVE_SurfaceInfoSet` is `0x1ec` bytes
+>   (`mov w2,#0x1ec` memset at `0xfffffe0008ec685c`) of **named** members
+>   (`pClient->sSurfaceInfoSet.ia<Name>[AVE_SIIdx_{Set,Layer,Num,Size}]`,
+>   assert strings) — 20-byte `u32` arrays, 36 bytes for `Recon` and
+>   `MCTFOutput`, no flags word. Count is at member `+0x0c`, size at `+0x10`.
+>   Full offset table in [47](47-abi-13.5-frame-rc-surfaces.md) (surfaces part).
+> - Much of 26.6.2's extra surface/engine surface (MCTF/GGM/DMV kinds, 41 vs 30
+>   indices) is probably support for newer SoCs; **inferred**.
+
 > ## Verification note — independently confirmed
 >
 > Re-checked against the binary before committing:
