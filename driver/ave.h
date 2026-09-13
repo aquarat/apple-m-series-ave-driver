@@ -131,6 +131,7 @@ void ave_fw_globals_dump(struct ave_device *ave);
 void ave_fw_peek_phys(struct ave_device *ave);
 void ave_fw_snapshot_phys(struct ave_device *ave);
 void ave_fw_diff_phys(struct ave_device *ave);
+void ave_fw_identify_phys(struct ave_device *ave);
 int ave_ipc_init(struct ave_device *ave);
 void ave_ipc_fini(struct ave_device *ave);
 int ave_ipc_handshake(struct ave_device *ave);

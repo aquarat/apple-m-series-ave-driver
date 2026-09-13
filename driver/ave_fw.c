@@ -524,5 +524,138 @@ void ave_fw_diff_phys(struct ave_device *ave)
 			 changed, AVE_SNAP_PAGES, first * SZ_4K);
 	else
 		dev_info(ave->dev,
-			 "  no page of iBoot's image changed - the core is not executing it\n");
+			 "  no page of iBoot's image changed (cannot tell parked from dead)\n");
+}
+
+/*
+ * What is actually in the DRAM below Linux's memory map?
+ *
+ * docs/42 §3.3 established that the code at the RVBAR address is from the
+ * same source family as AppleAVE2FW, but its test matched all nineteen
+ * firmware variants equally, so it identified nothing. And §3.4 found that
+ * TEXT and DATA cannot both fit between that address and the ISP carve-out,
+ * which, if true, means the address is a device address meant to be
+ * translated. That is the contradiction at the centre of the fetch problem.
+ *
+ * This looks for things only an AVE image contains - the IOBA/IOSZ tag pair
+ * ave_fw_patch_ioba() edits, the AppleAVE2FW source path, CmdProcessor - and
+ * maps which pages hold anything at all. Where the IOBA tag sits says where
+ * DATA is; its payload says whether iBoot filled in the I/O base.
+ *
+ * The same scan is run over our own image first. If it cannot find the
+ * patterns there, a miss in iBoot's memory means nothing.
+ *
+ * Read-only, and confined to the 16 MiB window the liveness snapshot has
+ * already read safely on earlier runs. Nothing below the RVBAR address is
+ * touched: that DRAM is not ours to know about, and on Apple silicon a read
+ * of protected memory is not guaranteed to be harmless.
+ */
+struct ave_pat {
+	const char *name;
+	const u8 *bytes;
+	size_t len;
+};
+
+static const u8 pat_ioba[] = { 'A', 'B', 'O', 'I', 8, 0, 0, 0 };
+static const u8 pat_iosz[] = { 'Z', 'S', 'O', 'I', 4, 0, 0, 0 };
+static const u8 pat_src[]  = "AppleAVE2FW/Firmware";
+static const u8 pat_cmd[]  = "CmdProcessor";
+static const u8 pat_macho[] = { 0xcf, 0xfa, 0xed, 0xfe };
+
+static const struct ave_pat ave_pats[] = {
+	{ "IOBA tag",	pat_ioba,  sizeof(pat_ioba) },
+	{ "IOSZ tag",	pat_iosz,  sizeof(pat_iosz) },
+	{ "src path",	pat_src,   sizeof(pat_src) - 1 },
+	{ "CmdProc",	pat_cmd,   sizeof(pat_cmd) - 1 },
+	{ "MH_MAGIC64",	pat_macho, sizeof(pat_macho) },
+};
+
+#define AVE_SCAN_MAX_HITS	6
+
+static void ave_scan_buf(struct ave_device *ave, const char *what, u64 base,
+			 const u8 *buf, size_t len)
+{
+	unsigned int hits[ARRAY_SIZE(ave_pats)] = { 0 };
+	size_t i, p;
+
+	for (i = 0; i < len; i++) {
+		for (p = 0; p < ARRAY_SIZE(ave_pats); p++) {
+			const struct ave_pat *pt = &ave_pats[p];
+
+			if (buf[i] != pt->bytes[0] || i + pt->len > len ||
+			    memcmp(buf + i, pt->bytes, pt->len))
+				continue;
+			/* Mach-O magic is only meaningful page-aligned. */
+			if (pt->bytes == pat_macho && (i & 0xfff))
+				continue;
+			if (++hits[p] > AVE_SCAN_MAX_HITS)
+				continue;
+			if (pt->bytes == pat_ioba && i + 16 <= len)
+				dev_info(ave->dev, "  [%s] %-10s at %#llx (+%#zx) payload %#llx\n",
+					 what, pt->name, base + i, i,
+					 get_unaligned_le64(buf + i + 8));
+			else if (pt->bytes == pat_iosz && i + 12 <= len)
+				dev_info(ave->dev, "  [%s] %-10s at %#llx (+%#zx) payload %#x\n",
+					 what, pt->name, base + i, i,
+					 get_unaligned_le32(buf + i + 8));
+			else
+				dev_info(ave->dev, "  [%s] %-10s at %#llx (+%#zx)\n",
+					 what, pt->name, base + i, i);
+		}
+	}
+	for (p = 0; p < ARRAY_SIZE(ave_pats); p++)
+		dev_info(ave->dev, "  [%s] %-10s %u hit(s)\n",
+			 what, ave_pats[p].name, hits[p]);
+}
+
+/* Runs of pages containing any non-zero byte, merged, 4 KiB granularity. */
+static void ave_scan_extent(struct ave_device *ave, u64 base, const u8 *buf,
+			    size_t pages)
+{
+	size_t i, run = 0, nruns = 0, nonzero = 0;
+	bool in = false;
+
+	for (i = 0; i <= pages; i++) {
+		bool nz = false;
+
+		if (i < pages)
+			nz = memchr_inv(buf + i * SZ_4K, 0, SZ_4K) != NULL;
+		if (nz)
+			nonzero++;
+		if (nz && !in) {
+			run = i;
+			in = true;
+		} else if (!nz && in) {
+			in = false;
+			if (++nruns <= 24)
+				dev_info(ave->dev, "  extent: %#llx-%#llx (%zu KiB)\n",
+					 base + run * SZ_4K, base + i * SZ_4K,
+					 (i - run) * 4);
+		}
+	}
+	dev_info(ave->dev, "  extent: %zu non-zero pages of %zu, %zu run(s)\n",
+		 nonzero, pages, nruns);
+}
+
+void ave_fw_identify_phys(struct ave_device *ave)
+{
+	phys_addr_t pa;
+	void *p;
+
+	/* Control first: the patterns must be findable in a known AVE image. */
+	if (ave->fw.cpu && ave->fw.size)
+		ave_scan_buf(ave, "ours ", 0, ave->fw.cpu, ave->fw.size);
+	else
+		dev_info(ave->dev, "  identify: our image is not loaded; no control scan\n");
+
+	p = ave_snap_map(ave, &pa);
+	if (!p) {
+		dev_info(ave->dev, "  identify: cannot map the RVBAR window\n");
+		return;
+	}
+	dev_info(ave->dev, "  identify: scanning %u KiB from %pa\n",
+		 AVE_SNAP_PAGES * 4, &pa);
+	ave_scan_buf(ave, "iboot", pa, p, AVE_SNAP_PAGES * SZ_4K);
+	ave_scan_extent(ave, pa, p, AVE_SNAP_PAGES);
+	memunmap(p);
 }
