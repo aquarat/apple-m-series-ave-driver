@@ -936,6 +936,17 @@ int ave_ipc_handshake(struct ave_device *ave)
 	ave->client_buf_size = cbuf;
 
 	/* --- ready flag ----------------------------------------------------- */
+	/*
+	 * Channels are bound, and once the firmware clears the flag bit 0 is a
+	 * doorbell (13.5: TERMINAL), not the mailbox. Flip the IRQ handler over
+	 * BEFORE writing the flag, or a doorbell racing the poll below is
+	 * captured as a mailbox message nobody consumes (review 2026-09-13).
+	 */
+	spin_lock_irqsave(&ave->ipc_lock, flags);
+	ave->ipc_up = true;
+	ave->mbox_pending = false;
+	spin_unlock_irqrestore(&ave->ipc_lock, flags);
+
 	ave_set_scratch(ave, 3, AVE_BOOT_MAGIC);
 	ret = readl_relaxed_poll_timeout(ave->bank[AVE_BANK_SVE].base + AVE_SVE_SCRATCH(3),
 					 val, val == 0, AVE_BOOT_READY_DELAY_US,
@@ -947,7 +958,6 @@ int ave_ipc_handshake(struct ave_device *ave)
 
 	spin_lock_irqsave(&ave->ipc_lock, flags);
 	ave->boot_phase = AVE_BOOT_READY;
-	ave->ipc_up = true;
 	spin_unlock_irqrestore(&ave->ipc_lock, flags);
 
 	dev_info(ave->dev, "  %s handshake complete: %u channel(s), heartbeat scratch7 %#x\n",
@@ -955,7 +965,10 @@ int ave_ipc_handshake(struct ave_device *ave)
 	return 0;
 
 fail:
+	spin_lock_irqsave(&ave->ipc_lock, flags);
+	ave->ipc_up = false;
 	ave->boot_phase = AVE_BOOT_FAILED;
+	spin_unlock_irqrestore(&ave->ipc_lock, flags);
 	return ret;
 }
 

@@ -251,6 +251,37 @@ static irqreturn_t ave_irq_handler(int irq, void *data)
 
 
 /*
+ * Drop VENC power, safely.
+ *
+ * The IRQ handler reads and write-1-clears the SVE status register, and a
+ * register access in a gated block hangs the fabric. Gating is asynchronous
+ * (genpd suppliers are put asynchronously), so the handler must be quiesced
+ * - synchronously, waiting out any running instance - BEFORE the reference
+ * is dropped. Every power-off goes through here: the stage-15 power-off,
+ * remove(), probe failure, and the devres action below that covers any
+ * probe exit after stage 6. Idempotent. (Review 2026-09-13, finding 1.)
+ */
+static void ave_power_off(struct ave_device *ave, const char *why)
+{
+	if (!ave->powered)
+		return;
+	if (ave->irq_enabled) {
+		disable_irq(ave->irq);
+		ave->irq_enabled = false;
+	}
+	if (ave->bank[AVE_BANK_ASC].base)
+		ave_write(ave, AVE_BANK_ASC, AVE_ASC_CPU_CONTROL, 0);
+	ave->powered = false;
+	pm_runtime_put_sync(ave->dev);
+	dev_info(ave->dev, "powered off (%s)\n", why);
+}
+
+static void ave_power_off_action(void *data)
+{
+	ave_power_off(data, "devres");
+}
+
+/*
  * Finish bringing the coprocessor up.
  *
  * By the time this runs, the staged probe has already powered the block
@@ -401,7 +432,7 @@ static void ave_ctl_asc_sample(struct device *dev)
 	iounmap(b);
 }
 
-static int ave_probe(struct platform_device *pdev)
+static int ave_probe_stages(struct platform_device *pdev)
 {
 	static const char * const bank_names[AVE_NUM_BANKS] = {
 		"dpe", "asc", "sve", "unk3", "axi2af",
@@ -426,6 +457,16 @@ static int ave_probe(struct platform_device *pdev)
 	ret = ave_detect_fw_abi(ave);
 	if (ret)
 		return ret;
+
+	/*
+	 * With fw_map_text=0, DVA 0xb28000 holds OUR image, a different build
+	 * linked at vmaddr 0. If an admitted TEXT fetch is translated, the core
+	 * would run it. Any DAPF programming therefore requires an explicit
+	 * TEXT policy. (Review 2026-09-13, finding 4.)
+	 */
+	if (ave_dapf_program_requested() && ave_fw_map_text_mode() == 0)
+		return dev_err_probe(dev, -EINVAL,
+				     "dapf_set= requires fw_map_text=1 or 2\n");
 
 	if (ave_stage(dev, AVE_STAGE_MAP_BANKS)) {
 		for (i = 0; i < AVE_NUM_BANKS; i++) {
@@ -466,8 +507,13 @@ static int ave_probe(struct platform_device *pdev)
 	}
 
 	if (ave_stage(dev, AVE_STAGE_REQUEST_IRQ)) {
-		ret = devm_request_irq(dev, ave->irq, ave_irq_handler, 0,
-				       dev_name(dev), ave);
+		/*
+		 * Not enabled until VENC is powered (stage 6): a line left
+		 * asserted by an earlier run would otherwise fire the handler
+		 * against a gated block the moment it is requested.
+		 */
+		ret = devm_request_irq(dev, ave->irq, ave_irq_handler,
+				       IRQF_NO_AUTOEN, dev_name(dev), ave);
 		if (ret)
 			return dev_err_probe(dev, ret, "request_irq failed\n");
 		ave_stage_ok(dev, AVE_STAGE_REQUEST_IRQ);
@@ -516,6 +562,18 @@ static int ave_probe(struct platform_device *pdev)
 		if (ret < 0)
 			return dev_err_probe(dev, ret, "power up failed\n");
 		ave->powered = true;
+		/*
+		 * Registered after the IRQ and the power-domain devres, so it is
+		 * released first on every probe failure: quiesce the IRQ and drop
+		 * power before pd detach and free_irq.
+		 */
+		ret = devm_add_action_or_reset(dev, ave_power_off_action, ave);
+		if (ret)
+			return dev_err_probe(dev, ret, "power-off action\n");
+		if (ave->irq > 0) {
+			enable_irq(ave->irq);
+			ave->irq_enabled = true;
+		}
 		dev_info(dev, "  resumed; left powered for inspection\n");
 		ave_stage_ok(dev, AVE_STAGE_POWER_ON);
 	} else {
@@ -719,12 +777,14 @@ iop_config_done:
 		}
 	}
 
-	/* E3 (docs/48): program the AVE DAPF; no-op unless dapf_set= is given. */
-	if (stop_after >= AVE_STAGE_ASC_START) {
-		ret = ave_dapf_program_selected(ave);
-		if (ret)
-			return dev_err_probe(dev, ret, "DAPF program\n");
-	}
+	/*
+	 * E3 (docs/48): program the AVE DAPF; no-op unless dapf_set= is given.
+	 * Reached with stop_after=12 (we are past the stage-12 early return),
+	 * so E3a can verify the writes by readback without starting the core.
+	 */
+	ret = ave_dapf_program_selected(ave);
+	if (ret)
+		return dev_err_probe(dev, ret, "DAPF program\n");
 
 	ave_fw_snapshot_phys(ave);
 	if (stop_after >= AVE_STAGE_ASC_START) {
@@ -799,11 +859,8 @@ iop_config_done:
 		 * ~70k/s. Only gating VENC stops it. Leaving it powered made
 		 * the desktop stutter for as long as the module stayed loaded.
 		 */
-		if (stop_after < AVE_STAGE_START && ave->powered) {
-			ave->powered = false;
-			pm_runtime_put_sync(dev);
-			dev_info(dev, "  powered off: CPU_CONTROL = 0 cannot stop a started core\n");
-		}
+		if (stop_after < AVE_STAGE_START)
+			ave_power_off(ave, "end of stage 15; CPU_CONTROL = 0 cannot stop a started core");
 		ave_stage_ok(dev, AVE_STAGE_PROBE_STATE);
 	} else {
 		return 0;
@@ -811,14 +868,33 @@ iop_config_done:
 
 	if (stop_after >= AVE_STAGE_START) {
 		ret = ave_start(ave);
-		if (ret) {
-			ave_ipc_fini(ave);
+		if (ret)
 			return dev_err_probe(dev, ret, "coprocessor start\n");
-		}
 		dev_info(dev, "Apple AVE video encoder ready\n");
 	}
 
 	return 0;
+}
+
+/*
+ * Every probe failure after stage 9 used to leak FwIPC, the firmware buffer
+ * and - worse - DART mappings in the device's persistent default domain,
+ * including E3's RW mapping of iBoot DATA, so the next probe refused with
+ * "already mapped". Unwind here, in the safe order: IRQ and power first,
+ * then mappings and memory. Both unload functions are idempotent.
+ * (Review 2026-09-13, finding 3.)
+ */
+static int ave_probe(struct platform_device *pdev)
+{
+	int ret = ave_probe_stages(pdev);
+	struct ave_device *ave = platform_get_drvdata(pdev);
+
+	if (ret && ave) {
+		ave_power_off(ave, "probe failed");
+		ave_fw_unload(ave);
+		ave_ipc_fini(ave);
+	}
+	return ret;
 }
 
 static void ave_remove(struct platform_device *pdev)
@@ -845,13 +921,7 @@ static void ave_remove(struct platform_device *pdev)
 	 * kernel disables IRQ 129 as "nobody cared". The fault handler is then
 	 * reading a gated DART. It has not hung, but it is not benign.
 	 */
-	if (ave->powered) {
-		if (ave->bank[AVE_BANK_ASC].base)
-			ave_write(ave, AVE_BANK_ASC, AVE_ASC_CPU_CONTROL, 0);
-		ave->powered = false;
-		pm_runtime_put(ave->dev);
-		dev_info(ave->dev, "powered off\n");
-	}
+	ave_power_off(ave, "remove");
 
 	ave_fw_unload(ave);
 	ave_ipc_fini(ave);
