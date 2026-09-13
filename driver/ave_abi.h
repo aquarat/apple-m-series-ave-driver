@@ -774,6 +774,13 @@ static inline u32 ave_coded_data_size_max(u32 w, u32 h, bool hevc)
  */
 #define AVE_SRC_NBR_GROUPS		4
 #define AVE_SRC_NBR_MAX			4
+
+/*
+ * Rows of encoder_addr_entropy[][] the host fills. The wire table is [16][4];
+ * the firmware copies and asserts only the first ctrl+3768 rows, which our
+ * arm sets to 4 (docs/54).
+ */
+#define AVE_ENTROPY_MAX			16
 /* Loose per-frame scratch IOVAs (13.5 PICMGMT 0x8E0/0x8E8/0x8F0/0x900). */
 #define AVE_PIC_SCRATCH_MAX		4
 #define ave_mb_align(v)			(((v) + AVE_MB_SIZE - 1) & ~(AVE_MB_SIZE - 1))
@@ -951,6 +958,20 @@ struct ave_start_avc_layout {
 	 */
 	u32	param_sets_addr;	/* u64 DART IOVA */
 	u32	param_sets_size;	/* u32, must be non-zero */
+	/*
+	 * sSVEMap.iNum - how many SVE cores the session spans. We run one.
+	 *
+	 * 0 and 1 both take the single-core arm, so this is not what stops a
+	 * frame; writing 1 closes CollectDataFromCpus:8657 (asserts
+	 * sSVEMap.iNum == 1), which is otherwise reached only via a flag that
+	 * is *inferred* zero rather than confirmed (docs/54). Cheap insurance
+	 * against a late, quiet failure.
+	 *
+	 * Also decides whether iFwClientMemAddr is dereferenced at all: the
+	 * map and carve are behind iNum > 1 (fw 0x5cb50), so with 1 the
+	 * firmware never touches that buffer.
+	 */
+	u32	sve_num;		/* u32; AVE_OFF_NONE = not located */
 	/* DPB (recon) table: recon_max entries, recon_stride apart */
 	u32	recon_set;
 	u32	recon_stride;
@@ -1133,6 +1154,30 @@ struct ave_process_avc_layout {
 	u32	low_res_results;
 	u32	low_res_results_stride;
 	u32	low_res_results_max;
+	/*
+	 * EncCommParams.encoder_addr_entropy[16][4] - the entropy-coding
+	 * working buffers, a u64 table at PICMGMT + 0xA00 on 13.5.
+	 *
+	 * This is the last unconditional assert left on the per-frame path
+	 * (docs/54). SetTranscode copies and checks entry [i][transcode_
+	 * buffer_id] for i < ctrl+3768, which our arm sets to 4
+	 * unconditionally (fw 0x5d064/0x5d074), and asserts both
+	 * CAVCController_H13C.cpp:8020 (non-zero) and :8021 (& 63 == 0) at
+	 * fw 0x59558 / 0x595a0.
+	 *
+	 * Element [i][j] is at entropy_set + entropy_stride_i*i +
+	 * entropy_stride_j*j. We use j = transcode_buffer_id = 0. Confirmed
+	 * from both sides: firmware copy PipePrepareParam fw 0x48800-0x4881c,
+	 * host writer AVE_CHM_SetDataInfo_FwBuf kext 0xfffffe0008eb0cc4.
+	 *
+	 * Unlike low_res_src (PICMGMT + 0xC20), nothing in the firmware writes
+	 * this range before reading it, so filling it is safe. entropy_max ==
+	 * 0 means the table has not been located for this ABI.
+	 */
+	u32	entropy_set;
+	u32	entropy_stride_i;
+	u32	entropy_stride_j;
+	u32	entropy_max;
 	/* Per-frame SrcNbr tables, same shape as start_avc.src_nbr_set. */
 	u32	src_nbr_set[AVE_SRC_NBR_GROUPS];
 	u32	src_nbr_max;
@@ -1268,6 +1313,7 @@ const struct ave_cmd_abi ave_cmd_abi_13_5 = {
 		.bitrate	= 0xff30,	/* fw 0x5d9b4 */
 		.param_sets_addr = 0xfb30,	/* fw ldr x20,[x23,#880] 0x5df28; kext VP+0xFAD0 0xfffffe0008eaee10 */
 		.param_sets_size = 0xfb38,	/* fw ldr w2,[x23,#888] 0x5de44 */
+		.sve_num	= 0x10de8,	/* docs/54; single core = 1 */
 		.rc_mode	= 0xff50,	/* ui32RCFlag, ldr w8,[x10,#32] 0x5ceb4 */
 		.rc_mode_fixed_qp = 2,		/* AVE_RC_FIXQP: cmp w10,#0x2 0x41158,
 						 * string 0x4e69c */
@@ -1425,6 +1471,11 @@ const struct ave_cmd_abi ave_cmd_abi_13_5 = {
 		.low_res_results = 0xc28,
 		.low_res_results_stride = 0x08,
 		.low_res_results_max = 4,
+		/* docs/54: PICMGMT +0xA00, u64[16][4]; 4 rows at j = 0. */
+		.entropy_set	= 0xa00,
+		.entropy_stride_i = 0x20,
+		.entropy_stride_j = 0x08,
+		.entropy_max	= 4,
 		.src_nbr_set	= { 0x980, 0x9a0, 0x9c0, 0x9e0 },
 		.src_nbr_max	= 4,
 		/* kext 0xfffffe0008eb0b10/b44/b68/b84; meanings unknown. */
@@ -1661,6 +1712,9 @@ const struct ave_cmd_abi ave_cmd_abi_26_6 = {
 		.low_res_results = AVE_PIC_LOWRES_RESULTS,
 		.low_res_results_stride = 0x10,
 		.low_res_results_max = 1,	/* only [0] was located */
+		/* Not located on 26.6.2; docs/54 analysed 13.5 only. */
+		.entropy_set	= AVE_OFF_NONE,
+		.entropy_max	= 0,
 		.src_nbr_set	= { AVE_PIC_SRC_NEIGH_INFO, AVE_PIC_SRC_NEIGH_PIXEL,
 				    AVE_PIC_SRC_NEIGH_DATA, AVE_PIC_SRC_NEIGH_FWDATA },
 		.src_nbr_max	= 4,

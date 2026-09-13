@@ -155,6 +155,24 @@ struct ave_avc_frame {
 	 */
 	u64	low_res_src_addr;	/* % 64 */
 
+	/*
+	 * EncCommParams.encoder_addr_entropy[i][0] - the entropy-coding
+	 * working buffers, the last unconditional per-frame assert (docs/54).
+	 * SetTranscode requires the first ctrl+3768 (= 4 on our arm) to be
+	 * non-zero and 64-byte aligned, fw 0x59558 / 0x595a0, asserting
+	 * CAVCController_H13C.cpp:8020 and :8021.
+	 *
+	 * Size per buffer, from the kext's AVE_CalcBufSizeOfEntropyCoding
+	 * (0xfffffe0008ea5bd0) AVC arm: ALIGN_DOWN(64*W + 960, 1024) * K,
+	 * with K either 8 or ceil(ceil(H/16)/4). Which flag picks K could not
+	 * be pinned, so the driver uses the larger: 960 KiB at 1280x720.
+	 *
+	 * 0 entries leave the table zero, which reproduces the assert - kept
+	 * as the negative control, exactly like low_res_src_addr above.
+	 */
+	u64	entropy[AVE_ENTROPY_MAX];
+	u32	n_entropy;		/* 0 = write none */
+
 	/* Per-frame source-neighbour scratch, [group][index]; % 64. */
 	u64	src_nbr[AVE_SRC_NBR_GROUPS][AVE_SRC_NBR_MAX];
 	u32	n_src_nbr;		/* 0 = write none */

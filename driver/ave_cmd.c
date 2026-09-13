@@ -344,6 +344,12 @@ int ave_cmd_build_start_avc(const struct ave_cmd_abi *abi, u8 *buf, size_t len,
 	wr32(&w, l->fw_client_size, s->fw_client_size);
 	wr64(&w, l->fw_client_mem_addr, s->fw_client_mem_addr);
 	/* 13.5 only: 26.6.2's counterpart has not been located (docs/52). */
+	/*
+	 * sSVEMap.iNum: we always run a single SVE core. Writing it also keeps
+	 * the firmware off iFwClientMemAddr, whose carve is behind iNum > 1
+	 * (fw 0x5cb50). docs/54.
+	 */
+	wr32_opt(&w, l->sve_num, 1);
 	if (l->param_sets_addr != AVE_OFF_NONE) {
 		wr64(&w, l->param_sets_addr, s->param_sets_addr);
 		wr32_opt(&w, l->param_sets_size, s->param_sets_size);
@@ -478,6 +484,24 @@ int ave_cmd_build_process_avc(const struct ave_cmd_abi *abi, u8 *buf,
 	    ((f->low_res_src_addr & (AVE_STRIDE_ALIGN - 1)) ||
 	     l->low_res_src == AVE_OFF_NONE))
 		return -EINVAL;
+	/*
+	 * Entropy-coding buffers: optional in the same sense as low_res_src
+	 * above (0 = leave the table zero and reproduce the :8020 assert on
+	 * purpose), but a table we do write must be complete and aligned, and
+	 * the ABI must have the field.
+	 */
+	if (f->n_entropy) {
+		u32 i;
+
+		if (l->entropy_set == AVE_OFF_NONE || !l->entropy_max ||
+		    f->n_entropy > l->entropy_max ||
+		    f->n_entropy > AVE_ENTROPY_MAX)
+			return -EINVAL;
+		for (i = 0; i < f->n_entropy; i++)
+			if (!f->entropy[i] ||
+			    (f->entropy[i] & (AVE_STRIDE_ALIGN - 1)))
+				return -EINVAL;
+	}
 	if (f->n_src_nbr) {
 		u32 g, i;
 
@@ -557,6 +581,10 @@ int ave_cmd_build_process_avc(const struct ave_cmd_abi *abi, u8 *buf,
 
 	if (f->low_res_src_addr && l->low_res_src != AVE_OFF_NONE)
 		wr64(&w, base + l->low_res_src, f->low_res_src_addr);
+	/* encoder_addr_entropy[i][0]; j = transcode_buffer_id = 0 (docs/54). */
+	for (i = 0; i < f->n_entropy; i++)
+		wr64(&w, base + l->entropy_set + l->entropy_stride_i * i,
+		     f->entropy[i]);
 
 	for (i = 0; i < f->n_src_nbr; i++) {
 		u32 g;
