@@ -33,4 +33,15 @@ int ave_session_selftest(struct ave_device *ave);
  */
 void ave_session_release(struct ave_device *ave);
 
+/*
+ * Ask the firmware to halt itself (command 14) so that the next load can
+ * start it again without rebooting the machine. Sends on IO and waits for SVE
+ * scratch 0, because this command never replies (docs/55). Returns 0 when the
+ * firmware reached its wfi, a negative errno otherwise, or 0 immediately when
+ * the gate parameter is off. Call it from ave_remove() while the IPC
+ * transport is still live and BEFORE dropping power.
+ */
+int ave_session_halt(struct ave_device *ave);
+bool ave_session_halt_requested(void);
+
 #endif /* __AVE_SESSION_H__ */
