@@ -58,6 +58,13 @@ struct ave_dapf_entry {
 int ave_dapf_dump(struct ave_device *ave);
 
 /*
+ * The same dump, ungated, tagged with @tag. For callers with their own gate -
+ * ave_core_reset() uses it to check whether m1n1's entries survived a block
+ * reset, which Linux could not put back (docs/49).
+ */
+int ave_dapf_dump_now(struct ave_device *ave, const char *tag);
+
+/*
  * E3: write @n entries exactly as m1n1 does, then read every one back.
  * Ungated primitive - callers are responsible for the gate. Returns -EIO on
  * readback mismatch.
