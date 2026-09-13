@@ -386,6 +386,8 @@ static void test_start_13_5(void)
 	/* docs/52: fw ldr x20,[x23,#880] 0x5df28 / ldr w2,[x23,#888] 0x5de44 */
 	E64(buf, 0xfb30, 0x0000000400300000ull, "ParameterSetsBuffer (fw 0x5df28)");
 	E32(buf, 0xfb38, 0x1000, "ParameterSetsBufferSize (fw 0x5de44)");
+	/* sSVEMap.iNum: single core, closes CollectDataFromCpus:8657, docs/54 */
+	E32(buf, 0x10de8, 1, "sSVEMap.iNum = 1");
 	/* docs/46 §9.2, docs/38 §7: MB-aligned in VideoParams */
 	E32(buf, 0x60, 1920, "width (fw 0x5ced0)");
 	E32(buf, 0x64, 1088, "height (fw 0x5ced0)");
@@ -619,7 +621,45 @@ static void test_process_13_5(void)
 	E64(buf, P + 0x8b8, 0x0000000600000000ull, "recon MV (fw 0x2c4b0)");
 	expect_rest_zero(buf, 0x1940);
 
+	/*
+	 * encoder_addr_entropy[i][0] - docs/54. The table is [16][4] at
+	 * PICMGMT +0xA00, stride 0x20 between rows; SetTranscode asserts the
+	 * first four are non-zero and 64-aligned (fw 0x59558 / 0x595a0).
+	 */
+	begin("13.5 process_avc entropy table");
+	f = frame_idr();
+	f.n_entropy = 4;
+	f.entropy[0] = 0x0000000700000000ull;
+	f.entropy[1] = 0x00000007000f0000ull;
+	f.entropy[2] = 0x00000007001e0000ull;
+	f.entropy[3] = 0x00000007002d0000ull;
+	memset(buf, 0, sizeof(buf));
+	ret = ave_cmd_build_process_avc(a, buf, sizeof(buf), &CTX, 40, &f);
+	expect_int(ret, 0x1940, "size unchanged");
+	E64(buf, P + 0xa00, f.entropy[0], "entropy[0][0] (wire 0x13C8)");
+	E64(buf, P + 0xa20, f.entropy[1], "entropy[1][0] (wire 0x13E8)");
+	E64(buf, P + 0xa40, f.entropy[2], "entropy[2][0] (wire 0x1408)");
+	E64(buf, P + 0xa60, f.entropy[3], "entropy[3][0] (wire 0x1428)");
+	E64(buf, P + 0xa08, 0, "[0][1] left zero: j = transcode_buffer_id = 0");
+	E64(buf, P + 0xa80, 0, "row 4 left zero: only ctrl+3768 = 4 are read");
+
+	begin("13.5 process_avc entropy negatives");
+	f.entropy[2] = 0;
+	expect_int(ave_cmd_build_process_avc(a, buf, sizeof(buf), &CTX, 40, &f),
+		   -EINVAL, "a zero entry in a table we claim to fill (:8020)");
+	f.entropy[2] = 0x0000000700000020ull;
+	expect_int(ave_cmd_build_process_avc(a, buf, sizeof(buf), &CTX, 40, &f),
+		   -EINVAL, "entry % 64 (:8021)");
+	f.entropy[2] = 0x00000007001e0000ull;
+	f.n_entropy = 17;
+	expect_int(ave_cmd_build_process_avc(a, buf, sizeof(buf), &CTX, 40, &f),
+		   -EINVAL, "more rows than the wire table holds");
+	f = frame_idr();
+	expect_int(ave_cmd_build_process_avc(a, buf, sizeof(buf), &CTX, 40, &f),
+		   0x1940, "n_entropy = 0 still builds: the assert is the control");
+
 	begin("13.5 process_avc negatives");
+	f = frame_idr();
 	expect_int(ave_cmd_build_process_avc(a, buf, sizeof(buf), &CTX, 41, &f), -EINVAL,
 		   "slot 41 (cmp w24,#0x28 0xfffffe0008eac860)");
 	expect_int(ave_cmd_build_process_avc(a, buf, 0x193f, &CTX, 21, &f), -EINVAL, "len short");
