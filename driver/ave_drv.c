@@ -981,9 +981,28 @@ static void ave_remove(struct platform_device *pdev)
 	 * kernel disables IRQ 129 as "nobody cared". The fault handler is then
 	 * reading a gated DART. It has not hung, but it is not benign.
 	 */
+	/*
+	 * Read the core's state BEFORE dropping power: a register read in a
+	 * gated block hangs the fabric (docs/24), so this must not move below
+	 * ave_power_off(). venc_sys is not gated on the patched m1n1 (docs/31
+	 * 20:37), so after a Process timeout the core can still be writing the
+	 * session buffers; unmapping them then gives a DART fault storm and
+	 * costs a reboot. Leak them in that case - the memory comes back on the
+	 * next boot. (Review of 19b9d93, finding 4.)
+	 */
+	if (ave->powered && ave->bank[AVE_BANK_ASC].base && ave->session_bufs) {
+		u32 st = ave_read(ave, AVE_BANK_ASC, AVE_ASC_CPU_STATUS);
+
+		if (!(st & AVE_ASC_ST_STOPPED)) {
+			dev_warn(ave->dev,
+				 "core not stopped (CPU_STATUS %#x): leaking the session buffers rather than unmapping under live DMA\n",
+				 st);
+			ave->session_bufs = NULL;
+		}
+	}
+
 	ave_power_off(ave, "remove");
 
-	/* Safe now: the core is powered off and cannot reach these. */
 	ave_session_release(ave);
 	ave_fw_unload(ave);
 	ave_ipc_fini(ave);
