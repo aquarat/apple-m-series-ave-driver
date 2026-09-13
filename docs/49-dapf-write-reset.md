@@ -501,3 +501,58 @@ Next discriminators, each needing waits of 15 s or more around the write:
 - A static question for the reviewer: how our `devm_ioremap` mapping and
   `writel` differ from apple-dart's for the same register (mapping
   attributes, access width, the regulator/clock/PM state apple-dart holds).
+
+## N1h2 on a text console — 2026-09-13: it is an SError, not a hang
+
+Rerun of N1h (`dapf_probe=1`) by the operator on tty3 with
+`dmesg -n 8`, so every kernel line printed on screen
+(`results/n1h2-vt-*.kmsg`; screen photographed). The console's last driver
+line: `[2557.213340] PROBE next: same-value write TCR[0] <- 0x80 (in 5 s)`.
+Then drm_panic's screen: **"KERNEL PANIC! Please reboot your computer.
+Asynchronous SError Interrupt"**, with a QR code.
+
+The QR (version 35, no URL configured) was decoded from the photo with
+zxing-cpp; it holds the plain-text tail of the panic log
+(`results/n1h2-vt-panic-qr.txt`):
+
+```
+[2562.397362] Tainted: [S]=CPU_OUT_OF_SPEC, [M]=MACHINE_CHECK, [O]=OOT_MODULE, [E]=UNSIGNED_MODULE
+  ...
+  arm64_serror_panic+0x78/0x90
+  arm64_is_fatal_ras_serror+0x8c/0x98
+  do_serror+0x38/0x60
+  el1h_64_error_handler+0x40/0x68
+  el1h_64_error+0x84/0x88
+  dev_driver_string+0x0/0x48 (P)
+  _dev_info+0x6c/0xa0
+  ave_dapf_write_probe+0x178/0x390 [apple_ave]
+```
+
+**Confirmed:**
+
+- The same-value `writel(0x80, cpudart + 0x100)` at ~2562.21 (5 s after the
+  announcement) raised an **asynchronous, fatal RAS SError**, taken ~180 ms
+  later inside the `dev_info` that follows the write. Kernel tainted
+  `MACHINE_CHECK`. The CPUDART register block **rejects the write with a
+  bus error**; it does not hang.
+- The "freeze, then reset ~30 s later" is the panic (`kernel.panic = 0`)
+  followed by the Apple SoC watchdog, whose timeout is 30 s
+  (`/sys/class/watchdog/watchdog0/timeout`). No PMU-level mechanism is
+  needed to explain it.
+- The ~5 s of missing lines in every capture is the persistence loss
+  measured in N1i, now corroborated by the on-screen log.
+
+What the rejection depends on: apple-dart rewrites this DART's TCRs on every
+runtime resume (`apple_dart_resume` → `hw_reset` + restore), which happens at
+the start of each of our power sessions and did so successfully in
+N1c-N1g. Our writes fail only **late**, after stage 11. Stage 11 writes
+`scratch0 = 0x08042006`, the IOP host-mode flag Apple writes in
+`AVE_SVECtrl::SetIOPFlag` - and Apple's DART/DAPF restore happens at power-up,
+before it. **Leading hypothesis (inferred):** setting the IOP flag (or
+something between stage 8 and stage 12: IPC alloc, the DATA map) locks the
+CPUDART/DAPF register block against host writes, so they must be done
+before stage 11.
+
+Next: program the DAPF **at stage 8**, before the IPC allocation, the DATA
+map and the scratch writes (m1n1 order, no quiesce, readback). Survival both
+supports the hypothesis and is the step E3 actually needs.

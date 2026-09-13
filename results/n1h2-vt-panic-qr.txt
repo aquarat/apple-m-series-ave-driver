@@ -1,0 +1,47 @@
+[ 2562.397362] Tainted: [S]=CPU_OUT_OF_SPEC, [M]=MACHINE_CHECK, [O]=OOT_MODULE, [E]=UNSIGNED_MODULE
+[ 2562.397363] Hardware name: Apple Inc. MacBookPro18,4/J314c, BIOS 2026.04 04/01/2026
+[ 2562.397363] Call trace:
+[ 2562.397364]  show_stack+0x20/0x38 (C)
+[ 2562.397366]  dump_stack_lvl+0x88/0xb8
+[ 2562.397368]  dump_stack+0x18/0x30
+[ 2562.397369]  vpanic+0x2ac/0x4c0
+[ 2562.397371]  panic+0x68/0x70
+[ 2562.397372]  nmi_panic+0x74/0x80
+[ 2562.397373]  arm64_serror_panic+0x78/0x90
+[ 2562.397374]  arm64_is_fatal_ras_serror+0x8c/0x98
+[ 2562.397375]  do_serror+0x38/0x60
+[ 2562.397375]  el1h_64_error_handler+0x40/0x68
+[ 2562.397378]  el1h_64_error+0x84/0x88
+[ 2562.397378]  dev_driver_string+0x0/0x48 (P)
+[ 2562.397380]  _dev_info+0x6c/0xa0
+[ 2562.397382]  ave_dapf_write_probe+0x178/0x390 [apple_ave]
+[ 2562.397389]  ave_probe_stages+0xbc4/0x1500 [apple_ave]
+[ 2562.397393]  ave_probe+0x20/0x90 [apple_ave]
+[ 2562.397397]  platform_probe+0x88/0xc0
+[ 2562.397398]  really_probe+0xc8/0x400
+[ 2562.397399]  __driver_probe_device+0x90/0x1a8
+[ 2562.397401]  driver_probe_device+0x44/0x128
+[ 2562.397402]  __driver_attach+0xd0/0x208
+[ 2562.397403]  bus_for_each_dev+0x84/0xf0
+[ 2562.397404]  driver_attach+0x2c/0x40
+[ 2562.397405]  bus_add_driver+0x15c/0x2a8
+[ 2562.397406]  driver_register+0x70/0x140
+[ 2562.397408]  __platform_driver_register+0x28/0x40
+[ 2562.397410]  ave_driver_init+0x28/0x3fd0 [apple_ave]
+[ 2562.397413]  do_one_initcall+0x5c/0x4b8
+[ 2562.397415]  do_init_module+0x94/0x2a8
+[ 2562.397416]  load_module+0x93c/0xb28
+[ 2562.397417]  init_module_from_file+0xe8/0x150
+[ 2562.397417]  idempotent_init_module+0x1dc/0x2d0
+[ 2562.397418]  __arm64_sys_finit_module+0x70/0x100
+[ 2562.397419]  invoke_syscall.constprop.0+0xac/0x110
+[ 2562.397421]  el0_svc_common.constprop.0+0x40/0xf0
+[ 2562.397423]  do_el0_svc+0x24/0x40
+[ 2562.397424]  el0_svc+0x40/0x198
+[ 2562.397425]  el0t_64_sync_handler+0xa0/0xf0
+[ 2562.397426]  el0t_64_sync+0x1b0/0x1b8
+[ 2562.397430] SMP: stopping secondary CPUs
+[ 2562.397450] Kernel Offset: 0x37a82ecc0000 from 0xffff800080000000
+[ 2562.397451] PHYS_OFFSET: 0x10000000000
+[ 2562.397451] CPU features: 0x0,04000000,01c000a9,99081482,511fdcc3
+[ 2562.397453] Memory Limit: none
