@@ -1,0 +1,376 @@
+=== nc-dryrun2 2026-09-13T20:37:32+01:00 commit 9fc3cdb: insmod driver/apple-ave.ko stop_after=13 fw_map_data=1 fw_map_text=2 fw_restore_data=2 ===
+[  177.132265] apple-ave 40d100000.video-encoder: probe: staged bring-up, stop_after=13 (max 16)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  177.132274] apple-ave 40d100000.video-encoder: OS firmware 13.5: using macOS 13.5 AVE ABI
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  177.132275] apple-ave 40d100000.video-encoder: stage 1 (map-banks): starting
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  177.132277] apple-ave 40d100000.video-encoder:   mapping bank 0 (dpe)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  177.132291] apple-ave 40d100000.video-encoder:   mapping bank 1 (asc)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  177.132297] apple-ave 40d100000.video-encoder:   mapping bank 2 (sve)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  177.132300] apple-ave 40d100000.video-encoder:   mapping bank 3 (unk3)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  177.132302] apple-ave 40d100000.video-encoder:   mapping bank 4 (axi2af)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  177.132307] apple-ave 40d100000.video-encoder: stage 1 (map-banks): OK
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  177.132308] apple-ave 40d100000.video-encoder: stage 2 (dma-mask): starting
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  177.132309] apple-ave 40d100000.video-encoder: stage 2 (dma-mask): OK
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  177.132310] apple-ave 40d100000.video-encoder: stage 3 (get-irq): starting
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  177.132317] apple-ave 40d100000.video-encoder:   irq = 130
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  177.132318] apple-ave 40d100000.video-encoder: stage 3 (get-irq): OK
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  177.132318] apple-ave 40d100000.video-encoder: stage 4 (request-irq): starting
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  177.132323] apple-ave 40d100000.video-encoder: stage 4 (request-irq): OK
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  177.132324] apple-ave 40d100000.video-encoder: stage 5 (power-attach): starting
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  177.132521] apple-ave 40d100000.video-encoder:   attached 5 power domain(s)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  177.132523] apple-ave 40d100000.video-encoder: stage 5 (power-attach): OK
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  177.132524] apple-ave 40d100000.video-encoder: stage 6 (power-on): starting
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  177.132528] apple-ave 40d100000.video-encoder:   resumed; left powered for inspection
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  177.132529] apple-ave 40d100000.video-encoder: stage 6 (power-on): OK
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  177.132529] apple-ave 40d100000.video-encoder: stage 7 (write-sve-idle): starting
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  177.132530] apple-ave 40d100000.video-encoder:   writing 1 to SVE+0x38 (Apple's first access) ...
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  177.132531] apple-ave 40d100000.video-encoder:   write returned
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  177.132532] apple-ave 40d100000.video-encoder: stage 7 (write-sve-idle): OK
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  177.132533] apple-ave 40d100000.video-encoder: stage 8 (read-asc-status): starting
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  177.132534] apple-ave 40d100000.video-encoder:   reading ASC+0x400048 (CPU_STATUS) ...
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  177.132535] apple-ave 40d100000.video-encoder:   ASC CPU_STATUS = 0x00000028
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  177.132536] apple-ave 40d100000.video-encoder: stage 8 (read-asc-status): OK
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  177.132537] apple-ave 40d100000.video-encoder: stage 9 (ipc-alloc): starting
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  177.132790] apple-ave 40d100000.video-encoder: IPC (macOS 13.5): FwIPC surface 24, 7168 KiB at iova 0x00000000ff800000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  177.132792] apple-ave 40d100000.video-encoder: stage 9 (ipc-alloc): OK
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  177.132793] apple-ave 40d100000.video-encoder: stage 10 (fw-load): starting
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  177.134783] apple-ave 40d100000.video-encoder: firmware image: 2622936 bytes
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  177.134785] apple-ave 40d100000.video-encoder:   image spans 0x268000, allocating 0x268000 contiguous
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  177.135910] apple-ave 40d100000.video-encoder:   __TEXT       vm 0x0+0x134000 file 0x4000+0x134000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  177.135959] apple-ave 40d100000.video-encoder:   __DATA       vm 0x134000+0x134000 file 0x138000+0x134000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  177.174003] apple-ave 40d100000.video-encoder:   IOBA at image +0x1341fd: 0x0 -> 0x40c000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  177.174004] apple-ave 40d100000.video-encoder:   IOSZ at image +0x13420d: 0 -> 0x2000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  177.247106] apple-ave 40d100000.video-encoder:   fw-base register 0x102010000b28001 -> mapping image at IOVA 0xb28000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  177.247107] apple-ave 40d100000.video-encoder:   iova 0x00000000ff400000 -> phys 0x000001000a800000, mapping at IOVA 0xb28000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  177.247109] apple-ave 40d100000.video-encoder: STEP next: memremap + read iBoot TEXT literal
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  177.247122] apple-ave 40d100000.video-encoder:   iboot: RVBAR base 0x10000b28000, DATA literal 0x1f0000ec000 - placement as expected
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  177.247176] apple-ave 40d100000.video-encoder:   iboot DATA: 0x10001a90000+0x134000 is outside System RAM, /memory and /reserved-memory
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  177.247179] apple-ave 40d100000.video-encoder: STEP next: iommu_map iboot DATA dva 0xec000 -> phys 0x10001a90000 +0x134000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  177.247183] apple-ave 40d100000.video-encoder:   iboot DATA: DVA 0xec000 -> phys 0x10001a90000 +0x134000 RW, verified
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  177.247184] apple-ave 40d100000.video-encoder:   iboot TEXT: leaving DVA 0xb28000 UNMAPPED (discriminating run: a translated fetch must fault there)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  177.247185] apple-ave 40d100000.video-encoder:   fw_map_text=2: NOT mapping our image at IOVA 0xb28000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  177.247193] apple-ave 40d100000.video-encoder: stage 10 (fw-load): OK
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  177.247194] apple-ave 40d100000.video-encoder: stage 11 (boot-cfg): starting
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  177.247195] apple-ave 40d100000.video-encoder:   macOS 13.5: no boot cfg block; instance 0, DevID 14
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  177.247196] apple-ave 40d100000.video-encoder: STEP next: pre-start scratch writes
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  177.247197] apple-ave 40d100000.video-encoder:   scratch0=0x8042006 scratch1=0x0 scratch2=0xe
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  177.247198] apple-ave 40d100000.video-encoder: stage 11 (boot-cfg): OK
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  177.247199] apple-ave 40d100000.video-encoder: stage 12 (iop-config): starting
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  177.247200] apple-ave 40d100000.video-encoder:   ASC+0x50000 BEFORE any write = 0x102010000b28001  (base field 0x10000b28000)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  177.247200] apple-ave 40d100000.video-encoder:   13.5: Apple does not write RVBAR on this SoC; skipping
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  177.247201] apple-ave 40d100000.video-encoder: stage 12 (iop-config): OK
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  177.247202] apple-ave 40d100000.video-encoder: STEP stage 12 done; next: DAPF programming (if dapf_set)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  177.247203] apple-ave 40d100000.video-encoder: STEP DAPF step returned
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  177.247996] apple-ave 40d100000.video-encoder:   snapshot: 4096 pages of 0x0000010000b28000 checksummed before start
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  177.719515] apple-ave 40d100000.video-encoder:   [ours ] src path   at 0x11f5f5 (+0x11f5f5)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  177.719605] apple-ave 40d100000.video-encoder:   [ours ] src path   at 0x11f6bd (+0x11f6bd)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  177.719768] apple-ave 40d100000.video-encoder:   [ours ] src path   at 0x11f84c (+0x11f84c)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  177.719940] apple-ave 40d100000.video-encoder:   [ours ] src path   at 0x11fa0d (+0x11fa0d)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  177.720012] apple-ave 40d100000.video-encoder:   [ours ] src path   at 0x11faa6 (+0x11faa6)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  177.720160] apple-ave 40d100000.video-encoder:   [ours ] src path   at 0x11fbeb (+0x11fbeb)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  177.722921] apple-ave 40d100000.video-encoder:   [ours ] CmdProc    at 0x12165e (+0x12165e)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  177.753826] apple-ave 40d100000.video-encoder:   [ours ] IOBA tag   at 0x1341f5 (+0x1341f5) payload 0x40c000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  177.753835] apple-ave 40d100000.video-encoder:   [ours ] IOSZ tag   at 0x134205 (+0x134205) payload 0x2000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  178.260094] apple-ave 40d100000.video-encoder:   [ours ] IOBA tag   1 hit(s)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  178.260097] apple-ave 40d100000.video-encoder:   [ours ] IOSZ tag   1 hit(s)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  178.260098] apple-ave 40d100000.video-encoder:   [ours ] src path   15 hit(s)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  178.260099] apple-ave 40d100000.video-encoder:   [ours ] CmdProc    1 hit(s)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  178.260099] apple-ave 40d100000.video-encoder:   [ours ] MH_MAGIC64 0 hit(s)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  178.260119] apple-ave 40d100000.video-encoder:   identify: scanning 16384 KiB from 0x0000010000b28000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  178.263399] apple-ave 40d100000.video-encoder:   [iboot] CmdProc    at 0x10000be4a9b (+0xbca9b)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  178.263440] apple-ave 40d100000.video-encoder:   [iboot] CmdProc    at 0x10000be6db8 (+0xbedb8)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  178.263442] apple-ave 40d100000.video-encoder:   [iboot] CmdProc    at 0x10000be6e47 (+0xbee47)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  178.265611] apple-ave 40d100000.video-encoder:   [iboot] IOBA tag   at 0x10000c6544c (+0x13d44c) payload 0x0
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  178.265613] apple-ave 40d100000.video-encoder:   [iboot] IOSZ tag   at 0x10000c6545c (+0x13d45c) payload 0x0
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  178.303155] apple-ave 40d100000.video-encoder:   [iboot] CmdProc    at 0x10001522480 (+0x9fa480)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  178.303274] apple-ave 40d100000.video-encoder:   [iboot] CmdProc    at 0x10001528874 (+0xa00874)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  178.305148] apple-ave 40d100000.video-encoder:   [iboot] CmdProc    at 0x10001590247 (+0xa68247)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  178.308642] apple-ave 40d100000.video-encoder:   [iboot] IOBA tag   at 0x1000165ec4c (+0xb36c4c) payload 0x0
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  178.308646] apple-ave 40d100000.video-encoder:   [iboot] IOSZ tag   at 0x1000165ec5c (+0xb36c5c) payload 0x0
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  178.326267] apple-ave 40d100000.video-encoder:   [iboot] IOBA tag   at 0x10001a93bdc (+0xf6bbdc) payload 0x40c000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  178.326271] apple-ave 40d100000.video-encoder:   [iboot] IOSZ tag   at 0x10001a93bec (+0xf6bbec) payload 0x0
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  178.328780] apple-ave 40d100000.video-encoder:   [iboot] IOBA tag   3 hit(s)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  178.328781] apple-ave 40d100000.video-encoder:   [iboot] IOSZ tag   3 hit(s)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  178.328782] apple-ave 40d100000.video-encoder:   [iboot] src path   0 hit(s)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  178.328782] apple-ave 40d100000.video-encoder:   [iboot] CmdProc    6 hit(s)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  178.328783] apple-ave 40d100000.video-encoder:   [iboot] MH_MAGIC64 0 hit(s)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  178.328785] apple-ave 40d100000.video-encoder:   extent: 0x10000b28000-0x10000b29000 (4 KiB)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  178.328789] apple-ave 40d100000.video-encoder:   extent: 0x10000b2c000-0x10000c15000 (932 KiB)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  178.328792] apple-ave 40d100000.video-encoder:   extent: 0x10000c18000-0x10000c5e000 (280 KiB)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  178.328793] apple-ave 40d100000.video-encoder:   extent: 0x10000c60000-0x10000c62000 (8 KiB)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  178.328794] apple-ave 40d100000.video-encoder:   extent: 0x10000c64000-0x10000c69000 (20 KiB)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  178.328816] apple-ave 40d100000.video-encoder:   extent: 0x10000c6c000-0x100012ef000 (6668 KiB)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  178.328865] apple-ave 40d100000.video-encoder:   extent: 0x100013e8000-0x10001424000 (240 KiB)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  178.328868] apple-ave 40d100000.video-encoder:   extent: 0x10001425000-0x10001480000 (364 KiB)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  178.328870] apple-ave 40d100000.video-encoder:   extent: 0x10001481000-0x10001498000 (92 KiB)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  178.328871] apple-ave 40d100000.video-encoder:   extent: 0x1000149a000-0x100014c9000 (188 KiB)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  178.328872] apple-ave 40d100000.video-encoder:   extent: 0x100014ca000-0x100014e0000 (88 KiB)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  178.328886] apple-ave 40d100000.video-encoder:   extent: 0x100014ef000-0x10001657000 (1440 KiB)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  178.328888] apple-ave 40d100000.video-encoder:   extent: 0x10001658000-0x10001672000 (104 KiB)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  178.329084] apple-ave 40d100000.video-encoder:   extent: 0x10001a3c000-0x10001a3d000 (4 KiB)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  178.329100] apple-ave 40d100000.video-encoder:   extent: 0x10001a90000-0x10001aa6000 (88 KiB)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  178.329101] apple-ave 40d100000.video-encoder:   extent: 0x10001aa8000-0x10001aa9000 (4 KiB)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  178.329103] apple-ave 40d100000.video-encoder:   extent: 0x10001aaf000-0x10001abc000 (52 KiB)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  178.329113] apple-ave 40d100000.video-encoder:   extent: 0x10001af0000-0x10001af1000 (4 KiB)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  178.329114] apple-ave 40d100000.video-encoder:   extent: 0x10001af2000-0x10001af4000 (8 KiB)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  178.329116] apple-ave 40d100000.video-encoder:   extent: 0x10001af8000-0x10001afc000 (16 KiB)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  178.329130] apple-ave 40d100000.video-encoder:   extent: 2651 non-zero pages of 4096, 20 run(s)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  178.329141] apple-ave 40d100000.video-encoder:   [halted ] CPU_CONTROL = 0x0
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  178.554213] apple-ave 40d100000.video-encoder:   [halted ] CPU_STATUS: 2000 samples over 225 ms, 1 distinct
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  178.554246] apple-ave 40d100000.video-encoder:   [halted ]   0x0028 x2000 FIQ_NOT_PEND? IDLE
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  178.554263] apple-ave 40d100000.video-encoder: stage 13 (asc-start): starting
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  178.554272] apple-ave 40d100000.video-encoder: fw_restore_data: REFUSING - core is not halted (CPU_CONTROL 0x0, CPU_STATUS 0x28); the restore belongs before the ASC start, not after it
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  178.554280] apple-ave 40d100000.video-encoder: error -EBUSY: stage-13 DATA restore
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  178.554329] apple-ave 40d100000.video-encoder: powered off (probe failed)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  178.554353] apple-ave 40d100000.video-encoder: iboot: DATA unmapped, 1261568 of 0x134000 bytes
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[  178.554555] apple-ave 40d100000.video-encoder: probe with driver apple-ave failed with error -16
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+=== insmod returned rc=0 ===
+[  178.595169] e3-run heartbeat nc-dryrun2 t=0s
+=== insmod rc=0 ===
