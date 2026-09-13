@@ -876,3 +876,36 @@ the image at `CAVCController_H13C.cpp:5782`.
 would be simpler than supplying the buffers), what the rest of the
 `sLowResOutput` group is, and whether `Uncompress Ref is not supported`
 matters or is informational.
+
+## 2026-09-13 22:39 — the low-res pointer is overwritten before it is read
+
+`results/frame2-1789335565.kmsg`: same run with
+`LowResSrcLumaScaled = 0xfdfc0000` published at PICMGMT+0xC20 (240 KiB,
+64-aligned, from the kext formula). **Identical assert, same line 5782.**
+
+Scanning the 13.5 firmware for stores to that offset explains why
+(`STR Xt,[Xn,#3104]`, 5 sites; `LDR`, 9 sites):
+
+```
+2c314: ldr x12,[x2,#72]        ; DPB entry: luma
+2c318: ldp x11,x8,[x2,#216]    ; DPB entry: +216 LSB, +224 low-res
+2c320: str x8,[x1,#3104]       ; -> pPicParams->sLowResOutput.LowResSrcLumaScaled
+2c328: str x11,[x1,#2208]      ; the recon pointers the review already found
+```
+
+`setRefPointers` **overwrites** PICMGMT+0xC20 from the DPB entry before
+`setPipe`/`setLRME` reads it - the same pattern the review of 19b9d93 found
+for the recon pointers (finding 3), which is why writing the per-frame field
+changes nothing. **Confirmed.**
+
+The chain so far, all confirmed: the DPB entry is built at fw `0x2d53c`-`0x2d55c`
+from a surface descriptor `x11`: `[x11+48]` -> entry+72 (luma),
+`[x11+56]` -> entry+216 (LSB), **`[x11+64]` -> entry+224 (low-res)**. The
+Start_AVC recon table (wire `0x88`, stride `0x10`) is copied at
+`0x5d6ac`-`0x5d6ec` into `ctrl+3256`, taking only the *first* u64 of each
+16-byte entry.
+
+**Unknown, and the next thing to establish:** what fills the surface
+descriptor's `+64`, i.e. which command field (or InfoSet/surface-set entry,
+docs/15-19) carries the low-res surface per recon buffer. The per-frame
+`sLowResOutput` field is not it.
