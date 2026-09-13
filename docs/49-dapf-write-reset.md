@@ -556,3 +556,27 @@ before stage 11.
 Next: program the DAPF **at stage 8**, before the IPC allocation, the DATA
 map and the scratch writes (m1n1 order, no quiesce, readback). Survival both
 supports the hypothesis and is the step E3 actually needs.
+
+## N1j — 2026-09-13, `results/n1j-*.kmsg`: DAPF writes are rejected at stage 8 too
+
+`stop_after=8 dapf_dump=1 dapf_early=1 dapf_set=control dapf_quiesce=0
+fw_map_text=2`: DAPF programming at stage 8, before the IPC allocation, the
+DATA map and the stage-11 IOP flag. **The machine reset.** Last line on disk
+(allowing the ~5 s loss window): `STEP next: first write to DAPF slot 0 (r4,
+m1n1 order)`. The IOP-flag hypothesis is **refuted** for DAPF writes.
+
+Not a lock apple-dart applies: apple-dart's lock handling is for
+bootloader-locked DARTs, detected from CONFIG bit 15 (clear here, "locked:
+0"), and the PROTECT registers exist only on t8110. It engages nothing on
+this t8020.
+
+Remaining ordering difference: apple-dart's successful TCR writes happen at
+runtime resume, immediately after power-on. Every rejected write of ours
+came after **stage 7**, which writes `SVE+0x38 = 1` - Apple's
+`AVE_SVECtrl::SetIdle(1)` from `AVE_PMGR::SetClockGating(true)`. Mapping
+does not require TLB invalidation, so apple-dart may not write this DART at
+all after stage 6. **Hypothesis:** stage 7 enables clock gating that makes
+the DART/DAPF reject writes (reads still work).
+
+N1k: `dapf_early=2` programs the DAPF at the end of stage 6, before the
+stage-7 write, with `stop_after=6`.
