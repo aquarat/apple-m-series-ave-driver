@@ -715,6 +715,9 @@ tools/session_selftest  141 checks, 0 failures   (was 29)
 tools/ipc_selftest    32120 checks, 0 failures
 ```
 
+(Superseded by §11.8: `session_selftest` is 167 checks after the
+`sLowResOutput` work.)
+
 ## Review of 19b9d93 (Fable) — changes applied
 
 Verdict was **SAFE TO RUN**; no path handed the firmware unowned memory, and
@@ -749,3 +752,280 @@ Left as-is, with the reasoning recorded: the Process recon pointers are
 overwritten by `setRefPointers` before `setPipe` reads them (finding 3), so
 they are inert either way; and the debugfs directory is a weaker success
 signal than the `encoded one frame OK` log line (finding 6).
+
+---
+
+## 11. The first hardware `Process` — `setLRME` asserts on `sLowResOutput` (2026-09-13)
+
+`Process` (id 7, `0x1940` bytes) was accepted by the dispatcher and reached the
+AVC per-frame setup, then died in `CAVCController::setLRME`
+(`results/frame1-1789333891.kmsg`, docs/31 2026-09-13 22:11). This section is
+the analysis behind the fix.
+
+### 11.1 The full assert predicate
+
+The kmsg clamps at ~120 characters; the binary does not. The two strings are
+at file `0xc9b85` and `0xc9be6` in `data/blobs/macos-13.5/ave_h13c.bin`
+(image VA = file − `0x4000`), and the code that evaluates them is
+`setLRME + 0xf68` (fw `0x523b4`–`0x523e0`):
+
+```
+523b4:  ldr  w14, [x19, #2700]       ; EncComm width  (coded, pixels)
+523b8:  ldr  w16, [x19, #5176]       ; EncCommParams.encode_row_init
+523bc:  ldr  x15, [x21, #3104]       ; pPicParams->sLowResOutput.LowResSrcLumaScaled
+523c0:  lsl  w14, w14, #2            ; \
+523c4:  add  w14, w14, #0xfc         ;  > lr_stride = ALIGN(4*width, 256)
+523c8:  and  w14, w14, #0xffffff00   ; /
+523cc:  lsr  w16, w16, #2            ; encode_row_init / 4
+523d0:  mul  w16, w16, w14           ; (encode_row_init/4) * lr_stride
+523d4:  adds x16, x15, x16
+523d8:  b.eq 0x5242c                 ; -> ASSERT line 5782   (the one we hit)
+523dc:  tst  x16, #0x3f
+523e0:  b.eq 0x52474                 ; else ASSERT line 5783
+```
+
+so, in full:
+
+```
+CAVCController_H13C.cpp:5782
+  (pPicParams->sLowResOutput.LowResSrcLumaScaled
+   + EncCommParams.encode_row_init/4*lr_stride) != 0
+CAVCController_H13C.cpp:5783
+  ((pPicParams->sLowResOutput.LowResSrcLumaScaled
+    + EncCommParams.encode_row_init/4*lr_stride) & 63) == 0
+```
+
+with `lr_stride = ALIGN(4 * EncComm_width, 256)`. **C** (fw `0x523b4`–`0x523e0`,
+assert emitters `0x52430` line 5782 and `0x523e8` line 5783).
+
+`encode_row_init` is `0` for a whole-frame encode (it is written only by
+`ProcessPipeDone` / `ProcessPipeStatsMcore` / `ConfigureMCPUs`, fw `0x59d30`,
+`0x59dc8`, `0x5ba64`, `0x615f4` — **C**), so on the first frame the predicate
+reduces to *`LowResSrcLumaScaled != 0` and 64-byte aligned*. We sent zero.
+
+`x21` is `pPicParams` (`mov x21, x2` at fw `0x51494`, and the signature is
+`setLRME(CAVEControllerAvcEncodeCmd*, AVE_PICMGMT_PARAMS*, unsigned)`). **C.**
+
+### 11.2 The `sLowResOutput` group on 13.5
+
+Offsets are into `AVE_PICMGMT_PARAMS` (add `0x9C8` for the wire offset). The
+group sits immediately after `sOutput`, which ends at `0xC18`.
+
+| off | field | how it is read | assert | conf |
+|---|---|---|---|---|
+| `0xC20` | `LowResSrcLumaScaled` | `ldr x15,[x21,#3104]` fw `0x523bc` | **`!= 0` and `& 63 == 0`, unconditional** (5782 / 5783) | C |
+| `0xC28` | `LowResResults[0]` | `ldr x11,[x21,#3112]` fw `0x51e84` | `cbz`-skipped; only `& 63 == 0` (line 5654) when non-zero | C |
+| `0xC30` | `LowResResults[1]` | `ldr x11,[x21,#3120]` fw `0x51ed4` | same | C |
+| `0xC38` | `LowResResults[2]` | `ldr x11,[x21,#3128]` fw `0x5204c` | same | C |
+| `0xC40` | `LowResResults[3]` | `ldr x11,[x21,#3136]` fw `0x520a4` | same | C |
+
+The per-reference loop reads the same array as `LowResResults[me_ref_index]`
+(`add x15,x21,x9,lsl#3` + `ldr x13,[x15,#3112]`, fw `0x51a2c`/`0x51a40`), which
+fixes the element stride at **8 bytes** — not 26.6.2's `{addr,size}` pairs
+`0x10` apart (docs/32 §6.5). **C.**
+
+`sRef.Low_Res_Y_L0[i]` is at `0x778 + 8i` (fw `0x519e8` for `i = 0`, look-ahead
+`ldr x13,[x15,#1920]` at `0x51a7c`) and `Low_Res_Y_L1[]` follows the same shape
+— matching docs/47's `0x778`. **C.**
+
+**What each points at.** `LowResSrcLumaScaled` is the *write* target of the LRME
+front end: the scaled-down copy of this frame's source luma, which becomes next
+frame's `Low_Res_Y_L0[]` entry. This is the surface the kext calls **`LowResRef`**
+(`AVE_Client_CalcSurfaceInfo_LRME`, kext `0xfffffe0008ec6fe4`, fills
+`LowResRef`/`LowResResult`/`LowResRCResult` — docs/17 version note). **I** for
+the name mapping; **C** that the size formula below is the one Apple uses for it.
+
+**Required size.** `AVE_CalcBufSizeOfLowResRef(DevType, ClientType, CodecType,
+width, height, CHROMA_FORMAT, bool)` at kext `0xfffffe0008ea560c`, AVC arm
+(`CodecType == 0`, `ClientType != 2`, DevType 12 < `0x13` for t6001 — docs/17):
+
+```
+fffffe0008ea5668:  lsl  w8, w3, #2            ; 4*width
+fffffe0008ea56a4:  add  w8, w8, #0xfc         ; \
+fffffe0008ea56a8:  and  w8, w8, #0xffffff00   ;  > ALIGN(4*width, 256)  == lr_stride
+fffffe0008ea56ac:  lsr  w10, w10, #4          ; (height + 63) >> 4
+fffffe0008ea56b0:  madd w8, w8, w10, w12      ; * that, + 0x1ff
+fffffe0008ea56b4:  and  w8, w8, #0xfffffe00   ; ALIGN(..., 512)
+```
+
+```
+size = ALIGN( ALIGN(4*W, 256) * ((H + 63) >> 4), 512 )
+```
+
+**The stride term is byte-for-byte the firmware's own `lr_stride`**, which is
+what makes this the right function and not a plausible one. At 1280x720:
+`lr_stride = 5120`, 48 rows, `size = 0x3C000` (245,760 bytes). Alignment: 64
+(the assert); `dma_alloc_coherent` gives page alignment anyway. **C** for the
+formula, **I** that the engine writes exactly `(H+63)>>4` rows.
+
+The caller passes the pair at client`+1936`/`+1940` as `(width, height)`
+(kext `0xfffffe0008ec7074` → `0xec71e4` → `0xec72a4`/`a8`). Whether that pair is
+the display or the MB-aligned size is **U**; the driver passes the MB-aligned
+size, which is the larger of the two, so it cannot be short.
+
+### 11.3 Can the low-res / LRME pass be switched off? **No.**
+
+`setPipe` calls `setLRME(cmd = NULL, pPicParams, trigger = 0)` at fw `0x57d30`,
+behind exactly two gates (fw `0x57c8c`–`0x57cac`):
+
+```
+57c90:  ldrb w9, [x9, #1204]     ; ctrl + 0x23FEC
+57c94:  cbnz w9, 0x57d40         ; non-zero -> setPipe does NOT call setLRME
+57ca4:  ldr  w10, [x10]          ; *(u32 *)(ctrl + 0x13A3C)
+57cac:  cbz  w10, 0x57d20        ; zero -> call setLRME
+```
+
+Both are **firmware-internal state, not host fields**:
+
+- `CAVCController::CAVCController` clears both — `strb wzr,[x10]` (`ctrl+0x23FEC`)
+  at fw `0x46100` and `str wzr,[x11]` (`ctrl+0x13A3C`) at fw `0x46104`. **C.**
+- The only code that computes `ctrl+0x23FEC` is the ctor, `ResetBetweenPasses`,
+  `ProcessLRMEDone` and `ProcessLRMEStart`; the only code that computes
+  `ctrl+0x13A3C` is the ctor, `ProcessPipeReset`, `ProcessLRMEStart` and
+  `setPipe` itself (immediate scan for `add xD,xS,#0x23/0x13,lsl#12` followed by
+  `#0xfec`/`#0xa3c`). No `Process` or `Start_AVC` field reaches either. **C**,
+  with the caveat that an immediate scan cannot see table-driven writes
+  (methodology trap 3).
+- And switching the byte on would not help anyway: `ProcessLRMEStart` calls the
+  same `setLRME` (fw `0x513e0`) precisely when `ctrl+0x23FEC != 0`
+  (`ldrb w8,[x24]; cbz w8, 0x513e4` at fw `0x51398`). The assert moves, it does
+  not go away. **C.**
+- `CAVE_CMD_LRME_STANDALONE` (13.5 command id 9, docs/46 §1) is a *separate*
+  submission for running LRME on its own; it does not disable the in-pipe pass.
+  `pVideoParams->low_res_pipe_sync_mode` (pVideoParams`+0`, logged at fw
+  `0x143d8` with `xc_pipe_sync_mode` at pVideoParams`+483`) is read in
+  `CFlowControllerBase::ProcessInitStage2`, not in either gate. **C** that it is
+  not one of the two gates; **U** what it does control.
+
+The path from `0x52304` to the assert at `0x523b4` is straight-line: the only
+branches in between are the `sInput.Y` asserts (lines 5719/5720) and the
+`LowResResults` alignment assert (5654). **C.**
+
+**With `num_ref_idx_l0_active_minus1 < 0` — which is what an I-frame sends — the
+whole reference half of `setLRME` is skipped** (`tbnz w13,#31, 0x51ad4` at fw
+`0x519e4`, and the L1 equivalent `tbnz w9,#31, 0x51cbc` at `0x51ae0`), so
+`Low_Res_Y_L0/L1[]` and the `LowResResults[me_ref_index]` asserts (lines
+5575/5576/5581/5582/5605/5606/5612/5613) are unreachable. The complete assert
+inventory for `setLRME` is 14 sites; after this change **none** of them is
+reachable for an I-only frame. **C.**
+
+### 11.4 Decision
+
+**Supply the buffer.** It is the only route: there is no flag (11.3), the size
+is confirmed rather than guessed (11.2), it costs one 240 KiB coherent
+allocation, and `LowResResults[]` can stay zero because every read of them is
+`cbz`-skipped.
+
+Implemented in `ave_abi.h` (`process_avc.low_res_src` = `0xC20` on 13.5,
+`0x4F10` on 26.6.2), `ave_cmd.c` (writes it, rejects a misaligned address,
+allows zero), and `ave_session.c`:
+
+- `session_lowres` (default **on**) — `0` leaves the field zero and reproduces
+  `ASSERT ... 5782` exactly. That is the negative control for this change.
+- `session_lowres_kb` (default `0` = the formula) — an override, because the
+  *row count* is inferred even though the formula is confirmed. The log line
+  says which of the two produced the size.
+
+`LowResResults[]` are deliberately left zero and the self-test asserts they stay
+zero.
+
+### 11.5 `Uncompress Ref is not supported` — informational, ignore it
+
+Emitted from `CAVCController::setPipe + 0x20c4` (fw `0x54ffc`):
+
+```
+54ce4:  ldr  x8, [sp, #112]        ; ctrl + 0x13A3C
+54cec:  cbz  w8, 0x54f7c
+54f7c:  ldrb w8, [x24, #1312]      ; ctrl + 0x24058  ("refs are compressed")
+54f80:  cbz  w8, 0x54ffc
+54ffc:  adr  x0, 0xc6530           ; "Uncompress Ref is not supported"
+55004:  bl   0x94920               ; plain log - NOT bl 0xa56bc + 0x949d8 + panic
+55008:  b    0x54cf0               ; and execution continues
+```
+
+It is a one-argument log call with an unconditional branch back into the normal
+flow — not an assert, no `AVE_Panic`. The hardware run proves it: the line
+appeared *before* the line-5782 assert, i.e. `setPipe` ran on past it into
+`setLRME`. **C.**
+
+What it means: with `ctrl+0x24058` zero the firmware skips the branch that
+programs the second (`_LSB`) reference/recon plane — the same gate docs/53 §2.4
+already records for `sRecon.Y_LSB` (fw `0x54f7c`) — and takes the default
+programming at `0x54cf0`. **We do not need a compression flag or a
+differently-formatted recon buffer for the first frame:** an I-frame reads no
+reference at all, so the reference format is moot, and the recon *write* format
+only matters the moment a later P-frame tries to use it. **I.**
+
+Provenance of `ctrl+0x24058` is **U** — a scan for `strb Wt,[Xn,#1312]` across
+`__TEXT` finds only `CHEVCController::PipePrepareParam` writing the *neighbouring*
+byte `+1313` (fw `0x65e64`), and that scan **fails its negative control**: it also
+finds no writer for `ctrl+0x23FEC`, which demonstrably *is* written (via a
+different base register). So "nothing writes it" is not established; only "no
+host field for it was found" is. (Methodology trap 2.)
+
+### 11.6 Reproduce
+
+```sh
+# the assert, its predicate and both emitters
+AVE_MACOS=13.5 python3 tools/disas.py --fw --addr 0x523b4 -n 0xd0
+AVE_MACOS=13.5 python3 tools/disas.py --fw 'CAVCController7setLRME' -n 0x1400
+
+# the two gates in front of the setLRME call, and the ctor that clears them
+AVE_MACOS=13.5 python3 tools/disas.py --fw --addr 0x57c80 -n 0xc0
+AVE_MACOS=13.5 python3 tools/disas.py --fw --addr 0x460d4 -n 0x40
+AVE_MACOS=13.5 python3 tools/disas.py --fw --addr 0x51390 -n 0x60
+
+# the size formula, and the call that fixes its arguments
+AVE_MACOS=13.5 python3 tools/disas.py --kext --addr 0xfffffe0008ea560c -n 0xd8
+AVE_MACOS=13.5 python3 tools/disas.py --kext --addr 0xfffffe0008ec7264 -n 0x60
+
+# "Uncompress Ref is not supported": a log, not an assert
+AVE_MACOS=13.5 python3 tools/disas.py --fw --addr 0x54ce4 -n 0x40
+AVE_MACOS=13.5 python3 tools/disas.py --fw --addr 0x54f7c -n 0x90
+```
+
+### 11.7 Ranked: what most likely fails next
+
+1. **`SetTranscode` / `setPipe` `SrcNeighbor` sizes.** The tables are now
+   published, so the `!= 0` asserts are satisfied and the next failure mode is
+   silent: the 16 slots are one contiguous mapping, so a slot that is too small
+   overruns the next one rather than faulting. 13.5's kext *does* have
+   `AVE_CalcBufSizeOfSrcNeighbor{Info,Pixel,Data,FwData}`
+   (`0xfffffe0008ea5960` / `59d8` / `5a60` / `5acc`) — docs/47's per-MB-column
+   numbers come from them, but nothing has checked the **floor and the row
+   multiplier** against the 13.5 arms. Cheapest next read.
+2. **Another unconditional per-frame assert further down `setPipe` /
+   `SetTranscode`.** `setLRME` is clean now (11.3), but the assert inventory
+   past `0x57d30` has not been walked with the L0 < 0 short-circuit applied.
+   Expect a named field, which is the cheap failure.
+3. **The LRME engine writing outside the scaled-luma surface.** The formula is
+   Apple's, but the row count is inferred; an over-run would be a DART fault,
+   loud and attributable. `session_lowres_kb` raises it without a rebuild.
+4. **`Recon` layout.** The driver hands `setPipe` four flat planes out of one
+   arena sized by the docs/38 §7 over-estimate. If the recon surface is tiled or
+   compressed (11.5 hints the reference path expects compression), the write
+   lands inside our mapping but in the wrong shape — no fault, wrong output, and
+   only visible as a garbage second frame. Not a first-frame risk.
+5. **No completion at all.** `ENCODE_DONE` (`0xE06`) and `LRME_DONE` (`0xE07`)
+   come from the same `ProcessEncDone`; the capture hook now filters on the id,
+   so a 2 s timeout with "0 other completions" again means the pipe never
+   started, not that we missed it.
+6. **The length formula / parameter-set assembly** (§3, §4). Lowest risk: both
+   sides of the length computation were read out of the binaries, and the
+   parameter-set scan-back cross-checks itself against
+   `ui32_SPSPPSHeaderBits / 8` and logs a disagreement instead of hiding it.
+
+### 11.8 Harness after this change
+
+```
+tools/abi_selftest      698 checks, 0 failures
+tools/session_selftest  167 checks, 0 failures   (was 141)
+tools/ipc_selftest    32120 checks, 0 failures
+```
+
+The new `session_selftest` checks: `LowResSrcLumaScaled` lands at
+`PICMGMT + low_res_src` and inside both the PICMGMT block and the command; every
+`LowResResults[i]` stays zero and none of them overlaps it; and the negative
+controls — a `+1` address, a 32-but-not-64-aligned address, and the deliberate
+zero (which must still build, because it is the `session_lowres=0` bisect and
+must leave the field zero).

@@ -125,6 +125,18 @@ struct ave_avc_frame {
 	bool	force_key_frame;
 	bool	update_param_sets;	/* re-emit SPS/PPS accounting on an IDR */
 
+	/*
+	 * sLowResOutput.LowResSrcLumaScaled: the low-resolution motion
+	 * estimation pass's scaled-source-luma target. setLRME runs for every
+	 * frame, including an I-frame with no references, and asserts this is
+	 * non-zero and 64-byte aligned (fw 0x52430 / 0x523e8, lines 5782 and
+	 * 5783). 0 leaves the field zero, which reproduces that assert - the
+	 * driver exposes it as a module parameter for exactly that bisect.
+	 * Required size: ALIGN(ALIGN(4*W,256) * ((H+63)>>4), 512), from the
+	 * kext's AVE_CalcBufSizeOfLowResRef (0xfffffe0008ea560c).
+	 */
+	u64	low_res_src_addr;	/* % 64 */
+
 	/* Per-frame source-neighbour scratch, [group][index]; % 64. */
 	u64	src_nbr[AVE_SRC_NBR_GROUPS][AVE_SRC_NBR_MAX];
 	u32	n_src_nbr;		/* 0 = write none */

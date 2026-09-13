@@ -46,6 +46,7 @@
 #define IOVA_LUMA		0x70000000ull	/* 64-aligned */
 #define IOVA_CHROMA		0x70400000ull
 #define IOVA_NBR		0x80000000ull	/* 64-aligned, +0x10000 per slot */
+#define IOVA_LOWRES		0x90000000ull	/* 64-aligned LRME scaled-luma target */
 #define SESS_STRIDE		1280		/* % 64 == 0 */
 #define SESS_PROCESS_SLOT	21
 
@@ -236,6 +237,7 @@ static void test_abi(enum ave_fw_abi which, const char *name)
 			.recon_mv_addr	= IOVA_RECON + 0x400000,
 			.ctx_index	= 0,
 			.force_key_frame = true,
+			.low_res_src_addr = IOVA_LOWRES,
 			.n_scratch	= 0,
 		};
 		size_t want = ave_cmd_size(abi, AVE_OP_PROCESS_AVC);
@@ -304,6 +306,37 @@ static void test_abi(enum ave_fw_abi which, const char *name)
 			CHECK(get_unaligned_le64(cmdbuf + base + l->recon_y_lsb) ==
 			      IOVA_RECON + 0x200000,
 			      "recon Y_LSB not at PICMGMT+%#x", l->recon_y_lsb);
+		/*
+		 * sLowResOutput. The firmware calls setLRME for every frame and
+		 * asserts LowResSrcLumaScaled != 0 (setLRME:5782, fw 0x52430), so
+		 * the address has to land at the recorded offset.
+		 */
+		CHECK(l->low_res_src != AVE_OFF_NONE,
+		      "no LowResSrcLumaScaled offset for this ABI");
+		if (l->low_res_src != AVE_OFF_NONE) {
+			CHECK(get_unaligned_le64(cmdbuf + base + l->low_res_src) ==
+			      IOVA_LOWRES,
+			      "LowResSrcLumaScaled not at PICMGMT+%#x", l->low_res_src);
+			CHECK(base + l->low_res_src + 8 <= want,
+			      "LowResSrcLumaScaled at PICMGMT+%#x runs past the command",
+			      l->low_res_src);
+			CHECK(l->low_res_src + 8 <= l->picmgmt_size,
+			      "LowResSrcLumaScaled at +%#x runs past PICMGMT (%#x)",
+			      l->low_res_src, l->picmgmt_size);
+		}
+		/*
+		 * LowResResults[] must stay ZERO: the driver never publishes them
+		 * and the firmware cbz-skips each one. Guard against a future
+		 * builder writing there by accident.
+		 */
+		for (i = 0; i < l->low_res_results_max; i++) {
+			u32 off = l->low_res_results + i * l->low_res_results_stride;
+
+			CHECK(get_unaligned_le64(cmdbuf + base + off) == 0,
+			      "LowResResults[%u] at PICMGMT+%#x is not zero", i, off);
+			CHECK(off != l->low_res_src,
+			      "LowResResults[%u] overlaps LowResSrcLumaScaled", i);
+		}
 		for (g = 0; g < AVE_SRC_NBR_GROUPS; g++) {
 			if (l->src_nbr_set[g] == AVE_OFF_NONE)
 				continue;
@@ -374,6 +407,31 @@ static void test_abi(enum ave_fw_abi which, const char *name)
 		CHECK(ave_cmd_build_process_avc(abi, cmdbuf, sizeof(cmdbuf), &c,
 						h->max_slot, &f) == -EINVAL,
 		      "builder accepted slot == max_slot");
+
+		/*
+		 * LowResSrcLumaScaled negative controls. Zero is ALLOWED (it is the
+		 * session_lowres=0 bisect that reproduces setLRME:5782), but a
+		 * misaligned address must be refused here rather than by the
+		 * firmware's line-5783 assert.
+		 */
+		f.low_res_src_addr = IOVA_LOWRES + 1;
+		CHECK(ave_cmd_build_process_avc(abi, cmdbuf, sizeof(cmdbuf), &c,
+						SESS_PROCESS_SLOT, &f) == -EINVAL,
+		      "builder accepted a misaligned LowResSrcLumaScaled address");
+		f.low_res_src_addr = IOVA_LOWRES + 32;	/* 32 but not 64 */
+		CHECK(ave_cmd_build_process_avc(abi, cmdbuf, sizeof(cmdbuf), &c,
+						SESS_PROCESS_SLOT, &f) == -EINVAL,
+		      "builder accepted a 32-byte-aligned LowResSrcLumaScaled address");
+		f.low_res_src_addr = 0;
+		ret = ave_cmd_build_process_avc(abi, cmdbuf, sizeof(cmdbuf), &c,
+						SESS_PROCESS_SLOT, &f);
+		CHECK(ret == (int)want,
+		      "builder refused a ZERO LowResSrcLumaScaled (the bisect case): %d",
+		      ret);
+		if (ret == (int)want && l->low_res_src != AVE_OFF_NONE)
+			CHECK(get_unaligned_le64(cmdbuf + base + l->low_res_src) == 0,
+			      "a zero LowResSrcLumaScaled did not leave the field zero");
+		f.low_res_src_addr = IOVA_LOWRES;
 
 		if (l->src_nbr_max) {
 			f.src_nbr[2][0] = 0;

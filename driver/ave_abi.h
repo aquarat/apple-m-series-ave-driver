@@ -1073,6 +1073,34 @@ struct ave_process_avc_layout {
 	u32	force_non_ref;		/* u8 */
 	u32	update_param_sets;	/* u8 */
 	u32	scaling_matrix_mode;	/* u32 */
+	/*
+	 * sLowResOutput.LowResSrcLumaScaled - where the low-resolution
+	 * motion-estimation pass writes the scaled copy of the source luma.
+	 *
+	 * CAVCController::setLRME is called unconditionally from setPipe on the
+	 * per-frame path (fw 0x57d30) and asserts, straight-line, with no host
+	 * flag in front of it:
+	 *
+	 *   setLRME:5782  (sLowResOutput.LowResSrcLumaScaled
+	 *                  + EncCommParams.encode_row_init/4*lr_stride) != 0
+	 *   setLRME:5783  (that sum & 63) == 0
+	 *
+	 * (fw 0x523b4-0x523e0; strings at file 0xc9b85 / 0xc9be6). For a
+	 * whole-frame encode encode_row_init is 0, so the requirement is just
+	 * "non-zero and 64-byte aligned". See docs/53 §9. AVE_OFF_NONE means
+	 * the field has not been located for that ABI.
+	 */
+	u32	low_res_src;		/* u64 */
+	/*
+	 * sLowResOutput.LowResResults[] - the per-reference LRME result
+	 * buffers. Recorded, never written: every read is cbz-skipped
+	 * (fw 0x51e88, 0x51ed8, 0x52050, 0x520a8) and only the alignment is
+	 * asserted when the entry is non-zero, so an I-frame leaves them all
+	 * zero. low_res_results_max == 0 means "not located for this ABI".
+	 */
+	u32	low_res_results;
+	u32	low_res_results_stride;
+	u32	low_res_results_max;
 	/* Per-frame SrcNbr tables, same shape as start_avc.src_nbr_set. */
 	u32	src_nbr_set[AVE_SRC_NBR_GROUPS];
 	u32	src_nbr_max;
@@ -1346,6 +1374,19 @@ const struct ave_cmd_abi ave_cmd_abi_13_5 = {
 		 * SrcNeighbor{Info,Pixel,FwData} group by their identical
 		 * 0x20 stride and order; that mapping is INFERRED.
 		 */
+		/*
+		 * fw setLRME ldr x15,[x21,#3104] 0x523bc, with x21 =
+		 * pPicParams (mov x21,x2 at 0x51494) - the value the
+		 * line-5782 assert at 0x52430 tests. The results array is the
+		 * cbz-guarded set of loads at [x21,#3112] (0x51e84),
+		 * [x21,#3120] (0x51ed4), [x21,#3128] (0x5204c) and
+		 * [x21,#3136] (0x520a4): four entries, 8 bytes apart,
+		 * immediately after LowResSrcLumaScaled.
+		 */
+		.low_res_src	= 0xc20,
+		.low_res_results = 0xc28,
+		.low_res_results_stride = 0x08,
+		.low_res_results_max = 4,
 		.src_nbr_set	= { 0x980, 0x9a0, 0x9c0, 0x9e0 },
 		.src_nbr_max	= 4,
 		/* kext 0xfffffe0008eb0b10/b44/b68/b84; meanings unknown. */
@@ -1567,6 +1608,14 @@ const struct ave_cmd_abi ave_cmd_abi_26_6 = {
 		.scaling_matrix_mode = 0x1750,		/* docs/47 §1.2 */
 		/* 0x20 apart, four u64 each - the shape the 13.5 groups were
 		 * matched against. */
+		/* docs/32 §6.5: confirmed from CLRMEFSController::
+		 * ConfigWrDMALowResSrcScaled (0x8a850) and
+		 * ConfigWrDMALowResFSRslts (0x8aa10). The 26.6.2 results
+		 * entries are {addr, size} pairs, 0x10 apart. */
+		.low_res_src	= AVE_PIC_LOWRES_LUMA_SCALED,
+		.low_res_results = AVE_PIC_LOWRES_RESULTS,
+		.low_res_results_stride = 0x10,
+		.low_res_results_max = 1,	/* only [0] was located */
 		.src_nbr_set	= { AVE_PIC_SRC_NEIGH_INFO, AVE_PIC_SRC_NEIGH_PIXEL,
 				    AVE_PIC_SRC_NEIGH_DATA, AVE_PIC_SRC_NEIGH_FWDATA },
 		.src_nbr_max	= 4,
