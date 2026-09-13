@@ -363,8 +363,9 @@ drift, roughly 19 pages, first at DATA+`0x2000`. Nothing is written. If this
 still reports 0, the comparator is broken and every later "0" is meaningless -
 stop there.
 
-**(0) Dry run, fresh boot.** `fw_restore_data=2`. Expect: all gates pass, "DATA
-before restore vs pristine: 0 bytes differ", "DRY RUN - nothing written", and the
+**(0) Dry run, fresh boot.** `fw_restore_data=2`. Expect: all gates pass, a drift
+of 0 **or exactly the 8-byte STKG exception described under (a) below** (the same
+fresh-boot comparison applies here), "DRY RUN - nothing written", and the
 handshake completing exactly as it does today. Nothing has been written, so this
 costs nothing but a boot.
 
