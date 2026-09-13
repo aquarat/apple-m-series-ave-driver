@@ -9,6 +9,20 @@ published on, so it is the easiest place to cross-check outside sources.
 Everything below is **confirmed** — read out of the dispatch table and the
 disassembly — unless marked otherwise.
 
+> **Version note (2026-09-13).** The table below is **macOS 26.6.2** and stands
+> for that build. On **macOS 13.5** (the firmware this machine runs,
+> [43](43-macos-13.5-firmware.md)) the user-client ABI **differs by version**:
+> `AppleAVE2UserClient::externalMethod` (`0xfffffe0008e98c40`) accepts
+> selector `<= 0x12` (`cmp w22,#0x12` at `0xfffffe0008e98c74`) and indexes
+> `selector * 24` into the table at `0xfffffe0007bc2768` with **no `-1`**, so
+> selector 0 is live. Populated entries: 0 `IO_Open` in `0x4D0` / out `0x8`,
+> 1 `IO_Close` `0x18`/`0x4`, 2 `IO_SetCallback` `0x28`/`0x4`, 3 `IO_Prepare`
+> `0x39C70`/`0x4`, 4 `IO_Start` `0x39C70`/`0x4`, 5 `IO_Stop` `0x18`/`0x4`,
+> 6 `IO_Complete` `0x18`/`0x4`, 7 `IO_Process` `0x20`/`0x4`, 8 `IO_Reset`
+> `0x18`/`0x4`; entries 9–18 are all-zero in the file. `IO_Config` exists as a
+> function but is not in the table. All zero scalars. Details:
+> [46](46-abi-13.5-commands-session.md) §6.
+
 ## Dispatch
 
 `AppleAVE2UserClient::externalMethod` at `0xfffffe0008cb4b78`:

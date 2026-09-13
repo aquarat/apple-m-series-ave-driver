@@ -16,6 +16,22 @@
 the struct sizes, and the common `0x40`-byte header. This document goes inside
 the structs.
 
+> **Version note (2026-09-13).** Everything here is **macOS 26.6.2** and stands
+> for that build. On **macOS 13.5** (the firmware this machine runs,
+> [43](43-macos-13.5-firmware.md)) the structs **differ by version**; the full
+> side-by-side is [46](46-abi-13.5-commands-session.md). In brief:
+> **Open** (13.5 `CAVE_CMD_START`, id 2) is `0x40`, header only; the firmware
+> reads only the u32 client id at `+0x10` (`ProcessStart` `0xe894`).
+> **Config** (id 1) is `0x70`: `+0x40`/`+0x41` McpuController flags (same
+> rule as §2), `+0x42` u8 (not read), `+0x48` u64 register DART address (now
+> read, `0xe554`), `+0x50`/`+0x54` doorbell cadences, `+0x58`/`+0x59` u8 DSIDs,
+> `+0x60` u64 shared-memory IOVA, `+0x68` u32 size, carved as
+> 4 × {2744, 2048, 4} (`ProcessConfig` `0xe4d4`). **Start_AVC** (13.5
+> `CAVE_CMD_AVC_INIT`, id 4) is `0x10E10` with a different block map
+> (host `0xfffffe0008ea9820`), and **Process_AVC** (`AVC_ENCODE`, id 7) is
+> `0x1940`; see [46](46-abi-13.5-commands-session.md) §9–§10. Replies use
+> status `0xEE0000` for success rather than 0.
+
 Every row is marked **confirmed** (read out of an instruction, VA cited),
 **inferred** (a chain of reasoning over confirmed facts, stated as such), or
 **unknown**. Reproduce any line with:

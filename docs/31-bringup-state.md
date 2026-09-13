@@ -564,9 +564,12 @@ system firmware (`asahi,system-fw-version = 26.4`).
 
 The AVE text in memory is clearly the same product — `CAVCController_H13C.cpp`,
 `CAVE_CMD_*`, `PlatformIOPIPCManager` — but only ~5% of 32-byte code samples
-match our image, 1087 of its ~2200 strings are shared, and the live build
-contains `"Host and FW Interface is mismatched, please ensure the versions are
-aligned."`. **Every host/firmware ABI detail derived from the 26.6.2 firmware
+match our image, and 1087 of its ~2200 strings are shared. (This section
+first cited the string `"Host and FW Interface is mismatched, please ensure
+the versions are aligned."` as AVE's. **It is not**: it sits at dump
+`+0x13e7a3`, inside the GPU firmware fragment, and occurs in neither AVE image
+nor either kext. AVE has no interface-version check at all — a wrong command
+size makes its firmware spin — see [46](46-abi-13.5-commands-session.md).) **Every host/firmware ABI detail derived from the 26.6.2 firmware
 and kext (docs 07, 20, 32, 35–39) is unverified against the firmware that
 would actually run, and should be re-derived from the 13.5 AppleAVE2FW and
 AppleAVE2 kext before it is trusted.** This is the same constraint Asahi's DCP
