@@ -2,6 +2,7 @@
 # Throwaway bring-up scaffolding. See ave_overlay_mod.c.
 obj-m += ave-overlay.o
 ave-overlay-y := ave_overlay_mod.o
+obj-m += physdump.o
 
 KDIR ?= /lib/modules/$(shell uname -r)/build
 PWD  := $(shell pwd)

@@ -447,3 +447,101 @@ The remaining routes are to find how the register becomes writable (it is
 plausibly locked above EL1, which is what m1n1 exists to handle), or to find
 the configuration under which Apple's own bypass path routes the fetch
 correctly.
+
+## Run 2026-09-13: liveness with controls, and what is in the window
+
+Log: `results/handshake-20260913-102149-c4e58389.log`, commit `03a66c4`,
+overlay variant 0 (DART, DMA domain).
+
+### CPU_STATUS discriminates, and says "not running"
+
+2000 samples each, bit names from m1n1 `hw/asc.py` (`IRQ_NOT_PEND` and
+`FIQ_NOT_PEND` are m1n1's own guesses):
+
+| core | CPU_CONTROL | CPU_STATUS histogram |
+|---|---|---|
+| **DCP** (38bc00000, known running — positive control) | `0x10` | `0x2d` RUNNING\|IDLE… x1905, `0x2c` x74, `0x28` x20, `0x08` x1 |
+| AVE, powered, before start (negative control) | `0x0` | `0x2a` STOPPED\|IDLE… x2000 |
+| AVE, started | `0x10` | `0x2c` IDLE… x2000 — **RUNNING never seen** |
+| AVE, `CPU_CONTROL` then written 0 | `0x0` | `0x2c` x2000 — **not STOPPED again** |
+
+- The discriminator passes its controls: a live RTKit core sits in
+  `RUNNING|IDLE` (in WFI between interrupts) and occasionally wakes (`0x08`);
+  a held core reads `STOPPED`. The started AVE core is neither: released
+  from `STOPPED`, never `RUNNING`, while the DART reports fetch faults at
+  `+0x200` (and occasionally `+0x280`) at ~70k/s. **Measured:** its status is
+  not the status of a running RTKit core. **Inferred** from the DCP control,
+  not shown: a core executing a `b .` park loop would read `RUNNING` and not
+  `IDLE`, so this is more likely a core that never completes an instruction
+  fetch than one parked at `+0x200`. The bit names are m1n1's, partly guessed,
+  so this inference is only as good as they are.
+- **Writing `CPU_CONTROL = 0` does not stop a started core.** Status stayed
+  `0x2c` and faults continued until `rmmod` gated VENC. Consistent with
+  Apple never clearing it ([09](09-firmware-load.md) §2.5). The earlier
+  "asc_start clears CPU_CONTROL, so runs are independent" reasoning was right
+  in conclusion (power gating resets it) but wrong in mechanism.
+
+### The ASC timer is not a liveness signal
+
+`bank1+0x178000` advanced ~2.5 M per ~100 ms at `freq = 24000000` in all
+three states, halted included. It is a free-running 24 MHz timebase, as the
+negative control was there to catch ([42](42-asc-firmware-ownership.md) §7
+corrected accordingly).
+
+### Scanning the 16 MiB window from `0x10000b28000`
+
+The same scan over our own image finds IOBA 1, IOSZ 1, `AppleAVE2FW/Firmware`
+15, `CmdProcessor` 1 — so the patterns are findable. In the window:
+
+| hit | where | payload | in |
+|---|---|---|---|
+| `CmdProcessor` x3 | `+0xbca9b`..`+0xbee47` | — | the AVE slot (TEXT-like) |
+| IOBA / IOSZ | `0x10000c6544c` (`+0x13d44c`) | **0 / 0** | the AVE slot, `0x2bb4` below the ISP carve-out |
+| `CmdProcessor` x3 | `0x10001522480`..`0x10001590247` | — | ISP TEXT carve-out |
+| IOBA / IOSZ | `0x1000165ec4c` | 0 / 0 | a 104 KiB run just after the SIO TEXT carve-out (unreserved) |
+| IOBA / IOSZ | `0x10001a93bdc` | **`0x40c000000`** / 0 | an isolated 88 KiB run, `0x10001a90000`-`0x10001aa6000` (unreserved) |
+| `AppleAVE2FW/Firmware` | — | — | **0 hits anywhere** |
+
+Non-zero extent of the AVE slot: `0x10000b28000` to the ISP carve-out at
+`0x10000c68000`, nearly all of it.
+
+What this does and does not show:
+
+- **`CmdProcessor` does not identify AVE**: three hits sit inside the ISP
+  TEXT carve-out. The IOBA/IOSZ pair occurs **three times**, twice outside
+  the AVE slot in DRAM no carve-out claims. So "an IOBA hit means AVE"
+  ([42](42-asc-firmware-ownership.md) §7.1) is not a test either: it cannot
+  say which copy is live, or rule out another RTKit firmware using the same
+  tag convention. A trap 2 non-test, caught by running it.
+- The tag in the AVE slot is `0x2bb4` bytes below the ISP boundary. Our
+  image carries 92 KiB of initialised DATA after offset 0 (IOBA at DATA
+  `+0x1f5`), so a comparable DATA segment starting there **cannot fit in the
+  slot**. Either this build's DATA is laid out very differently, or what sits
+  at `+0x13d000` is not the live DATA.
+- The 88 KiB run at `0x10001a90000` is about the size of our initialised DATA
+  (92 KiB), and its IOBA holds `0x40c000000` — exactly the AP-physical base of
+  AVE's own I/O window (overlay `reg[4]`). No other firmware has a reason to
+  carry that value. **Inferred, not shown:** this is the AVE DATA segment,
+  physically discontiguous from TEXT the way ISP's is, which would support
+  §3.4's reading that the reset-vector address is meant to be translated.
+- `AppleAVE2FW/Firmware` source paths are absent from the whole window, so the
+  loaded build differs from our IPSW extraction at least in string content.
+
+Next: copy the window out (`test/physdump.ko`, read-only, touches no
+hardware) and compare offline — DATA at `0x10001a90000` against our DATA,
+TEXT in the slot against our TEXT — rather than adding more printk.
+
+### Side effects on the machine
+
+The started core stormed the DART for ~2 minutes while the module sat
+loaded, which made the desktop stutter. `rmmod` gated VENC and the last fault
+was reported ~2 s later; the DART's shared IRQ line then stayed asserted with
+nothing to report for ~9 s, and the kernel disabled IRQ 129 ("nobody cared").
+Nothing else shares that line. Consequences:
+
+- the probe now powers off at the end of stage 15 instead of leaving a
+  started core faulting;
+- `tools/handshake-test.sh` refuses to run on a boot where any IRQ has been
+  disabled, since fault reporting is what it measures;
+- **the next AVE hardware run on this machine needs a reboot first.**
+

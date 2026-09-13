@@ -10,3 +10,6 @@ data/bringup-marker
 data/bringup-logs/
 test/ave_overlay_dtbo.h
 test/*.dtbo
+test/.*.cmd
+test/*.mod
+test/*.mod.c

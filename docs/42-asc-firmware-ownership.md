@@ -471,7 +471,10 @@ re-establishes the base address.** Answer to question 5.
 
 Per `AGENTS.md`, these are written down, not run.
 
-1. **Identify the image (highest value, read-only).** Dump physical
+1. **Identify the image (highest value, read-only).** *Run 2026-09-13
+   ([31](31-bringup-state.md)): `CmdProcessor` also occurs in ISP's carve-out
+   and the IOBA/IOSZ pair occurs three times, so neither discriminates. A non-zero IOBA
+   (`0x40c000000`) was found at `0x10001a93bdc`, outside the slot.* Dump physical
    `0x10000b28000 .. 0x10000c68000` and search it for the length-prefixed
    `IOBA` tag (`41 42 4f 49`, "IOBA" byte-reversed) and `IOSZ`
    (`5a 53 4f 49`) described in [40](40-firmware-io-base.md) §2, and for the
