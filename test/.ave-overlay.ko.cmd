@@ -1,1 +1,0 @@
-savedcmd_ave-overlay.ko := ld -r -EL  -maarch64linux -z norelro -z noexecstack --no-warn-rwx-segments --build-id=sha1  -T /usr/src/kernels/7.1.13-401.asahi.vrr3.fc44.aarch64+16k/scripts/module.lds -o ave-overlay.ko ave-overlay.o ave-overlay.mod.o .module-common.o

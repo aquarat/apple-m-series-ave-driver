@@ -13,3 +13,13 @@ test/*.dtbo
 test/.*.cmd
 test/*.mod
 test/*.mod.c
+# Kernel build artefacts and generated overlay headers - never track these
+# (docs/00 trap 7: a tracked generated header hid an overlay regression).
+*.o
+*.ko
+*.mod
+*.mod.c
+.*.cmd
+modules.order
+Module.symvers
+test/*_dtbo.h

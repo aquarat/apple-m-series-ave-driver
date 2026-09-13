@@ -304,8 +304,13 @@ int ave_ipc_send(struct ave_device *ave, u32 chan_id, dma_addr_t payload,
 {
 	u64 fw = 0;
 
-	if (!READ_ONCE(ave->ipc_up))
-		return -ENODEV;		/* Apple gates on HwC state 3 */
+	/*
+	 * Apple gates sends on HwC state 3, i.e. after the ready flag clears.
+	 * ipc_up now flips before the flag is written (so the IRQ handler
+	 * treats bit 0 as a doorbell), so it is not the right gate here.
+	 */
+	if (READ_ONCE(ave->boot_phase) != AVE_BOOT_READY)
+		return -ENODEV;
 	if (payload) {
 		if (payload < ave->ipc.iova ||
 		    payload - ave->ipc.iova >= ave->ipc.size)
