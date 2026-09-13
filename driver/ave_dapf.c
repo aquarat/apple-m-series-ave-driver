@@ -425,10 +425,12 @@ int ave_dapf_program(struct ave_device *ave,
 	}
 
 	/*
-	 * Enabling a slot: m1n1's dapf_init_t8020() order, r4, start, end,
-	 * then r0 last. Clearing a slot (r0 == 0): r0 FIRST, so a stale entry
-	 * is disabled before its range is rewritten and never admits a
-	 * half-written range in between.
+	 * Every slot is disabled first (r0 = 0), then r4, start, end, then the
+	 * final r0 - m1n1's dapf_init_t8020() order with a disable in front.
+	 * E2 found non-zero garbage r0 in the slots E3 enables, and m1n1's
+	 * order alone would leave that garbage enable in place while the range
+	 * is half-written. The core is halted during this, but the r0 bits are
+	 * not understood, so no slot passes through an unintended state.
 	 */
 	for (i = 0; i < n; i++) {
 		void __iomem *b = ave->dapf + DAPF_ENTRY(i);
@@ -436,8 +438,7 @@ int ave_dapf_program(struct ave_device *ave,
 		dev_info(ave->dev, "dapf: write [%2u] r0 %#06x r4 %#06x  %#013llx - %#013llx  %s\n",
 			 i, ent[i].r0, ent[i].r4, ent[i].start, ent[i].end,
 			 ent[i].what ?: "");
-		if (!ent[i].r0)
-			writel(0, b + DAPF_R0);
+		writel(0, b + DAPF_R0);
 		if (ent[i].end & 3)
 			dev_warn(ave->dev, "dapf: [%2u] end %#llx has low bits set; the register will drop them\n",
 				 i, ent[i].end);
