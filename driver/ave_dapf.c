@@ -556,8 +556,13 @@ int ave_dapf_write_probe(struct ave_device *ave)
 	}
 
 	v = readl(ave->cpudart + DART_TCR(0));
-	dev_info(ave->dev, "PROBE next: same-value write TCR[0] <- %#x\n", v);
-	msleep(2000);
+	dev_info(ave->dev, "PROBE next: same-value write TCR[0] <- %#x (in 5 s)\n", v);
+	/*
+	 * 5 s, not 2: a fabric hang blocks NVMe MMIO too, so the capture's
+	 * fsync of the line printed just before a hang never lands. Give this
+	 * line ample time to reach disk before the write (N1h, docs/49).
+	 */
+	msleep(5000);
 	writel(v, ave->cpudart + DART_TCR(0));
 	back = readl(ave->cpudart + DART_TCR(0));
 	dev_info(ave->dev, "PROBE wrote TCR[0] same value; readback %#x\n", back);
