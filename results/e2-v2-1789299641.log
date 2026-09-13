@@ -1,0 +1,75 @@
+[  167.818165] apple-ave 40d100000.video-encoder: probe: staged bring-up, stop_after=8 (max 16)
+[  167.818173] apple-ave 40d100000.video-encoder: OS firmware 13.5: using macOS 13.5 AVE ABI
+[  167.818174] apple-ave 40d100000.video-encoder: stage 1 (map-banks): starting
+[  167.818175] apple-ave 40d100000.video-encoder:   mapping bank 0 (dpe)
+[  167.818187] apple-ave 40d100000.video-encoder:   mapping bank 1 (asc)
+[  167.818191] apple-ave 40d100000.video-encoder:   mapping bank 2 (sve)
+[  167.818194] apple-ave 40d100000.video-encoder:   mapping bank 3 (unk3)
+[  167.818196] apple-ave 40d100000.video-encoder:   mapping bank 4 (axi2af)
+[  167.818200] apple-ave 40d100000.video-encoder: stage 1 (map-banks): OK
+[  167.818201] apple-ave 40d100000.video-encoder: stage 2 (dma-mask): starting
+[  167.818202] apple-ave 40d100000.video-encoder: stage 2 (dma-mask): OK
+[  167.818202] apple-ave 40d100000.video-encoder: stage 3 (get-irq): starting
+[  167.818220] apple-ave 40d100000.video-encoder:   irq = 129
+[  167.818220] apple-ave 40d100000.video-encoder: stage 3 (get-irq): OK
+[  167.818221] apple-ave 40d100000.video-encoder: stage 4 (request-irq): starting
+[  167.818228] apple-ave 40d100000.video-encoder: stage 4 (request-irq): OK
+[  167.818228] apple-ave 40d100000.video-encoder: stage 5 (power-attach): starting
+[  167.818418] apple-ave 40d100000.video-encoder:   attached 5 power domain(s)
+[  167.818419] apple-ave 40d100000.video-encoder: stage 5 (power-attach): OK
+[  167.818420] apple-ave 40d100000.video-encoder: stage 6 (power-on): starting
+[  167.818423] apple-ave 40d100000.video-encoder:   resumed; left powered for inspection
+[  167.818424] apple-ave 40d100000.video-encoder: stage 6 (power-on): OK
+[  167.818425] apple-ave 40d100000.video-encoder: stage 7 (write-sve-idle): starting
+[  167.818425] apple-ave 40d100000.video-encoder:   writing 1 to SVE+0x38 (Apple's first access) ...
+[  167.818426] apple-ave 40d100000.video-encoder:   write returned
+[  167.818431] apple-ave 40d100000.video-encoder: stage 7 (write-sve-idle): OK
+[  167.818432] apple-ave 40d100000.video-encoder: stage 8 (read-asc-status): starting
+[  167.818432] apple-ave 40d100000.video-encoder:   reading ASC+0x400048 (CPU_STATUS) ...
+[  167.818433] apple-ave 40d100000.video-encoder:   ASC CPU_STATUS = 0x0000002a
+[  167.818437] apple-ave 40d100000.video-encoder: dapf: mapped CPUDART 0x000000040d040000 and DAPF 0x000000040d044000 (not requested)
+[  167.818438] apple-ave 40d100000.video-encoder: dapf: E2 read-only dump (domain none - no DART bound)
+[  167.818440] apple-ave 40d100000.video-encoder: dapf: [E2] CPUDART 0x000000040d040000
+[  167.818442] apple-ave 40d100000.video-encoder: dapf:   PARAMS1 = 0x1ed01020  PARAMS2 = 0x00021037
+[  167.818443] apple-ave 40d100000.video-encoder: dapf:   ERROR   = 0x0e000400 stream 14 code 0x400 WRITE  addr 0x37678fc7
+[  167.818444] apple-ave 40d100000.video-encoder: dapf:   CONFIG  = 0x1e010000
+[  167.818445] apple-ave 40d100000.video-encoder: dapf:   REMAP[0] = 0x03020100
+[  167.818447] apple-ave 40d100000.video-encoder: dapf:   REMAP[1] = 0x07060504
+[  167.818447] apple-ave 40d100000.video-encoder: dapf:   REMAP[2] = 0x0b0a0908
+[  167.818448] apple-ave 40d100000.video-encoder: dapf:   REMAP[3] = 0x0f0e0d0c
+[  167.818450] apple-ave 40d100000.video-encoder: dapf:   DAPF_LOCK = 0x00000000  UNK1(0xf8) = 0x00000000  ENABLED_STREAMS = 0x0000fffe
+[  167.818451] apple-ave 40d100000.video-encoder: dapf:   TCR[ 0]  = 0x00000080 TRANSLATE
+[  167.818453] apple-ave 40d100000.video-encoder: dapf:   TTBR[ 0][0] = 0x00000000
+[  167.818455] apple-ave 40d100000.video-encoder: dapf:   TTBR[ 0][1] = 0x01c00c00
+[  167.818456] apple-ave 40d100000.video-encoder: dapf:   TTBR[ 0][2] = 0x08822100
+[  167.818457] apple-ave 40d100000.video-encoder: dapf:   TTBR[ 0][3] = 0x28835c40
+[  167.818459] apple-ave 40d100000.video-encoder: dapf:   TCR[ 1]  = 0x00000080 TRANSLATE
+[  167.818460] apple-ave 40d100000.video-encoder: dapf:   TTBR[ 1][0] = 0x00200400
+[  167.818462] apple-ave 40d100000.video-encoder: dapf:   TTBR[ 1][1] = 0x09820400
+[  167.818464] apple-ave 40d100000.video-encoder: dapf:   TTBR[ 1][2] = 0x14820100
+[  167.818464] apple-ave 40d100000.video-encoder: dapf:   TTBR[ 1][3] = 0x00208200
+[  167.818465] apple-ave 40d100000.video-encoder: dapf:   TCR[15]  = 0x00000080 TRANSLATE
+[  167.818467] apple-ave 40d100000.video-encoder: dapf:   TTBR[15][0] = 0x20180200
+[  167.818469] apple-ave 40d100000.video-encoder: dapf:   TTBR[15][1] = 0x03801440
+[  167.818470] apple-ave 40d100000.video-encoder: dapf:   TTBR[15][2] = 0x09c50140
+[  167.818471] apple-ave 40d100000.video-encoder: dapf:   TTBR[15][3] = 0x00100040
+[  167.818471] apple-ave 40d100000.video-encoder: dapf: [E2] DAPF 0x000000040d044000, 16 entries x {r0 +0, r4 +4, start +8, end +0x10 (incl)}
+[  167.818473] apple-ave 40d100000.video-encoder: dapf:   [ 0] r0 0x0200 r4 0x00e3  0x010000d0000 - 0x0000e040400
+[  167.818476] apple-ave 40d100000.video-encoder: dapf:   [ 1] r0 0x0000 r4 0x0640  0x02002060000 - 0x1820808c80c
+[  167.818479] apple-ave 40d100000.video-encoder: dapf:   [ 2] r0 0x0010 r4 0x1021  0x00041e21124 - 0x00900061000 admits:0x40d050000 admits:0x506000000
+[  167.818482] apple-ave 40d100000.video-encoder: dapf:   [ 3] r0 0x0030 r4 0x2428  0x00502060640 - 0x04003005080 admits:0x506000000
+[  167.818484] apple-ave 40d100000.video-encoder: dapf:   [ 4] r0 0x0200 r4 0x6023  0x00002200880 - 0x00004440000
+[  167.818487] apple-ave 40d100000.video-encoder: dapf:   [ 5] r0 0x0100 r4 0x0ac2  0x04004a24100 - 0x10014604100 admits:0x10000b28200
+[  167.818489] apple-ave 40d100000.video-encoder: dapf:   [ 6] r0 0x0010 r4 0x1040  0x00008060800 - 0x00000090004
+[  167.818492] apple-ave 40d100000.video-encoder: dapf:   [ 7] r0 0x0030 r4 0xc041  0x20071200140 - 0x03094a60004
+[  167.818495] apple-ave 40d100000.video-encoder: dapf:   [ 8] r0 0x0100 r4 0x0c44  0x200500d0200 - 0x00006484000
+[  167.818497] apple-ave 40d100000.video-encoder: dapf:   [ 9] r0 0x0010 r4 0x4000  0x000d0042804 - 0x0204a003908 admits:0x40d050000 admits:0x506000000
+[  167.818500] apple-ave 40d100000.video-encoder: dapf:   [10] r0 0x0100 r4 0x0a00  0x004040c2000 - 0x00520020100 admits:0x40d050000 admits:0x506000000
+[  167.818503] apple-ave 40d100000.video-encoder: dapf:   [11] r0 0x0000 r4 0x1c94  0x0103c204008 - 0x00018034010
+[  167.818505] apple-ave 40d100000.video-encoder: dapf:   [12] r0 0x0200 r4 0x00cc  0x00080524000 - 0x0080a300210 admits:0x40d050000 admits:0x506000000
+[  167.818508] apple-ave 40d100000.video-encoder: dapf:   [13] r0 0x0320 r4 0x0400  0x0400a002208 - 0x00007080480
+[  167.818511] apple-ave 40d100000.video-encoder: dapf:   [14] r0 0x0000 r4 0x8001  0x00080541c00 - 0x00000000000
+[  167.818513] apple-ave 40d100000.video-encoder: dapf:   [15] r0 0x0200 r4 0x0004  0x08031002900 - 0x00400000000
+[  167.818514] apple-ave 40d100000.video-encoder: dapf: [E2] 16 non-empty slot(s)
+[  167.818515] apple-ave 40d100000.video-encoder: stage 8 (read-asc-status): OK
+[  167.818515] apple-ave 40d100000.video-encoder: stage 9 (ipc-alloc): SKIPPED (stop_after=8)

@@ -229,7 +229,6 @@ hang, then a reboot. **Bootability:** unaffected; nothing persists.
 |---|---|---|
 | `dapf_set` | `off` | `control` = 0x1f0 window + MMIO, **no TEXT** (negative control); `text` = window + MMIO + TEXT |
 | `dapf_mmio` | `ave0` | `ave0` = `0x40d050000-0x40dc69000` (ave0's own span, listed under dart-ave1); `adt` = `0x506000000-0x507c6c000` (as dart-ave0 lists it; ave1's span); `both`; `none` |
-| `dapf_allow_stale` | 0 | 1 = program even if slots beyond the set are non-empty |
 | `fw_map_data` | 0 | 1 = DART map DVA `0xec000` → phys `0x10001a90000`, `0x134000`, RW |
 | `fw_map_text` | 0 | 0 = legacy: our image at DVA `0xb28000`; 1 = iBoot TEXT phys `0x10000b28000` at DVA `0xb28000`, read-only; 2 = nothing at DVA `0xb28000` |
 | `dapf_dump` | 0 | 1 = also dump at stage 8 and after the run |
@@ -239,7 +238,7 @@ The entries are written exactly as `dapf_init_t8020()` writes them: `+4 r4`,
 back and compared. The window and MMIO entries go in ADT order, and TEXT is
 appended as slot `n-1`.
 
-- TEXT entry = `0x10000b28000`-`0x10000c13fff`, `r0 0x33`, `r4 1`, copying
+- *(Superseded by E1 — see "Results" below: the TEXT entry is now `0x10000b28000`-`0x10000c13ffc`, `r0 0x11`.)* TEXT entry = `0x10000b28000`-`0x10000c13fff`, `r0 0x33`, `r4 1`, copying
   the window entry.
 - **`end` is inclusive.** `dart-isp0`'s ADT list has `0x28ec3c000-0x28ec3c003`
   and `0x285460000-0x285460003`, which are single 32-bit registers, and m1n1
@@ -252,7 +251,7 @@ Checks before any DAPF write:
 - stage 6 reference held;
 - address checks as in E2;
 - `DAPF_LOCK` clear;
-- no stale non-empty slot beyond the new set (unless `dapf_allow_stale=1`).
+- *(Superseded: all 16 slots are now written every time, unused ones cleared.)* no stale non-empty slot beyond the new set.
 
 Checks before any DART mapping:
 
@@ -270,7 +269,7 @@ core is started.
 ### Sequence (one fresh boot, variant=3, in this order)
 
 The order matters. DAPF state may survive gating, and a `text` run leaves
-slot `n-1` set. The stale-slot check will then refuse a later `control` run
+slot `n-1` set. *(Superseded: every run now writes all 16 slots with a fixed layout — slot 0 TEXT or cleared, slot 1 window, then MMIO — so order no longer matters and a later `control` run clears slot 0 itself.)* The stale-slot check will then refuse a later `control` run
 with the same `dapf_mmio`. That refusal is intentional; reboot to rerun the
 control.
 
@@ -336,7 +335,7 @@ expected success.
 
 ### Abort criteria
 
-- Any `REFUSING` line: stop and resolve it. Never pass `dapf_allow_stale=1`
+- Any `REFUSING` line: stop and resolve it. (`dapf_allow_stale` no longer exists.) Never pass `dapf_allow_stale=1`
   just to get past a refusal on a boot whose history you do not know.
 - E3a readback mismatch; E3b not faulting; `Disabling IRQ #` between runs.
 - The desktop stuttering badly for more than a few seconds after `rmmod`, or
@@ -389,3 +388,56 @@ Guards added after review (2026-09-13):
 - Any probe failure after stage 9 unwinds FwIPC, the firmware buffer and the
   iBoot DART mappings, so a refused E3 run (e.g. the stale-slot refusal) no
   longer leaves DATA mapped and blocks a rerun in the same boot.
+
+## Results
+
+### E1 — run 2026-09-13, `results/e1-1789299549.log`
+
+Camera streaming, ISP runtime-active, all 10 ISP domains on; `isp_peek`
+pinned them and read only.
+
+- **ISP's RVBAR is `0x0102010000c68001`: locked, base = ISP TEXT physical**
+  (`0x10000c68000`, its `/reserved-memory` carve-out mapped at IOVA 0).
+  CPU_STATUS `0x2d` RUNNING|IDLE, CPU_CONTROL `0x10`. So a locked RVBAR
+  pointing at physical TEXT is how a *working* ASC on this machine boots.
+  AVE's `0x0102010000b28001` is the same pattern, not an anomaly.
+  **Confirmed.**
+- **ISP's DAPF slot 0 admits exactly its TEXT, physically:**
+  `0x10000c68000 - 0x100015e7ffc`, **r0 `0x11`**, r4 1. Slot 1 is the
+  `0x1f0` window (r0 `0x33`), then MMIO windows (r0 `0x31`), 16 slots in
+  use. The TEXT entry is not in the restore ADT (0/15 slot-for-slot matches,
+  everything shifted by one); it is injected, presumably from the live ADT.
+  **Confirmed.** This is the entry AVE lacks.
+- **End addresses are stored with the low two bits clear:** ADT
+  `0x1f0ffffffff` reads `0x1f0fffffffc`, `0x28e584043` reads `0x28e584040`.
+  Inclusive, last admitted 4-byte word. **Confirmed.**
+- **The t8020 register layout is right**: every entry decodes to a sensible
+  range, validating the offsets `ave_dapf.c` uses. **Confirmed.**
+- ISP's DART: TCR[0] `0x80` TRANSLATE, all other SIDs 0, DAPF_LOCK 0.
+- **Inferred:** ISP's DAPF was programmed by m1n1 at boot and ISP had been
+  runtime-suspended (domains off) until the camera started, so **DAPF
+  contents survive power gating.** And ISP's TEXT is DART-mapped at IOVA 0,
+  not at the low 32 bits of `0x10000c68000` (`0xc68000` falls inside its
+  DATA mapping), so an admitted physical fetch is most likely passed through
+  untranslated — H1, favouring `fw_map_text=2`. E3c is still the test.
+
+### E2 — run 2026-09-13, `results/e2-v2-*.log`
+
+Overlay `variant=2` (no DART bound), `stop_after=8 dapf_dump=1`.
+
+- **AVE's DAPF holds uninitialised contents**: all 16 slots non-empty with
+  start above end, arbitrary r0/r4 (e.g. slot 0 `r0 0x200 r4 0xe3
+  0x010000d0000 - 0x0000e040400`). The DART's TTBRs are likewise
+  non-physical values; TCR[0/1/15] read `0x80`; PARAMS1 `0x1ed01020`,
+  PARAMS2 `0x00021037`; REMAP the identity pattern.
+- **Identical after a full VENC power cycle** (rmmod, `venc_sys off-0`,
+  insmod; `results/e2-v2-repeat-*.log`), apart from the ERROR address. With
+  E1 this means the state is retained across gating and nobody has written
+  it since cold reset. No TEXT admission from iBoot survives. **Confirmed.**
+- Consequently E3 was changed (commit after 01d36f1): write **all 16 slots**
+  in a fixed ISP-like layout (slot 0 TEXT or cleared, slot 1 window, then
+  MMIO, rest cleared; a cleared slot gets r0 written first), store ends
+  already masked, use **r0 `0x11`** for TEXT, and drop the stale-slot
+  refusal and `dapf_allow_stale`.
+- E2c (`variant=3` control) is folded into E3a, whose stage-8 dump runs on
+  `variant=3` before anything is programmed.
