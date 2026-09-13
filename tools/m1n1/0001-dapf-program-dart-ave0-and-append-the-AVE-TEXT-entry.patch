@@ -1,0 +1,143 @@
+From 9f9850d0e110c2f64ccfdcebf62288354fb18985 Mon Sep 17 00:00:00 2001
+From: apple-ave-driver <blue@aquarat.co.uk>
+Date: Sun, 13 Sep 2026 18:26:27 +0100
+Subject: [PATCH] dapf: program dart-ave0 and append the AVE TEXT entry if
+ missing
+
+---
+ src/dapf.c | 77 +++++++++++++++++++++++++++++++++++++++++++++++++-----
+ 1 file changed, 70 insertions(+), 7 deletions(-)
+
+diff --git a/src/dapf.c b/src/dapf.c
+index 3b4b773..9c50774 100644
+--- a/src/dapf.c
++++ b/src/dapf.c
+@@ -19,7 +19,56 @@ struct dapf_t8020_config {
+     u32 r4;
+ } PACKED;
+ 
+-static int dapf_init_t8020(const char *path, u64 base, int node)
++/*
++ * AVE (apple-ave-driver, docs/44 and docs/49): the AVE coprocessor boots from a
++ * locked RVBAR at its iBoot-loaded TEXT, physically, like ISP. ISP's live DAPF
++ * carries an iBoot-injected TEXT entry (r0 0x11); the restore ADT for dart-ave0
++ * does not, and Linux cannot write this DAPF at runtime (every write raises a
++ * fatal SError). If the ADT list does not already cover the firmware's TEXT,
++ * append one entry for it from the ASC node's segment-ranges, the same way.
++ */
++static int dapf_append_asc_text(const char *path, u64 base, int count,
++                                const struct dapf_t8020_config *config, const char *asc_path)
++{
++    int asc = adt_path_offset(adt, asc_path);
++    if (asc < 0) {
++        printf("dapf: %s: %s not found, no TEXT entry\n", path, asc_path);
++        return 0;
++    }
++
++    u32 seg_len;
++    const struct adt_segment_ranges *seg = adt_getprop(adt, asc, "segment-ranges", &seg_len);
++    if (!seg || seg_len < sizeof(*seg)) {
++        printf("dapf: %s: no segment-ranges on %s, no TEXT entry\n", path, asc_path);
++        return 0;
++    }
++
++    u64 start = seg[0].phys;
++    u64 end = (seg[0].phys + seg[0].size - 1) & ~3ULL;
++
++    for (int i = 0; i < count; i++) {
++        if (config[i].start <= start && config[i].end >= start) {
++            printf("dapf: %s: TEXT 0x%lx already covered by entry %d\n", path, start, i);
++            return 0;
++        }
++    }
++
++    if (count >= 16 || !seg[0].size) {
++        printf("dapf: %s: cannot add TEXT entry (count %d, size 0x%x)\n", path, count,
++               seg[0].size);
++        return -1;
++    }
++
++    base += 0x40 * count;
++    write32(base + 0x04, 1);
++    write64(base + 0x08, start);
++    write64(base + 0x10, end);
++    write32(base + 0x00, 0x11);
++    printf("dapf: %s: appended TEXT entry %d: 0x%lx-0x%lx r0 0x11\n", path, count, start, end);
++    return 0;
++}
++
++static int dapf_init_t8020(const char *path, u64 base, int node, const char *asc_path)
+ {
+     u32 length;
+     const char *prop = "filter-data-instance-0";
+@@ -39,6 +88,9 @@ static int dapf_init_t8020(const char *path, u64 base, int node)
+         write32(base + 0x00, (config[i].r0_hi << 4) | config[i].r0_lo);
+         base += 0x40;
+     }
++
++    if (asc_path)
++        return dapf_append_asc_text(path, base - 0x40 * count, count, config, asc_path);
+     return 0;
+ }
+ 
+@@ -123,7 +175,7 @@ static int dapf_init_t8110(const char *path, u64 base, int node)
+     }
+ }
+ 
+-int dapf_init(const char *path, int index)
++static int dapf_init_asc(const char *path, int index, const char *asc_path)
+ {
+     int ret;
+     int dart_path[8];
+@@ -146,9 +198,9 @@ int dapf_init(const char *path, int index)
+     }
+ 
+     if (adt_is_compatible(adt, node, "dart,t8020")) {
+-        ret = dapf_init_t8020(path, base, node);
++        ret = dapf_init_t8020(path, base, node, asc_path);
+     } else if (adt_is_compatible(adt, node, "dart,t6000")) {
+-        ret = dapf_init_t8020(path, base, node);
++        ret = dapf_init_t8020(path, base, node, asc_path);
+     } else if (adt_is_compatible(adt, node, "dart,t8110")) {
+         ret = dapf_init_t8110(path, base, node);
+     } else {
+@@ -165,14 +217,25 @@ int dapf_init(const char *path, int index)
+     return ret;
+ }
+ 
++int dapf_init(const char *path, int index)
++{
++    return dapf_init_asc(path, index, NULL);
++}
++
+ struct entry {
+     const char *path;
+     int index;
++    const char *asc_path; /* append a TEXT entry for this ASC if needed */
+ };
+ 
+ struct entry dapf_entries[] = {
+-    {"/arm-io/dart-aop", 1}, {"/arm-io/dart-mtp", 1},  {"/arm-io/dart-pmp", 1},
+-    {"/arm-io/dart-isp", 5}, {"/arm-io/dart-isp0", 5}, {NULL, -1},
++    {"/arm-io/dart-aop", 1, NULL},
++    {"/arm-io/dart-mtp", 1, NULL},
++    {"/arm-io/dart-pmp", 1, NULL},
++    {"/arm-io/dart-isp", 5, NULL},
++    {"/arm-io/dart-isp0", 5, NULL},
++    {"/arm-io/dart-ave0", 3, "/arm-io/ave0"},
++    {NULL, -1, NULL},
+ };
+ 
+ int dapf_init_all(void)
+@@ -186,7 +249,7 @@ int dapf_init_all(void)
+             entry++;
+             continue;
+         }
+-        if (dapf_init(entry->path, entry->index) < 0) {
++        if (dapf_init_asc(entry->path, entry->index, entry->asc_path) < 0) {
+             ret = -1;
+         }
+         entry++;
+-- 
+2.55.0
+
