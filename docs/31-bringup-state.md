@@ -681,3 +681,33 @@ assumed zero - inferred).
 Next: (1) confirm by running `stop_after=16` as the **first** start of a
 fresh boot; (2) implement the restore - copy the pristine `0x64000` bytes
 plus zero fill over physical DATA before every start, as macOS does.
+
+## 2026-09-13 19:36 — FULL macOS 13.5 HANDSHAKE; THE FIRMWARE LOGS OVER TERMINAL
+
+`results/n3-handshake2-1789324537.kmsg`: fresh boot (pristine DATA), patched
+m1n1, overlay `variant=3`, `stop_after=16 fw_map_data=1 fw_map_text=2`,
+**first** firmware start of the boot.
+
+| step | observed | predicted (docs/45) |
+|---|---|---|
+| msg 1 | `nch=7 chanmem=0x9bc0 ver=0x100 heap=0xc0000` | same |
+| msg 2 (host) | FwIPC iova `0xff800000`, size `0x700000` | size `0x700000` |
+| msg 3 | `fw_base 0xffffffff80000000`; fw heap (surface 23) 768 KiB at `0xff300000` | heap after msg 3 |
+| msg 4 | info block fw `0xffffffff80009bc0`, chanmem `0xffffffff80000000` (`0x9bc0`), dev_type 11 | dev_type 11 |
+| msg 5 | desc fw `0xffffffff80000000`, client buffer `0xb4000` (max `0x100000`) | `0xb4000` literal |
+| channels | TERMINAL id4 dir2 bit0 512 slots; IO id1 dir0 bit1 32; DEBUG id5 dir0 bit1 8; BUF_H2T id6 dir0 bit2 1; BUF_T2H id7 dir1 bit3 1; SHAREDMALLOC id3 dir1 bit3 8; IO_T2H id2 dir1 bit3 32 | same table |
+| ready | `macOS 13.5 handshake complete: 7 channel(s)`; `coprocessor up`; `Apple AVE video encoder ready` | |
+| log | **`fw[0]\| FW Cfg: prod, tag: AppleAVE2FW-6070.11.1, SHA: c86a10b71`** over TERMINAL | log over TERMINAL |
+
+Zero DART faults, no SError, AVE DART fault IRQs at 0 interrupts; the driver
+stayed loaded with the firmware idle. **Phase 4 (IPC transport live) is
+reached** except for sending a command and reading a reply.
+
+**Confirmed:** every element of the 13.5 boot/IPC ABI reconstructed
+statically (docs/45, `driver/ave_abi_boot.h`, `ave_ipc.c`) matches the live
+firmware, down to the firmware build tag `AppleAVE2FW-6070.11.1` identified
+in docs/43.
+
+Open items before commands: restore pristine DATA before every start (the
+second start in a boot is silent otherwise), then Config → Open → Start_AVC
+(docs/46) over the IO channel.
