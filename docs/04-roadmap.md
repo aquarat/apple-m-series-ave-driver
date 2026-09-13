@@ -94,6 +94,11 @@ fix is not ([31](31-bringup-state.md), [41](41-apple-fetch-path.md),
   it (`40d040000`) resolves at most 38 bits, so **no mapping can satisfy the
   fetch**. With a translating domain it faults; with an identity domain nothing
   faults and nothing observable happens.
+  **Correction ([44](44-reset-fetch-path.md)):** the fault code is
+  `NO_DAPF_MATCH`. The fetch is meant to be *physical* and admitted by the
+  CPUDART's address filter (DAPF), which nothing on Linux programs. DATA is
+  reached through a `0x1f0_0000_0000` DART window. The blocker is now "program
+  the DAPF and map DATA at DVA `0xec000`" (experiments E1-E3 in doc 44).
 - iBoot left code at that physical address from the same source family as
   `AppleAVE2FW`, but TEXT and DATA cannot both fit contiguously below the ISP
   carve-out ([42](42-asc-firmware-ownership.md) §3.4), which argues the address

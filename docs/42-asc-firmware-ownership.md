@@ -289,6 +289,12 @@ at exactly that value `+ 0x200`. That is **inferred**, on two independent legs.
 
 ### 3.4 An inconsistency that has to be recorded
 
+> **Resolved (2026-09-13, [44](44-reset-fetch-path.md) §2.4).** Both readings
+> were half right. The 13.5 bootstrap fetches and maps TEXT at its physical
+> address (RVBAR), and reaches DATA at `0x1f0000ec000`, a DAPF-admitted DART
+> window translated at DVA `0xec000`. iBoot patches that base into TEXT at
+> `0x423c`. 13.5's AppleAVE2 also never writes RVBAR on t6001 (§2.1 there).
+
 Our image is `__TEXT` `0x134000` at VA 0 and `__DATA` `0x134000` at VA
 `0x134000` (2.5 MiB total). The space below the ISP carve-out is only
 `0x140000`. The loaded build references `adrp x0, 0x14c000` at stub offset
