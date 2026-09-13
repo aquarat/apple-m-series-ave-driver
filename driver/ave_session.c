@@ -9,6 +9,9 @@
  *   1. Config      - the IOP/device configuration command (global, no client).
  *   2. Open        - register a client id / session.
  *   3. Start_AVC   - a minimal fixed-QP, I-only, 8-bit 4:2:0 AVC session.
+ *   4. Process     - one I-frame, only with session_frame=1 (docs/53). The
+ *                    encoded bitstream is published under
+ *                    /sys/kernel/debug/apple_ave/ once a frame comes back.
  *
  * Each step builds the command for ave_cmd_abi_get(ave->fw_abi) into a buffer
  * carved from the FwIPC region (so ave_ipc_send() can hand its IOVA to the
@@ -23,20 +26,24 @@
  * exit. ipc_rx runs in hard IRQ context, so the hook only memcpy()s and
  * complete()s.
  *
- * Nothing here is on the encode path and none of it runs unless
- * session_selftest=1 is passed, so a wrong guess degrades to a logged
- * firmware rejection, not a wedged encoder.
+ * None of it runs unless session_selftest=1 (or session_frame=1) is passed, so
+ * a wrong guess degrades to a logged firmware rejection or assert, not a
+ * wedged encoder. With session_frame=0 the three commands are byte-identical
+ * to the ones the firmware accepted on 2026-09-13 21:13 (docs/31).
  */
 #include <linux/completion.h>
+#include <linux/debugfs.h>
 #include <linux/delay.h>
 #include <linux/dma-mapping.h>
 #include <linux/errno.h>
 #include <linux/interrupt.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
+#include <linux/sizes.h>
 #include <linux/slab.h>
 #include <linux/types.h>
 #include <linux/unaligned.h>
+#include <linux/vmalloc.h>
 
 #include "ave.h"
 #include "ave_abi_boot.h"	/* AVE_CH_IO, ave_ipc_alloc/free */
@@ -79,6 +86,38 @@ static unsigned int session_qp = 30;
 module_param(session_qp, uint, 0444);
 MODULE_PARM_DESC(session_qp, "Start_AVC fixed QP for I/P/B (0..51, default 30)");
 
+/* ---- phase 6: one encoded frame (docs/53) ---- */
+
+static bool session_frame;
+module_param(session_frame, bool, 0444);
+MODULE_PARM_DESC(session_frame,
+	"after Start_AVC, encode one I-frame with Process and publish the bitstream under /sys/kernel/debug/apple_ave (default off; implies session_selftest)");
+
+/*
+ * The source-neighbour scratch tables. Their sizes are NOT known (nothing in
+ * either binary sizes them - the kext takes them from pre-allocated surfaces
+ * whose InfoSet entry we have not decoded). session_nbr_kb is the per-slot
+ * size; 16 slots are allocated. If the first hardware run faults inside one of
+ * these, raise it. session_nbr=0 sends the tables zero, which is what the
+ * pre-phase-6 self-test did - useful as a bisect: it should then assert
+ * "encoder_addr_src_nbr_info != 0" at setPipe line 6990.
+ */
+static bool session_nbr = true;
+module_param(session_nbr, bool, 0444);
+MODULE_PARM_DESC(session_nbr,
+	"publish the SrcNeighbor scratch tables at Start_AVC and in Process (default on; 0 to prove the assert)");
+
+static unsigned int session_nbr_kb = 256;
+module_param(session_nbr_kb, uint, 0444);
+MODULE_PARM_DESC(session_nbr_kb,
+	"size of each SrcNeighbor scratch slot in KiB (default 256; size is unknown, this is a guess)");
+
+/* AVE_FRAME_TYPE_IDR (3) by default; 0 = I (non-IDR). */
+static unsigned int session_frame_type = AVE_FRAME_TYPE_IDR;
+module_param(session_frame_type, uint, 0444);
+MODULE_PARM_DESC(session_frame_type,
+	"IMG_FRAME_TYPE for the single Process (3 = IDR, 0 = I; default 3)");
+
 /* ------------------------------------------------------------------------ */
 /* Tunables that are pure sizing guesses (flagged in the report)            */
 /* ------------------------------------------------------------------------ */
@@ -106,6 +145,13 @@ MODULE_PARM_DESC(session_qp, "Start_AVC fixed QP for I/P/B (0..51, default 30)")
  * page rather than a tight fit.
  */
 #define AVE_SESS_PARAM_SETS_SIZE	0x1000
+
+/*
+ * The Process slot. Any value < hdr.max_slot is legal; macOS's own client uses
+ * 21..40 (kext 0xfffffe0008f0166c / 0xfffffe0008f01188), so stay in that range
+ * rather than reusing a slot the fixed-slot commands own.
+ */
+#define AVE_SESS_PROCESS_SLOT		21
 
 /* ------------------------------------------------------------------------ */
 /* Reply capture (written from hard IRQ by the ipc_rx hook)                 */
@@ -174,8 +220,11 @@ static void ave_session_ipc_rx(struct ave_device *ave, u32 chan_id,
 /* Buffer bookkeeping - freed on every exit path                            */
 /* ------------------------------------------------------------------------ */
 
-#define AVE_SESS_MAX_DMA	8
-#define AVE_SESS_MAX_IPC	4
+#define AVE_SESS_MAX_DMA	16
+#define AVE_SESS_MAX_IPC	8
+
+/* 16 SrcNeighbor slots: 4 groups x 4 entries. */
+#define AVE_SESS_NBR_SLOTS	(AVE_SRC_NBR_GROUPS * AVE_SRC_NBR_MAX)
 
 struct ave_sess_bufs {
 	struct ave_device *ave;
@@ -183,6 +232,31 @@ struct ave_sess_bufs {
 	unsigned int ndma;
 	struct { void *cpu; size_t size; } ipc[AVE_SESS_MAX_IPC];
 	unsigned int nipc;
+
+	/*
+	 * What Start_AVC published, so the Process step can repeat the same
+	 * addresses (the firmware asserts sOutput.Coded == the Start-time
+	 * table entry: fw 0x58404, "pPicParams->sOutput.Coded ==
+	 * EncCommParams.bitstream_addr_dst[index]").
+	 */
+	void		*coded_cpu;
+	dma_addr_t	coded_iova;
+	u32		coded_size;
+	void		*coded_hdr_cpu;
+	dma_addr_t	coded_hdr_iova;
+	u32		coded_hdr_size;
+	void		*psets_cpu;
+	u32		psets_size;
+	dma_addr_t	recon_iova;
+	u32		recon_size;
+	u64		nbr[AVE_SRC_NBR_GROUPS][AVE_SRC_NBR_MAX];
+	u32		n_nbr;
+
+	/* debugfs: only created once a frame actually came back. */
+	struct dentry		*dbg_dir;
+	struct debugfs_blob_wrapper coded_blob, hdr_blob, psets_blob, h264_blob;
+	void			*h264;		/* assembled Annex-B frame */
+	size_t			h264_len;
 };
 
 /* DART-addressable data buffer in the device DMA domain (the coprocessor's
@@ -221,10 +295,38 @@ static void *ave_sess_ipc_alloc(struct ave_sess_bufs *b, size_t size,
 	return cpu;
 }
 
+/*
+ * A 128-byte-aligned sub-allocation out of one coherent arena. Used for the
+ * recon planes (the firmware asserts & 127 == 0 on all four, fw 0x55310 /
+ * 0x5541c / 0x58068 / 0x54f94) and the SrcNeighbor slots (& 63 == 0).
+ */
+struct ave_sess_arena {
+	void		*cpu;
+	dma_addr_t	iova;
+	size_t		size;
+	size_t		used;
+};
+
+static void *ave_sess_arena_take(struct ave_sess_arena *a, size_t size,
+				 dma_addr_t *iova)
+{
+	size_t off = ALIGN(a->used, 128);
+
+	if (size > a->size || off > a->size - size)
+		return NULL;
+	a->used = off + size;
+	*iova = a->iova + off;
+	return a->cpu + off;
+}
+
 static void ave_sess_free_all(struct ave_sess_bufs *b)
 {
 	unsigned int i;
 
+	debugfs_remove_recursive(b->dbg_dir);
+	b->dbg_dir = NULL;
+	vfree(b->h264);
+	b->h264 = NULL;
 	for (i = 0; i < b->ndma; i++)
 		dma_free_coherent(b->ave->dev, b->dma[i].size,
 				  b->dma[i].cpu, b->dma[i].iova);
@@ -414,6 +516,7 @@ static int ave_session_start_avc(struct ave_device *ave,
 	dma_addr_t cmd_iova, fwc_iova, fwcm_iova, recon_iova, coded_iova, hdr_iova;
 	dma_addr_t psets_iova;
 	u32 cw, ch, recon_size, fwc_size;
+	void *coded_cpu, *hdr_cpu, *psets_cpu;
 	size_t cmd_len;
 	void *cmd;
 	int ret;
@@ -433,11 +536,36 @@ static int ave_session_start_avc(struct ave_device *ave,
 
 	if (!ave_sess_dma_alloc(bufs, fwc_size, &fwc_iova) ||
 	    !ave_sess_dma_alloc(bufs, AVE_SESS_FWCLIENTMEM_SIZE, &fwcm_iova) ||
-	    !ave_sess_dma_alloc(bufs, recon_size, &recon_iova) ||
-	    !ave_sess_dma_alloc(bufs, AVE_SESS_CODED_SIZE, &coded_iova) ||
-	    !ave_sess_dma_alloc(bufs, abi->start_avc.coded_hdr_bytes, &hdr_iova) ||
-	    !ave_sess_dma_alloc(bufs, AVE_SESS_PARAM_SETS_SIZE, &psets_iova))
+	    !ave_sess_dma_alloc(bufs, recon_size, &recon_iova))
 		return -ENOMEM;
+	coded_cpu = ave_sess_dma_alloc(bufs, AVE_SESS_CODED_SIZE, &coded_iova);
+	hdr_cpu = ave_sess_dma_alloc(bufs, abi->start_avc.coded_hdr_bytes,
+				     &hdr_iova);
+	psets_cpu = ave_sess_dma_alloc(bufs, AVE_SESS_PARAM_SETS_SIZE,
+				       &psets_iova);
+	if (!coded_cpu || !hdr_cpu || !psets_cpu)
+		return -ENOMEM;
+
+	/*
+	 * dma_alloc_coherent already hands back zeroed memory, but the frame
+	 * step relies on that to find the end of the SPS+PPS the firmware
+	 * writes here (it reports the length only in bits, in a controller
+	 * field we cannot read), so make the assumption explicit.
+	 */
+	memset(psets_cpu, 0, AVE_SESS_PARAM_SETS_SIZE);
+	memset(hdr_cpu, 0, abi->start_avc.coded_hdr_bytes);
+	memset(coded_cpu, 0, AVE_SESS_CODED_SIZE);
+
+	bufs->coded_cpu = coded_cpu;
+	bufs->coded_iova = coded_iova;
+	bufs->coded_size = AVE_SESS_CODED_SIZE;
+	bufs->coded_hdr_cpu = hdr_cpu;
+	bufs->coded_hdr_iova = hdr_iova;
+	bufs->coded_hdr_size = abi->start_avc.coded_hdr_bytes;
+	bufs->psets_cpu = psets_cpu;
+	bufs->psets_size = AVE_SESS_PARAM_SETS_SIZE;
+	bufs->recon_iova = recon_iova;
+	bufs->recon_size = recon_size;
 
 	recon.addr = recon_iova;
 	recon.luma_size = cw * ch;		/* used only where recon_size != NONE */
@@ -470,6 +598,16 @@ static int ave_session_start_avc(struct ave_device *ave,
 	s.coded_hdr = &coded_hdr;
 	s.n_coded = 1;
 
+	/*
+	 * SrcNeighbor scratch. Only published for the frame run: sending it on
+	 * a Start that is not followed by Process changes a sequence that is
+	 * already known to be accepted, for no gain.
+	 */
+	if (bufs->n_nbr && abi->start_avc.src_nbr_max) {
+		memcpy(s.src_nbr, bufs->nbr, sizeof(s.src_nbr));
+		s.n_src_nbr = min(bufs->n_nbr, abi->start_avc.src_nbr_max);
+	}
+
 	ret = ave_cmd_build_start_avc(abi, cmd, cmd_len, &ctx, &s);
 	if (ret < 0) {
 		dev_err(ave->dev, "session: Start_AVC build failed: %d\n", ret);
@@ -484,9 +622,365 @@ static int ave_session_start_avc(struct ave_device *ave,
 		 &recon_iova, recon_size, &coded_iova, (u32)AVE_SESS_CODED_SIZE,
 		 &hdr_iova, abi->start_avc.coded_hdr_bytes,
 		 &psets_iova, (u32)AVE_SESS_PARAM_SETS_SIZE);
+	if (s.n_src_nbr)
+		dev_info(ave->dev,
+			 "session: Start_AVC: SrcNeighbor %u entries/group at %#llx %#llx %#llx %#llx (+%u KiB each)\n",
+			 s.n_src_nbr, s.src_nbr[0][0], s.src_nbr[1][0],
+			 s.src_nbr[2][0], s.src_nbr[3][0], session_nbr_kb);
+	else
+		dev_warn(ave->dev,
+			 "session: Start_AVC: SrcNeighbor tables left ZERO - the first Process will assert at setPipe:6990 if it gets that far\n");
 
 	return ave_session_cmd(ave, abi, AVE_OP_START_AVC, "Start_AVC",
 			       cmd_iova, cmd_len, client_id);
+}
+
+/* ------------------------------------------------------------------------ */
+/* Phase 6 - one encoded frame                                              */
+/* ------------------------------------------------------------------------ */
+
+/*
+ * Allocate the SrcNeighbor arena and hand out 16 64-byte-aligned slots. Done
+ * before Start_AVC because those tables are published there as well as per
+ * frame. Failure is not fatal: the run continues with the tables zero and the
+ * firmware's own assert names the field.
+ */
+static void ave_session_alloc_nbr(struct ave_device *ave,
+				  struct ave_sess_bufs *bufs)
+{
+	struct ave_sess_arena a = {};
+	size_t slot = (size_t)session_nbr_kb << 10;
+	unsigned int g, i;
+
+	if (!session_nbr || !session_frame)
+		return;
+	if (!slot || slot > SZ_16M) {
+		dev_warn(ave->dev, "session: session_nbr_kb=%u out of range\n",
+			 session_nbr_kb);
+		return;
+	}
+	a.size = ALIGN(slot, 128) * AVE_SESS_NBR_SLOTS + 128;
+	a.cpu = ave_sess_dma_alloc(bufs, a.size, &a.iova);
+	if (!a.cpu) {
+		dev_warn(ave->dev,
+			 "session: SrcNeighbor arena (%zu bytes) allocation failed\n",
+			 a.size);
+		return;
+	}
+	memset(a.cpu, 0, a.size);
+
+	for (g = 0; g < AVE_SRC_NBR_GROUPS; g++)
+		for (i = 0; i < AVE_SRC_NBR_MAX; i++) {
+			dma_addr_t iova;
+
+			if (!ave_sess_arena_take(&a, slot, &iova))
+				return;		/* keeps what it managed */
+			bufs->nbr[g][i] = iova;
+		}
+	bufs->n_nbr = AVE_SRC_NBR_MAX;
+}
+
+/*
+ * A deterministic, legal, non-uniform NV12 frame: a horizontal luma ramp over
+ * the legal 16..235 range that also steps per macroblock row, near-grey chroma
+ * with a slow horizontal Cr drift. The content does not matter; what matters
+ * is that it is not flat (a flat frame compresses to almost nothing and would
+ * make "the output is 30 bytes" ambiguous) and that a decoded PNG of it is
+ * recognisable by eye.
+ *
+ * The allocation is MB-aligned in height because the encoder fetches
+ * 16*ceil(H/16) luma rows regardless of the declared height (docs/38 §5); an
+ * allocation sized to the display height is short by up to 15 rows and the
+ * read runs off the end of the DART mapping.
+ */
+static void ave_session_fill_input(u8 *luma, u8 *chroma, u32 stride,
+				   u32 w, u32 h)
+{
+	u32 x, y;
+
+	for (y = 0; y < h; y++) {
+		u8 *row = luma + (size_t)y * stride;
+
+		for (x = 0; x < w; x++)
+			row[x] = (u8)(16 + ((x * 219) / (w ? w : 1)) +
+				      ((y / AVE_MB_SIZE) & 7));
+		if (stride > w)
+			memset(row + w, 0, stride - w);
+	}
+	for (y = 0; y < h / 2; y++) {
+		u8 *row = chroma + (size_t)y * stride;
+
+		for (x = 0; x < w; x += 2) {
+			row[x] = 128;				/* Cb */
+			row[x + 1] = (u8)(128 + ((x / 32) & 15) - 8);	/* Cr */
+		}
+		if (stride > w)
+			memset(row + w, 0, stride - w);
+	}
+}
+
+/*
+ * Length of the SPS+PPS the firmware wrote into the parameter-sets buffer.
+ *
+ * The firmware memcpy()s SPS then PPS into it at Start_AVC (fw 0x5df5c /
+ * 0x5df78) and records the total only as a bit count in a controller field
+ * ([x19+2740], fw 0x5df9c) that never reaches the host. The buffer was zeroed
+ * before Start, and an H.264 NAL always ends with the rbsp_stop_one_bit, so
+ * the last non-zero byte is the last byte of the PPS. Emulation prevention
+ * guarantees no three consecutive zero bytes inside, so scanning back from the
+ * end cannot stop early.
+ */
+static size_t ave_session_psets_len(const u8 *buf, size_t size)
+{
+	while (size && !buf[size - 1])
+		size--;
+	return size;
+}
+
+/* Annex-B 4-byte start code + nal_unit_type, as WriteBits::nal_header emits. */
+static int ave_session_nal_type(const u8 *buf, size_t len)
+{
+	if (len < 5 || buf[0] || buf[1] || buf[2] || buf[3] != 1)
+		return -1;
+	return buf[4] & 0x1f;
+}
+
+static void ave_session_publish(struct ave_device *ave,
+				struct ave_sess_bufs *bufs, u32 coded_len,
+				size_t psets_len)
+{
+	int coded_nal = ave_session_nal_type(bufs->coded_cpu, coded_len);
+	bool need_psets = coded_nal != 7;	/* 7 = SPS */
+	size_t total = coded_len + (need_psets ? psets_len : 0);
+
+	bufs->dbg_dir = debugfs_create_dir("apple_ave", NULL);
+	if (IS_ERR(bufs->dbg_dir)) {
+		dev_warn(ave->dev, "session: debugfs dir failed: %pe\n",
+			 bufs->dbg_dir);
+		bufs->dbg_dir = NULL;
+		return;
+	}
+
+	bufs->coded_blob.data = bufs->coded_cpu;
+	bufs->coded_blob.size = coded_len;
+	debugfs_create_blob("coded.bin", 0444, bufs->dbg_dir, &bufs->coded_blob);
+
+	bufs->hdr_blob.data = bufs->coded_hdr_cpu;
+	bufs->hdr_blob.size = bufs->coded_hdr_size;
+	debugfs_create_blob("coded_hdr.bin", 0444, bufs->dbg_dir,
+			    &bufs->hdr_blob);
+
+	bufs->psets_blob.data = bufs->psets_cpu;
+	bufs->psets_blob.size = psets_len;
+	debugfs_create_blob("paramsets.bin", 0444, bufs->dbg_dir,
+			    &bufs->psets_blob);
+
+	/*
+	 * The assembled elementary stream. The coded buffer holds the slice
+	 * NAL(s) only - the firmware writes SPS+PPS to the parameter-sets
+	 * buffer at Start and reports their length in the coded header
+	 * (ui32_SPSPPSHeaderBits) purely for rate-control accounting - so they
+	 * are prepended here. If the bitstream turns out to start with an SPS
+	 * after all, it is emitted unchanged and the log says so.
+	 */
+	if (!total)
+		return;
+	bufs->h264 = vmalloc(total);
+	if (!bufs->h264)
+		return;
+	if (need_psets) {
+		memcpy(bufs->h264, bufs->psets_cpu, psets_len);
+		memcpy(bufs->h264 + psets_len, bufs->coded_cpu, coded_len);
+	} else {
+		memcpy(bufs->h264, bufs->coded_cpu, coded_len);
+	}
+	bufs->h264_len = total;
+	bufs->h264_blob.data = bufs->h264;
+	bufs->h264_blob.size = total;
+	debugfs_create_blob("frame.h264", 0444, bufs->dbg_dir,
+			    &bufs->h264_blob);
+
+	dev_info(ave->dev,
+		 "session: frame: /sys/kernel/debug/apple_ave/frame.h264 = %zu bytes (%s; coded starts with NAL type %d)\n",
+		 total,
+		 need_psets ? "SPS+PPS prepended from paramsets.bin"
+			    : "coded buffer already carries the parameter sets",
+		 coded_nal);
+}
+
+static int ave_session_process(struct ave_device *ave,
+			       const struct ave_cmd_abi *abi,
+			       struct ave_sess_bufs *bufs, u64 client_id)
+{
+	struct ave_cmd_ctx ctx = { .count = 4, .client_id = client_id };
+	struct ave_avc_frame f = {};
+	struct ave_coded_info info;
+	struct ave_sess_arena recon = {};
+	dma_addr_t cmd_iova, luma_iova, chroma_iova;
+	dma_addr_t ry, ruv, ry_lsb, ruv_lsb, rmv;
+	u32 cw, ch, stride, luma_bytes, chroma_bytes, mb_w, mb_h;
+	size_t cmd_len, psets_len;
+	u8 *luma, *chroma;
+	void *cmd;
+	int ret;
+
+	if (!bufs->coded_cpu)
+		return -EINVAL;
+
+	cw = ave_mb_align(session_width);
+	ch = ave_mb_align(session_height);
+	mb_w = cw / AVE_MB_SIZE;
+	mb_h = ch / AVE_MB_SIZE;
+
+	/*
+	 * Stride must be non-zero and a multiple of 64 (kext 0xeb0768, and the
+	 * firmware re-checks the addresses at setPipe 6440/6454). The coded
+	 * width is already a multiple of 16; round it to 64.
+	 */
+	stride = ALIGN(cw, AVE_STRIDE_ALIGN);
+	luma_bytes = stride * ave_src_luma_rows(ch);
+	chroma_bytes = stride * ave_src_chroma_rows(ch);
+
+	luma = ave_sess_dma_alloc(bufs, luma_bytes, &luma_iova);
+	chroma = ave_sess_dma_alloc(bufs, chroma_bytes, &chroma_iova);
+	if (!luma || !chroma)
+		return -ENOMEM;
+	if ((luma_iova | chroma_iova) & (AVE_STRIDE_ALIGN - 1)) {
+		dev_err(ave->dev,
+			"session: frame: input planes not 64-aligned (%pad / %pad)\n",
+			&luma_iova, &chroma_iova);
+		return -EINVAL;
+	}
+	ave_session_fill_input(luma, chroma, stride, cw, ch);
+
+	/*
+	 * Reconstruction planes. setPipe asserts all four are non-zero and
+	 * 128-aligned behind their gates (fw 0x55358/0x55310 Y_MSB,
+	 * 0x580b0/0x58068 UV_MSB, 0x550e4/0x54f94 Y_LSB, 0x55978/0x5541c
+	 * UV_LSB), plus a colocated MV store. The Start-time DPB entry points
+	 * at the same arena; the sizes below are the docs/38 §7 tile formula
+	 * rounded up, which is an over-estimate and therefore safe.
+	 */
+	recon.size = (size_t)cw * ch * 3 + (size_t)mb_w * mb_h * 1024 + SZ_64K;
+	recon.cpu = ave_sess_dma_alloc(bufs, recon.size, &recon.iova);
+	if (!recon.cpu)
+		return -ENOMEM;
+	memset(recon.cpu, 0, recon.size);
+	if (!ave_sess_arena_take(&recon, (size_t)cw * ch, &ry) ||
+	    !ave_sess_arena_take(&recon, (size_t)cw * ch / 2, &ruv) ||
+	    !ave_sess_arena_take(&recon, (size_t)cw * ch, &ry_lsb) ||
+	    !ave_sess_arena_take(&recon, (size_t)cw * ch / 2, &ruv_lsb) ||
+	    !ave_sess_arena_take(&recon, (size_t)mb_w * mb_h * 1024, &rmv))
+		return -ENOMEM;
+
+	cmd_len = ave_cmd_size(abi, AVE_OP_PROCESS_AVC);
+	cmd = ave_sess_ipc_alloc(bufs, cmd_len, &cmd_iova);
+	if (!cmd)
+		return -ENOMEM;
+
+	f.frame_type = session_frame_type;
+	f.in_luma_addr = luma_iova;
+	f.in_luma_stride = stride;
+	f.in_luma_size = luma_bytes;
+	f.in_chroma_addr = chroma_iova;
+	f.in_chroma_stride = stride;
+	f.in_chroma_size = chroma_bytes;
+
+	/* out_mode is left 0, so the size check is against the Start table. */
+	f.coded_index = 0;
+	f.coded_addr = bufs->coded_iova;
+	f.coded_hdr_addr = bufs->coded_hdr_iova;
+	f.coded_size = bufs->coded_size;
+
+	f.recon_luma_addr = ry;
+	f.recon_chroma_addr = ruv;
+	f.recon_luma_lsb_addr = ry_lsb;
+	f.recon_chroma_lsb_addr = ruv_lsb;
+	f.recon_mv_addr = rmv;
+
+	f.ctx_index = 0;
+	f.force_key_frame = session_frame_type == AVE_FRAME_TYPE_IDR;
+	f.update_param_sets = false;
+
+	if (bufs->n_nbr && abi->process_avc.src_nbr_max) {
+		memcpy(f.src_nbr, bufs->nbr, sizeof(f.src_nbr));
+		f.n_src_nbr = min(bufs->n_nbr, abi->process_avc.src_nbr_max);
+	}
+
+	ret = ave_cmd_build_process_avc(abi, cmd, cmd_len, &ctx,
+					AVE_SESS_PROCESS_SLOT, &f);
+	if (ret < 0) {
+		dev_err(ave->dev, "session: Process build failed: %d\n", ret);
+		return ret;
+	}
+
+	dev_info(ave->dev,
+		 "session: Process: %ux%u coded, stride %u, luma %pad/%#x chroma %pad/%#x, frame_type %u, slot %u\n",
+		 cw, ch, stride, &luma_iova, luma_bytes, &chroma_iova,
+		 chroma_bytes, session_frame_type, AVE_SESS_PROCESS_SLOT);
+	dev_info(ave->dev,
+		 "session: Process: coded %pad/%#x hdr %pad/%#x recon Y %pad UV %pad MV %pad\n",
+		 &bufs->coded_iova, bufs->coded_size, &bufs->coded_hdr_iova,
+		 bufs->coded_hdr_size, &ry, &ruv, &rmv);
+
+	ret = ave_session_cmd(ave, abi, AVE_OP_PROCESS_AVC, "Process",
+			      cmd_iova, cmd_len, client_id);
+	if (ret)
+		return ret;
+
+	/*
+	 * The completion says nothing about the length; everything comes out
+	 * of the coded-header buffer (docs/53 §3).
+	 */
+	dma_rmb();
+	print_hex_dump(KERN_INFO, "session: coded_hdr: ", DUMP_PREFIX_OFFSET,
+		       16, 4, bufs->coded_hdr_cpu, 0x40, false);
+	print_hex_dump(KERN_INFO, "session: slice0: ", DUMP_PREFIX_OFFSET,
+		       16, 4,
+		       (u8 *)bufs->coded_hdr_cpu + abi->coded_hdr.slice_bytes_written,
+		       0x20, false);
+
+	ret = ave_cmd_coded_length(abi, bufs->coded_hdr_cpu,
+				   bufs->coded_hdr_size, &info);
+	if (ret) {
+		dev_err(ave->dev,
+			"session: frame: cannot decode the coded header: %d\n",
+			ret);
+		return ret;
+	}
+	dev_info(ave->dev,
+		 "session: frame: %u bytes in %u slice(s) (written %u - trimmed %u), FrameTypeReturned %u, frame_num %u, SPS+PPS %u bits\n",
+		 info.bytes, info.slices, info.bytes + info.bytes_removed,
+		 info.bytes_removed, info.frame_type, info.frame_num,
+		 info.sps_pps_bits);
+
+	if (!info.bytes) {
+		dev_err(ave->dev,
+			"session: frame: the firmware reported ZERO coded bytes - the encode did not produce a bitstream\n");
+		return -ENODATA;
+	}
+	if (info.bytes > bufs->coded_size) {
+		dev_err(ave->dev,
+			"session: frame: reported length %u exceeds the coded buffer (%u); header is not what we think it is\n",
+			info.bytes, bufs->coded_size);
+		return -EPROTO;
+	}
+
+	print_hex_dump(KERN_INFO, "session: coded: ", DUMP_PREFIX_OFFSET,
+		       16, 1, bufs->coded_cpu, min_t(u32, info.bytes, 64),
+		       false);
+
+	psets_len = ave_session_psets_len(bufs->psets_cpu, bufs->psets_size);
+	dev_info(ave->dev,
+		 "session: frame: parameter sets %zu bytes (firmware said %u bits = %u bytes), first NAL type %d\n",
+		 psets_len, info.sps_pps_bits, info.sps_pps_bits / 8,
+		 ave_session_nal_type(bufs->psets_cpu, psets_len));
+	print_hex_dump(KERN_INFO, "session: psets: ", DUMP_PREFIX_OFFSET,
+		       16, 1, bufs->psets_cpu, min_t(size_t, psets_len, 64),
+		       false);
+
+	ave_session_publish(ave, bufs, info.bytes, psets_len);
+	return 0;
 }
 
 /* ------------------------------------------------------------------------ */
@@ -511,7 +1005,7 @@ int ave_session_selftest(struct ave_device *ave)
 	void (*prev_rx)(struct ave_device *, u32, void *, u32, u32);
 	int ret;
 
-	if (!session_selftest)
+	if (!session_selftest && !session_frame)
 		return 0;
 
 	if (!ave->running) {
@@ -564,7 +1058,25 @@ int ave_session_selftest(struct ave_device *ave)
 	if (ret)
 		goto out;
 
+	/* Must precede Start_AVC: the tables are published in that command. */
+	ave_session_alloc_nbr(ave, bufs);
+
 	ret = ave_session_start_avc(ave, abi, bufs, AVE_SESS_CLIENT_ID);
+	if (ret || !session_frame)
+		goto out;
+
+	if (!ave_cmd_size(abi, AVE_OP_PROCESS_AVC)) {
+		dev_err(ave->dev,
+			"session: no Process command for ABI %s\n", abi->name);
+		ret = -ENODEV;
+		goto out;
+	}
+	if (!abi->coded_hdr.slice_stride)
+		dev_warn(ave->dev,
+			 "session: ABI %s has no coded-header layout; the frame length will not be recoverable\n",
+			 abi->name);
+
+	ret = ave_session_process(ave, abi, bufs, AVE_SESS_CLIENT_ID);
 
 out:
 	/* Stop the hook before freeing the buffers replies were written into. */
@@ -581,6 +1093,8 @@ out:
 	 */
 
 	dev_info(ave->dev, "session: self-test %s (%d)\n",
-		 ret ? "FAILED" : "reached Start_AVC OK", ret);
+		 ret ? "FAILED"
+		     : (session_frame ? "encoded one frame OK"
+				      : "reached Start_AVC OK"), ret);
 	return ret;
 }

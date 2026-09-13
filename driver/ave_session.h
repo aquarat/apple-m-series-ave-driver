@@ -5,7 +5,7 @@
  * UNTESTED ON HARDWARE. This sends the opening command sequence (Config ->
  * Open -> Start_AVC) for a fixed-QP, I-frame-only, 8-bit 4:2:0 AVC session
  * over the IO channel and checks each firmware reply. It is a diagnostic
- * probe, not the encode path: it stops before Process/encode and is gated
+ * probe, not the encode path: it and, with session_frame=1, encodes one I-frame (docs/53) and is gated
  * behind the module parameter ave_session.session_selftest (off by default).
  *
  * The handshake must already be complete (ave->boot_phase == READY, the IO

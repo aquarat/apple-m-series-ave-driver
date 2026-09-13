@@ -300,6 +300,20 @@ int ave_cmd_build_start_avc(const struct ave_cmd_abi *abi, u8 *buf, size_t len,
 		    !s->coded_hdr[i].addr ||
 		    s->coded_hdr[i].size < l->coded_hdr_bytes)
 			return -EINVAL;
+	if (s->n_src_nbr) {
+		u32 g;
+
+		if (!l->src_nbr_max || s->n_src_nbr > l->src_nbr_max)
+			return -EINVAL;
+		for (g = 0; g < AVE_SRC_NBR_GROUPS; g++) {
+			if (l->src_nbr_set[g] == AVE_OFF_NONE)
+				continue;
+			for (i = 0; i < s->n_src_nbr; i++)
+				if (!s->src_nbr[g][i] ||
+				    (s->src_nbr[g][i] & (AVE_STRIDE_ALIGN - 1)))
+					return -EINVAL;
+		}
+	}
 
 	ret = ave_cmd_begin(abi, AVE_OP_START_AVC, buf, len, ctx, 0, &w);
 	if (ret < 0)
@@ -357,6 +371,14 @@ int ave_cmd_build_start_avc(const struct ave_cmd_abi *abi, u8 *buf, size_t len,
 		wr32(&w, l->coded_hdr_size + i * l->coded_hdr_size_stride,
 		     s->coded_hdr[i].size);
 	}
+	for (i = 0; i < s->n_src_nbr; i++) {
+		u32 g;
+
+		for (g = 0; g < AVE_SRC_NBR_GROUPS; g++)
+			if (l->src_nbr_set[g] != AVE_OFF_NONE)
+				wr64(&w, l->src_nbr_set[g] + i * 8,
+				     s->src_nbr[g][i]);
+	}
 
 	/* ---- SPS ---- */
 	wr32(&w, sps->profile, sps->enum_profile_level ? (u32)prof : s->profile_idc);
@@ -403,7 +425,7 @@ int ave_cmd_build_process_avc(const struct ave_cmd_abi *abi, u8 *buf,
 {
 	const struct ave_process_avc_layout *l;
 	struct ave_wr w;
-	u32 base;
+	u32 base, i;
 	int ret;
 
 	if (!abi || !f)
@@ -424,7 +446,24 @@ int ave_cmd_build_process_avc(const struct ave_cmd_abi *abi, u8 *buf,
 	if (f->coded_index >= abi->start_avc.coded_max || !f->coded_addr ||
 	    !f->coded_hdr_addr || !f->coded_size)
 		return -EINVAL;
-	if ((f->recon_luma_addr & 127) || (f->recon_chroma_addr & 127))
+	if ((f->recon_luma_addr & 127) || (f->recon_chroma_addr & 127) ||
+	    (f->recon_luma_lsb_addr & 127) || (f->recon_chroma_lsb_addr & 127))
+		return -EINVAL;
+	if (f->n_src_nbr) {
+		u32 g, i;
+
+		if (!l->src_nbr_max || f->n_src_nbr > l->src_nbr_max)
+			return -EINVAL;
+		for (g = 0; g < AVE_SRC_NBR_GROUPS; g++) {
+			if (l->src_nbr_set[g] == AVE_OFF_NONE)
+				continue;
+			for (i = 0; i < f->n_src_nbr; i++)
+				if (!f->src_nbr[g][i] ||
+				    (f->src_nbr[g][i] & (AVE_STRIDE_ALIGN - 1)))
+					return -EINVAL;
+		}
+	}
+	if (f->n_scratch > l->scratch_n)
 		return -EINVAL;
 
 	ret = ave_cmd_begin(abi, AVE_OP_PROCESS_AVC, buf, len, ctx, slot, &w);
@@ -468,8 +507,86 @@ int ave_cmd_build_process_avc(const struct ave_cmd_abi *abi, u8 *buf,
 		wr64(&w, base + l->recon_uv, f->recon_chroma_addr);
 	if (f->recon_mv_addr)
 		wr64(&w, base + l->recon_mv, f->recon_mv_addr);
+	if (f->recon_luma_lsb_addr && l->recon_y_lsb != AVE_OFF_NONE)
+		wr64(&w, base + l->recon_y_lsb, f->recon_luma_lsb_addr);
+	if (f->recon_chroma_lsb_addr && l->recon_uv_lsb != AVE_OFF_NONE)
+		wr64(&w, base + l->recon_uv_lsb, f->recon_chroma_lsb_addr);
+
+	wr32_opt(&w, base + l->ctx_index, f->ctx_index);
+	/*
+	 * forceKeyFrame is an int the firmware reads in GetFrameType; the host
+	 * writes 0 for its own "3" sentinel (kext 0xfffffe0008eab8d8-8e4), so
+	 * only 0 and 1 are ever sent. It has no effect when the frame type is
+	 * given explicitly (anything but 5 skips GetFrameType, fw 0x145d4).
+	 */
+	wr32_opt(&w, base + l->force_key_frame, f->force_key_frame);
+	if (l->force_non_ref != AVE_OFF_NONE)
+		wr8(&w, base + l->force_non_ref, 0);
+	if (l->update_param_sets != AVE_OFF_NONE)
+		wr8(&w, base + l->update_param_sets, f->update_param_sets);
+	wr32_opt(&w, base + l->scaling_matrix_mode, 0);
+
+	for (i = 0; i < f->n_src_nbr; i++) {
+		u32 g;
+
+		for (g = 0; g < AVE_SRC_NBR_GROUPS; g++)
+			if (l->src_nbr_set[g] != AVE_OFF_NONE)
+				wr64(&w, base + l->src_nbr_set[g] + i * 8,
+				     f->src_nbr[g][i]);
+	}
+	for (i = 0; i < f->n_scratch; i++)
+		if (f->scratch[i] && l->scratch[i] != AVE_OFF_NONE)
+			wr64(&w, base + l->scratch[i], f->scratch[i]);
 
 	return ave_cmd_end(&w);
+}
+
+int ave_cmd_coded_length(const struct ave_cmd_abi *abi, const void *hdr,
+			 size_t hdr_len, struct ave_coded_info *out)
+{
+	const struct ave_coded_hdr_layout *c;
+	const u8 *h = hdr;
+	u32 i, written = 0, removed = 0;
+
+	if (!abi || !hdr || !out)
+		return -EINVAL;
+	c = &abi->coded_hdr;
+	if (!c->slice_stride)
+		return -EINVAL;		/* layout not read for this ABI */
+	if (hdr_len < c->min_bytes)
+		return -EINVAL;
+
+	memset(out, 0, sizeof(*out));
+	out->frame_type = get_unaligned_le32(h + c->frame_type);
+	out->frame_num = get_unaligned_le32(h + c->frame_num);
+	out->sps_pps_bits = get_unaligned_le32(h + c->sps_pps_bits);
+
+	for (i = 0; i < c->slice_max; i++) {
+		u32 rec = i * c->slice_stride;
+		u32 n;
+		int trim;
+
+		if ((u64)rec + c->slice_bytes_removed + 1 > hdr_len)
+			break;
+		n = get_unaligned_le32(h + rec + c->slice_bytes_written);
+		if (!n)
+			break;
+		trim = (signed char)h[rec + c->slice_bytes_removed];
+		if (trim < 0)
+			return -EPROTO;	/* Apple bails here too (0xec5078) */
+		/* A byte count larger than the whole buffer is nonsense. */
+		if (n > 0x40000000u || written > 0x40000000u - n)
+			return -EPROTO;
+		written += n;
+		removed += (u32)trim;
+		out->slices++;
+	}
+	if (removed > written)
+		return -EPROTO;
+
+	out->bytes_removed = removed;
+	out->bytes = written - removed;
+	return 0;
 }
 
 int ave_cmd_check_reply(const struct ave_cmd_abi *abi, enum ave_op op,
