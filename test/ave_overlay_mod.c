@@ -23,6 +23,8 @@
 
 #include "ave_overlay_dtbo.h"
 #include "ave_overlay_noiommu_dtbo.h"
+#include "ave_overlay_e2_dtbo.h"
+#include "ave_overlay_e3_dtbo.h"
 
 static int ovcs_id;
 
@@ -39,23 +41,54 @@ static int ovcs_id;
  *                      be running iBoot's firmware, whose addressing
  *                      assumptions we have not read.
  *
+ * variant=2 (docs/44 E2): variant=1's node plus "cpudart" and "dapf" reg
+ *                      entries appended, for a read-only CPUDART/DAPF dump
+ *                      that apple-dart has never touched. Stop at stage 8.
+ *
+ * variant=3 (docs/44 E2 control, E3): variant=0 plus the same two appended
+ *                      reg entries. The DART is bound and translating; the
+ *                      driver may program the DAPF (dapf_set=).
+ *
  * Selected here rather than at build time so the risk is chosen when the
  * module is loaded, with the consequence in front of whoever types it.
+ * Any other value is refused; before variants 2 and 3 existed every non-zero
+ * value meant variant=1.
  */
 static int variant;
 module_param(variant, int, 0444);
 MODULE_PARM_DESC(variant,
-		 "0 = with DART (default), 1 = no IOMMU: preserves iBoot's DART config, NO backstop");
+		 "0 = with DART (default), 1 = no IOMMU: preserves iBoot's DART config, NO backstop, 2 = 1 + cpudart/dapf regs (E2), 3 = 0 + cpudart/dapf regs (E3)");
 
 static int __init ave_ov_init(void)
 {
-	const void *fdt = variant ? ave_overlay_noiommu_dtbo : ave_overlay_dtbo;
-	unsigned int len = variant ? ave_overlay_noiommu_dtbo_len
-				   : ave_overlay_dtbo_len;
+	const void *fdt;
+	unsigned int len;
 	int ret;
 
-	if (variant)
+	switch (variant) {
+	case 0:
+		fdt = ave_overlay_dtbo;
+		len = ave_overlay_dtbo_len;
+		break;
+	case 1:
+		fdt = ave_overlay_noiommu_dtbo;
+		len = ave_overlay_noiommu_dtbo_len;
 		pr_warn("ave-overlay: variant=1 - NO IOMMU, the coprocessor is unconstrained\n");
+		break;
+	case 2:
+		fdt = ave_overlay_e2_dtbo;
+		len = ave_overlay_e2_dtbo_len;
+		pr_warn("ave-overlay: variant=2 - NO IOMMU, plus cpudart/dapf regs for the E2 dump; stop_after<=8\n");
+		break;
+	case 3:
+		fdt = ave_overlay_e3_dtbo;
+		len = ave_overlay_e3_dtbo_len;
+		pr_warn("ave-overlay: variant=3 - with DART, plus cpudart/dapf regs (E2 control / E3)\n");
+		break;
+	default:
+		pr_err("ave-overlay: variant=%d is not 0, 1, 2 or 3; refusing\n", variant);
+		return -EINVAL;
+	}
 
 	ret = of_overlay_fdt_apply((void *)fdt, len,
 				   &ovcs_id, NULL);

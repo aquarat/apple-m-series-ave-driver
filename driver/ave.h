@@ -34,19 +34,25 @@ struct ave_dma_buf {
 };
 
 /*
- * One IPC channel. The descriptor comes from the firmware; head and tail are
+ * One IPC channel, indexed by host channel id (enum ave_boot_ch_id in
+ * ave_abi_boot.h). The descriptor comes from the firmware; rd/wr are
  * host-private (the firmware never reads them - the only shared state is each
- * slot's phase bit).
+ * slot's phase bit). Layout mirrors Apple's 0x30-byte handle, docs/36 §6.
  */
 struct ave_channel {
+	bool		bound;
 	u32		id;
-	u32		doorbell_bit;
-	u32		nslots;
-	u32		head;
-	u32		tail;
-	u8		phase;
+	u32		desc_index;	/* position in the firmware's table */
+	u32		dir;		/* descriptor +0x40 */
+	u32		doorbell_bit;	/* descriptor +0x44 */
+	u32		nslots;		/* descriptor +0x48 */
+	u32		type;		/* host ring type, from dir */
+	s32		rd;		/* -1 = nothing outstanding */
+	s32		wr;		/* -1 = full */
+	u32		nrecv;
+	u32		nsend;
 	void		*ring;		/* into ipc.cpu */
-	dma_addr_t	ring_iova;
+	u64		ring_fw;	/* descriptor +0x4c */
 };
 
 struct ave_device {
@@ -55,9 +61,55 @@ struct ave_device {
 	enum ave_fw_abi		fw_abi;		/* chosen before any command */
 
 	/* --- boot/IPC state (owner: ave_ipc.c work) --- */
+	/*
+	 * Per-version boot/IPC descriptor (ave_abi_boot.h), set by
+	 * ave_ipc_init(). NULL until then; the IRQ handler uses it to know the
+	 * lock below has been initialised.
+	 */
+	const struct ave_boot_abi *boot_abi;
+	spinlock_t		ipc_lock;	/* mailbox capture, rings, pool */
+	struct gen_pool		*ipc_pool;	/* 64-byte granule over FwIPC */
+	u8			boot_phase;	/* enum in ave_ipc.c */
+	bool			ipc_up;		/* ready flag cleared: rings live */
+	/* Mailbox messages the IRQ handler took before RecvIOPMsg could. */
+	bool			mbox_pending;
+	u32			mbox_status;
+	u32			mbox[4];
+	u32			msg1[4];	/* message 1 as received */
+	u64			ipc_fw_base;	/* message 3: fw view of FwIPC */
+	struct ave_dma_buf	fwheap;		/* message 1 scratch 3 */
+	void			*chanmem;	/* channel block, in FwIPC */
+	u32			chanmem_size;
+	void			*ipcinfo;	/* 0x50-byte info block, in FwIPC */
+	void			*info_log;	/* 26.6.2 +0x10 block, in FwIPC */
+	u32			client_buf_size; /* message 5 scratch 2 */
+	u64			time_base;	/* 26.6.2 scratch 4/5 */
+	/* SHAREDMALLOC allocations (gen_pool needs the size back). */
+#define AVE_SHMALLOC_MAX	64
+	struct { void *cpu; u32 size; } shm[AVE_SHMALLOC_MAX];
+	/*
+	 * Channel dispatch after the handshake, called from the IRQ handler.
+	 * A pointer so ave_drv.c needs no ave_abi_boot.h include; see ave_ipc.c.
+	 */
+	void			(*ipc_irq)(struct ave_device *ave, u32 status);
+	/* Command-layer hook for IO / IO_T2H payloads (CPU address or NULL). */
+	void			(*ipc_rx)(struct ave_device *ave, u32 chan_id,
+					  void *buf, u32 size, u32 flags);
+	struct ratelimit_state	fwlog_rs;
+	unsigned long		fwlog_lines;
 	/* --- end boot/IPC --- */
 
 	/* --- DAPF / fetch-path state (owner: ave_fw.c / ave_dapf.c work) --- */
+	/* Optional "cpudart"/"dapf" reg entries: devm_ioremap, NOT requested. */
+	void __iomem		*cpudart;
+	void __iomem		*dapf;
+	phys_addr_t		cpudart_phys;
+	phys_addr_t		dapf_phys;
+	bool			dapf_programmed;
+	/* iBoot segment DART mappings (ave_fw.c, fw_map_data / fw_map_text) */
+	struct iommu_domain	*iboot_domain;
+	bool			iboot_data_mapped;
+	bool			iboot_text_mapped;
 	/* --- end DAPF --- */
 
 	/*
@@ -96,11 +148,11 @@ struct ave_device {
 		u64		map_iova;	/* where the core fetches */
 	} fw;
 
-	struct ave_dma_buf	ipc;		/* the 20 MiB FwIPC region */
-	struct ave_dma_buf	fwcfg;		/* 56-byte boot argument block */
-	struct ave_dma_buf	fwlog;		/* firmware log surface        */
-	struct ave_channel	chan[AVE_IPC_MAX_CHANNELS];
-	unsigned int		nchannels;
+	struct ave_dma_buf	ipc;		/* FwIPC: 7 MiB (13.5) / 20 MiB (26.6.2) */
+	struct ave_dma_buf	fwcfg;		/* 26.6.2 only: 56-byte boot block */
+	struct ave_dma_buf	fwlog;		/* 26.6.2 only: FwLog surface      */
+	struct ave_channel	chan[8];	/* by host id; AVE_CH_MAX */
+	unsigned int		nchannels;	/* descriptors bound */
 
 	bool			running;
 };

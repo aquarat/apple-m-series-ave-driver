@@ -1,0 +1,496 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/*
+ * Apple AVE - pure command builders for every supported firmware ABI.
+ *
+ * UNTESTED ON HARDWARE. See ave_cmd.h. Every offset is read through
+ * struct ave_cmd_abi; there are no wire offsets in this file.
+ */
+#include <linux/errno.h>
+#include <linux/string.h>
+#include <linux/types.h>
+#include <linux/unaligned.h>
+
+#define AVE_CMD_ABI_DEFINE_TABLES
+#include "ave_cmd.h"
+
+const struct ave_cmd_abi *ave_cmd_abi_get(enum ave_fw_abi abi)
+{
+	switch (abi) {
+	case AVE_ABI_MACOS_13_5:
+		return &ave_cmd_abi_13_5;
+	case AVE_ABI_MACOS_26_6:
+		return &ave_cmd_abi_26_6;
+	default:
+		return NULL;
+	}
+}
+
+size_t ave_cmd_size(const struct ave_cmd_abi *abi, enum ave_op op)
+{
+	if (!abi || op >= AVE_OP_COUNT || !abi->cmd[op].id)
+		return 0;
+	return abi->cmd[op].size;
+}
+
+/*
+ * Bounds-checked field writer. A table offset that runs past the command is a
+ * table bug; it poisons the writer instead of scribbling past the buffer.
+ */
+struct ave_wr {
+	u8	*buf;
+	size_t	size;
+	int	err;
+};
+
+static bool ave_wr_ok(struct ave_wr *w, u32 off, u32 width)
+{
+	if (w->err || off > w->size || width > w->size - off) {
+		w->err = -EINVAL;
+		return false;
+	}
+	return true;
+}
+
+static void wr8(struct ave_wr *w, u32 off, u8 v)
+{
+	if (ave_wr_ok(w, off, 1))
+		w->buf[off] = v;
+}
+
+static void wr16(struct ave_wr *w, u32 off, u16 v)
+{
+	if (ave_wr_ok(w, off, 2))
+		put_unaligned_le16(v, w->buf + off);
+}
+
+static void wr32(struct ave_wr *w, u32 off, u32 v)
+{
+	if (ave_wr_ok(w, off, 4))
+		put_unaligned_le32(v, w->buf + off);
+}
+
+static void wr64(struct ave_wr *w, u32 off, u64 v)
+{
+	if (ave_wr_ok(w, off, 8))
+		put_unaligned_le64(v, w->buf + off);
+}
+
+/* Write only if the field exists in this ABI. */
+static void wr32_opt(struct ave_wr *w, u32 off, u32 v)
+{
+	if (off != AVE_OFF_NONE)
+		wr32(w, off, v);
+}
+
+/* IEEE-754 binary64 bit pattern of an unsigned integer, without FP. */
+static u64 ave_u32_to_f64_bits(u32 v)
+{
+	u64 mant;
+	int e = 31;
+
+	if (!v)
+		return 0;
+	while (!(v & (1u << e)))
+		e--;
+	mant = ((u64)v << (52 - e)) & ((1ull << 52) - 1);
+	return ((u64)(1023 + e) << 52) | mant;
+}
+
+/* Zero-fill and header. Returns the command size or -EINVAL. */
+static int ave_cmd_begin(const struct ave_cmd_abi *abi, enum ave_op op,
+			 u8 *buf, size_t len, const struct ave_cmd_ctx *ctx,
+			 u32 slot, struct ave_wr *w)
+{
+	const struct ave_cmd_desc *d;
+	const struct ave_hdr_layout *h;
+	bool global, hevc;
+
+	if (!abi || !buf || !ctx || op >= AVE_OP_COUNT)
+		return -EINVAL;
+	d = &abi->cmd[op];
+	h = &abi->hdr;
+	if (!d->id || d->size < AVE_CMD_HDR_SIZE || len < d->size)
+		return -EINVAL;
+
+	if (d->slot != AVE_SLOT_CALLER)
+		slot = d->slot;
+	else if (slot >= h->max_slot)
+		return -EINVAL;
+
+	global = d->slot == AVE_SLOT_GLOBAL;
+	hevc = op == AVE_OP_START_HEVC || op == AVE_OP_PROCESS_HEVC;
+	if (!global && h->client_id_bytes == 4 && ctx->client_id > 0xffffffffull)
+		return -EINVAL;
+
+	memset(buf, 0, d->size);
+	w->buf = buf;
+	w->size = d->size;
+	w->err = 0;
+
+	wr16(w, 0, d->id);
+	wr64(w, h->count, ctx->count);
+	if (!global) {
+		/* Config and Halt carry no client, type or codec. */
+		if (h->client_id_bytes == 8)
+			wr64(w, h->client_id, ctx->client_id);
+		else
+			wr32(w, h->client_id, (u32)ctx->client_id);
+		wr32_opt(w, h->work_type, AVE_WORK_ENC);
+		wr32(w, h->codec, hevc ? h->codec_hevc : h->codec_avc);
+	}
+	wr32(w, h->slot, slot);
+	wr32(w, h->priority, d->priority);
+	if (ave_wr_ok(w, h->timeout, sizeof(ctx->timeout)))
+		memcpy(buf + h->timeout, ctx->timeout, sizeof(ctx->timeout));
+
+	return w->err ? w->err : (int)d->size;
+}
+
+static int ave_cmd_end(struct ave_wr *w)
+{
+	if (w->err) {
+		memset(w->buf, 0, w->size);
+		return w->err;
+	}
+	return (int)w->size;
+}
+
+int ave_cmd_build_hdr(const struct ave_cmd_abi *abi, enum ave_op op,
+		      u8 *buf, size_t len, const struct ave_cmd_ctx *ctx,
+		      u32 slot)
+{
+	struct ave_wr w;
+	int ret = ave_cmd_begin(abi, op, buf, len, ctx, slot, &w);
+
+	return ret < 0 ? ret : ave_cmd_end(&w);
+}
+
+int ave_cmd_build_simple(const struct ave_cmd_abi *abi, enum ave_op op,
+			 u8 *buf, size_t len, const struct ave_cmd_ctx *ctx)
+{
+	switch (op) {
+	case AVE_OP_HALT:
+	case AVE_OP_OPEN:
+	case AVE_OP_CLOSE:	/* 13.5 +0x40 u8 (client[0xE0C95]) left 0 */
+	case AVE_OP_STOP:
+	case AVE_OP_COMPLETE:
+	case AVE_OP_FLUSH:
+		return ave_cmd_build_hdr(abi, op, buf, len, ctx, 0);
+	default:
+		return -EINVAL;
+	}
+}
+
+int ave_cmd_build_config(const struct ave_cmd_abi *abi, u8 *buf, size_t len,
+			 const struct ave_cmd_ctx *ctx,
+			 const struct ave_config_params *p)
+{
+	const struct ave_config_layout *c;
+	struct ave_wr w;
+	int ret;
+
+	if (!abi || !p)
+		return -EINVAL;
+	c = &abi->config;
+	if (!p->shmem_addr || p->shmem_size < c->shmem_min)
+		return -EINVAL;
+	if (c->dsid_bytes == 1 && p->dsid > 0xff)
+		return -EINVAL;
+
+	ret = ave_cmd_begin(abi, AVE_OP_CONFIG, buf, len, ctx, 0, &w);
+	if (ret < 0)
+		return ret;
+
+	wr8(&w, c->skip_mcpu, p->skip_mcpu);
+	wr8(&w, c->create_mcpu, p->create_mcpu);
+	if (c->reg_dart_addr != AVE_OFF_NONE)
+		wr64(&w, c->reg_dart_addr, p->reg_dart_addr);
+	wr32(&w, c->doorbell_cadence0, p->doorbell_cadence[0]);
+	wr32(&w, c->doorbell_cadence1, p->doorbell_cadence[1]);
+	if (c->dsid_bytes == 1) {
+		wr8(&w, c->dsid, p->dsid);
+		if (c->dsid2 != AVE_OFF_NONE)
+			wr8(&w, c->dsid2, p->dsid);
+	} else {
+		wr32(&w, c->dsid, p->dsid);
+	}
+	wr64(&w, c->shmem_addr, p->shmem_addr);
+	wr32(&w, c->shmem_size, p->shmem_size);
+
+	return ave_cmd_end(&w);
+}
+
+/* level_idc -> _E_AVC_Level (26.6.2 AVC_FindLevelIdc table, docs/37 §3). */
+static int ave_avc_level_enum(u8 level_idc)
+{
+	static const u8 idc[] = {
+		10, 1, 11, 12, 13, 20, 21, 22, 30, 31,
+		32, 40, 41, 42, 50, 51, 52, 60, 61, 62,
+	};
+	int i;
+
+	for (i = 0; i < (int)sizeof(idc); i++)
+		if (i != 1 && idc[i] == level_idc)	/* 1b (eLevel 2) not offered */
+			return i + 1;
+	return -EINVAL;
+}
+
+/* profile_idc -> _E_AVC_Profile (26.6.2 AVC_FindProfileIdc, docs/37 §3). */
+static int ave_avc_profile_enum(u8 profile_idc)
+{
+	switch (profile_idc) {
+	case 66:	return 2;	/* Baseline */
+	case 77:	return 4;	/* Main */
+	case 100:	return 6;	/* High */
+	default:	return -EINVAL;
+	}
+}
+
+#define AVE_AVC_MIN_W	192	/* 13.5 kext 0xfffffe0008ea3d9c; same numbers */
+#define AVE_AVC_MIN_H	96	/* table-driven on 26.6.2 (docs/47 §5)       */
+#define AVE_AVC_MAX_WH	4096
+
+int ave_cmd_build_start_avc(const struct ave_cmd_abi *abi, u8 *buf, size_t len,
+			    const struct ave_cmd_ctx *ctx,
+			    const struct ave_avc_session *s)
+{
+	const struct ave_start_avc_layout *l;
+	const struct ave_sps_layout *sps;
+	const struct ave_pps_layout *pps;
+	u32 cw, ch, i;
+	int prof, lvl, ret;
+	struct ave_wr w;
+
+	if (!abi || !s)
+		return -EINVAL;
+	l = &abi->start_avc;
+	sps = &abi->sps;
+	pps = &abi->pps;
+
+	/* ---- parameter validation, before touching the buffer ---- */
+	if (s->width < AVE_AVC_MIN_W || s->width > AVE_AVC_MAX_WH ||
+	    s->height < AVE_AVC_MIN_H || s->height > AVE_AVC_MAX_WH ||
+	    (s->width & 1) || (s->height & 1))
+		return -EINVAL;
+	if (!s->frame_rate || !s->key_interval)
+		return -EINVAL;
+	if (s->qp_i > 51 || s->qp_p > 51 || s->qp_b > 51)
+		return -EINVAL;
+	prof = ave_avc_profile_enum(s->profile_idc);
+	lvl = ave_avc_level_enum(s->level_idc);
+	if (prof < 0 || lvl < 0 || (s->profile_idc == 66 && s->cabac))
+		return -EINVAL;
+	if (!s->fw_client_addr || !s->fw_client_size ||
+	    !s->fw_client_mem_addr || !s->fw_client_mem_size)
+		return -EINVAL;
+	if (!s->recon || !s->n_recon || s->n_recon > l->recon_max)
+		return -EINVAL;
+	if (!s->coded || !s->coded_hdr || !s->n_coded ||
+	    s->n_coded > l->coded_max)
+		return -EINVAL;
+	for (i = 0; i < s->n_recon; i++)
+		if (!s->recon[i].addr || (s->recon[i].addr & 127))
+			return -EINVAL;
+	for (i = 0; i < s->n_coded; i++)
+		if (!s->coded[i].addr || !s->coded[i].size ||
+		    !s->coded_hdr[i].addr ||
+		    s->coded_hdr[i].size < l->coded_hdr_bytes)
+			return -EINVAL;
+
+	ret = ave_cmd_begin(abi, AVE_OP_START_AVC, buf, len, ctx, 0, &w);
+	if (ret < 0)
+		return ret;
+
+	cw = ave_mb_align(s->width);
+	ch = ave_mb_align(s->height);
+
+	/* ---- per-client firmware buffers ---- */
+	wr64(&w, l->fw_client_addr, s->fw_client_addr);
+	wr32(&w, l->fw_client_size, s->fw_client_size);
+	wr64(&w, l->fw_client_mem_addr, s->fw_client_mem_addr);
+	wr32(&w, l->fw_client_mem_size, s->fw_client_mem_size);
+
+	/* ---- geometry: MB-aligned, display size via SPS cropping (docs/38) */
+	wr32(&w, l->width, cw);
+	wr32(&w, l->height, ch);
+
+	/* ---- fixed-QP rate control ---- */
+	wr32(&w, l->frame_rate, s->frame_rate);
+	wr32(&w, l->bitrate, s->bitrate);
+	wr32(&w, l->rc_mode, l->rc_mode_fixed_qp);
+	if (l->rc_feature != AVE_OFF_NONE)
+		wr64(&w, l->rc_feature, l->rc_feature_fixed_qp);
+	wr32(&w, l->qp_i, s->qp_i);
+	wr32(&w, l->qp_p, s->qp_p);
+	wr32(&w, l->qp_b, s->qp_b);
+	wr32(&w, l->qp_min, 0);
+	wr32(&w, l->qp_max, 51);
+	wr32(&w, l->key_interval, s->key_interval);
+	wr32_opt(&w, l->key_interval_strict, s->key_interval);
+	wr32(&w, l->slice_num, 1);
+
+	/* ---- buffer tables ---- */
+	for (i = 0; i < s->n_recon; i++) {
+		u32 e = l->recon_set + i * l->recon_stride;
+
+		wr64(&w, e + l->recon_addr, s->recon[i].addr);
+		if (l->recon_size != AVE_OFF_NONE)
+			wr32(&w, e + l->recon_size, s->recon[i].luma_size);
+		/* 26.6.2 uncompressed entry is {base, luma, base, 0}, docs/21 §3.2 */
+		if (l->recon_meta_addr != AVE_OFF_NONE)
+			wr64(&w, e + l->recon_meta_addr, s->recon[i].addr);
+	}
+	for (i = 0; i < s->n_coded; i++) {
+		wr64(&w, l->coded_addr + i * l->coded_addr_stride, s->coded[i].addr);
+		wr32(&w, l->coded_size + i * l->coded_size_stride, s->coded[i].size);
+		wr64(&w, l->coded_hdr_addr + i * l->coded_hdr_addr_stride,
+		     s->coded_hdr[i].addr);
+		wr32(&w, l->coded_hdr_size + i * l->coded_hdr_size_stride,
+		     s->coded_hdr[i].size);
+	}
+
+	/* ---- SPS ---- */
+	wr32(&w, sps->profile, sps->enum_profile_level ? (u32)prof : s->profile_idc);
+	wr32(&w, sps->level, sps->enum_profile_level ? (u32)lvl : s->level_idc);
+	wr32(&w, sps->seq_parameter_set_id, 0);		/* must be 0 (docs/37 §5.5) */
+	wr32(&w, sps->chroma_format_idc, 1);		/* 4:2:0 */
+	wr32(&w, sps->bit_depth_luma_minus8, 0);	/* 8-bit */
+	wr32(&w, sps->bit_depth_chroma_minus8, 0);
+	wr32(&w, sps->log2_max_frame_num_minus4, 0);
+	wr32(&w, sps->pic_order_cnt_type, 2);		/* 1 unusable (docs/37 §5.6) */
+	wr32(&w, sps->max_num_ref_frames, 1);
+	wr8(&w, sps->gaps_in_frame_num_allowed, 0);
+	wr32(&w, sps->pic_width_in_mbs_minus1, cw / AVE_MB_SIZE - 1);
+	wr32(&w, sps->pic_height_in_map_units_minus1, ch / AVE_MB_SIZE - 1);
+	wr32(&w, sps->frame_mbs_only_flag, 1);
+	wr32(&w, sps->direct_8x8_inference_flag, 1);
+	wr8(&w, sps->vui_parameters_present_flag, 0);	/* 13.5 VUI has no timing */
+	/* CropUnitX = CropUnitY = 2 for 4:2:0 progressive */
+	wr8(&w, sps->frame_cropping_flag, cw != s->width || ch != s->height);
+	wr32(&w, sps->crop_left, 0);
+	wr32(&w, sps->crop_right, (cw - s->width) / 2);
+	wr32(&w, sps->crop_top, 0);
+	wr32(&w, sps->crop_bottom, (ch - s->height) / 2);
+	wr8(&w, sps->fw_creates_header, 1);		/* == PPS's (docs/37 §5.1) */
+	wr32(&w, sps->header_len, 0);			/* 26.6.2 checks == 0 */
+
+	/* ---- PPS ---- */
+	wr32(&w, pps->pic_parameter_set_id, 0);
+	wr32(&w, pps->seq_parameter_set_id, 0);
+	wr32(&w, pps->entropy_coding_mode_flag, s->cabac);
+	wr32(&w, pps->num_slice_groups_minus1, 0);	/* must be 0 (docs/37 §5.7) */
+	wr32(&w, pps->pic_init_qp_minus26, 0);
+	wr8(&w, pps->deblocking_filter_control, 1);
+	wr8(&w, pps->constrained_intra_pred, 0);
+	wr8(&w, pps->transform_8x8_mode, s->profile_idc >= 100);
+	wr8(&w, pps->fw_creates_header, 1);
+
+	return ave_cmd_end(&w);
+}
+
+int ave_cmd_build_process_avc(const struct ave_cmd_abi *abi, u8 *buf,
+			      size_t len, const struct ave_cmd_ctx *ctx,
+			      u32 slot, const struct ave_avc_frame *f)
+{
+	const struct ave_process_avc_layout *l;
+	struct ave_wr w;
+	u32 base;
+	int ret;
+
+	if (!abi || !f)
+		return -EINVAL;
+	l = &abi->process_avc;
+
+	if (f->frame_type != AVE_FRAME_TYPE_I &&
+	    f->frame_type != AVE_FRAME_TYPE_IDR)
+		return -EINVAL;
+	if (!f->in_luma_addr || (f->in_luma_addr & (AVE_STRIDE_ALIGN - 1)) ||
+	    !f->in_luma_stride || (f->in_luma_stride % AVE_STRIDE_ALIGN) ||
+	    !f->in_chroma_addr || (f->in_chroma_addr & (AVE_STRIDE_ALIGN - 1)) ||
+	    !f->in_chroma_stride || (f->in_chroma_stride % AVE_STRIDE_ALIGN))
+		return -EINVAL;
+	if (l->in_luma_size != AVE_OFF_NONE &&
+	    (!f->in_luma_size || !f->in_chroma_size))
+		return -EINVAL;
+	if (f->coded_index >= abi->start_avc.coded_max || !f->coded_addr ||
+	    !f->coded_hdr_addr || !f->coded_size)
+		return -EINVAL;
+	if ((f->recon_luma_addr & 127) || (f->recon_chroma_addr & 127))
+		return -EINVAL;
+
+	ret = ave_cmd_begin(abi, AVE_OP_PROCESS_AVC, buf, len, ctx, slot, &w);
+	if (ret < 0)
+		return ret;
+
+	base = l->picmgmt;
+	if (!ave_wr_ok(&w, base, l->picmgmt_size))
+		return ave_cmd_end(&w);
+	if (l->picmgmt_size_word)
+		wr32(&w, base, l->picmgmt_size);
+
+	wr32(&w, base + l->frame_type, f->frame_type);
+	if (l->frame_num != AVE_OFF_NONE)
+		wr64(&w, base + l->frame_num, f->frame_num);
+	if (l->poc != AVE_OFF_NONE)
+		wr32(&w, base + l->poc, f->poc);
+	if (l->frame_rate_f64 != AVE_OFF_NONE && f->frame_rate)
+		wr64(&w, base + l->frame_rate_f64,
+		     ave_u32_to_f64_bits(f->frame_rate));
+	wr8(&w, base + l->input_compressed, 0);
+
+	wr64(&w, base + l->in_luma_addr, f->in_luma_addr);
+	wr32(&w, base + l->in_luma_stride, f->in_luma_stride);
+	wr64(&w, base + l->in_chroma_addr, f->in_chroma_addr);
+	wr32(&w, base + l->in_chroma_stride, f->in_chroma_stride);
+	if (l->in_luma_size != AVE_OFF_NONE)
+		wr32(&w, base + l->in_luma_size, f->in_luma_size);
+	if (l->in_chroma_size != AVE_OFF_NONE)
+		wr32(&w, base + l->in_chroma_size, f->in_chroma_size);
+
+	wr8(&w, base + l->out_mode, 0);		/* Coded == CodedData[index] arm */
+	wr32(&w, base + l->out_index, f->coded_index);
+	wr64(&w, base + l->out_coded, f->coded_addr);
+	wr64(&w, base + l->out_coded_hdr, f->coded_hdr_addr);
+	wr32(&w, base + l->out_coded_size, f->coded_size);
+
+	if (f->recon_luma_addr)
+		wr64(&w, base + l->recon_y, f->recon_luma_addr);
+	if (f->recon_chroma_addr)
+		wr64(&w, base + l->recon_uv, f->recon_chroma_addr);
+	if (f->recon_mv_addr)
+		wr64(&w, base + l->recon_mv, f->recon_mv_addr);
+
+	return ave_cmd_end(&w);
+}
+
+int ave_cmd_check_reply(const struct ave_cmd_abi *abi, enum ave_op op,
+			const u8 *msg, size_t len, u64 client_id, u32 *status)
+{
+	const struct ave_cmd_desc *d;
+	const struct ave_reply_layout *r;
+	u64 cid;
+	u32 st;
+
+	if (!abi || !msg || op >= AVE_OP_COUNT)
+		return -EINVAL;
+	d = &abi->cmd[op];
+	r = &abi->reply;
+	if (!d->id || !d->reply_id || !d->reply_size)
+		return -EINVAL;
+	if (len < d->reply_size || r->status + 4u > d->reply_size ||
+	    r->client_id + (u32)r->client_id_bytes > d->reply_size)
+		return -EPROTO;
+	if (get_unaligned_le16(msg + r->id) != d->reply_id)
+		return -EPROTO;
+
+	st = get_unaligned_le32(msg + r->status);
+	if (status)
+		*status = st;
+
+	cid = r->client_id_bytes == 8 ? get_unaligned_le64(msg + r->client_id)
+				      : get_unaligned_le32(msg + r->client_id);
+	if (cid != (r->client_id_bytes == 8 ? client_id : (u32)client_id))
+		return -EPROTO;
+
+	return st == r->status_ok ? 0 : -EIO;
+}
