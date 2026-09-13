@@ -198,3 +198,9 @@ again, `sudo update-m1n1` regenerates a stock `boot.bin`.
   `sudo` in macOS). Tested on a simulated ESP with a space in the path: it
   restores and verifies, keeps the replaced file as `boot.bin.failed`, and
   refuses to change anything when `boot.bin.pre-ave` is corrupt or missing.
+- **2026-09-13 19:17** — **step A booted.** With `/boot/efi/m1n1/boot.bin` =
+  `bd040b64…75da8` (self-built, unpatched) the machine booted normally;
+  `chosen/asahi,m1n1-stage2-version` = `v1.6.1` (identical tag to Fedora's, as
+  expected for an untagged-patch build - the ESP hash is what identifies it).
+  No new kernel errors versus the previous boot. The self-built toolchain is
+  cleared; step B next.
