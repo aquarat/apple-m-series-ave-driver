@@ -179,6 +179,8 @@ static void test_abi(enum ave_fw_abi which, const char *name)
 			.fw_client_size = SESS_FWCLIENT_SIZE,
 			.fw_client_mem_addr = IOVA_FWCLIENTMEM,
 			.fw_client_mem_size = SESS_FWCLIENTMEM_SIZE,
+			.param_sets_addr = IOVA_FWCLIENTMEM + 0x100000,
+			.param_sets_size = 0x1000,
 			.recon = &recon, .n_recon = 1,
 			.coded = &coded, .coded_hdr = &coded_hdr, .n_coded = 1,
 		};

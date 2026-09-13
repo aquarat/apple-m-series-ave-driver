@@ -350,6 +350,8 @@ static struct ave_avc_session session_1080p(bool v13)
 		.cabac = true,
 		.fw_client_addr = 0x0000000400000000ull, .fw_client_size = 0x100000,
 		.fw_client_mem_addr = 0x0000000400200000ull, .fw_client_mem_size = 0x10000,
+		/* SPS/PPS output buffer; required wherever the ABI has the field */
+		.param_sets_addr = 0x0000000400300000ull, .param_sets_size = 0x1000,
 		.recon = RECON, .n_recon = 2,
 		.coded = CODED, .coded_hdr = v13 ? CODED_HDR_13 : CODED_HDR_26,
 		.n_coded = 2,
@@ -375,6 +377,9 @@ static void test_start_13_5(void)
 	E32(buf, 0x48, 0x100000, "FwClient size (fw 0xee40)");
 	E64(buf, 0x50, 0x0000000400200000ull, "FwClientMem (fw 0x463f0)");
 	E32(buf, 0x58, 0x10000, "FwClientMem size");
+	/* docs/52: fw ldr x20,[x23,#880] 0x5df28 / ldr w2,[x23,#888] 0x5de44 */
+	E64(buf, 0xfb30, 0x0000000400300000ull, "ParameterSetsBuffer (fw 0x5df28)");
+	E32(buf, 0xfb38, 0x1000, "ParameterSetsBufferSize (fw 0x5de44)");
 	/* docs/46 §9.2, docs/38 §7: MB-aligned in VideoParams */
 	E32(buf, 0x60, 1920, "width (fw 0x5ced0)");
 	E32(buf, 0x64, 1088, "height (fw 0x5ced0)");
