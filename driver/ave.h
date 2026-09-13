@@ -111,6 +111,14 @@ struct ave_device {
 	struct iommu_domain	*iboot_domain;
 	bool			iboot_data_mapped;
 	bool			iboot_text_mapped;
+	/*
+	 * Pristine copy of the firmware's DATA segment (ave_fw.c,
+	 * fw_restore_data). vmalloc'd AVE_IBOOT_DATA_SIZE buffer, loaded once
+	 * from the committed blob and memcpy'd back over physical DATA before
+	 * each core start, mirroring macOS. NULL until first use; freed on
+	 * unload.
+	 */
+	u8			*iboot_data_pristine;
 	/* --- end DAPF --- */
 
 	/*
@@ -200,6 +208,7 @@ static inline void ave_write64(struct ave_device *ave, unsigned int bank,
 int ave_fw_load(struct ave_device *ave);
 void ave_fw_unload(struct ave_device *ave);
 int ave_fw_map_text_mode(void);
+int ave_fw_restore_data(struct ave_device *ave);
 
 /* ave_ipc.c */
 int ave_boot_config(struct ave_device *ave);

@@ -40,11 +40,13 @@
 #include <linux/of_reserved_mem.h>
 #include <linux/sizes.h>
 #include <linux/slab.h>
+#include <linux/vmalloc.h>
 
 #include "ave.h"
 #include "ave_dapf.h"
 
 #define AVE_FW_NAME		"apple/ave_h13c.bin"
+#define AVE_FW_PRISTINE_NAME	"apple/ave-data-pristine.bin"
 
 /* Mach-O, enough of it to walk the load commands. */
 #define MH_MAGIC_64		0xfeedfacf
@@ -286,6 +288,63 @@ int ave_fw_map_text_mode(void)
 {
 	return fw_map_text;
 }
+
+/*
+ * DATA restore (fw_restore_data), mirroring macOS.
+ *
+ * The firmware's DATA segment is iBoot-preloaded once per boot. The FIRST
+ * start of the core writes ~19 pages of DATA in place; a SECOND start within
+ * the same boot then runs against that dirtied DATA and is silent. macOS never
+ * hits this because it restores a pristine copy of DATA over the physical
+ * segment before *every* start (13.5 AVE_Firmware::UpdateImage at kext VA
+ * 0xfffffe0008f11ae4; 26.6.2 AVE_FwImg::UpdateImage -> RestoreCTRRData,
+ * docs/42 §4-5, docs/45 row 32). This does the same so the core can be
+ * (re)started without a reboot.
+ *
+ * Source of the pristine bytes - why Option B (committed blob), not Option A
+ * (snapshot-at-load):
+ *
+ *   Option A would snapshot physical DATA into a buffer at module load and
+ *   restore from that. It is only correct if DATA is still pristine at load,
+ *   i.e. no start has happened since boot. Within one module lifetime we know
+ *   we have not started the core - but Linux does not own this DRAM, so it
+ *   survives rmmod: at a fresh load a *previous* load may have started the
+ *   core and dirtied DATA, and nothing in the driver's own state records that
+ *   across the reload. The only reliable way to decide "is this pristine?" is
+ *   to compare against a known-pristine reference - which is exactly the blob
+ *   Option B already carries. So a sound Option A needs Option B's data
+ *   anyway, and B then subsumes it. Silently snapshotting possibly-dirty DATA
+ *   is the failure the methodology warns against, so we do not.
+ *
+ *   Option B restores from data/blobs/ave-data-pristine.bin, produced by
+ *   tools/extract_pristine_data.py from data/blobs/iboot-window-16m.bin (a
+ *   physical dump taken before any start - what macOS itself snapshots).
+ *   Verified against that dump: DATA sits at window offset 0xf68000, its first
+ *   0x98000 bytes are covered (exactly to the window end) and 0x64000..0x98000
+ *   is already zero; the tail 0x98000..0x134000 is bss, zero-padded. The dump
+ *   (not the shipped Mach-O) is authoritative: iBoot fills 147 bytes of DATA
+ *   at boot - the RTKit tag list, e.g. IOBA = 0x40c000000 - which macOS
+ *   snapshots and the file lacks.
+ *
+ * Install the blob at /lib/firmware/apple/ave-data-pristine.bin (the default
+ * fw_restore_path). Off by default; with fw_restore_data=0 this is a no-op.
+ *
+ * Power/coherency. DATA at AVE_IBOOT_DATA_PHYS is ordinary DRAM below Linux's
+ * /memory map, not the VENC MMIO block, so VENC power is irrelevant to writing
+ * it - the peek/snapshot code already reads it with no power handling. It uses
+ * a cacheable (MEMREMAP_WB) mapping exactly as that read path does, so the
+ * platform is coherent from the core's view; a wmb() orders the copy ahead of
+ * the ASC-start register writes that follow.
+ */
+static bool fw_restore_data;
+module_param(fw_restore_data, bool, 0444);
+MODULE_PARM_DESC(fw_restore_data,
+		 "Restore pristine firmware DATA over phys 0x10001a90000 before each core start (mirrors macOS; default off)");
+
+static char *fw_restore_path = AVE_FW_PRISTINE_NAME;
+module_param(fw_restore_path, charp, 0444);
+MODULE_PARM_DESC(fw_restore_path,
+		 "request_firmware() path for the pristine DATA blob (default " AVE_FW_PRISTINE_NAME ")");
 
 #define AVE_IBOOT_DATA_LITERAL_OFF	0x423c	/* image offset, docs/44 §2.4 */
 #define AVE_IBOOT_DATA_LITERAL		0x1f0000ec000ULL
@@ -555,6 +614,100 @@ fail:
 }
 
 /*
+ * Load the committed pristine DATA blob into a vmalloc buffer, once.
+ *
+ * The file may be exactly AVE_IBOOT_DATA_SIZE (as tools/extract_pristine_data.py
+ * emits) or shorter; a short file is zero-padded, since the tail of DATA is bss.
+ * Idempotent: a second call is a no-op once the buffer exists.
+ */
+static int ave_fw_load_pristine(struct ave_device *ave)
+{
+	const struct firmware *fw;
+	u8 *buf;
+	int ret;
+
+	if (ave->iboot_data_pristine)
+		return 0;
+
+	ret = request_firmware(&fw, fw_restore_path, ave->dev);
+	if (ret) {
+		dev_err(ave->dev,
+			"fw_restore_data: no pristine blob at %s (%d). Build it with "
+			"tools/extract_pristine_data.py and install at "
+			"/lib/firmware/" AVE_FW_PRISTINE_NAME "\n",
+			fw_restore_path, ret);
+		return ret;
+	}
+	if (fw->size > AVE_IBOOT_DATA_SIZE) {
+		dev_err(ave->dev,
+			"fw_restore_data: %s is %zu bytes, larger than DATA (%#llx)\n",
+			fw_restore_path, fw->size, AVE_IBOOT_DATA_SIZE);
+		release_firmware(fw);
+		return -EINVAL;
+	}
+
+	buf = vzalloc(AVE_IBOOT_DATA_SIZE);
+	if (!buf) {
+		release_firmware(fw);
+		return -ENOMEM;
+	}
+	memcpy(buf, fw->data, fw->size);
+	release_firmware(fw);
+
+	ave->iboot_data_pristine = buf;
+	dev_info(ave->dev,
+		 "fw_restore_data: loaded pristine DATA from %s (%#llx bytes, %#llx zero-padded)\n",
+		 fw_restore_path, AVE_IBOOT_DATA_SIZE, AVE_IBOOT_DATA_SIZE - fw->size);
+	return 0;
+}
+
+/*
+ * Restore pristine DATA over physical AVE_IBOOT_DATA_PHYS. Call before every
+ * core start (i.e. at the head of AVE_STAGE_ASC_START), gated by fw_restore_data.
+ * A no-op when the option is off, so it is safe to call unconditionally.
+ */
+int ave_fw_restore_data(struct ave_device *ave)
+{
+	void *p;
+	int ret;
+
+	if (!fw_restore_data)
+		return 0;
+
+	ret = ave_fw_load_pristine(ave);
+	if (ret)
+		return ret;
+
+	/*
+	 * We are about to WRITE this physical range. It must belong to nothing
+	 * Linux knows about - reuse the same System-RAM / /memory /
+	 * /reserved-memory check the DART mapping path uses. Any overlap refuses
+	 * and fails the start.
+	 */
+	ret = ave_fw_range_is_foreign(ave, AVE_IBOOT_DATA_PHYS,
+				      AVE_IBOOT_DATA_SIZE, "restore DATA");
+	if (ret)
+		return ret;
+
+	ave_step(ave, "next: memremap + restore pristine DATA phys %#llx +%#llx",
+		 AVE_IBOOT_DATA_PHYS, AVE_IBOOT_DATA_SIZE);
+	p = memremap(AVE_IBOOT_DATA_PHYS, AVE_IBOOT_DATA_SIZE, MEMREMAP_WB);
+	if (!p) {
+		dev_err(ave->dev,
+			"fw_restore_data: cannot memremap DATA phys %#llx +%#llx\n",
+			AVE_IBOOT_DATA_PHYS, AVE_IBOOT_DATA_SIZE);
+		return -ENOMEM;
+	}
+	memcpy(p, ave->iboot_data_pristine, AVE_IBOOT_DATA_SIZE);
+	wmb();	/* land the copy before the ASC-start writes that follow */
+	memunmap(p);
+
+	dev_info(ave->dev, "fw_restore_data: restored %#llx bytes over phys %#llx\n",
+		 AVE_IBOOT_DATA_SIZE, AVE_IBOOT_DATA_PHYS);
+	return 0;
+}
+
+/*
  * Load the firmware and map it at IOVA 0.
  *
  * The caller must have attached the IOMMU already - this uses the device's
@@ -757,6 +910,12 @@ void ave_fw_unload(struct ave_device *ave)
 
 	/* Before the early return: these do not depend on our image. */
 	ave_fw_unmap_iboot(ave);
+
+	/* fw_restore_data buffer: independent of our loaded image. */
+	if (ave->iboot_data_pristine) {
+		vfree(ave->iboot_data_pristine);
+		ave->iboot_data_pristine = NULL;
+	}
 
 	if (!ave->fw.cpu)
 		return;
