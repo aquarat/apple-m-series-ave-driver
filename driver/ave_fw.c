@@ -140,10 +140,16 @@ next:
  * coprocessor starts, addresses nothing that exists, and goes quiet, which is
  * exactly the symptom we have been chasing.
  *
- * The value is a BUS address, not an AP-physical one: the coprocessor sits on
- * the far side of the /arm-io translation. Deriving it from a mapped
- * resource rather than hard-coding it keeps the two from being confused
- * again - that confusion cost eight experiments already (docs/30).
+ * The value is AP-PHYSICAL (0x40c000000), not the bus address. An earlier
+ * version wrote bus 0x20c000000 on reasoning alone; the live AVE DATA segment
+ * iBoot filled on this machine holds IOBA = 0x40c000000, next to CpAd =
+ * 0x40d800000 and WrAd = 0x40dc00000 - the AP-physical ASC bank - and the GPU's
+ * list uses AP-physical addresses the same way (docs/40 §4, docs/31 "the
+ * dump"). Deriving it from the mapped resource keeps it tied to the DT.
+ *
+ * iBoot also fills CpAd, WrAd, SOC_ and SOCR, which we still leave unset.
+ * Irrelevant while the core can only run iBoot's image (RVBAR is locked), but
+ * required before our own image could ever run.
  */
 static int ave_fw_patch_ioba(struct ave_device *ave, void *img, size_t size)
 {
@@ -158,12 +164,7 @@ static int ave_fw_patch_ioba(struct ave_device *ave, void *img, size_t size)
 		dev_err(ave->dev, "no fabric bank resource; cannot derive I/O base\n");
 		return -EINVAL;
 	}
-	if (fabric < AVE_ARM_IO_BUS_OFFSET) {
-		dev_err(ave->dev, "fabric phys %pa is below the /arm-io offset\n",
-			&fabric);
-		return -EINVAL;
-	}
-	bus = (u64)fabric - AVE_ARM_IO_BUS_OFFSET;
+	bus = (u64)fabric;	/* AP-physical, as iBoot writes it */
 
 	/*
 	 * Byte-wise, not word-wise. The tag list is packed with no alignment:

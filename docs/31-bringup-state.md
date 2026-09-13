@@ -545,3 +545,69 @@ Nothing else shares that line. Consequences:
   disabled, since fault reporting is what it measures;
 - **the next AVE hardware run on this machine needs a reboot first.**
 
+## The dump: what iBoot actually loaded (2026-09-13)
+
+`test/physdump.ko` copied the same 16 MiB window to
+`data/blobs/iboot-window-16m.bin` (gitignored). It reproduces the in-kernel
+scan exactly — first word `0x14000081`, the three IOBA hits at the same
+addresses — so the copy is sound. Everything below is offline analysis of it.
+
+### 1. The running firmware is macOS 13.5's, not the one we analysed
+
+Every RTKit firmware in the window (AVE, ISP, SIO, GPU) carries
+`RTKit-2062.141.1.release`. Our extracted `ave_h13c.bin` is
+`RTKit-3255.160.4.release`, from the **macOS 26.6.2** IPSW (build 25G83), and
+`kc.macho` is the matching xnu-12377. `/proc/device-tree/chosen` says why:
+`asahi,os-fw-version = 13.5`. The coprocessor firmware iBoot loads is chosen
+by the OS firmware bundle the Asahi installer pinned, independent of the
+system firmware (`asahi,system-fw-version = 26.4`).
+
+The AVE text in memory is clearly the same product — `CAVCController_H13C.cpp`,
+`CAVE_CMD_*`, `PlatformIOPIPCManager` — but only ~5% of 32-byte code samples
+match our image, 1087 of its ~2200 strings are shared, and the live build
+contains `"Host and FW Interface is mismatched, please ensure the versions are
+aligned."`. **Every host/firmware ABI detail derived from the 26.6.2 firmware
+and kext (docs 07, 20, 32, 35–39) is unverified against the firmware that
+would actually run, and should be re-derived from the 13.5 AppleAVE2FW and
+AppleAVE2 kext before it is trusted.** This is the same constraint Asahi's DCP
+driver lives under.
+
+### 2. RTKit tag lists identify each segment
+
+`tools/rtkit_tags.py` decodes the boot-argument tag lists (STKG … IOBA, IOSZ)
+that the loader fills in. Three live lists, all with `SOC_ = 0x6001`,
+`SOCR = 0x11`:
+
+| list at | CpAd | WrAd | IOBA | RTSZ | owner |
+|---|---|---|---|---|---|
+| `0x10000c652a0` | `0x406000000` | `0x406400000` | 0 | `0xcc000` | **GPU** (`gpu@406400000`) |
+| `0x1000165eaa0` | `0x285000000` | `0x285400000` | 0 | `0x50c000` | unidentified; no Linux node at that address |
+| `0x10001a93a30` | `0x40d800000` | `0x40dc00000` | **`0x40c000000`** | `0x220000` | **AVE** (ASC bank; WrAd = bank + `AVE_ASC_BASE`) |
+
+Confirmed consequences:
+
+- **AVE's DATA segment is at `0x10001a90000`** (the 88 KiB run), iBoot-filled.
+  AVE's TEXT is in the region at `0x10000b28000`. They are **physically
+  discontiguous**, like ISP's — so [42](42-asc-firmware-ownership.md) §3.4's
+  reading stands: the firmware expects a translated address space
+  (`RTSZ = 0x220000`) that joins them.
+- **The region at `0x10000b28000` is not an AVE carve-out.** Its last
+  ~64 KiB is GPU firmware DATA. The earlier "slot" framing, and the IOBA hit
+  at `0x10000c6544c`, were someone else's.
+- **IOBA is AP-physical.** iBoot writes `0x40c000000`; our patch wrote bus
+  `0x20c000000` ([40](40-firmware-io-base.md) §4 corrected, `ave_fw.c` fixed).
+  Moot while RVBAR is locked to iBoot's image, but it was wrong.
+
+### 3. What this changes
+
+The fetch blocker is unchanged — a locked reset vector, a 41-bit fetch, a
+38-bit DART — but it is now better posed. The live image is TEXT at
+`0x10000b28000` and DATA at `0x10001a90000`, joined in some address space of
+size `0x220000`. Whatever makes the reset fetch work on macOS must also
+produce that join, which is a stronger constraint than before.
+
+Separately and more urgently for everything after stage 3: obtain the
+**macOS 13.5** `AppleAVE2FW_H13C.im4p` and AppleAVE2 kext, and re-verify the
+ABI docs against them. Otherwise even a booting core will be spoken to in a
+dialect it rejects.
+
