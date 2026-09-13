@@ -1054,6 +1054,26 @@ static void ave_remove(struct platform_device *pdev)
 {
 	struct ave_device *ave = platform_get_drvdata(pdev);
 
+	/*
+	 * Ask the firmware to halt itself before anything is torn down. It
+	 * needs the IPC transport, so it has to happen here, ahead of
+	 * ave_stop() and the power-off. No-op unless fw_halt=1.
+	 *
+	 * This is the whole point of the exercise: a core that halts cleanly
+	 * leaves CPU_STATUS STOPPED, which lets the next insmod restore DATA
+	 * and start it again in the same boot instead of costing a reboot.
+	 * It also makes the session buffers safe to unmap below, where today
+	 * they have to be leaked.
+	 */
+	if (ave_session_halt_requested()) {
+		int hret = ave_session_halt(ave);
+
+		if (hret)
+			dev_warn(ave->dev,
+				 "halt: firmware did not stop (%d); unloading the hard way\n",
+				 hret);
+	}
+
 	ave_stop(ave);
 
 	/*

@@ -170,7 +170,13 @@ static void test_simple(void)
 		{ AVE_OP_COMPLETE, "complete", 13, 0x40, 9, 200, 9, 0x48, 9, 200 },
 		/* Flush: 13.5 id 11 0x40 fw 0xdc58, slot 10 0xfffffe0008ead5cc */
 		{ AVE_OP_FLUSH, "flush", 11, 0x40, 10, 200, 11, 0x48, 11, 200 },
-		/* Halt: 13.5 POWERDOWN id 14 0x40 fw 0xde08, slot ~0 prio 0 */
+		/*
+		 * Halt: 13.5 POWERDOWN id 14 0x40 fw 0xde08, slot ~0 prio 0.
+		 * Independently confirmed from the kext side in docs/55: the
+		 * 16 bytes MakeFwCmd_Halt stores at +0x10 are the literal at
+		 * 0xfffffe000723ccc0, twelve zeros then ff ff ff ff - client
+		 * 0, codec 0, slot ~0 - which is exactly this row.
+		 */
 		{ AVE_OP_HALT, "halt", 14, 0x40, 0xffffffff, 0, 2, 0x48, 0xffffffff, 0 },
 	};
 	char name[64];

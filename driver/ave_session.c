@@ -37,6 +37,7 @@
 #include <linux/dma-mapping.h>
 #include <linux/errno.h>
 #include <linux/interrupt.h>
+#include <linux/iopoll.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/sizes.h>
@@ -1447,5 +1448,150 @@ out:
 		 ret ? "FAILED"
 		     : (session_frame ? "encoded one frame OK"
 				      : "reached Start_AVC OK"), ret);
+	return ret;
+}
+
+/* ------------------------------------------------------------------------ */
+/* Halt: stop the core without rebooting the machine                        */
+/* ------------------------------------------------------------------------ */
+
+/*
+ * venc_sys no longer gates off under the patched m1n1, so once the core has
+ * been started nothing in Linux can stop it: CPU_CONTROL = 0 does not stop a
+ * started core, and the next insmod finds it running on drifted DATA. That is
+ * why every experiment has cost a reboot.
+ *
+ * macOS does have a way, and it is a firmware command rather than a register
+ * poke: AVE_HwC::SendFwCmd_Halt (kext 0xfffffe0008efc600) builds command id
+ * 14 and sends it on IO, then AVE_IOP::Stop polls for idle. An exhaustive
+ * scan of the 13.5 kext found no other stop mechanism - nothing outside
+ * AVE_IOP_Start_* ever writes CPU_CONTROL. Full trace in docs/55.
+ *
+ * Three things about this command are unlike every other one we send:
+ *
+ *  - **It never replies.** ProcessPowerDown tail-branches into an infinite
+ *    wfi loop (fw 0xa689c), so the dispatcher's reply epilogue is
+ *    unreachable and NotificationToHost is never called. Waiting for a
+ *    completion would time out on a *successful* halt, so we do not wait.
+ *  - **The completion signal is SVE scratch 0**, which the firmware sets to
+ *    AVE_SCRATCH0_STOPPED one instruction before the wfi (fw 0xa6898).
+ *  - **That value is already there.** StartUpIOP writes it at boot and it
+ *    stays. Polling without clearing it first is a check that can never say
+ *    "no" - it would report success whether or not the firmware ever saw the
+ *    command. macOS clears it immediately before the send (kext
+ *    0xfffffe0008efc704) and so do we, refusing to send if the clear does not
+ *    stick.
+ *
+ * Only the u16 id at +0 and the 0x40 length are load-bearing: the firmware
+ * asserts the length (fw 0xde08) and ProcessPowerDown never dereferences the
+ * command body. The builder already emits exactly this shape, so there is no
+ * Halt-specific wire code here.
+ *
+ * Known deviation from macOS: ShutDownIOP drops the PMGR power states and
+ * clock gating before the Halt. We cannot do that from here, and the purpose
+ * is unknown; if it matters it should show up as one of the polls timing out
+ * rather than as a hang.
+ */
+static bool fw_halt;
+module_param(fw_halt, bool, 0444);
+MODULE_PARM_DESC(fw_halt,
+		 "at unload, ask the firmware to halt (command 14) so the next load can start it again without a reboot");
+
+/* The advisory _S_AVE_TimeOut ms field; macOS computes cfg[+20]*3000. */
+#define AVE_HALT_CMD_TIMEOUT_MS	3000
+/* How long we give scratch 0 to change, and CPU_STATUS to settle after. */
+#define AVE_HALT_SCRATCH_US	(1000 * 1000)
+#define AVE_HALT_IDLE_SAMPLES	3
+
+bool ave_session_halt_requested(void)
+{
+	return fw_halt;
+}
+
+int ave_session_halt(struct ave_device *ave)
+{
+	const struct ave_cmd_abi *abi = ave_cmd_abi_get(ave->fw_abi);
+	struct ave_cmd_ctx ctx = { .count = 0, .client_id = 0 };
+	struct device *dev = ave->dev;
+	dma_addr_t cmd_iova;
+	unsigned int i, idle;
+	size_t cmd_len;
+	u8 *cmd;
+	u32 v;
+	int ret;
+
+	if (!fw_halt)
+		return 0;
+	/* Advisory, but macOS fills it in; match the shape. */
+	put_unaligned_le32(AVE_HALT_CMD_TIMEOUT_MS, ctx.timeout);
+	if (!abi) {
+		dev_warn(dev, "halt: no command ABI selected\n");
+		return -ENODEV;
+	}
+	cmd_len = ave_cmd_size(abi, AVE_OP_HALT);
+	if (!cmd_len) {
+		dev_warn(dev, "halt: ABI %s has no Halt command\n", abi->name);
+		return -ENODEV;
+	}
+
+	/*
+	 * Clear the completion word and prove the clear landed. Without this
+	 * the poll below is meaningless (see the comment above).
+	 */
+	ave_write(ave, AVE_BANK_SVE, AVE_SVE_SCRATCH(0), 0);
+	v = ave_read(ave, AVE_BANK_SVE, AVE_SVE_SCRATCH(0));
+	if (v) {
+		dev_err(dev, "halt: scratch 0 still %#010x after clearing it; not sending - the poll could not tell success from failure\n",
+			v);
+		return -EIO;
+	}
+
+	cmd = ave_ipc_alloc(ave, cmd_len, &cmd_iova);
+	if (!cmd)
+		return -ENOMEM;
+
+	ret = ave_cmd_build_simple(abi, AVE_OP_HALT, cmd, cmd_len, &ctx);
+	if (ret < 0) {
+		dev_err(dev, "halt: builder failed: %d\n", ret);
+		goto out_free;
+	}
+
+	dev_info(dev, "halt: sending command %u, %zu bytes at IOVA %pad on IO (no reply is expected)\n",
+		 abi->cmd[AVE_OP_HALT].id, cmd_len, &cmd_iova);
+
+	ret = ave_ipc_send(ave, AVE_CH_IO, cmd_iova, cmd_len, 0);
+	if (ret) {
+		dev_err(dev, "halt: send failed: %d\n", ret);
+		goto out_free;
+	}
+
+	ret = readl_relaxed_poll_timeout(
+		ave->bank[AVE_BANK_SVE].base + AVE_SVE_SCRATCH(0),
+		v, v == AVE_SCRATCH0_STOPPED, 100, AVE_HALT_SCRATCH_US);
+	if (ret) {
+		dev_err(dev, "halt: scratch 0 is %#010x, never became %#010x - the firmware did not halt\n",
+			v, AVE_SCRATCH0_STOPPED);
+		/* The core may still be running; it still owns this buffer. */
+		return ret;
+	}
+	dev_info(dev, "halt: scratch 0 = %#010x, the firmware reached its wfi\n", v);
+
+	/*
+	 * AVE_IOP::Stop's own check: three consecutive samples with
+	 * CPU_STATUS & (RUNNING|STOPPED) set. Reported either way - what this
+	 * register does after a Halt is inferred, not confirmed (docs/55).
+	 */
+	for (i = 0, idle = 0; i < 200 && idle < AVE_HALT_IDLE_SAMPLES; i++) {
+		v = ave_read(ave, AVE_BANK_ASC, AVE_ASC_CPU_STATUS);
+		idle = (v & (AVE_ASC_ST_RUNNING | AVE_ASC_ST_STOPPED)) ? idle + 1 : 0;
+		udelay(50);
+	}
+	dev_info(dev, "halt: CPU_STATUS %#010x%s after %u sample(s)%s\n",
+		 v, v & AVE_ASC_ST_STOPPED ? " STOPPED" : "", i,
+		 idle >= AVE_HALT_IDLE_SAMPLES ? "" : " - never settled");
+
+out_free:
+	/* Safe only now: a halted core cannot read the command any more. */
+	ave_ipc_free(ave, cmd, cmd_len);
 	return ret;
 }
