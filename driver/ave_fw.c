@@ -382,7 +382,13 @@ static int ave_fw_check_iboot_placement(struct ave_device *ave)
 		return -EINVAL;
 	}
 
-	p = memremap(AVE_IBOOT_TEXT_PHYS, SZ_16K, MEMREMAP_WB);
+	/*
+	 * Map through the end of the literal, not a guessed page size: SZ_16K
+	 * is 0x4000, and the literal sits at 0x423c. That mistake oopsed E3a
+	 * on 2026-09-13 (results/e3a-*.log).
+	 */
+	p = memremap(AVE_IBOOT_TEXT_PHYS,
+		     PAGE_ALIGN(AVE_IBOOT_DATA_LITERAL_OFF + 8), MEMREMAP_WB);
 	if (!p) {
 		dev_err(ave->dev, "  iboot: REFUSING - cannot memremap TEXT to check the DATA literal\n");
 		return -ENOMEM;

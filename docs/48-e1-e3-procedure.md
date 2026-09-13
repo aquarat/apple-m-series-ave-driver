@@ -455,3 +455,28 @@ Overlay `variant=2` (no DART bound), `stop_after=8 dapf_dump=1`.
   cycle.
 - Each slot is now disabled (r0 = 0) before being rewritten, enabled slots
   included (review of 8958777).
+
+### E3a, attempt 1 — 2026-09-13, `results/e3a-*.log`: kernel oops, aborted
+
+Fresh boot, overlay `variant=3` (group 16, DMA, apple-dart initialised
+`40d040000`), `stop_after=12 dapf_dump=1 dapf_set=control fw_map_data=1
+fw_map_text=2`.
+
+- The stage-8 dump on `variant=3` (this is E2c) shows apple-dart's reset:
+  TCR[0] `0x80` TRANSLATE with a VALID TTBR[0][0], SIDs 1 and 15 zeroed,
+  ENABLED_STREAMS `0xffff`. **The DAPF is still uninitialised** and
+  essentially the same as E2's across a reboot (a few bits differ, e.g.
+  slot 5 r0 now 0), confirming apple-dart never touches it.
+- **Oops in `ave_fw_check_iboot_placement()`** (inlined into
+  `ave_fw_map_iboot`), before any DAPF write and with the core never
+  started: `memremap(TEXT, SZ_16K)` maps `0x4000` bytes and then reads the
+  DATA literal at `+0x423c`. Paging fault at map base + `0x423c`. The
+  driver's own safety check was sized for 4 KiB-era arithmetic. Nothing on
+  the hardware was changed; no IRQ was disabled; the machine stayed up.
+- The insmod task died holding the device lock, so `apple_ave` cannot be
+  unloaded on that boot; a reboot is required before retrying.
+- Fixed: map `PAGE_ALIGN(0x423c + 8)`. Every other fixed-size mapping in
+  the new code was re-checked against the offsets it reads. Neither the
+  author agent nor two review passes caught this; the lesson is recorded
+  here rather than softened — *check map size against the largest offset
+  read, in bytes, for every mapping*.
