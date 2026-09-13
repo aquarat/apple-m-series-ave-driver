@@ -63,7 +63,8 @@ int ave_dapf_dump(struct ave_device *ave);
  * readback mismatch.
  */
 int ave_dapf_program(struct ave_device *ave,
-		     const struct ave_dapf_entry *ent, unsigned int n);
+		     const struct ave_dapf_entry *ent, unsigned int n,
+		     bool preclear);
 
 /*
  * E3: build the entry set chosen by dapf_set / dapf_mmio and program it.

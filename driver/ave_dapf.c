@@ -170,6 +170,16 @@ static const struct ave_dapf_entry ave_dapf_cleared = {
 	.what = "cleared",
 };
 
+static char *dapf_order = "m1n1";
+module_param(dapf_order, charp, 0444);
+MODULE_PARM_DESC(dapf_order,
+		 "E3: m1n1 (default; ADT order, only the needed slots, r4/start/end/r0, no pre-clear) | clear16 (all 16 slots with r0=0 first - RESET THE MACHINE on 2026-09-13)");
+
+static bool dapf_quiesce = true;
+module_param(dapf_quiesce, bool, 0444);
+MODULE_PARM_DESC(dapf_quiesce,
+		 "E3: zero every TCR and ENABLED_STREAMS around the DAPF writes, then restore (default 1; docs/49 N1)");
+
 static bool dapf_dump;
 module_param(dapf_dump, bool, 0444);
 MODULE_PARM_DESC(dapf_dump,
@@ -397,7 +407,8 @@ int ave_dapf_dump(struct ave_device *ave)
 }
 
 int ave_dapf_program(struct ave_device *ave,
-		     const struct ave_dapf_entry *ent, unsigned int n)
+		     const struct ave_dapf_entry *ent, unsigned int n,
+		     bool preclear)
 {
 	unsigned int i;
 	int ret, bad = 0;
@@ -425,8 +436,12 @@ int ave_dapf_program(struct ave_device *ave,
 	}
 
 	/*
-	 * Every slot is disabled first (r0 = 0), then r4, start, end, then the
-	 * final r0 - m1n1's dapf_init_t8020() order with a disable in front.
+	 * m1n1's dapf_init_t8020() order: r4, start, end, r0 last. With
+	 * @preclear (dapf_order=clear16 only) every slot is first disabled with
+	 * r0 = 0 - which is the write that reset the machine on 2026-09-13
+	 * (docs/48, docs/49), so it is no longer the default.
+	 *
+	 * Original rationale for the pre-clear:
 	 * E2 found non-zero garbage r0 in the slots E3 enables, and m1n1's
 	 * order alone would leave that garbage enable in place while the range
 	 * is half-written. The core is halted during this, but the r0 bits are
@@ -436,12 +451,14 @@ int ave_dapf_program(struct ave_device *ave,
 		void __iomem *b = ave->dapf + DAPF_ENTRY(i);
 
 		if (i <= 1)
-			ave_step(ave, "next: first write to DAPF slot %u (r0 = 0)", i);
+			ave_step(ave, "next: first write to DAPF slot %u (%s)", i,
+				 preclear ? "r0 = 0 pre-clear" : "r4, m1n1 order");
 
 		dev_info(ave->dev, "dapf: write [%2u] r0 %#06x r4 %#06x  %#013llx - %#013llx  %s\n",
 			 i, ent[i].r0, ent[i].r4, ent[i].start, ent[i].end,
 			 ent[i].what ?: "");
-		writel(0, b + DAPF_R0);
+		if (preclear)
+			writel(0, b + DAPF_R0);
 		if (ent[i].end & 3)
 			dev_warn(ave->dev, "dapf: [%2u] end %#llx has low bits set; the register will drop them\n",
 				 i, ent[i].end);
@@ -485,7 +502,9 @@ int ave_dapf_program_selected(struct ave_device *ave)
 	struct ave_dapf_entry set[AVE_DAPF_MAX_ENTRIES];
 	struct iommu_domain *domain;
 	bool want_text, mmio_ave0, mmio_adt;
-	unsigned int n = 0, i, stale = 0;
+	unsigned int n = 0, nwrite, i, stale = 0;
+	bool clear16 = false;
+	u32 saved_tcr[16], saved_en = 0;
 	u32 tcr;
 	int ret;
 
@@ -549,42 +568,95 @@ int ave_dapf_program_selected(struct ave_device *ave)
 	ave_dapf_dump_dart(ave, "E3 before");
 	ave_dapf_dump_entries(ave, "E3 before");
 
-	/*
-	 * Write ALL 16 slots, in a fixed layout that mirrors ISP's live DAPF
-	 * (E1): slot 0 = TEXT, slot 1 = the 0x1f0 window, then MMIO, every
-	 * other slot cleared. E2 (2026-09-13) found AVE's DAPF full of stable
-	 * uninitialised contents that survive power gating - nobody programs
-	 * it after cold reset - so leaving any slot untouched would let
-	 * garbage decide the result. The negative control differs from the
-	 * real run in slot 0 alone, and clearing removes any TEXT entry an
-	 * earlier dapf_set=text load in this boot left behind.
-	 */
-	for (i = 0; i < AVE_DAPF_MAX_ENTRIES; i++)
-		set[i] = ave_dapf_cleared;
-	set[0] = want_text ? ave_dapf_text : ave_dapf_cleared;
-	n = 1;
-	set[n++] = ave_dapf_window;
-	if (mmio_ave0)
-		set[n++] = ave_dapf_mmio_ave0;
-	if (mmio_adt)
-		set[n++] = ave_dapf_mmio_adt;
+	if (sysfs_streq(dapf_order, "clear16")) {
+		clear16 = true;
+	} else if (!sysfs_streq(dapf_order, "m1n1")) {
+		dev_err(ave->dev, "dapf: unknown dapf_order=\"%s\" (m1n1|clear16)\n", dapf_order);
+		return -EINVAL;
+	}
 
-	for (i = 0; i < AVE_DAPF_MAX_ENTRIES; i++) {
-		struct ave_dapf_entry e;
+	if (clear16) {
+		/*
+		 * All 16 slots, ISP-like layout: slot 0 TEXT or cleared, slot 1
+		 * window, then MMIO, rest cleared. A clean negative control, but
+		 * this sequence reset the machine on its first write.
+		 */
+		for (i = 0; i < AVE_DAPF_MAX_ENTRIES; i++)
+			set[i] = ave_dapf_cleared;
+		set[0] = want_text ? ave_dapf_text : ave_dapf_cleared;
+		n = 1;
+		set[n++] = ave_dapf_window;
+		if (mmio_ave0)
+			set[n++] = ave_dapf_mmio_ave0;
+		if (mmio_adt)
+			set[n++] = ave_dapf_mmio_adt;
+		nwrite = AVE_DAPF_MAX_ENTRIES;
+	} else {
+		/*
+		 * docs/49 N1: exactly what m1n1's dapf_init_t8020() would write
+		 * from an ADT listing these entries - ADT order from slot 0, only
+		 * as many slots as entries, nothing else touched. TEXT goes last.
+		 *
+		 * CAVEAT: slots beyond n keep E2's uninitialised contents, so a
+		 * dapf_set=control run in this mode is NOT a clean negative
+		 * control. Use it to learn whether the writes are survivable.
+		 */
+		set[n++] = ave_dapf_window;
+		if (mmio_ave0)
+			set[n++] = ave_dapf_mmio_ave0;
+		if (mmio_adt)
+			set[n++] = ave_dapf_mmio_adt;
+		if (want_text)
+			set[n++] = ave_dapf_text;
+		nwrite = n;
+		for (i = n; i < AVE_DAPF_MAX_ENTRIES; i++) {
+			struct ave_dapf_entry e;
 
-		if (i >= n || (i == 0 && !want_text))
 			if (ave_dapf_slot_read(ave, i, &e))
 				stale++;
+		}
+		if (stale)
+			dev_warn(ave->dev, "dapf: m1n1 order leaves %u non-empty slot(s) beyond %u untouched\n",
+				 stale, n);
 	}
-	if (stale)
-		dev_info(ave->dev, "dapf: clearing %u non-empty slot(s) outside the new set\n",
-			 stale);
 
-	dev_info(ave->dev, "dapf: E3 dapf_set=%s dapf_mmio=%s: %u entries%s\n",
-		 dapf_set, dapf_mmio, n,
-		 want_text ? "" : "  (NEGATIVE CONTROL: no TEXT entry - must still fault NO_DAPF_MATCH at TEXT+0x200)");
+	dev_info(ave->dev, "dapf: E3 dapf_set=%s dapf_mmio=%s dapf_order=%s quiesce=%d: %u entries%s\n",
+		 dapf_set, dapf_mmio, dapf_order, dapf_quiesce, n,
+		 want_text ? "" : clear16 ?
+		 "  (NEGATIVE CONTROL: no TEXT entry - must still fault NO_DAPF_MATCH at TEXT+0x200)" :
+		 "  (no TEXT entry; NOT a clean control in m1n1 order - garbage slots remain)");
 
-	ret = ave_dapf_program(ave, set, AVE_DAPF_MAX_ENTRIES);
+	/*
+	 * docs/49 N1: every known-good DAPF write (m1n1 at boot, m1n1's AOP
+	 * experiment) happens before the DART is configured. apple-dart has
+	 * enabled translation and all streams by now, so make the DART look
+	 * like that around the writes, and put it back afterwards. The core is
+	 * halted, so nothing is using the DART meanwhile; TTBRs are untouched,
+	 * so no TLB invalidation is needed on restore.
+	 */
+	if (dapf_quiesce) {
+		for (i = 0; i < 16; i++)
+			saved_tcr[i] = readl(ave->cpudart + DART_TCR(i));
+		saved_en = readl(ave->cpudart + DART_ENABLED_STREAMS);
+		ave_step(ave, "next: quiesce DART - all TCRs 0 (saved TCR[0] %#x)", saved_tcr[0]);
+		for (i = 0; i < 16; i++)
+			writel(0, ave->cpudart + DART_TCR(i));
+		ave_step(ave, "next: ENABLED_STREAMS 0 (saved %#x)", saved_en);
+		writel(0, ave->cpudart + DART_ENABLED_STREAMS);
+		ave_step(ave, "DART quiesced");
+	}
+
+	ret = ave_dapf_program(ave, set, nwrite, clear16);
+
+	if (dapf_quiesce) {
+		ave_step(ave, "next: restore ENABLED_STREAMS %#x and TCRs", saved_en);
+		writel(saved_en, ave->cpudart + DART_ENABLED_STREAMS);
+		for (i = 0; i < 16; i++)
+			writel(saved_tcr[i], ave->cpudart + DART_TCR(i));
+		dev_info(ave->dev, "dapf: DART restored: TCR[0] %#x ENABLED_STREAMS %#x\n",
+			 readl(ave->cpudart + DART_TCR(0)),
+			 readl(ave->cpudart + DART_ENABLED_STREAMS));
+	}
 	if (ret)
 		return ret;
 
