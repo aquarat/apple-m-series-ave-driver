@@ -64,6 +64,11 @@ module_param(core_reset, int, 0444);
 MODULE_PARM_DESC(core_reset,
 		 "at stage 13, when the core is still running from an earlier load: 0 = leave it (default), 1 = pulse the block reset and report whether it stops and whether the DAPF survived, 2 = pulse it even when already STOPPED");
 
+static bool core_reset_only;
+module_param(core_reset_only, bool, 0444);
+MODULE_PARM_DESC(core_reset_only,
+		 "with core_reset: report the post-pulse state and stop probe, never starting a core over a DART the pulse may have wiped");
+
 static bool asc_timer;
 module_param(asc_timer, bool, 0444);
 MODULE_PARM_DESC(asc_timer, "also read the ASC timebase at +0x178000 during liveness sampling");
@@ -324,7 +329,8 @@ static void ave_power_off_action(void *data)
 static int ave_core_reset(struct ave_device *ave)
 {
 	struct device *dev = ave->dev;
-	struct reset_control *rst;
+	unsigned int before = 0, after = 0;
+	bool irq_was_on;
 	u32 st;
 	int ret;
 
@@ -337,18 +343,58 @@ static int ave_core_reset(struct ave_device *ave)
 			 st);
 		return 0;
 	}
-	dev_info(dev, "core reset: CPU_STATUS %#010x%s, pulsing the block reset\n",
-		 st, st & AVE_ASC_ST_STOPPED ? " STOPPED (core_reset=2)" : " not STOPPED");
 
-	rst = devm_reset_control_get_optional_exclusive(dev, NULL);
-	if (IS_ERR(rst))
-		return dev_err_probe(dev, PTR_ERR(rst), "core reset: reset control\n");
-	if (!rst) {
+	/*
+	 * Baseline the DAPF BEFORE the pulse. Without it "N non-empty slots"
+	 * afterwards cannot tell "survived" from "were never there" - a check
+	 * that can only say yes. If we cannot read them we must not pulse at
+	 * all: the run would take the risk and learn nothing from the one
+	 * question that decides whether this path is viable.
+	 * (Review 2026-09-13, finding 3.)
+	 */
+	ret = ave_dapf_dump_now(ave, "before core reset", &before);
+	if (ret) {
+		dev_err(dev, "core reset: cannot read the DAPF (%d) - refusing to pulse, since the readback is the whole point (needs overlay variant=2 or 3)\n",
+			ret);
+		return ret;
+	}
+
+	dev_info(dev, "core reset: CPU_STATUS %#010x%s, %u DAPF slot(s) before; pulsing the block reset\n",
+		 st, st & AVE_ASC_ST_STOPPED ? " STOPPED (core_reset=2)" : " not STOPPED",
+		 before);
+
+	if (!ave->rst) {
+		ave->rst = devm_reset_control_get_optional_exclusive(dev, NULL);
+		if (IS_ERR(ave->rst)) {
+			ret = PTR_ERR(ave->rst);
+			ave->rst = NULL;
+			return dev_err_probe(dev, ret, "core reset: reset control\n");
+		}
+	}
+	if (!ave->rst) {
 		dev_warn(dev, "core reset: this node has no reset in the DT\n");
 		return -ENODEV;
 	}
 
-	ret = reset_control_reset(rst);
+	/*
+	 * The reset pulse holds venc_sys in DEV_DISABLE|RESET, and the DART is
+	 * a child of that domain. When we get here because a core is still
+	 * running, that core is usually fault-storming, so both our handler
+	 * and apple-dart's would be reading registers inside a block that is
+	 * being reset. Quiesce ours across the pulse; we cannot do anything
+	 * about apple-dart's, which is part of why this is opt-in.
+	 * (Review 2026-09-13, finding 2.)
+	 */
+	irq_was_on = ave->irq_enabled;
+	if (irq_was_on) {
+		disable_irq(ave->irq);
+		ave->irq_enabled = false;
+	}
+	ret = reset_control_reset(ave->rst);
+	if (irq_was_on) {
+		enable_irq(ave->irq);
+		ave->irq_enabled = true;
+	}
 	dev_info(dev, "core reset: reset_control_reset() = %d\n", ret);
 	if (ret)
 		return ret;
@@ -357,12 +403,28 @@ static int ave_core_reset(struct ave_device *ave)
 	dev_info(dev, "core reset: CPU_STATUS now %#010x%s\n",
 		 st, st & AVE_ASC_ST_STOPPED ? " STOPPED" : " NOT STOPPED");
 
-	/* The decisive readback; failures here are reported, not fatal. */
-	ret = ave_dapf_dump_now(ave, "after core reset");
-	if (ret)
-		dev_warn(dev, "core reset: DAPF readback unavailable (%d) - needs overlay variant=2 or 3\n",
-			 ret);
+	ret = ave_dapf_dump_now(ave, "after core reset", &after);
+	if (ret) {
+		dev_err(dev, "core reset: DAPF unreadable after the pulse (%d)\n",
+			ret);
+		return ret;
+	}
+	dev_info(dev, "core reset: DAPF slots %u -> %u: %s\n", before, after,
+		 after == before ? "SURVIVED" : "CHANGED");
 
+	/*
+	 * core_reset_only: answer the two questions and stop, without ever
+	 * starting a core over a DART that may have just been wiped. This is
+	 * the cheap way to run the experiment once.
+	 */
+	if (core_reset_only) {
+		dev_info(dev, "core reset: core_reset_only=1, stopping probe here\n");
+		return -ECANCELED;
+	}
+	if (after != before) {
+		dev_err(dev, "core reset: the DAPF changed; not starting the core - Linux cannot put those entries back (docs/49), only a reboot can\n");
+		return -ENODEV;
+	}
 	if (!(st & AVE_ASC_ST_STOPPED)) {
 		dev_warn(dev, "core reset: the core did not stop; not starting it again\n");
 		return -EBUSY;
@@ -876,9 +938,19 @@ iop_config_done:
 		 * the PMGR registers behind genpd's back.
 		 */
 		if (rvbar_probe >= 2) {
-			struct reset_control *rst;
+			struct reset_control *rst = ave->rst;
 
-			rst = devm_reset_control_get_optional_exclusive(dev, NULL);
+			/*
+			 * One exclusive get per device: a second one WARNs and
+			 * returns -EBUSY, which would make core_reset look like
+			 * "the core did not stop" when it was never asked.
+			 * (Review 2026-09-13, finding 4.)
+			 */
+			if (!rst) {
+				rst = devm_reset_control_get_optional_exclusive(dev, NULL);
+				if (!IS_ERR(rst))
+					ave->rst = rst;
+			}
 			if (IS_ERR(rst)) {
 				dev_info(dev, "  reset control unavailable: %ld\n",
 					 PTR_ERR(rst));

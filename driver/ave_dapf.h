@@ -62,7 +62,8 @@ int ave_dapf_dump(struct ave_device *ave);
  * ave_core_reset() uses it to check whether m1n1's entries survived a block
  * reset, which Linux could not put back (docs/49).
  */
-int ave_dapf_dump_now(struct ave_device *ave, const char *tag);
+int ave_dapf_dump_now(struct ave_device *ave, const char *tag,
+		      unsigned int *used);
 
 /*
  * E3: write @n entries exactly as m1n1 does, then read every one back.
