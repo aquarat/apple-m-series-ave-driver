@@ -398,3 +398,27 @@ cumulatively or at some low rate (surviving runs made ~100 reads, freezing
 ones considerably more); or reads only hang once the later stages have run.
 N1f discriminates directly: N1b without the write, reading TCR[0] and
 ENABLED_STREAMS every 2 s for 120 s (`dapf_probe=3`).
+
+## N1f — 2026-09-13, `results/n1f-*.kmsg`: late reads alone do not freeze it
+
+N1b's configuration with its read loop extended to 120 s and no write
+(`dapf_probe=3`): 61 TCR[0]/ENABLED_STREAMS read pairs, stage-12 snapshot,
+30 s hold. **Survived.** N1b's freeze is not reproduced by its reads.
+
+Every factor tested in isolation now survives, on one boot (N1c1-N1f, six
+insmods, ~2 h uptime). The three freezes (E3a attempt 3, N1, N1b) were each
+the **first AVE insmod of a fresh boot** that read CPUDART/DAPF after stage
+11. The surviving runs that read CPUDART/DAPF late (N1d-N1f) were all later
+insmods on a boot where VENC had already been powered up and gated at least
+once. Counter-evidence: the E3a oops run was also a first insmod with the
+stage-8 dump and did not freeze - but its probe died at stage 10, before any
+late read.
+
+**Inferred, weakly (3 freezes, small samples):** the hazard depends on the
+first VENC power session after boot (apple-dart just probed; the DART and
+DAPF first powered by us), not on any single operation we have isolated.
+
+N1g: N1f's exact command (`dapf_probe=3`, no write) as the **first** AVE
+insmod after a fresh boot with overlay `variant=3`. A freeze makes
+first-session dependence the leading hypothesis; a survival makes the three
+freezes look probabilistic, and the next step is repetition, not bisection.
