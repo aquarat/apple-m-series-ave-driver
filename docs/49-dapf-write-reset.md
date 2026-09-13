@@ -422,3 +422,34 @@ N1g: N1f's exact command (`dapf_probe=3`, no write) as the **first** AVE
 insmod after a fresh boot with overlay `variant=3`. A freeze makes
 first-session dependence the leading hypothesis; a survival makes the three
 freezes look probabilistic, and the next step is repetition, not bisection.
+
+## N1g, N1g2, N1h — 2026-09-13
+
+- **N1g** (`results/n1g-*.kmsg`): N1f's command as the **first** AVE insmod of
+  a fresh boot. 61 late read pairs, survived. First-session dependence is
+  not supported.
+- **N1g2** (`results/n1g2-*.kmsg`): repeated at kernel uptime 306-431 s, to
+  span the ~310 s at which E3a attempt 3 and N1b froze. Survived. No systemd
+  timer falls near 5 min after boot.
+- A correction to how the captures are read: a fabric hang blocks **all**
+  MMIO, NVMe included, so `tools/kmsg_capture.py` can read a line printed
+  just before a hang but its write/fsync never completes. **The last line
+  on disk precedes the fatal access by at least one fsync.**
+- **N1h** (`results/n1h-*.kmsg`): N1b again (`dapf_probe=1`) with a 5 s
+  sleep between printing "next: same-value write" and the write. The machine
+  reset. The last line on disk is again `t=30s`; the announcement never
+  landed despite the 5 s sleep after it. Same stopping point as N1b, twice.
+
+So `dapf_probe=1` stops at the same point on two boots, while
+`dapf_probe=3`, whose loop is identical and simply continues past 32 s,
+survived 120 s three times. Between the `t=30s` line and the announcement
+the code does only `msleep(2000)`, one `readl(TCR[0])` and the `dev_info` -
+all of which the looping version does too. Either the announcement's fsync
+was still pending when the write hung the bus (btrfs's 30 s commit interval
+could make one fsync slow, and the loop ends ~32 s in), which would make the
+write the trigger; or something about that point in the code is unexplained.
+
+N1i removes the fsync ambiguity: after the announcement, wait 60 s printing
+a line every 2 s **with no register access** (N1e showed such holds are
+safe), then write, then print. Lines landing through the wait followed by a
+reset pins it to the write; a reset during the wait pins it elsewhere.
