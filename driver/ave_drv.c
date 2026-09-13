@@ -29,6 +29,7 @@
 #include <linux/slab.h>
 
 #include "ave.h"
+#include "ave_dapf.h"
 
 #define AVE_ASC_IDLE_TIMEOUT_US		100000
 
@@ -173,17 +174,25 @@ static void ave_asc_stop(struct ave_device *ave)
 static irqreturn_t ave_irq_handler(int irq, void *data)
 {
 	struct ave_device *ave = data;
+	/* Non-NULL once ave_ipc_init() has initialised ipc_lock. */
+	bool ipc = READ_ONCE(ave->boot_abi) != NULL;
+	unsigned long flags = 0;
+	bool dispatch = false;
 	u32 status;
 
+	if (ipc)
+		spin_lock_irqsave(&ave->ipc_lock, flags);
+
 	status = ave_read(ave, AVE_BANK_SVE, AVE_SVE_INTR_STATUS);
-	if (!status)
+	if (!status) {
+		if (ipc)
+			spin_unlock_irqrestore(&ave->ipc_lock, flags);
 		return IRQ_NONE;
+	}
 
 	/*
-	 * Capture before clearing. Until the handshake completes this may be
-	 * the firmware's first and only message, and write-1-to-clear
-	 * destroys it. Reading the scratch words here costs four MMIO reads
-	 * and turns an unrecoverable miss into a logged fact.
+	 * Capture before clearing, for the log. The first interrupt is
+	 * normally message 1, and write-1-to-clear destroys the evidence.
 	 */
 	if (!ave->hs_seen) {
 		ave->hs_status     = status;
@@ -198,66 +207,75 @@ static irqreturn_t ave_irq_handler(int irq, void *data)
 			 ave->hs_scratch[2], ave->hs_scratch[3]);
 	}
 
-	/* Write-1-to-clear: the value read is written straight back. */
-	ave_write(ave, AVE_BANK_SVE, AVE_SVE_INTR_STATUS, status);
+	/*
+	 * Until the ready flag clears, bit 0 is the scratch mailbox and every
+	 * handshake message (1, 3, 5) raises it. Apple runs StartUpIOP with no
+	 * handler (docs/34 §14); ours is live, so keep the message for
+	 * ave_recv_iop_msg() instead of letting the W1C below eat it. Same lock
+	 * as RecvIOPMsg's poll, so exactly one of the two sees the bit.
+	 * After the handshake bit 0 is a channel doorbell (13.5: TERMINAL).
+	 */
+	if (ipc && !ave->ipc_up && (status & BIT(0))) {
+		ave->mbox_status = status;
+		ave->mbox[0] = ave_read(ave, AVE_BANK_SVE, AVE_SVE_SCRATCH(0));
+		ave->mbox[1] = ave_read(ave, AVE_BANK_SVE, AVE_SVE_SCRATCH(1));
+		ave->mbox[2] = ave_read(ave, AVE_BANK_SVE, AVE_SVE_SCRATCH(2));
+		ave->mbox[3] = ave_read(ave, AVE_BANK_SVE, AVE_SVE_SCRATCH(3));
+		ave->mbox_pending = true;
+	}
 
 	/*
-	 * One bit per IPC channel. Everything below this - command ack,
-	 * command error, per-engine completion - is software dispatch on the
-	 * message content, not on hardware bits.
+	 * Write-1-to-clear the whole word, before dispatch, as
+	 * AVE_HwC::ProcessIntr does (k13 0xfffffe0008f0d9d8; k26 c19928).
 	 */
+	ave_write(ave, AVE_BANK_SVE, AVE_SVE_INTR_STATUS, status);
+	dispatch = ipc && ave->ipc_up && ave->ipc_irq;
+
+	if (ipc)
+		spin_unlock_irqrestore(&ave->ipc_lock, flags);
+
 	dev_dbg(ave->dev, "irq status %#x\n", status);
 
-	/* TODO: drain the T2H ring and dispatch. Needs the command layer. */
+	/*
+	 * Status bits are doorbell bits, and on 13.5 several channels share
+	 * one (bit 1: IO, DEBUG; bit 3: BUF_T2H, SHAREDMALLOC, IO_T2H), so the
+	 * dispatcher drains every bound channel of the selected ABI whose bit
+	 * is set - Apple's ch = 1..7 loop (k13 0xfffffe0008f0d9dc..f0dae8).
+	 * It lives in ave_ipc.c (ave_ipc_irq_dispatch).
+	 */
+	if (dispatch)
+		ave->ipc_irq(ave, status);
+
 	return IRQ_HANDLED;
 }
 
-static int ave_power_up(struct ave_device *ave)
-{
-	int ret;
 
-	/*
-	 * Apple's AVE_HwC::Init sets the IOP domain to CLOCK_ON as its very
-	 * first hardware action, before the DART is attached and before any
-	 * MMIO is mapped. genpd brings the whole list up together, which is
-	 * close enough given the domains are dependency-ordered in the DT.
-	 */
-	ret = pm_runtime_resume_and_get(ave->dev);
-	if (ret < 0) {
-		dev_err(ave->dev, "failed to power up: %d\n", ret);
-		return ret;
-	}
-	return 0;
-}
-
+/*
+ * Finish bringing the coprocessor up.
+ *
+ * By the time this runs, the staged probe has already powered the block
+ * (stage 6), programmed the pre-start scratch registers (stage 11), started
+ * the core (stage 13) and received message 1 (stage 14, which ave_ipc.c keeps
+ * as the handshake's first message). An earlier version powered up and
+ * started the ASC a second time here and never programmed the scratch
+ * registers at all. All that remains is messages 2-5 and the ready flag.
+ *
+ * Power is owned by ave->powered and dropped in ave_remove(), not here.
+ */
 static int ave_start(struct ave_device *ave)
 {
 	int ret;
 
-	ret = ave_power_up(ave);
-	if (ret)
-		return ret;
-
-	ret = ave_asc_start(ave);
-	if (ret)
-		goto err_power;
-
 	ret = ave_ipc_handshake(ave);
 	if (ret) {
 		dev_err(ave->dev, "IPC handshake failed: %d\n", ret);
-		goto err_asc;
+		return ret;
 	}
 
 	ave->running = true;
 	dev_info(ave->dev, "coprocessor up, %u IPC channel(s)\n",
 		 ave->nchannels);
 	return 0;
-
-err_asc:
-	ave_asc_stop(ave);
-err_power:
-	pm_runtime_put(ave->dev);
-	return ret;
 }
 
 static void ave_stop(struct ave_device *ave)
@@ -265,7 +283,7 @@ static void ave_stop(struct ave_device *ave)
 	if (!ave->running)
 		return;
 	ave_asc_stop(ave);
-	pm_runtime_put(ave->dev);
+	/* Power is dropped by ave_remove() via ave->powered. */
 }
 
 /*
@@ -550,6 +568,11 @@ static int ave_probe(struct platform_device *pdev)
 			 AVE_ASC_CPU_STATUS);
 		v = ave_read(ave, AVE_BANK_ASC, AVE_ASC_CPU_STATUS);
 		dev_info(dev, "  ASC CPU_STATUS = 0x%08x\n", v);
+
+		/* E2 (docs/48): read-only DART + DAPF dump; no-op unless dapf_dump=1. */
+		ret = ave_dapf_dump(ave);
+		if (ret)
+			return dev_err_probe(dev, ret, "DAPF dump\n");
 		ave_stage_ok(dev, AVE_STAGE_READ_ASC);
 	} else {
 		return 0;
@@ -606,6 +629,16 @@ static int ave_probe(struct platform_device *pdev)
 		 */
 		dev_info(dev, "  ASC+0x%x BEFORE any write = %#llx  (base field %#llx)\n",
 			 AVE_ASC_FW_BASE, pre, pre & AVE_ASC_FW_BASE_MASK);
+		/*
+		 * The 13.5 kext skips Config for iBoot-loaded chip types above 5
+		 * (0xfffffe0008f1221c, docs/44); t6000 is type 8. Do as Apple
+		 * does. The register is locked regardless.
+		 */
+		if (ave->fw_abi == AVE_ABI_MACOS_13_5) {
+			dev_info(dev, "  13.5: Apple does not write RVBAR on this SoC; skipping\n");
+			ave_stage_ok(dev, AVE_STAGE_IOP_CONFIG);
+			goto iop_config_done;
+		}
 		dev_info(dev, "  writing fw base %#llx to ASC+0x%x ...\n",
 			 v, AVE_ASC_FW_BASE);
 		ave_write64(ave, AVE_BANK_ASC, AVE_ASC_FW_BASE, v);
@@ -613,6 +646,8 @@ static int ave_probe(struct platform_device *pdev)
 			 readq_relaxed(ave->bank[AVE_BANK_ASC].base +
 				       AVE_ASC_FW_BASE));
 		ave_stage_ok(dev, AVE_STAGE_IOP_CONFIG);
+iop_config_done:
+		;
 	} else {
 		return 0;
 	}
@@ -684,6 +719,13 @@ static int ave_probe(struct platform_device *pdev)
 		}
 	}
 
+	/* E3 (docs/48): program the AVE DAPF; no-op unless dapf_set= is given. */
+	if (stop_after >= AVE_STAGE_ASC_START) {
+		ret = ave_dapf_program_selected(ave);
+		if (ret)
+			return dev_err_probe(dev, ret, "DAPF program\n");
+	}
+
 	ave_fw_snapshot_phys(ave);
 	if (stop_after >= AVE_STAGE_ASC_START) {
 		ave_fw_identify_phys(ave);
@@ -748,6 +790,7 @@ static int ave_probe(struct platform_device *pdev)
 			 : "no observable activity - core may not be running");
 
 		ave_asc_liveness(ave, "started");
+		ave_dapf_dump(ave);	/* post-run DART/DAPF state, if dapf_dump=1 */
 
 		/*
 		 * Power off rather than halt. Writing CPU_CONTROL = 0 to a

@@ -32,10 +32,17 @@
 #include <linux/unaligned.h>
 #include <linux/firmware.h>
 #include <linux/iommu.h>
+#include <linux/ioport.h>
+#include <linux/io.h>
+#include <linux/mm.h>
+#include <linux/of.h>
+#include <linux/of_address.h>
+#include <linux/of_reserved_mem.h>
 #include <linux/sizes.h>
 #include <linux/slab.h>
 
 #include "ave.h"
+#include "ave_dapf.h"
 
 #define AVE_FW_NAME		"apple/ave_h13c.bin"
 
@@ -209,6 +216,331 @@ static int ave_fw_patch_ioba(struct ave_device *ave, void *img, size_t size)
 }
 
 /*
+ * docs/44 E3: DART mappings for iBoot's own firmware segments.
+ *
+ * Both options are OFF by default, and with both off ave_fw_load() behaves
+ * exactly as before.
+ *
+ * DATA (fw_map_data=1). The 13.5 bootstrap loads DATA's base from the
+ * iBoot-patched literal at image 0x423c, 0x1f0000ec000 (docs/44 §2.4), i.e.
+ * DATA VA 0xec000 inside the 0x1f0_0000_0000 window that DAPF entry 0 admits.
+ * The window is 4 GiB, the DART's input space is 32 bits ("AS 32"), so the
+ * inference is that the DART translates the low 32 bits: DVA 0xec000 ->
+ * physical 0x10001a90000, size 0x134000 (DATA vmsize). That mapping is what
+ * this creates, read/write.
+ *
+ * TEXT (fw_map_text). Does the physical TEXT fetch also need a DART mapping?
+ * docs/44 does NOT settle it, so it is a separate, selectable option:
+ *
+ *   - The fault address register reported the full 0x10000b28200 with
+ *     NO_DAPF_MATCH while IOVA 0xb28000 was mapped. So the DAPF compares the
+ *     full-width address, before any translation. What the DART does with a
+ *     >32-bit address the DAPF *admits* has never been observed.
+ *   - H1 reads it as a physical pass-through: the bootstrap builds its TEXT
+ *     PTE from the MMU-off PC, i.e. TEXT's real DRAM address.
+ *   - But the 0x1f0 window entry has the same r0 (0x33) we give TEXT, and the
+ *     window is inferred to be *translated* by its low 32 bits. By that
+ *     analogy an admitted 0x10000b28200 would be translated to DVA 0xb28200,
+ *     and TEXT would need DVA 0xb28000 -> phys 0x10000b28000.
+ *
+ *   fw_map_text=0  legacy: our request_firmware() image is mapped at the DVA
+ *                  taken from RVBAR's low 32 bits (0xb28000). NOTE the
+ *                  installed apple/ave_h13c.bin is NOT the 13.5 image iBoot
+ *                  loaded (different sha256), so a translated fetch would
+ *                  run a mismatched copy - a confound for E3.
+ *   fw_map_text=1  iBoot's TEXT, phys 0x10000b28000 size 0xec000, at DVA
+ *                  0xb28000, READ-ONLY (t6000 is APPLE_DART2 format, which
+ *                  honours IOMMU_WRITE absence). Physical and translated
+ *                  fetches then see identical bytes: success cannot tell
+ *                  them apart.
+ *   fw_map_text=2  nothing at DVA 0xb28000. The discriminating run: with TEXT
+ *                  admitted by the DAPF, a translated fetch faults NO_PTE /
+ *                  NO_PMD / NO_TTBR at 0xb28200, a physical one does not.
+ *
+ * Safety. Neither range may touch memory Linux owns, and mapping it into a
+ * DART is still a statement that the device may read (and for DATA write)
+ * it. So before any iommu_map():
+ *   - RVBAR's base field must be 0x10000b28000 and TEXT+0x423c must hold
+ *     0x1f0000ec000, i.e. this boot's iBoot placed the image where the
+ *     constants say (read through memremap, inside the 16 MiB window the
+ *     liveness snapshot already reads);
+ *   - region_intersects() must report the range disjoint from System RAM;
+ *   - no /memory node reg may overlap it;
+ *   - no /reserved-memory child (reg, or its dynamic reserved_mem) may
+ *     overlap it;
+ *   - every page of the DVA range must be unmapped in the domain, and inside
+ *     its aperture, and everything page aligned.
+ * Any failure refuses, and ave_fw_load() fails so the core is never started.
+ */
+static bool fw_map_data;
+module_param(fw_map_data, bool, 0444);
+MODULE_PARM_DESC(fw_map_data,
+		 "E3: DART-map iBoot's DATA, DVA 0xec000 -> phys 0x10001a90000 +0x134000 (translating domain only; default off)");
+
+static int fw_map_text;
+module_param(fw_map_text, int, 0444);
+MODULE_PARM_DESC(fw_map_text,
+		 "E3: DVA 0xb28000 holds 0 = our image (legacy, default) | 1 = iBoot TEXT phys 0x10000b28000 read-only | 2 = nothing");
+
+#define AVE_IBOOT_DATA_LITERAL_OFF	0x423c	/* image offset, docs/44 §2.4 */
+#define AVE_IBOOT_DATA_LITERAL		0x1f0000ec000ULL
+
+static bool ave_ranges_overlap(u64 a, u64 alen, u64 b, u64 blen)
+{
+	return a < b + blen && b < a + alen;
+}
+
+/* 0 if [phys, phys+size) belongs to nothing Linux knows about. */
+static int ave_fw_range_is_foreign(struct ave_device *ave, u64 phys, u64 size,
+				   const char *what)
+{
+	struct device_node *np, *rmem_np, *child;
+	struct resource r;
+	unsigned int i;
+	int ret;
+
+	ret = region_intersects(phys, size, IORESOURCE_SYSTEM_RAM,
+				IORES_DESC_NONE);
+	if (ret != REGION_DISJOINT) {
+		dev_err(ave->dev,
+			"  %s: REFUSING - %#llx+%#llx intersects System RAM (%d)\n",
+			what, phys, size, ret);
+		return -EBUSY;
+	}
+
+	for_each_node_by_type(np, "memory") {
+		for (i = 0; !of_address_to_resource(np, i, &r); i++) {
+			if (ave_ranges_overlap(phys, size, r.start,
+					       resource_size(&r))) {
+				dev_err(ave->dev,
+					"  %s: REFUSING - overlaps %pOF %pR\n",
+					what, np, &r);
+				of_node_put(np);
+				return -EBUSY;
+			}
+		}
+	}
+
+	rmem_np = of_find_node_by_path("/reserved-memory");
+	if (!rmem_np) {
+		dev_err(ave->dev, "  %s: REFUSING - no /reserved-memory node to check against\n",
+			what);
+		return -ENODEV;
+	}
+	for_each_child_of_node(rmem_np, child) {
+		struct reserved_mem *rm;
+		bool had_reg = false;
+
+		for (i = 0; !of_address_to_resource(child, i, &r); i++) {
+			had_reg = true;
+			if (ave_ranges_overlap(phys, size, r.start,
+					       resource_size(&r))) {
+				dev_err(ave->dev,
+					"  %s: REFUSING - overlaps reserved-memory %pOF %pR\n",
+					what, child, &r);
+				of_node_put(child);
+				of_node_put(rmem_np);
+				return -EBUSY;
+			}
+		}
+		if (had_reg)
+			continue;
+		rm = of_reserved_mem_lookup(child);
+		if (rm && ave_ranges_overlap(phys, size, rm->base, rm->size)) {
+			dev_err(ave->dev,
+				"  %s: REFUSING - overlaps dynamic reserved-memory %pOF %pa+%pa\n",
+				what, child, &rm->base, &rm->size);
+			of_node_put(child);
+			of_node_put(rmem_np);
+			return -EBUSY;
+		}
+	}
+	of_node_put(rmem_np);
+
+	dev_info(ave->dev, "  %s: %#llx+%#llx is outside System RAM, /memory and /reserved-memory\n",
+		 what, phys, size);
+	return 0;
+}
+
+/* Is this boot's iBoot image where the constants say? */
+static int ave_fw_check_iboot_placement(struct ave_device *ave)
+{
+	u64 fwreg = ave_read64(ave, AVE_BANK_ASC, AVE_ASC_FW_BASE);
+	u64 base = fwreg & AVE_ASC_FW_BASE_MASK;
+	u64 lit;
+	void *p;
+
+	if (base != AVE_IBOOT_TEXT_PHYS) {
+		dev_err(ave->dev,
+			"  iboot: REFUSING - RVBAR %#llx base %#llx, constants assume %#llx\n",
+			fwreg, base, AVE_IBOOT_TEXT_PHYS);
+		return -EINVAL;
+	}
+
+	p = memremap(AVE_IBOOT_TEXT_PHYS, SZ_16K, MEMREMAP_WB);
+	if (!p) {
+		dev_err(ave->dev, "  iboot: REFUSING - cannot memremap TEXT to check the DATA literal\n");
+		return -ENOMEM;
+	}
+	/* ldp w0, w1 at 0x308-0x310: low word then high word. */
+	lit = get_unaligned_le32(p + AVE_IBOOT_DATA_LITERAL_OFF) |
+	      ((u64)get_unaligned_le32(p + AVE_IBOOT_DATA_LITERAL_OFF + 4) << 32);
+	memunmap(p);
+
+	if (lit != AVE_IBOOT_DATA_LITERAL) {
+		dev_err(ave->dev,
+			"  iboot: REFUSING - TEXT+%#x holds DATA base %#llx, expected %#llx\n",
+			AVE_IBOOT_DATA_LITERAL_OFF, lit, AVE_IBOOT_DATA_LITERAL);
+		return -EINVAL;
+	}
+	dev_info(ave->dev, "  iboot: RVBAR base %#llx, DATA literal %#llx - placement as expected\n",
+		 base, lit);
+	return 0;
+}
+
+static int ave_fw_map_one(struct ave_device *ave, struct iommu_domain *domain,
+			  u64 dva, u64 phys, u64 size, int prot, const char *what)
+{
+	u64 pgsz, off;
+	phys_addr_t back;
+	int ret;
+
+	if (!domain->pgsize_bitmap)
+		return -EINVAL;
+	pgsz = 1ULL << __ffs(domain->pgsize_bitmap);
+	if ((dva | phys | size) & (pgsz - 1)) {
+		dev_err(ave->dev, "  %s: REFUSING - not aligned to DART page %#llx\n",
+			what, pgsz);
+		return -EINVAL;
+	}
+	if (domain->geometry.force_aperture &&
+	    (dva < domain->geometry.aperture_start ||
+	     dva + size - 1 > domain->geometry.aperture_end)) {
+		dev_err(ave->dev, "  %s: REFUSING - DVA %#llx+%#llx outside aperture\n",
+			what, dva, size);
+		return -EINVAL;
+	}
+	for (off = 0; off < size; off += pgsz) {
+		if (iommu_iova_to_phys(domain, dva + off)) {
+			dev_err(ave->dev,
+				"  %s: REFUSING - DVA %#llx is already mapped; not replacing someone's mapping\n",
+				what, dva + off);
+			return -EEXIST;
+		}
+	}
+
+	ret = ave_fw_range_is_foreign(ave, phys, size, what);
+	if (ret)
+		return ret;
+
+	ret = iommu_map(domain, dva, phys, size, prot, GFP_KERNEL);
+	if (ret) {
+		dev_err(ave->dev, "  %s: iommu_map failed: %d\n", what, ret);
+		return ret;
+	}
+
+	back = iommu_iova_to_phys(domain, dva + size - pgsz);
+	if (iommu_iova_to_phys(domain, dva) != phys ||
+	    back != phys + size - pgsz) {
+		dev_err(ave->dev, "  %s: verify MISMATCH after map (last page -> %pa)\n",
+			what, &back);
+		iommu_unmap(domain, dva, size);
+		return -EIO;
+	}
+	dev_info(ave->dev, "  %s: DVA %#llx -> phys %#llx +%#llx %s, verified\n",
+		 what, dva, phys, size, prot & IOMMU_WRITE ? "RW" : "RO");
+	return 0;
+}
+
+static void ave_fw_unmap_iboot(struct ave_device *ave)
+{
+	struct iommu_domain *domain = ave->iboot_domain;
+	size_t n;
+
+	if (!ave->iboot_data_mapped && !ave->iboot_text_mapped)
+		return;
+
+	if (!domain || iommu_get_domain_for_dev(ave->dev) != domain) {
+		dev_err(ave->dev,
+			"iboot: device domain changed under us; cannot unmap iBoot segments\n");
+		return;
+	}
+	if (ave->iboot_data_mapped) {
+		n = iommu_unmap(domain, AVE_IBOOT_DATA_DVA, AVE_IBOOT_DATA_SIZE);
+		dev_info(ave->dev, "iboot: DATA unmapped, %zu of %#llx bytes\n",
+			 n, AVE_IBOOT_DATA_SIZE);
+		ave->iboot_data_mapped = false;
+	}
+	if (ave->iboot_text_mapped) {
+		n = iommu_unmap(domain, AVE_IBOOT_TEXT_DVA, AVE_IBOOT_TEXT_SIZE);
+		dev_info(ave->dev, "iboot: TEXT unmapped, %zu of %#llx bytes\n",
+			 n, AVE_IBOOT_TEXT_SIZE);
+		ave->iboot_text_mapped = false;
+	}
+	ave->iboot_domain = NULL;
+}
+
+static int ave_fw_map_iboot(struct ave_device *ave, struct iommu_domain *domain,
+			    u64 map_iova)
+{
+	int ret;
+
+	if (fw_map_text < 0 || fw_map_text > 2) {
+		dev_err(ave->dev, "fw_map_text=%d: must be 0, 1 or 2\n", fw_map_text);
+		return -EINVAL;
+	}
+	if (!fw_map_data && !fw_map_text)
+		return 0;
+
+	if (!(domain->type & __IOMMU_DOMAIN_PAGING)) {
+		dev_err(ave->dev,
+			"iboot: REFUSING fw_map_data/fw_map_text - domain type %#x does not translate (need overlay variant=3, DMA group)\n",
+			domain->type);
+		return -EINVAL;
+	}
+	if (fw_map_text && map_iova != AVE_IBOOT_TEXT_DVA) {
+		dev_err(ave->dev,
+			"iboot: REFUSING - RVBAR-derived DVA %#llx, TEXT option assumes %#llx\n",
+			map_iova, AVE_IBOOT_TEXT_DVA);
+		return -EINVAL;
+	}
+
+	ret = ave_fw_check_iboot_placement(ave);
+	if (ret)
+		return ret;
+
+	ave->iboot_domain = domain;
+
+	if (fw_map_data) {
+		ret = ave_fw_map_one(ave, domain, AVE_IBOOT_DATA_DVA,
+				     AVE_IBOOT_DATA_PHYS, AVE_IBOOT_DATA_SIZE,
+				     IOMMU_READ | IOMMU_WRITE, "iboot DATA");
+		if (ret)
+			goto fail;
+		ave->iboot_data_mapped = true;
+	}
+
+	if (fw_map_text == 1) {
+		ret = ave_fw_map_one(ave, domain, AVE_IBOOT_TEXT_DVA,
+				     AVE_IBOOT_TEXT_PHYS, AVE_IBOOT_TEXT_SIZE,
+				     IOMMU_READ, "iboot TEXT");
+		if (ret)
+			goto fail;
+		ave->iboot_text_mapped = true;
+	} else if (fw_map_text == 2) {
+		dev_info(ave->dev,
+			 "  iboot TEXT: leaving DVA %#llx UNMAPPED (discriminating run: a translated fetch must fault there)\n",
+			 AVE_IBOOT_TEXT_DVA);
+	}
+	return 0;
+
+fail:
+	ave_fw_unmap_iboot(ave);
+	ave->iboot_domain = NULL;
+	return ret;
+}
+
+/*
  * Load the firmware and map it at IOVA 0.
  *
  * The caller must have attached the IOMMU already - this uses the device's
@@ -291,6 +623,10 @@ int ave_fw_load(struct ave_device *ave)
 	 * the software page table happily held an address the hardware cannot
 	 * present. The DART's fault register reports the same 0x100 prefix it
 	 * cannot decode.
+	 *
+	 * Correction (docs/44 §0): those faults were code 0x800 NO_DAPF_MATCH,
+	 * the address filter, not a translation failure. See ave_fw_map_iboot()
+	 * for what that changes.
 	 */
 	map_iova = fwreg & 0xfffff000ULL;
 	if (!map_iova) {
@@ -310,6 +646,11 @@ int ave_fw_load(struct ave_device *ave)
 	dev_info(ave->dev, "  iova %pad -> phys %pa, mapping at IOVA %#llx\n",
 		 &ave->fw.iova, &pa, map_iova);
 
+	/* docs/44 E3 options; a no-op unless fw_map_data / fw_map_text. */
+	ret = ave_fw_map_iboot(ave, domain, map_iova);
+	if (ret)
+		goto err_free;
+
 	/*
 	 * In bypass there is nothing to map, and nothing we could usefully
 	 * map: the core fetches the physical address in the fw-base register,
@@ -320,6 +661,20 @@ int ave_fw_load(struct ave_device *ave)
 		dev_info(ave->dev,
 			 "  identity domain: DART in bypass, core will fetch phys %#llx directly\n",
 			 fwreg & AVE_ASC_FW_BASE_MASK);
+		ave->fw.mapped_at_zero = false;
+		release_firmware(fw);
+		return 0;
+	}
+
+	if (fw_map_text) {
+		/*
+		 * DVA map_iova now holds iBoot's TEXT (1) or deliberately
+		 * nothing (2). Our image stays allocated - the identify scan
+		 * uses it as its control - but is not mapped anywhere.
+		 */
+		dev_info(ave->dev,
+			 "  fw_map_text=%d: NOT mapping our image at IOVA %#llx\n",
+			 fw_map_text, map_iova);
 		ave->fw.mapped_at_zero = false;
 		release_firmware(fw);
 		return 0;
@@ -373,6 +728,7 @@ int ave_fw_load(struct ave_device *ave)
 	return 0;
 
 err_free:
+	ave_fw_unmap_iboot(ave);
 	dma_free_attrs(ave->dev, size, ave->fw.cpu, ave->fw.iova,
 		       DMA_ATTR_FORCE_CONTIGUOUS);
 	ave->fw.cpu = NULL;
@@ -384,6 +740,9 @@ out:
 void ave_fw_unload(struct ave_device *ave)
 {
 	struct iommu_domain *domain;
+
+	/* Before the early return: these do not depend on our image. */
+	ave_fw_unmap_iboot(ave);
 
 	if (!ave->fw.cpu)
 		return;

@@ -1,0 +1,76 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/*
+ * Test overlay, variant=2 (docs/44 E2): variant=1's AVE node - NO DART node,
+ * NO "iommus" - plus two reg entries appended for the read-only dump:
+ *
+ *   [5] "cpudart"  0x40d040000 +0x4000   dart-ave0 reg[0] (bus 0x20d040000)
+ *   [6] "dapf"     0x40d044000 +0x4000   dart-ave0 reg[3] (bus 0x20d044000)
+ *
+ * Appended, never inserted: ave_drv.c maps banks 0-4 by index.
+ *
+ * apple-dart never binds here, so the dump sees the CPUDART exactly as
+ * gating and iBoot left it. The driver maps these with devm_ioremap() (not
+ * request) and reads them only while the stage 6 runtime-PM reference holds
+ * venc_sys on. Stop at stage 8: without an IOMMU, stage 9's DMA allocation
+ * would hand the coprocessor unprotected memory.
+ *
+ * Literal phandles (the base tree has no __symbols__):
+ *   0x13  aic
+ *   0x1d  ps_venc_sys      0xc2  ps_venc_dma
+ *   0xc4  ps_venc_pipe4    0xc3  ps_venc_pipe5
+ *   0xc5  ps_venc_me0
+ *
+ * Compile WITHOUT -@: that flag emits a __symbols__ node the live tree lacks,
+ * and the overlay is then rejected with -EINVAL.
+ */
+/dts-v1/;
+/plugin/;
+
+/ {
+	fragment@0 {
+		target-path = "/soc";
+
+		__overlay__ {
+			#address-cells = <2>;
+			#size-cells = <2>;
+
+			ave0: video-encoder@40d100000 {
+				compatible = "apple,t6001-ave", "apple,ave";
+				/* CPU physical = ADT bus + 0x2_00000000, per
+				 * /arm-io "ranges". See tools/check_addrs.py. */
+				reg = <0x4 0x0d100000 0x0 0x45c000>,
+				      <0x4 0x0d800000 0x0 0x800000>,
+				      <0x4 0x0d050000 0x0 0x008000>,
+				      <0x2 0x8e588000 0x0 0x000024>,
+				      <0x4 0x0c000000 0x0 0x1000000>,
+				      <0x4 0x0d040000 0x0 0x4000>,
+				      <0x4 0x0d044000 0x0 0x4000>;
+				reg-names = "dpe", "asc", "sve", "unk3", "axi2af",
+					    "cpudart", "dapf";
+				interrupt-parent = <0x13>;
+				interrupts = <0 0 1031 4>;
+				power-domains = <0x1d>, <0xc2>, <0xc4>,
+						<0xc3>, <0xc5>;
+				/* apple-avd does reset_control_reset() before its
+				 * first register access; #reset-cells is 0 */
+				resets = <0x1d>;
+				/*
+				 * No "iommus" on purpose, and no DART nodes
+				 * above. apple-dart therefore never binds to
+				 * the AVE DART, and iBoot's configuration of
+				 * it survives - which is the whole point of
+				 * this variant.
+				 *
+				 * The cost is real: the device has NO IOMMU
+				 * backstop. Every previous experiment had the
+				 * DART catching stray accesses as loud
+				 * translation faults; here a stray write from
+				 * the coprocessor lands in physical RAM. We
+				 * would also be running iBoot's firmware
+				 * image, whose addressing assumptions we have
+				 * not read.
+				 */
+			};
+		};
+	};
+};
