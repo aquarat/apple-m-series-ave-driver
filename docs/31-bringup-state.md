@@ -752,3 +752,52 @@ attached.
   block at probe when the core is not STOPPED (the DT gives `resets = <0x1d>`
   and an earlier run showed the call returns 0 without hanging); or finding
   what keeps `venc_sys` on and gating it properly.
+
+## 2026-09-13 20:43 — CONFIG AND OPEN ACCEPTED; Start_AVC asserts on a null address
+
+`results/cmd1-1789328606.kmsg`: fresh boot, patched m1n1, overlay `variant=3`,
+`stop_after=16 fw_map_data=1 fw_map_text=2 fw_restore_data=2 session_selftest=1`.
+
+**Restore dry run (nothing written):** all gates passed — core halted
+(`CPU_STATUS 0x2a`), blob sha256 verified, TEXT matched the 13.5 image over
+3 x 0x4000, destination outside System RAM/`/memory`/`/reserved-memory`. Drift
+was **exactly 8 bytes in 1 page at DATA+0x3a38**, live STKG
+`0xa52fda7ba8e5cb00` vs blob `0x816ea533007323bc`. **Confirmed:** docs/51 §2.3
+is right — `STKG` is a per-boot random stack guard, and it is the only
+fresh-boot difference. The "expected exception" the review added is what
+happened.
+
+**Commands over IO, replies on IO_T2H:**
+
+| command | sent | reply | status |
+|---|---|---|---|
+| Config | 112 bytes (0x70) | id `0x0e01`, cid 0, slot `0xffffffff` | **`0xee0000` ACCEPTED** |
+| Open | 64 bytes (0x40) | id `0x0e02`, cid 1, slot 3 | **`0xee0000` ACCEPTED** |
+| Start_AVC | 69136 bytes (0x10E10) | none | **firmware assert** |
+
+**Confirmed:** the 13.5 command ABI reconstructed statically (docs/46) is
+right for Config and Open — sizes, ids, the client-id echo, and the
+`0xEE0000` success status all match on hardware. The channel split the
+review corrected (commands on IO, completions on IO_T2H) is also confirmed:
+every reply arrived on IO_T2H, and the IO ack arrived too.
+
+**Start_AVC** was accepted by the dispatcher (the IO ack arrived; the
+firmware's own history log shows `Start AVC 1` after `Open 1` and `Config`)
+and then asserted:
+
+```
+fw[3]| SCRATCH_REG32_RD: addr fffffffff5050034 value 00000001
+fw[3]| SCRATCH_REG32_WR: addr fffffffff5050034 value 40000001
+fw[3]| ASSERT: ./AppleAVE2FW/utils/MappedMemory.cpp, 39: paddr != 0
+```
+
+**Inferred:** this is the `reg_dart_addr` field the session code sends as 0
+(Config +0x48, `AVE_Reg::GetDARTAddr(3)`), which docs/46 flagged as unknown
+and `ave_session.c` warns about; `ProcessInitStage2` loads it and passes it on
+(fw `0x13e3c`). A zero there reaching a `MappedMemory` constructor matches the
+assert exactly. **Not yet confirmed** — it could equally be one of the buffer
+addresses Start_AVC carries. The next step is to read `MappedMemory.cpp:39`'s
+caller in the 13.5 firmware and identify which field it maps.
+
+The firmware log is now a working oracle: it names the source file, line and
+assertion, and dumps a command history with client ids.
