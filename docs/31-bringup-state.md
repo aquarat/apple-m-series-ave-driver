@@ -711,3 +711,44 @@ in docs/43.
 Open items before commands: restore pristine DATA before every start (the
 second start in a boot is silent otherwise), then Config → Open → Start_AVC
 (docs/46) over the IO channel.
+
+## 2026-09-13 20:37 — with the patched m1n1, VENC is no longer power-cycled
+
+Trying to run docs/51's negative control (start the firmware, unload, dry-run
+the restore to measure drift) produced a different result:
+
+```
+[halted ]   0x0028 x2000 FIQ_NOT_PEND? IDLE
+fw_restore_data: REFUSING - core is not halted (CPU_CONTROL 0x0, CPU_STATUS 0x28)
+```
+
+`CPU_STATUS` is `0x28`: **not** `STOPPED`, where a fresh boot reads `0x2a`. And
+`pm_genpd_summary` shows `venc_sys` **on** with zero devices after `rmmod`,
+while its children (`venc_dma`, `venc_pipe4/5`, `venc_me0/1`) are `off-0` and
+both AVE DARTs are `suspended`. The block is genuinely live — the core kept
+running after the module was removed.
+
+**Confirmed:** on this boot the driver's power-off no longer gates `venc_sys`,
+so the core is not reset between loads and a second start cannot work,
+independent of DATA drift. The restore's halted-core gate correctly refused,
+which is the gate doing its job.
+
+**Inferred:** the patched m1n1 leaves `VENC_SYS` on (its power-down of the
+`VENC-DART` clock gate is a no-op because that PMGR device is virtual —
+docs/50, review finding F2), so Linux's genpd sees it on from boot and nothing
+gates it afterwards; `genpd: Disabling unused power domains` runs at 0.23 s,
+long before the overlay exists. **Unknown:** why genpd does not power it off
+when the last consumer suspends — both DARTs are suspended and no device is
+attached.
+
+**Consequences:**
+
+- The 19:30 silent second start is *not* re-explained by this: that run read
+  `0x2a STOPPED` before starting, so the core there *was* power-cycled and the
+  DATA-drift hypothesis (docs/51) still stands for it.
+- Until VENC can be gated on demand, **each firmware start needs a fresh
+  boot**, and docs/51 step (b) (reload without rebooting) cannot run.
+- Candidate fixes, none tried: an explicit `reset_control_reset()` of the
+  block at probe when the core is not STOPPED (the DT gives `resets = <0x1d>`
+  and an earlier run showed the call returns 0 without hanging); or finding
+  what keeps `venc_sys` on and gating it properly.
