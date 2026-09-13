@@ -950,6 +950,7 @@ static int ave_probe(struct platform_device *pdev)
 
 	if (ret && ave) {
 		ave_power_off(ave, "probe failed");
+		ave_session_release(ave);
 		ave_fw_unload(ave);
 		ave_ipc_fini(ave);
 	}
@@ -982,6 +983,8 @@ static void ave_remove(struct platform_device *pdev)
 	 */
 	ave_power_off(ave, "remove");
 
+	/* Safe now: the core is powered off and cannot reach these. */
+	ave_session_release(ave);
 	ave_fw_unload(ave);
 	ave_ipc_fini(ave);
 }

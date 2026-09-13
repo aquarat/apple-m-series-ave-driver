@@ -164,6 +164,13 @@ struct ave_device {
 	struct ave_channel	chan[8];	/* by host id; AVE_CH_MAX */
 	unsigned int		nchannels;	/* descriptors bound */
 
+	/*
+	 * Buffers handed to the firmware by ave_session.c. The firmware keeps
+	 * the addresses after the self-test returns, so they are freed only in
+	 * ave_remove(), after the block is powered off.
+	 */
+	void			*session_bufs;
+
 	bool			running;
 };
 
