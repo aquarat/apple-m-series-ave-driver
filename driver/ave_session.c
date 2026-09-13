@@ -109,6 +109,9 @@ struct ave_sess_rx {
 	u32			size;
 	u32			flags;
 	bool			overflow;
+	/* The IO echo of the command buffer, which is an ack, not the answer. */
+	u32			ack_size;
+	bool			ack_seen;
 };
 
 /*
@@ -124,7 +127,29 @@ static void ave_session_ipc_rx(struct ave_device *ave, u32 chan_id,
 {
 	struct ave_sess_rx *rx = &ave_sess_rx;
 
-	if (chan_id != AVE_CH_IO)	/* IO_T2H async notifications: ignore */
+	/*
+	 * Two different messages come back per command, and only one is the
+	 * answer (review of 7998bf1, finding 1):
+	 *
+	 *   IO      - the firmware echoes the command buffer back
+	 *             (CController::CmdProcess, fw 0xa1cf8, on handle [this+120]);
+	 *             byte 0 is still the command id and +0x38 is untouched.
+	 *             The kext treats ch 1 as ProcessIntr_CmdAck
+	 *             (0xfffffe0008f0d710). It is an ack.
+	 *   IO_T2H  - the completion NotificationToHost built at fw 0x13684 and
+	 *             sent through PostCmdSynchronous on handle [this+144]
+	 *             (fw 0xa1fb8); the kext's ch 2 path decodes id@0 and
+	 *             cid@0x10 from it. This is the reply to check.
+	 *
+	 * Capturing IO and checking it as the reply is why the first version
+	 * could only ever fail with -EPROTO.
+	 */
+	if (chan_id == AVE_CH_IO) {
+		rx->ack_size = size;
+		rx->ack_seen = true;
+		return;
+	}
+	if (chan_id != AVE_CH_IO_T2H)
 		return;
 
 	rx->flags = flags;
@@ -132,6 +157,8 @@ static void ave_session_ipc_rx(struct ave_device *ave, u32 chan_id,
 	rx->size = min_t(u32, size, (u32)sizeof(rx->buf));
 	if (buf && rx->size)
 		memcpy(rx->buf, buf, rx->size);
+	else
+		rx->size = 0;	/* payload outside FwIPC: report nothing, not stale */
 	complete(&rx->done);
 }
 
@@ -222,6 +249,8 @@ static int ave_session_cmd(struct ave_device *ave, const struct ave_cmd_abi *abi
 	rx->size = 0;
 	rx->flags = 0;
 	rx->overflow = false;
+	rx->ack_seen = false;
+	rx->ack_size = 0;
 
 	dev_info(ave->dev, "session: %s: sending %zu bytes at IOVA %pad on IO\n",
 		 name, cmd_len, &cmd_iova);
@@ -237,10 +266,20 @@ static int ave_session_cmd(struct ave_device *ave, const struct ave_cmd_abi *abi
 					   msecs_to_jiffies(AVE_SESS_TIMEOUT_MS));
 	if (!left) {
 		dev_err(ave->dev,
-			"session: %s: TIMEOUT after %d ms - no reply on IO\n",
-			name, AVE_SESS_TIMEOUT_MS);
+			"session: %s: TIMEOUT after %d ms - no completion on IO_T2H (IO ack %s)\n",
+			name, AVE_SESS_TIMEOUT_MS,
+			rx->ack_seen ? "did arrive: the firmware took the command"
+				     : "did not arrive either");
 		return -ETIMEDOUT;
 	}
+	if (!rx->ack_seen)
+		dev_warn(ave->dev,
+			 "session: %s: completion arrived without the IO ack echo\n",
+			 name);
+	if (!rx->size)
+		dev_warn(ave->dev,
+			 "session: %s: completion payload is not inside FwIPC; nothing to check\n",
+			 name);
 
 	/* The reply words. print4() would be nicer; keep it explicit. */
 	dev_info(ave->dev,
@@ -429,10 +468,21 @@ static int ave_session_start_avc(struct ave_device *ave,
 /* Entry point                                                              */
 /* ------------------------------------------------------------------------ */
 
+void ave_session_release(struct ave_device *ave)
+{
+	struct ave_sess_bufs *bufs = ave->session_bufs;
+
+	if (!bufs)
+		return;
+	ave->session_bufs = NULL;
+	ave_sess_free_all(bufs);
+	kfree(bufs);
+}
+
 int ave_session_selftest(struct ave_device *ave)
 {
 	const struct ave_cmd_abi *abi;
-	struct ave_sess_bufs bufs = { .ave = ave };
+	struct ave_sess_bufs *bufs;
 	void (*prev_rx)(struct ave_device *, u32, void *, u32, u32);
 	int ret;
 
@@ -459,21 +509,37 @@ int ave_session_selftest(struct ave_device *ave)
 
 	dev_info(ave->dev, "session: self-test start (ABI %s)\n", abi->name);
 
+	/*
+	 * Owned by the device, not by this function. Config hands the firmware
+	 * a shared-memory region it carves into four (fw ProcessConfig 0xe5e4
+	 * -> PlatformIOPIPCManager::AddSharedMemory 0xaa85c), and Start_AVC
+	 * hands it the client, recon and coded buffers. The firmware keeps
+	 * those addresses; freeing them here - with the core still running -
+	 * would unmap live IOVAs and invite the fault storm docs/31 measured.
+	 * ave_remove() frees them after ave_power_off(). (Review finding 2.)
+	 */
+	bufs = kzalloc(sizeof(*bufs), GFP_KERNEL);
+	if (!bufs)
+		return -ENOMEM;
+	bufs->ave = ave;
+	ave_session_release(ave);	/* a previous run's, if any */
+	ave->session_bufs = bufs;
+
 	init_completion(&ave_sess_rx.done);
 
 	/* Publish the capturing hook to the IRQ handler before the first send. */
 	prev_rx = ave->ipc_rx;
 	smp_store_release(&ave->ipc_rx, ave_session_ipc_rx);
 
-	ret = ave_session_config(ave, abi, &bufs);
+	ret = ave_session_config(ave, abi, bufs);
 	if (ret)
 		goto out;
 
-	ret = ave_session_open(ave, abi, &bufs, AVE_SESS_CLIENT_ID);
+	ret = ave_session_open(ave, abi, bufs, AVE_SESS_CLIENT_ID);
 	if (ret)
 		goto out;
 
-	ret = ave_session_start_avc(ave, abi, &bufs, AVE_SESS_CLIENT_ID);
+	ret = ave_session_start_avc(ave, abi, bufs, AVE_SESS_CLIENT_ID);
 
 out:
 	/* Stop the hook before freeing the buffers replies were written into. */
@@ -484,7 +550,10 @@ out:
 	 * freed buffer, then drop everything.
 	 */
 	synchronize_irq(ave->irq);
-	ave_sess_free_all(&bufs);
+	/*
+	 * The buffers stay mapped: the firmware still holds their addresses.
+	 * ave_remove() releases them once the core is powered off.
+	 */
 
 	dev_info(ave->dev, "session: self-test %s (%d)\n",
 		 ret ? "FAILED" : "reached Start_AVC OK", ret);

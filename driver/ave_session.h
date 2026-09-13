@@ -26,4 +26,11 @@ struct ave_device;
  */
 int ave_session_selftest(struct ave_device *ave);
 
+/*
+ * Free the buffers the self-test handed to the firmware. Only safe once the
+ * core cannot reach them any more: call it from ave_remove() after the power
+ * has been dropped.
+ */
+void ave_session_release(struct ave_device *ave);
+
 #endif /* __AVE_SESSION_H__ */

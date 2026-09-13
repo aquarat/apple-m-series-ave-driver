@@ -463,6 +463,7 @@ static void ave_ipc_shmalloc(struct ave_device *ave, u64 fw, u32 size)
  */
 static void ave_ipc_drain(struct ave_device *ave, u32 id)
 {
+	void (*rx)(struct ave_device *, u32, void *, u32, u32);
 	u32 size, flags;
 	u64 fw;
 
@@ -472,10 +473,17 @@ static void ave_ipc_drain(struct ave_device *ave, u32 id)
 		case AVE_CH_IO_T2H:
 			if (id == AVE_CH_IO_T2H)
 				ave_chan_send_fw(ave, id, fw, size, 0);
-			if (ave->ipc_rx)
-				ave->ipc_rx(ave, id,
-					    fw ? ave_ipc_fw_to_cpu(ave, fw, 1) : NULL,
-					    size, flags);
+			rx = READ_ONCE(ave->ipc_rx);
+			if (rx)
+				/*
+				 * Validate for the length the consumer will
+				 * read, not one byte: a reply in the last
+				 * bytes of FwIPC would otherwise be copied
+				 * past the end of the region.
+				 */
+				rx(ave, id,
+				   fw ? ave_ipc_fw_to_cpu(ave, fw, size ?: 1) : NULL,
+				   size, flags);
 			else
 				dev_dbg(ave->dev, "ch %u: fw %#llx size %u flags %#x (no consumer)\n",
 					id, fw, size, flags);

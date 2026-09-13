@@ -352,6 +352,17 @@ AVE DAPF ([50](50-m1n1-ave-dapf.md)), overlay `variant=3`, and the driver
 parameters `stop_after=16 fw_map_data=1 fw_map_text=2`. **The operator runs
 these; an agent must not** ([AGENTS.md](../AGENTS.md)).
 
+**Run every restore step with `session_selftest` off** (the default), so a
+command-layer failure cannot be mistaken for a restore failure.
+
+**(-1) Negative control, before any write.** The drift count must be able to say
+"no" as well as "yes" (methodology [trap 2](00-methodology.md)). On a fresh boot:
+load with `stop_after=16` and **no** restore (the firmware starts and dirties
+DATA), `rmmod`, then load again with `fw_restore_data=2`. Expect a **non-zero**
+drift, roughly 19 pages, first at DATA+`0x2000`. Nothing is written. If this
+still reports 0, the comparator is broken and every later "0" is meaningless -
+stop there.
+
 **(0) Dry run, fresh boot.** `fw_restore_data=2`. Expect: all gates pass, "DATA
 before restore vs pristine: 0 bytes differ", "DRY RUN - nothing written", and the
 handshake completing exactly as it does today. Nothing has been written, so this
@@ -368,8 +379,24 @@ the **first** firmware start of the boot. Expect:
   `macOS 13.5 handshake complete: 7 channel(s)`.
 
 A 0 here is the point of the step: it proves the write path without changing what
-the firmware sees. If the count is not 0 on a genuinely fresh boot, stop — the
-blob or the machine's iBoot differs from what this document assumes.
+the firmware sees.
+
+**Expected exception, and the only one:** §2.3 says the `STKG` stack-guard word
+(DATA+`0x3a38`, 8 bytes) is written by iBoot with a fresh random value each boot,
+and the blob carries the dump boot's value. If that is right, a genuinely fresh
+boot shows **exactly 8 bytes differing in 1 page, at DATA+`0x3a38`** — not 0 —
+and the driver prints the live and blob values side by side on the
+`restore: STKG live ... blob ...` line, so the two cases are distinguishable at a
+glance. Either result is acceptable here and settles an open question:
+
+- **8 bytes at DATA+`0x3a38` only:** STKG is per-boot, as §2.3 says. The restore
+  then replaces that boot's cookie with an older one; §2.3 argues this is
+  self-consistent because the firmware installs the cookie from this same tag
+  list, and (a)/(b) completing the handshake is the evidence.
+- **0 bytes:** STKG is not per-boot after all, and §2.3 should be corrected.
+
+**Any other difference stops the run** — the blob or this machine's iBoot is not
+what this document assumes.
 
 **(b) Second start, same boot.** Without rebooting: `rmmod apple-ave`, then load
 again with `fw_restore_data=1`. Expect:
