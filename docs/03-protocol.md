@@ -4,6 +4,18 @@ Apple shipped `AppleAVE2FW` with its **symbol table and C++ source paths
 intact** — 1558 symbols, 69 source paths. A large part of the interface is
 therefore recoverable statically, before any tracing.
 
+> **Version note (2026-09-13).** Everything below was read from the **macOS
+> 26.6.2** image and stands for 26.6.2. On **macOS 13.5**, the firmware this
+> machine runs ([43](43-macos-13.5-firmware.md)): 1390 symbols and no
+> `ProcessCmd_*`; `CmdProcessor` is at `0xd614` with a **14-entry** table at
+> `0xe2e8` (ids 1..14, id 10 unhandled, names from the `eCAveCmdID` table at
+> `0xed060`: 1 `CONFIG`, 2 `START`, 3 `RESET`, 4 `AVC_INIT`, 5 `HEVC_INIT`,
+> 6 `UNINIT`, 7 `AVC_ENCODE`, 8 `HEVC_ENCODE`, 9 `LRME_STANDALONE`,
+> 10 `MCTF_PROCESS`, 11 `AVE_FLUSH`, 12 `STOP`, 13 `COMPLETE`, 14 `POWERDOWN`).
+> **Confirmed.** Command structs and sizes per version:
+> [46](46-abi-13.5-commands-session.md); boot/IPC per version:
+> [45](45-abi-13.5-boot-ipc.md).
+
 Regenerate everything here with:
 
 ```sh

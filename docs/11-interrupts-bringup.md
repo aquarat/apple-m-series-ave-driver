@@ -11,6 +11,20 @@ Reproduce any line with:
 python3 tools/disas.py --kext --addr <VA> -n <len>
 ```
 
+> **Version note (2026-09-13).** This document is **macOS 26.6.2** and stands
+> for 26.6.2. On **macOS 13.5** ([43](43-macos-13.5-firmware.md)), all
+> **confirmed** in [45](45-abi-13.5-boot-ipc.md) §1.10 and §1.12: still exactly
+> one interrupt at ADT index 0, but registered from **`AVE_HwC::Init`**
+> (`filterInterruptEventSource(this, ISR 0xfffffe0008f1031c, FilterISR
+> …f10780, provider, 0)` at `…f0f874..…f0f8ac`), not `AVE_Drv::IO_start`;
+> `ProcessIntr` still gates on state 3 (`HwC+0xA0`) and W1Cs the whole status
+> word (`…f0d9d4/d8`), but loops **`ch = 1..7`** (`…f0dae8`) and dispatches
+> 1 `IO` → `CmdAck`, 2 `IO_T2H` → echo + `Cmd`, **3 `SHAREDMALLOC` →
+> `ProcessIntr_IPCMem`, 4 `TERMINAL` → `ProcessIntr_Log`** (`…f0d714..…f0d790`).
+> §8.9: on 13.5 scratch 1/2 carry instance index / DevID, not an IOVA, and the
+> power-on in `AVE_HwC::Init` is `SetPS(PD 7, ClockOn)` (`…f0e614`) in 13.5's
+> PD numbering ([10](10-power.md) note).
+
 ## Headline result
 
 The ten `AVE_HwC::ProcessIntr_*` methods are **not** ten interrupt sources, and

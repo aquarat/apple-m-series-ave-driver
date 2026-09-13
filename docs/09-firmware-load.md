@@ -420,6 +420,18 @@ so no extra surface is created (`subs w26, w24, w27` / `b.le` at
 
 ### 2.1 Dispatch is a static per-generation table
 
+> **Version note (2026-09-13).** 26.6.2 values below stand for 26.6.2. On
+> **macOS 13.5** ([43](43-macos-13.5-firmware.md)) the table is
+> `gs_saAVE_IOP_If` at `0xfffffe0007bc39c8`, still stride `0x28` indexed by
+> `chipType - 1` (`0xfffffe0008f21928..…f2193c`), but with **15** types
+> (`cmp w0,#0x10` at `0xfffffe0008f21920`): 1 Tyche, 2 Thanatos, 3 Hypnos,
+> 4 Rhea, 5 Cronus, 6 Panda, 7 Acis, **8 Castor**, **9 Nyx**, 10 Atlas,
+> 11 Hera, 12–14 Tethys, 15 Themis. `ave0` is ChipType 8 → `_Castor`, whose
+> start writes, `0x400048 & 3` idle test and `0x178000`/`0x160020` timebase
+> are identical to §2.3/§2.4/§2.8 (`0xfffffe0008f1daa4..…f1db00`,
+> `…f1dc84..…f1dc94`, `…f1de24..…f1de34`); `AVE_IOP::Stop`'s constants match
+> §2.5. **Confirmed**; details in [45](45-abi-13.5-boot-ipc.md) §1.1–1.2.
+
 `AVE_IOP::Init` (`0xfffffe0008c40274`) stores no function pointer; it only
 saves its arguments (`0xfffffe0008c403a0`–`0xfffffe0008c403ac`):
 
@@ -685,6 +697,18 @@ read straight out of the ADT; why Apple does it is **unknown**.
 
 ### 3.2 DevID → DevType / ChipType
 
+> **Version note (2026-09-13).** The tables in §3.1–3.2 are **macOS 26.6.2**
+> and stand for 26.6.2. On **macOS 13.5** there is one 28-entry table, stride
+> `0x28`, `{chipType, devType, devID, maxNum, maxPerGroup, _, "t", number}`, at
+> `0xfffffe0007bc2a38` in the kext and, row-for-row identical, at `0xee4d0` in
+> the firmware (`_AVE_FindByDevID` `0xaab84`). `t8103` → 13/10/7,
+> **`t6000` → DevID 14, DevType 11, ChipType 8 (Castor)**, `t6001` → 15/12/9
+> (Nyx), `t6002` → 16/13/9. `AVE_DevInfo` fields: `+0x00` chipType, `+0x04`
+> devType, `+0x08` devID (`0xfffffe0008ede5d4..…ede5f0`). **Confirmed** both
+> sides. The renumbering is plausibly the 26.6.2 table growing for newer SoCs
+> (it runs to `t8152`; 13.5 stops at `t8130`) — **inferred**. See
+> [45](45-abi-13.5-boot-ipc.md) §2.2.
+
 `AVE_DevCap_Find(devID)` (`0xfffffe0008ba9ea8`) indexes
 `gsc_saAVE_DevCap` at **`0xfffffe0007edba00`**, stride **`0x48`**
 (`mov w8, #0x48` at `0xfffffe0008ba9eac`), bound `< 0x23`
@@ -829,6 +853,15 @@ via `AVE_AXI2AF_GetTunables(DevID, instanceId, revision, &cfg)`
 
 ### 4.1 The SVE scratch registers
 
+> **Version note (2026-09-13).** 26.6.2 below stands for 26.6.2. On **macOS
+> 13.5** the register map is the same (`_gs_sAVE_SVECtrl_Reg_Rhea`
+> `0xfffffe000b84ba04` = `{0xc, 0x10, 8, 0x18..0x34}`, `SetIdle` offset `0x38`
+> at table `+0x2c`, selected for ChipType 4–15), but the **uses differ**:
+> scratch 1 = instance index and scratch 2 = DevID (not the `_S_AVE_Fw_Cfg`
+> address), and scratch 4/5 are **not written**. Scratch 0 halt-ack and
+> scratch 7 heartbeat are the same. **Confirmed**, [45](45-abi-13.5-boot-ipc.md)
+> §1.3–1.4.
+
 Most of the boot handshake goes through eight scratch registers, not the
 mailbox. `AVE_SVECtrl::ReadScratch(int idx, u32*)` (`0xfffffe0008c913c4`) /
 `WriteScratch(int idx, u32)` (`0xfffffe0008c9127c`): take the per-SoC map at
@@ -870,6 +903,22 @@ So on M1 Pro/Max:
 Registers 3 and 6 are unused by these paths.
 
 ### 4.2 `StartUpIOP` — the ordered sequence
+
+> **Version note (2026-09-13).** The table is **macOS 26.6.2** and stands for
+> 26.6.2. The **macOS 13.5** `StartUpIOP` (`0xfffffe0008f119e0`) main path is:
+> `AVE_Firmware::UpdateImage` (`…f11ae4`) → `AVE_IPC` ctor/`Init`
+> (`…f11b74`/`…f11b90`) → `SetIOPFlag(0)` (`…f11d08`) →
+> `WriteScratch(1, HwC+0x40)` (`…f12004`) → `WriteScratch(2, GetDevID())`
+> (`…f1211c`) → `Config` (conditional, `…f1221c..…f1224c`; see
+> [44](44-reset-fetch-path.md)) → `Start` (`…f122dc`) → msg 1 (`…f123fc`,
+> count 1..8) → `GetInfo` + msg 2 (`…f12724`, `…f12f64`) → msg 3 (`…f12ff8`)
+> → `UpdateFwBaseAddr` (`…f13690`) → `CreateFwHeap` (`…f128b0`) →
+> `AllocChannelMem` (`…f12a94`) → `Alloc(0x50)` + msg 4 (`…f13104`,
+> `…f138d8`) → msg 5 (`…f13984`) → `CreateChannel` (`…f13c00`) →
+> `Alloc(0xE0)` (`…f13d30`) → client buffer ≤ `0x100000` (`…f13ec8`) →
+> `SetIOPFlag(3)` / poll. No `DPM::SetIOP`/`SetHw`, no `MakeFwCfg`, no
+> `Alloc(0x38)`, no `Alloc(0x10000)`, no time-base writes. **Confirmed**
+> (complete call list); [45](45-abi-13.5-boot-ipc.md) §1.4–1.6.
 
 Called only from `AVE_HwC::StartUp` (`0xfffffe0008c1cea0`), gated on state
 `[this+0xC0] == 2` (`0xfffffe0008c1ce80`); state 3 = already up; otherwise
@@ -928,6 +977,13 @@ On any failure, `cfg->flags` bit 12 gates a panic
 
 ### 4.3 `ShutDownIOP`
 
+> **Version note (2026-09-13).** Stands for 26.6.2. On **macOS 13.5**
+> (`0xfffffe0008f14438`) the core is the same — `SendFwCmd_Halt` (`…f14584`),
+> `AVE_IOP::Stop` (`…f14614`), poll `ReadScratch(0) == 0x08042006`
+> (`…f14608..…f14740`, `IODelay(100)`, `10000 × cfg`) — preceded by
+> `SetPS(PD 3..6, ClockOn)` and `SetClockGating(false)` (`…f14534..…f1457c`).
+> **Confirmed**, [45](45-abi-13.5-boot-ipc.md) row 104.
+
 | # | VA | step |
 |---:|---|---|
 | 1 | `0xfffffe0008c2008c` | `AVE_DPM::SetHw(PL=4)` |
@@ -970,6 +1026,15 @@ contiguous is **unknown** (it depends on `AVE_SurfaceMgr::CreateSurface`,
 `0xfffffe0008c80e30`, not examined).
 
 ### 4.5 `MakeFwCfg` — `_S_AVE_Fw_Cfg`, 56 bytes
+
+> **Version note (2026-09-13).** This block exists on **macOS 26.6.2** and the
+> layout below stands for 26.6.2. On **macOS 13.5** there is no `MakeFwCfg`
+> and no 56-byte block: the firmware reads scratch 1/2 as integers (`0xa5fb0`,
+> `0xa5fc8`) and uses them as `(index, DevID)` bytes (`0xa63c8..0xa63d0`). The
+> 0x50 block exists on 13.5 with `+0x08`, `+0x1C`, `+0x24`, `+0x28` as below,
+> selected by `GetChipType() >= 6`; `+0x10`/`+0x18` are not written.
+> `CreateFwHeap` (§4.4) uses surface cfg **23** on 13.5
+> (`0xfffffe0008f10f10`). **Confirmed**, [45](45-abi-13.5-boot-ipc.md) §1.6.
 
 Size `0x38` from the allocation at `0xfffffe0008c1d68c`. No memset in
 `MakeFwCfg` itself.

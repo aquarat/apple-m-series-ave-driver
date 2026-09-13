@@ -8,6 +8,24 @@ instruction it was read from. Firmware VAs are image VAs; file offset =
 Marking: **[C] confirmed** — read out of the disassembly. **[I] inferred**.
 **[?] unknown**.
 
+> **Version note (2026-09-13).** This document is **macOS 26.6.2** and stands
+> for 26.6.2. The mechanism it describes **does not exist on macOS 13.5**, the
+> firmware this machine runs ([43](43-macos-13.5-firmware.md)); see
+> [45](45-abi-13.5-boot-ipc.md) §2.3. On 13.5: the firmware has no
+> `AVE_Log_*` symbols and no `gs_psCfg` (§3, §9.3's `0x195090`/`0x1950b0` have
+> no counterpart); its instrumentation calls RTKit `CLogger::Print` (893 call
+> sites) and `CLogger::Assert` (913), with no per-subsystem level table (§8);
+> the kext has no `AVE_FwLog` class and no `FwLog` surface (§1, §4); there is no
+> `_S_AVE_Fw_Cfg` block, so nothing carries a log address (§6). The
+> host-driven branch binds `CLoggerInterProcessor` to the **`TERMINAL`** IPC
+> channel (`0xa636c..0xa63a0`) and the kext dispatches that channel to
+> `ProcessIntr_Log` (`0xfffffe0008f0d790`) — so on 13.5 the firmware log needs
+> a completed handshake. RTKit's crashlog buffer on 13.5 is `malloc(0x400)` with
+> its pointer at `0xeefd0` (`0xada74..0xadaa4`), where 26.6.2 uses
+> `0x1347c0`/`0x2649a0`.
+> All **[C]**; that `Print` output reaches the `TERMINAL` ring end to end is
+> **[I]**.
+
 ---
 
 ## 0. The short answer
