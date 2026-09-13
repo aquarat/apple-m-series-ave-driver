@@ -272,9 +272,16 @@ static int ave_session_cmd(struct ave_device *ave, const struct ave_cmd_abi *abi
 				     : "did not arrive either");
 		return -ETIMEDOUT;
 	}
+	/*
+	 * Expected, not a failure: the firmware builds the completion inside
+	 * the dispatcher (fw 0xa1cc8) and only echoes the command buffer
+	 * afterwards (0xa1cf8), so when the two doorbells arrive as separate
+	 * interrupts the completion wins the race and the ack lands just after
+	 * this point. Logged at info for that reason.
+	 */
 	if (!rx->ack_seen)
-		dev_warn(ave->dev,
-			 "session: %s: completion arrived without the IO ack echo\n",
+		dev_info(ave->dev,
+			 "session: %s: completion arrived before the IO ack echo (expected ordering)\n",
 			 name);
 	if (!rx->size)
 		dev_warn(ave->dev,
