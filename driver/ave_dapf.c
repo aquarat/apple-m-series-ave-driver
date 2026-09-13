@@ -180,6 +180,11 @@ module_param(dapf_quiesce, bool, 0444);
 MODULE_PARM_DESC(dapf_quiesce,
 		 "E3: zero every TCR and ENABLED_STREAMS around the DAPF writes, then restore (default 1; docs/49 N1)");
 
+static bool dapf_probe;
+module_param(dapf_probe, bool, 0444);
+MODULE_PARM_DESC(dapf_probe,
+		 "N1b (docs/49): after stage 12, hold 30 s with NO DART writes, then write TCR[0] with its current value and hold 10 s");
+
 static bool dapf_dump;
 module_param(dapf_dump, bool, 0444);
 MODULE_PARM_DESC(dapf_dump,
@@ -495,6 +500,52 @@ int ave_dapf_program(struct ave_device *ave,
 bool ave_dapf_program_requested(void)
 {
 	return dapf_set && *dapf_set && !sysfs_streq(dapf_set, "off");
+}
+
+/*
+ * N1b (docs/49): does the reset follow our write, or something earlier?
+ *
+ * Two resets each came ~3 s after the pre-start scratch writes and right after
+ * a marker hold, so the write and the delay are confounded. This holds with no
+ * writes at all, logging every 2 s, then performs the most innocuous write
+ * possible - TCR[0] rewritten with the value it already has - and holds again.
+ * Every line is picked up by the fsync-per-line capture.
+ */
+int ave_dapf_write_probe(struct ave_device *ave)
+{
+	unsigned int t;
+	u32 v, back;
+	int ret;
+
+	if (!dapf_probe)
+		return 0;
+	ret = ave_dapf_check_power(ave);
+	if (ret)
+		return ret;
+	ret = ave_dapf_map(ave);
+	if (ret)
+		return ret;
+
+	for (t = 0; t <= 30; t += 2) {
+		dev_info(ave->dev, "PROBE hold, no DART writes: t=%us TCR[0]=%#x ENABLED_STREAMS=%#x\n",
+			 t, readl(ave->cpudart + DART_TCR(0)),
+			 readl(ave->cpudart + DART_ENABLED_STREAMS));
+		msleep(2000);
+	}
+
+	v = readl(ave->cpudart + DART_TCR(0));
+	dev_info(ave->dev, "PROBE next: same-value write TCR[0] <- %#x\n", v);
+	msleep(2000);
+	writel(v, ave->cpudart + DART_TCR(0));
+	back = readl(ave->cpudart + DART_TCR(0));
+	dev_info(ave->dev, "PROBE wrote TCR[0] same value; readback %#x\n", back);
+
+	for (t = 0; t <= 10; t += 2) {
+		dev_info(ave->dev, "PROBE hold after write: t=%us\n", t);
+		msleep(2000);
+	}
+	dev_info(ave->dev, "PROBE survived: a same-value TCR write is harmless; the value matters\n");
+	return 0;
 }
 
 int ave_dapf_program_selected(struct ave_device *ave)

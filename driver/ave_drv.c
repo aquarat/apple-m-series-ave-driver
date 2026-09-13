@@ -786,6 +786,9 @@ iop_config_done:
 	 * Reached with stop_after=12 (we are past the stage-12 early return),
 	 * so E3a can verify the writes by readback without starting the core.
 	 */
+	ret = ave_dapf_write_probe(ave);	/* N1b; no-op unless dapf_probe=1 */
+	if (ret)
+		return dev_err_probe(dev, ret, "DAPF write probe\n");
 	ave_step(ave, "stage 12 done; next: DAPF programming (if dapf_set)");
 	ret = ave_dapf_program_selected(ave);
 	if (ret)

@@ -72,6 +72,7 @@ int ave_dapf_program(struct ave_device *ave,
  * failed precondition; the caller should fail probe rather than start the
  * core.
  */
+int ave_dapf_write_probe(struct ave_device *ave);
 bool ave_dapf_program_requested(void);
 int ave_dapf_program_selected(struct ave_device *ave);
 
