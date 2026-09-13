@@ -142,21 +142,64 @@ MODULE_PARM_DESC(session_nbr_kb,
  * (fw 0x523c0-0x523c8: lsl #2, add #0xfc, and #0xffffff00), which is what
  * makes this the right formula and not a guess. At 1280x720: 0x3C000.
  *
- * session_lowres=0 sends the field zero, which reproduces the 2026-09-13
- * hardware failure exactly ("ASSERT: CAVCController_H13C.cpp, 5782") and is
- * the negative control for this change. session_lowres_kb overrides the size;
- * the FORMULA is confirmed but the number of rows the engine actually writes
- * is inferred, so the override exists to raise it without a rebuild.
+ * WHERE IT ACTUALLY HAS TO GO (2026-09-13, after the first hardware Process):
+ * supplying the buffer at PICMGMT + 0xC20 changed nothing, because the field
+ * is overwritten before setLRME reads it. CAVECommonDPB::setRefPointers loads
+ * the DPB entry's +224 and stores it there (fw ldp x11,x8,[x2,#216] 0x2c318,
+ * str x8,[x1,#3104] 0x2c320), and that value comes from the Start_AVC command:
+ *
+ *   Start_AVC wire 0x2A8 + slot*8   (AVE_VIDEO_PARAMS + 0x248, cmd+0x60)
+ *     -> ProvideReferenceFrames   fw 0x2b780 / 0x2b788  -> DPBctx+0x10A0+slot*8
+ *     -> InitPointerAndVariables  fw 0x2bddc / 0x2bde8  -> DPB entry + 64
+ *     -> ManageDPBBuffer          fw 0x2d544 / 0x2d55c  -> RefFrameInfo + 224
+ *     -> setRefPointers           fw 0x2c318 / 0x2c320  -> PICMGMT + 0xC20
+ *
+ * So the buffers are published per DPB slot at Start_AVC (see session_dpb),
+ * and the per-frame field is written too - it is inert, but it is free, and
+ * it keeps the field's documented meaning visible in the command dump.
+ *
+ * session_lowres=0 leaves BOTH zero, which reproduces the 2026-09-13 hardware
+ * failure exactly ("ASSERT: CAVCController_H13C.cpp, 5782") and is the
+ * negative control for this change. session_lowres_kb overrides the size; the
+ * FORMULA is confirmed but the number of rows the engine actually writes is
+ * inferred, so the override exists to raise it without a rebuild.
  */
 static bool session_lowres = true;
 module_param(session_lowres, bool, 0444);
 MODULE_PARM_DESC(session_lowres,
-	"publish sLowResOutput.LowResSrcLumaScaled in Process (default on; 0 reproduces the setLRME:5782 assert)");
+	"publish the LowResRef (LRME scaled-luma) surfaces at Start_AVC and in Process (default on; 0 reproduces the setLRME:5782 assert)");
 
 static unsigned int session_lowres_kb;	/* 0 = the kext formula above */
 module_param(session_lowres_kb, uint, 0444);
 MODULE_PARM_DESC(session_lowres_kb,
-	"size of the LRME scaled-luma surface in KiB (0 = AVE_CalcBufSizeOfLowResRef formula)");
+	"size of each LRME scaled-luma surface in KiB (0 = AVE_CalcBufSizeOfLowResRef formula)");
+
+/*
+ * How many DPB slots Start_AVC publishes - one reconstruction surface and one
+ * LowResRef surface each.
+ *
+ * The firmware reads exactly max_num_ref_frames+1 slots of set 0:
+ * CAVCController::InitEncodingParameters calls ProvideReferenceFrames with
+ * numRefs = SPS max_num_ref_frames (fw ldr w1,[x24,#1072] 0x5dd14) and that
+ * function copies slots 0..numRefs inclusive (fw 0x2b638-0x2b644, loop bound
+ * numRefs+1) for sets 0..[dpb+32], and the H264VideoEncoderDPB constructor
+ * sets [dpb+32] = 1 (fw strb w8,[x0,#32] 0x2d1c4) - so one set only. We send
+ * max_num_ref_frames = 1 (ave_cmd.c), hence 2.
+ *
+ * Apple allocates the same count: AVE_CalcBufNumOfLowResRef (kext
+ * 0xfffffe0008ea55d8) returns n+1 and AVE_CreateInternalSurfaces (kext
+ * 0xfffffe0008f3a414) creates one surface per slot.
+ *
+ * session_dpb=1 reproduces the recon table of the Start_AVC the firmware
+ * accepted on 2026-09-13 21:13, which is the bisect for this change: the
+ * first frame uses slot 0 (ManageDPBBuffer reads the index at ctx+4228, which
+ * InitPointerAndVariables zeroes, fw 0x2bd1c) but also reads slot 1 as the
+ * "next" entry (fw 0x2d504-0x2d524).
+ */
+static unsigned int session_dpb = 2;
+module_param(session_dpb, uint, 0444);
+MODULE_PARM_DESC(session_dpb,
+	"DPB slots published at Start_AVC: recon + LowResRef surfaces (default 2 = max_num_ref_frames+1)");
 
 /* AVE_FRAME_TYPE_IDR (3) by default; 0 = I (non-IDR). */
 static unsigned int session_frame_type = AVE_FRAME_TYPE_IDR;
@@ -294,6 +337,14 @@ static void ave_session_ipc_rx(struct ave_device *ave, u32 chan_id,
 /* 16 SrcNeighbor slots: 4 groups x 4 entries. */
 #define AVE_SESS_NBR_SLOTS	(AVE_SRC_NBR_GROUPS * AVE_SRC_NBR_MAX)
 
+/*
+ * DPB slots the self-test is willing to publish. The wire table holds 17 per
+ * set (AVE_DPB_MAX), but each slot costs a reconstruction surface and a
+ * LowResRef surface, so the self-test caps it well below that; session_dpb
+ * above explains why the answer for this session is 2.
+ */
+#define AVE_SESS_DPB_MAX	4
+
 struct ave_sess_bufs {
 	struct ave_device *ave;
 	struct { void *cpu; dma_addr_t iova; size_t size; } dma[AVE_SESS_MAX_DMA];
@@ -315,8 +366,20 @@ struct ave_sess_bufs {
 	u32		coded_hdr_size;
 	void		*psets_cpu;
 	u32		psets_size;
-	dma_addr_t	recon_iova;
-	u32		recon_size;
+	/*
+	 * The DPB slots published at Start_AVC. The firmware rebuilds both the
+	 * per-frame recon pointers and sLowResOutput.LowResSrcLumaScaled out of
+	 * these (setRefPointers, fw 0x2c314-0x2c33c), so they are the ones that
+	 * matter, not the PICMGMT copies.
+	 */
+	struct {
+		dma_addr_t recon;
+		dma_addr_t low_res;
+	}		dpb[AVE_SESS_DPB_MAX];
+	u32		n_dpb;
+	u32		recon_size;	/* per slot */
+	size_t		low_res_size;	/* per slot; 0 = none published */
+	u32		low_res_stride;	/* for the log line only */
 	u64		nbr[AVE_SRC_NBR_GROUPS][AVE_SRC_NBR_MAX];
 	u32		n_nbr;
 
@@ -595,17 +658,144 @@ static int ave_session_open(struct ave_device *ave,
 			       cmd_iova, cmd_len, client_id);
 }
 
+/*
+ * Bytes one LRME scaled-source-luma surface needs for a @cw x @ch coded frame,
+ * and the row stride the firmware will program for it. Both come from the
+ * comment on session_lowres above; *stride is only for the log line.
+ */
+static size_t ave_session_lowres_size(u32 cw, u32 ch, u32 *stride)
+{
+	u32 lr_stride = ALIGN(4 * cw, 256);
+
+	if (stride)
+		*stride = lr_stride;
+	return ALIGN((size_t)lr_stride * ((ch + 63) >> 4), 512);
+}
+
+/*
+ * Carve the DPB slots Start_AVC publishes: one reconstruction surface and one
+ * LowResRef surface per slot, out of two coherent arenas so the number of
+ * mappings does not grow with session_dpb.
+ *
+ * Never fatal. Every failure here leaves a table entry zero, and a zero is a
+ * named firmware assert (setLRME:5782 for the LowResRef) rather than a silent
+ * fault - which is exactly what the session_lowres=0 control wants.
+ */
+static void ave_session_alloc_dpb(struct ave_device *ave,
+				  struct ave_sess_bufs *bufs)
+{
+	struct ave_sess_arena recon = {}, low = {};
+	size_t recon_slot, low_slot = 0;
+	u32 cw, ch, lr_stride = 0;
+	unsigned int i, n;
+
+	cw = ave_mb_align(session_width);
+	ch = ave_mb_align(session_height);
+
+	n = session_dpb;
+	if (!n || n > AVE_SESS_DPB_MAX) {
+		dev_warn(ave->dev,
+			 "session: session_dpb=%u out of range (1..%u); using 1\n",
+			 session_dpb, AVE_SESS_DPB_MAX);
+		n = 1;
+	}
+
+	/*
+	 * Reconstruction surface: luma + chroma. setRefPointers derives
+	 * sRecon.UV_MSB as luma + a firmware-computed offset (fw add x8,x12,x10
+	 * 0x2c324), so the slot has to hold both planes contiguously; cw*ch*2
+	 * is the docs/38 over-estimate this driver has used since Start_AVC was
+	 * first accepted.
+	 */
+	recon_slot = ALIGN((size_t)cw * ch * 2, SZ_4K);
+	recon.size = recon_slot * n;
+	recon.cpu = ave_sess_dma_alloc(bufs, recon.size, &recon.iova);
+	if (!recon.cpu) {
+		dev_err(ave->dev,
+			"session: DPB recon arena (%zu bytes) allocation failed\n",
+			recon.size);
+		return;
+	}
+	memset(recon.cpu, 0, recon.size);
+
+	if (session_lowres) {
+		low_slot = ave_session_lowres_size(cw, ch, &lr_stride);
+		if (session_lowres_kb) {
+			low_slot = (size_t)session_lowres_kb << 10;
+			if (low_slot > SZ_64M) {
+				dev_warn(ave->dev,
+					 "session: session_lowres_kb=%u out of range; using the formula\n",
+					 session_lowres_kb);
+				low_slot = ave_session_lowres_size(cw, ch,
+								   &lr_stride);
+			}
+		}
+		low_slot = ALIGN(low_slot, SZ_4K);
+		low.size = low_slot * n;
+		low.cpu = ave_sess_dma_alloc(bufs, low.size, &low.iova);
+		if (!low.cpu) {
+			dev_warn(ave->dev,
+				 "session: LowResRef arena (%zu bytes) allocation failed; expect ASSERT CAVCController_H13C.cpp:5782\n",
+				 low.size);
+			low_slot = 0;
+		} else {
+			memset(low.cpu, 0, low.size);
+		}
+	} else {
+		dev_warn(ave->dev,
+			 "session: session_lowres=0: the LowResRef table and LowResSrcLumaScaled are left zero, expect ASSERT CAVCController_H13C.cpp:5782\n");
+	}
+
+	for (i = 0; i < n; i++) {
+		dma_addr_t r, l = 0;
+
+		if (!ave_sess_arena_take(&recon, recon_slot, &r))
+			break;
+		if (low_slot && !ave_sess_arena_take(&low, low_slot, &l))
+			l = 0;
+		/*
+		 * The firmware asserts & 127 == 0 on the recon planes
+		 * (fw 0x55310 / 0x54f94 / 0x58068 / 0x5541c) and & 63 == 0 on
+		 * the LowResRef (fw 0x523dc, setLRME:5783). Both arenas are
+		 * page-aligned and both slot sizes are 4 KiB multiples, so this
+		 * holds by construction - check it rather than assume it.
+		 */
+		if ((r & 127) || (l & (AVE_STRIDE_ALIGN - 1))) {
+			dev_err(ave->dev,
+				"session: DPB slot %u misaligned (recon %pad, lowres %pad)\n",
+				i, &r, &l);
+			break;
+		}
+		bufs->dpb[i].recon = r;
+		bufs->dpb[i].low_res = l;
+		bufs->n_dpb = i + 1;
+	}
+
+	bufs->recon_size = recon_slot;
+	bufs->low_res_size = low_slot;
+	bufs->low_res_stride = lr_stride;
+
+	dev_info(ave->dev,
+		 "session: DPB %u slot(s): recon %pad +%#zx each; LowResRef %pad +%#zx each, lr_stride %u, %u rows%s\n",
+		 bufs->n_dpb, &recon.iova, recon_slot,
+		 &low.iova, low_slot, lr_stride, (ch + 63) >> 4,
+		 !low_slot ? " (NOT PUBLISHED)"
+			   : session_lowres_kb
+			     ? " (size overridden by session_lowres_kb)"
+			     : " (AVE_CalcBufSizeOfLowResRef formula)");
+}
+
 static int ave_session_start_avc(struct ave_device *ave,
 				 const struct ave_cmd_abi *abi,
 				 struct ave_sess_bufs *bufs, u64 client_id)
 {
 	struct ave_cmd_ctx ctx = { .count = 3, .client_id = client_id };
 	struct ave_avc_session s = {};
-	struct ave_recon_buf recon;
+	struct ave_recon_buf recon[AVE_SESS_DPB_MAX];
 	struct ave_buf coded, coded_hdr;
-	dma_addr_t cmd_iova, fwc_iova, fwcm_iova, recon_iova, coded_iova, hdr_iova;
+	dma_addr_t cmd_iova, fwc_iova, fwcm_iova, coded_iova, hdr_iova;
 	dma_addr_t psets_iova;
-	u32 cw, ch, recon_size, fwc_size;
+	u32 cw, ch, fwc_size, i;
 	void *coded_cpu, *hdr_cpu, *psets_cpu;
 	size_t cmd_len;
 	void *cmd;
@@ -619,14 +809,17 @@ static int ave_session_start_avc(struct ave_device *ave,
 	/* MB-aligned coded geometry, for the reconstruction buffer sizing. */
 	cw = ave_mb_align(session_width);
 	ch = ave_mb_align(session_height);
-	recon_size = cw * ch * 2;		/* luma + chroma, generous */
+
+	/* ave_session_alloc_dpb() must already have run: the recon and
+	 * LowResRef tables are published in this command. */
+	if (!bufs->n_dpb)
+		return -ENOMEM;
 
 	fwc_size = ave->client_buf_size ? ave->client_buf_size
 					: AVE_SESS_FWCLIENT_FALLBACK;
 
 	if (!ave_sess_dma_alloc(bufs, fwc_size, &fwc_iova) ||
-	    !ave_sess_dma_alloc(bufs, AVE_SESS_FWCLIENTMEM_SIZE, &fwcm_iova) ||
-	    !ave_sess_dma_alloc(bufs, recon_size, &recon_iova))
+	    !ave_sess_dma_alloc(bufs, AVE_SESS_FWCLIENTMEM_SIZE, &fwcm_iova))
 		return -ENOMEM;
 	coded_cpu = ave_sess_dma_alloc(bufs, AVE_SESS_CODED_SIZE, &coded_iova);
 	hdr_cpu = ave_sess_dma_alloc(bufs, abi->start_avc.coded_hdr_bytes,
@@ -654,11 +847,12 @@ static int ave_session_start_avc(struct ave_device *ave,
 	bufs->coded_hdr_size = abi->start_avc.coded_hdr_bytes;
 	bufs->psets_cpu = psets_cpu;
 	bufs->psets_size = AVE_SESS_PARAM_SETS_SIZE;
-	bufs->recon_iova = recon_iova;
-	bufs->recon_size = recon_size;
-
-	recon.addr = recon_iova;
-	recon.luma_size = cw * ch;		/* used only where recon_size != NONE */
+	memset(recon, 0, sizeof(recon));
+	for (i = 0; i < bufs->n_dpb; i++) {
+		recon[i].addr = bufs->dpb[i].recon;
+		/* used only where the ABI's recon_size != NONE (26.6.2) */
+		recon[i].luma_size = cw * ch;
+	}
 	coded.addr = coded_iova;
 	coded.size = AVE_SESS_CODED_SIZE;
 	coded_hdr.addr = hdr_iova;
@@ -682,8 +876,31 @@ static int ave_session_start_avc(struct ave_device *ave,
 	s.param_sets_addr = psets_iova;
 	s.param_sets_size = AVE_SESS_PARAM_SETS_SIZE;
 
-	s.recon = &recon;
-	s.n_recon = 1;
+	s.recon = recon;
+	s.n_recon = bufs->n_dpb;
+
+	/*
+	 * The LowResRef table. All or nothing: the builder refuses a partial
+	 * one, because a slot the firmware selects with a zero here asserts at
+	 * setLRME:5782 and a slot published without its recon peer would be a
+	 * pointer with no frame behind it.
+	 */
+	if (abi->start_avc.low_res_ref_set != AVE_OFF_NONE && bufs->low_res_size) {
+		for (i = 0; i < bufs->n_dpb; i++)
+			s.low_res_ref[i] = bufs->dpb[i].low_res;
+		s.n_low_res_ref = bufs->n_dpb;
+		for (i = 0; i < bufs->n_dpb; i++)
+			if (!s.low_res_ref[i]) {
+				/* A hole would be refused by the builder and
+				 * take the whole command down; drop the table
+				 * instead and let setLRME name the field. */
+				dev_warn(ave->dev,
+					 "session: DPB slot %u has no LowResRef; dropping the whole table, expect ASSERT CAVCController_H13C.cpp:5782\n",
+					 i);
+				s.n_low_res_ref = 0;
+				break;
+			}
+	}
 	s.coded = &coded;
 	s.coded_hdr = &coded_hdr;
 	s.n_coded = 1;
@@ -707,11 +924,25 @@ static int ave_session_start_avc(struct ave_device *ave,
 		 "session: Start_AVC: %ux%u (coded %ux%u) QP %u I-only, profile 66 level 40\n",
 		 session_width, session_height, cw, ch, session_qp);
 	dev_info(ave->dev,
-		 "session: Start_AVC: fw_client %pad/%#x mem %pad/%#x recon %pad/%#x coded %pad/%#x hdr %pad/%#x psets %pad/%#x\n",
+		 "session: Start_AVC: fw_client %pad/%#x mem %pad/%#x coded %pad/%#x hdr %pad/%#x psets %pad/%#x\n",
 		 &fwc_iova, fwc_size, &fwcm_iova, (u32)AVE_SESS_FWCLIENTMEM_SIZE,
-		 &recon_iova, recon_size, &coded_iova, (u32)AVE_SESS_CODED_SIZE,
+		 &coded_iova, (u32)AVE_SESS_CODED_SIZE,
 		 &hdr_iova, abi->start_avc.coded_hdr_bytes,
 		 &psets_iova, (u32)AVE_SESS_PARAM_SETS_SIZE);
+	for (i = 0; i < bufs->n_dpb; i++)
+		dev_info(ave->dev,
+			 "session: Start_AVC: DPB slot %u: recon %pad at wire %#x, LowResRef %pad at wire %#x\n",
+			 i, &bufs->dpb[i].recon,
+			 abi->start_avc.recon_set +
+				 i * abi->start_avc.recon_stride,
+			 &bufs->dpb[i].low_res,
+			 abi->start_avc.low_res_ref_set == AVE_OFF_NONE ? 0 :
+				 abi->start_avc.low_res_ref_set +
+				 i * abi->start_avc.low_res_ref_stride);
+	if (abi->start_avc.low_res_ref_set == AVE_OFF_NONE)
+		dev_warn(ave->dev,
+			 "session: Start_AVC: ABI %s has no LowResRef table; sLowResOutput.LowResSrcLumaScaled will be whatever setRefPointers finds in the DPB\n",
+			 abi->name);
 	if (s.n_src_nbr)
 		dev_info(ave->dev,
 			 "session: Start_AVC: SrcNeighbor %u entries/group at %#llx %#llx %#llx %#llx (+%u KiB each)\n",
@@ -783,71 +1014,6 @@ static void ave_session_alloc_nbr(struct ave_device *ave,
 			bufs->nbr[g][i] = iova;
 		}
 	bufs->n_nbr = AVE_SRC_NBR_MAX;
-}
-
-/*
- * Bytes the LRME scaled-source-luma surface needs for a @cw x @ch coded frame,
- * and the row stride the firmware will program for it. Both come from the
- * comment on session_lowres above; *stride is only for the log line.
- */
-static size_t ave_session_lowres_size(u32 cw, u32 ch, u32 *stride)
-{
-	u32 lr_stride = ALIGN(4 * cw, 256);
-
-	if (stride)
-		*stride = lr_stride;
-	return ALIGN((size_t)lr_stride * ((ch + 63) >> 4), 512);
-}
-
-/*
- * Allocate it and return the IOVA, or 0 to send the field zero. Never fatal:
- * a zero here is a known, named firmware assert rather than a silent fault.
- */
-static dma_addr_t ave_session_alloc_lowres(struct ave_device *ave,
-					   struct ave_sess_bufs *bufs,
-					   u32 cw, u32 ch)
-{
-	u32 lr_stride;
-	size_t size = ave_session_lowres_size(cw, ch, &lr_stride);
-	dma_addr_t iova;
-	void *cpu;
-
-	if (!session_lowres) {
-		dev_warn(ave->dev,
-			 "session: session_lowres=0: LowResSrcLumaScaled left zero, expect ASSERT CAVCController_H13C.cpp:5782\n");
-		return 0;
-	}
-	if (session_lowres_kb) {
-		size = (size_t)session_lowres_kb << 10;
-		if (size > SZ_64M) {
-			dev_warn(ave->dev,
-				 "session: session_lowres_kb=%u out of range\n",
-				 session_lowres_kb);
-			return 0;
-		}
-	}
-	size = ALIGN(size, SZ_4K);
-
-	cpu = ave_sess_dma_alloc(bufs, size, &iova);
-	if (!cpu) {
-		dev_warn(ave->dev,
-			 "session: LRME scaled-luma surface (%zu bytes) allocation failed\n",
-			 size);
-		return 0;
-	}
-	memset(cpu, 0, size);
-	if (iova & (AVE_STRIDE_ALIGN - 1)) {
-		dev_err(ave->dev,
-			"session: LRME scaled-luma surface %pad is not 64-aligned\n",
-			&iova);
-		return 0;
-	}
-	dev_info(ave->dev,
-		 "session: LRME scaled luma %pad +%#zx, lr_stride %u, %u rows%s\n",
-		 &iova, size, lr_stride, (ch + 63) >> 4,
-		 session_lowres_kb ? " (size overridden by session_lowres_kb)"
-				   : " (AVE_CalcBufSizeOfLowResRef formula)");
-	return iova;
 }
 
 /*
@@ -1081,7 +1247,7 @@ static int ave_session_process(struct ave_device *ave,
 	 * wrong.
 	 */
 	if (abi->process_avc.low_res_src != AVE_OFF_NONE)
-		f.low_res_src_addr = ave_session_alloc_lowres(ave, bufs, cw, ch);
+		f.low_res_src_addr = bufs->dpb[0].low_res;
 
 	if (bufs->n_nbr && abi->process_avc.src_nbr_max) {
 		memcpy(f.src_nbr, bufs->nbr, sizeof(f.src_nbr));
@@ -1104,7 +1270,7 @@ static int ave_session_process(struct ave_device *ave,
 		 &bufs->coded_iova, bufs->coded_size, &bufs->coded_hdr_iova,
 		 bufs->coded_hdr_size, &ry, &ruv, &rmv);
 	dev_info(ave->dev,
-		 "session: Process: LowResSrcLumaScaled %#llx at PICMGMT+%#x (LowResResults left zero)\n",
+		 "session: Process: LowResSrcLumaScaled %#llx at PICMGMT+%#x - INERT, setRefPointers overwrites it from DPB slot 0 (fw 0x2c320); LowResResults left zero\n",
 		 f.low_res_src_addr, abi->process_avc.low_res_src);
 
 	ret = ave_session_cmd(ave, abi, AVE_OP_PROCESS_AVC, "Process",
@@ -1242,8 +1408,9 @@ int ave_session_selftest(struct ave_device *ave)
 	if (ret)
 		goto out;
 
-	/* Must precede Start_AVC: the tables are published in that command. */
+	/* Must precede Start_AVC: these tables are published in that command. */
 	ave_session_alloc_nbr(ave, bufs);
+	ave_session_alloc_dpb(ave, bufs);
 
 	ret = ave_session_start_avc(ave, abi, bufs, AVE_SESS_CLIENT_ID);
 	if (ret || !session_frame)

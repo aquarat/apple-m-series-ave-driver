@@ -47,6 +47,16 @@
 #define IOVA_CHROMA		0x70400000ull
 #define IOVA_NBR		0x80000000ull	/* 64-aligned, +0x10000 per slot */
 #define IOVA_LOWRES		0x90000000ull	/* 64-aligned LRME scaled-luma target */
+
+/*
+ * DPB slots the harness publishes. The firmware needs max_num_ref_frames+1 of
+ * them (ProvideReferenceFrames copies slots 0..numRefs, fw 0x2b638-0x2b644,
+ * with numRefs = SPS max_num_ref_frames, fw 0x5dd14) and the driver sends
+ * max_num_ref_frames = 1, so 2.
+ */
+#define SESS_DPB		2
+/* ALIGN(ALIGN(4*W,256) * ((H+63)>>4), 512) - AVE_CalcBufSizeOfLowResRef. */
+#define SESS_LOWRES_SIZE	0x3c000ull
 #define SESS_STRIDE		1280		/* % 64 == 0 */
 #define SESS_PROCESS_SLOT	21
 
@@ -166,9 +176,9 @@ static void test_abi(enum ave_fw_abi which, const char *name)
 	ctx = "Start_AVC";
 	{
 		struct ave_cmd_ctx c = { .count = 3, .client_id = SESS_CLIENT_ID };
-		struct ave_recon_buf recon = {
-			.addr = IOVA_RECON,
-			.luma_size = SESS_WIDTH * SESS_HEIGHT,
+		struct ave_recon_buf recon[SESS_DPB] = {
+			{ IOVA_RECON,		    SESS_WIDTH * SESS_HEIGHT },
+			{ IOVA_RECON + 0x1000000ull, SESS_WIDTH * SESS_HEIGHT },
 		};
 		struct ave_buf coded = { .addr = IOVA_CODED, .size = SESS_CODED_SIZE };
 		struct ave_buf coded_hdr = {
@@ -187,10 +197,29 @@ static void test_abi(enum ave_fw_abi which, const char *name)
 			.fw_client_mem_size = SESS_FWCLIENTMEM_SIZE,
 			.param_sets_addr = IOVA_FWCLIENTMEM + 0x100000,
 			.param_sets_size = 0x1000,
-			.recon = &recon, .n_recon = 1,
+			.recon = recon, .n_recon = SESS_DPB,
+			.low_res_ref = { IOVA_LOWRES,
+					 IOVA_LOWRES + SESS_LOWRES_SIZE },
+			.n_low_res_ref = SESS_DPB,
 			.coded = &coded, .coded_hdr = &coded_hdr, .n_coded = 1,
 		};
+		const struct ave_start_avc_layout *sl = &abi->start_avc;
 		size_t want = ave_cmd_size(abi, AVE_OP_START_AVC);
+		unsigned int k;
+
+		/*
+		 * 26.6.2 has no LowResRef table (not located); publishing one
+		 * there must be refused, and the rest of the command must still
+		 * build once it is dropped.
+		 */
+		if (sl->low_res_ref_set == AVE_OFF_NONE) {
+			ret = ave_cmd_build_start_avc(abi, cmdbuf,
+						      sizeof(cmdbuf), &c, &s);
+			CHECK(ret == -EINVAL,
+			      "builder accepted a LowResRef table for an ABI that has none (ret %d)",
+			      ret);
+			s.n_low_res_ref = 0;
+		}
 
 		ret = ave_cmd_build_start_avc(abi, cmdbuf, sizeof(cmdbuf), &c, &s);
 		CHECK(ret == (int)want, "build_start_avc ret %d want %zu",
@@ -204,6 +233,110 @@ static void test_abi(enum ave_fw_abi which, const char *name)
 					  abi->cmd[AVE_OP_START_AVC].reply_size,
 					  SESS_CLIENT_ID, NULL) == 0,
 		      "check_reply rejected a success Start_AVC reply");
+
+		/*
+		 * The DPB tables. Slot i of the recon table and slot i of the
+		 * LowResRef table describe the same DPB entry: the firmware
+		 * copies wire recon_set[i] to DPB entry+48 and wire
+		 * low_res_ref_set[i] to DPB entry+64 in the same pass
+		 * (ProvideReferenceFrames, fw 0x2b75c / 0x2b780), and
+		 * setRefPointers then publishes entry+64 as
+		 * sLowResOutput.LowResSrcLumaScaled (fw 0x2c320).
+		 */
+		for (k = 0; k < SESS_DPB; k++) {
+			u32 roff = sl->recon_set + k * sl->recon_stride +
+				   sl->recon_addr;
+
+			CHECK(get_unaligned_le64(cmdbuf + roff) == recon[k].addr,
+			      "recon slot %u not at wire %#x", k, roff);
+			CHECK(roff + 8 <= want,
+			      "recon slot %u at wire %#x runs past the command",
+			      k, roff);
+		}
+		if (sl->low_res_ref_set != AVE_OFF_NONE) {
+			CHECK(sl->low_res_ref_stride == 8,
+			      "LowResRef stride %u is not a u64",
+			      sl->low_res_ref_stride);
+			CHECK(sl->low_res_ref_max >= SESS_DPB,
+			      "LowResRef table holds only %u slots",
+			      sl->low_res_ref_max);
+			for (k = 0; k < SESS_DPB; k++) {
+				u32 off = sl->low_res_ref_set +
+					  k * sl->low_res_ref_stride;
+
+				CHECK(get_unaligned_le64(cmdbuf + off) ==
+				      s.low_res_ref[k],
+				      "LowResRef slot %u not at wire %#x", k, off);
+				CHECK(off + 8 <= want,
+				      "LowResRef slot %u at wire %#x runs past the command",
+				      k, off);
+				/* The two tables must not overlap each other. */
+				CHECK(off >= sl->recon_set +
+					     sl->low_res_ref_max * sl->recon_stride ||
+				      off + 8 <= sl->recon_set,
+				      "LowResRef slot %u at wire %#x lands inside the recon table at %#x",
+				      k, off, sl->recon_set);
+			}
+			/* One past the last published slot must still be zero. */
+			CHECK(get_unaligned_le64(cmdbuf + sl->low_res_ref_set +
+						 SESS_DPB * sl->low_res_ref_stride) == 0,
+			      "LowResRef slot %u was written but not published",
+			      SESS_DPB);
+		}
+
+		/*
+		 * Negative controls for the LowResRef table.
+		 *
+		 * Zero entries at all IS allowed: that is the session_lowres=0
+		 * bisect, which must still build and must leave the table zero
+		 * so the run reproduces ASSERT CAVCController_H13C.cpp:5782.
+		 */
+		if (sl->low_res_ref_set != AVE_OFF_NONE) {
+			u64 keep = s.low_res_ref[1];
+
+			s.low_res_ref[1] = IOVA_LOWRES + 32;	/* 32, not 64 */
+			ret = ave_cmd_build_start_avc(abi, cmdbuf,
+						      sizeof(cmdbuf), &c, &s);
+			CHECK(ret == -EINVAL,
+			      "builder accepted a LowResRef that is 32- but not 64-aligned (ret %d)",
+			      ret);
+
+			s.low_res_ref[1] = 0;
+			ret = ave_cmd_build_start_avc(abi, cmdbuf,
+						      sizeof(cmdbuf), &c, &s);
+			CHECK(ret == -EINVAL,
+			      "builder accepted a LowResRef table with a zero hole (ret %d)",
+			      ret);
+
+			s.low_res_ref[1] = keep;
+			s.n_low_res_ref = SESS_DPB - 1;
+			ret = ave_cmd_build_start_avc(abi, cmdbuf,
+						      sizeof(cmdbuf), &c, &s);
+			CHECK(ret == -EINVAL,
+			      "builder accepted fewer LowResRef entries than DPB slots (ret %d)",
+			      ret);
+
+			s.n_low_res_ref = sl->low_res_ref_max + 1;
+			ret = ave_cmd_build_start_avc(abi, cmdbuf,
+						      sizeof(cmdbuf), &c, &s);
+			CHECK(ret == -EINVAL,
+			      "builder accepted more LowResRef entries than the table holds (ret %d)",
+			      ret);
+
+			/* The deliberate zero: no table, command still builds. */
+			s.n_low_res_ref = 0;
+			ret = ave_cmd_build_start_avc(abi, cmdbuf,
+						      sizeof(cmdbuf), &c, &s);
+			CHECK(ret == (int)want,
+			      "session_lowres=0 control: builder refused to omit the LowResRef table (ret %d)",
+			      ret);
+			for (k = 0; k < sl->low_res_ref_max; k++)
+				CHECK(get_unaligned_le64(cmdbuf + sl->low_res_ref_set +
+							 k * sl->low_res_ref_stride) == 0,
+				      "session_lowres=0 control: LowResRef slot %u is not zero",
+				      k);
+			s.n_low_res_ref = SESS_DPB;
+		}
 
 		/* The coded-header buffer must satisfy the builder's minimum. */
 		coded_hdr.size = abi->start_avc.coded_hdr_bytes - 1;

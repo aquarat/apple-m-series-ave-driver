@@ -75,6 +75,24 @@ struct ave_avc_session {
 
 	const struct ave_recon_buf *recon;	/* DPB surfaces */
 	u32	n_recon;			/* 1..abi recon_max */
+	/*
+	 * The LRME scaled-luma surfaces ("LowResRef"), one per DPB slot, in
+	 * the SAME slot order as recon[]. Written to
+	 * start_avc.low_res_ref_set + slot*low_res_ref_stride.
+	 *
+	 * This - not the per-frame PICMGMT field - is what ends up in
+	 * sLowResOutput.LowResSrcLumaScaled: CAVECommonDPB::setRefPointers
+	 * overwrites the per-frame field from the DPB entry (fw 0x2c318 /
+	 * 0x2c320) before CAVCController::setLRME reads it. Each must be
+	 * 64-byte aligned (setLRME:5783) and
+	 * ALIGN(ALIGN(4*W,256) * ((H+63)>>4), 512) bytes long, from the kext's
+	 * AVE_CalcBufSizeOfLowResRef (0xfffffe0008ea560c).
+	 *
+	 * n_low_res_ref == 0 writes none, which leaves the assert in place;
+	 * that is the deliberate negative control.
+	 */
+	u64	low_res_ref[AVE_DPB_MAX];
+	u32	n_low_res_ref;			/* 0, or exactly n_recon */
 	const struct ave_buf	*coded;		/* bitstream buffers */
 	const struct ave_buf	*coded_hdr;	/* coded-header buffers, same count */
 	u32	n_coded;			/* 1..abi coded_max */

@@ -1060,3 +1060,219 @@ maximum across the four groups, 80 KiB at 1280 - is right for AVC. The
 two-dimensional formula the §11 analysis found (`(((H+31)>>5)+1)/2-1` by
 `(W+31)>>5`, ×3, ×64 or ×256) is the **HEVC** arm and does not apply to this
 session; it would demand 330 KiB for Pixel, so it matters for HEVC later.
+
+---
+
+## 13. The `sLowResOutput` chain, completed — it comes from `Start_AVC`, not `Process` (2026-09-13)
+
+§11 supplied a 240 KiB 64-aligned buffer at `PICMGMT + 0xC20` and the hardware
+returned the **identical** `setLRME:5782` assert, because the firmware
+overwrites that field before `setLRME` reads it. This section is the rest of
+the chain, read end to end, and the change that follows from it.
+
+All VAs are 13.5 image VAs (firmware) / 13.5 kernelcache VAs (kext).
+
+### 13.1 The chain, host field to assert
+
+| # | who | what it does | evidence |
+|---|---|---|---|
+| 1 | **host** `AVE_CHM_SetFwBuf` | writes 2 sets x 17 slots of `u64` at `AVE_VIDEO_PARAMS + 0x248` — i.e. **`Start_AVC` wire `0x2A8`**, since VideoParams is `cmd+0x60` ([46](46-abi-13.5-commands-session.md) §9.1) | kext `add x24,x25,#0x9a8` `0xfffffe0008eaefc0`, `add x20,x22,#0x248` `0xeaefcc`, `str x0,[x20,x28,lsl#3]` `0xeaf004`; loop bounds `cmp x28,#0x11` `0xeaf010`, `cmp x27,#2` `0xeaf024`, `cmp x23,#2` `0xeaf034` |
+| 2 | fw `CAVECommonDPB::ProvideReferenceFrames(numRefs, AVE_VIDEO_PARAMS*)` | copies it to `DPBContext + 0x10A0 + set*0x80 + slot*8` | `ldr x23,[x21,#584]` `0x2b780` (x21 = VP + set*`0x88` + slot*8), `str x23,[x20,#4256]` `0x2b788` |
+| 3 | fw `CAVECommonDPB::InitPointerAndVariables(AVECommonDPBContext*)` | copies element `[set][slot]` into **DPB entry + 64** (entry = ctx + set*`0x500` + `0x680` + slot*`0x50`) | head (slot 0) `ldr x0,[x0,#4256]` `0x2bd48` -> `str x0,[x17,#1728]` `0x2bd54`; loop (slot >= 1) `ldr x6,[x1,x2]` `0x2bddc` -> `str x6,[x5,#1808]` `0x2bde8` |
+| 4 | fw `H264VideoEncoderDPB::ManageDPBBuffer` | DPB entry + 64 -> `ReferenceFrameInfoData + 224` | `ldur q0,[x11,#56]` `0x2d544`, `str x10,[x22,#224]` `0x2d55c` |
+| 5 | fw `CAVECommonDPB::setRefPointers` | `ReferenceFrameInfoData + 224` -> `AVE_PICMGMT_PARAMS + 0xC20` | `ldp x11,x8,[x2,#216]` `0x2c318`, `str x8,[x1,#3104]` `0x2c320` |
+| 6 | fw `CAVCController::setLRME` | asserts it is non-zero (5782) and 64-aligned (5783) | `ldr x15,[x21,#3104]` `0x523bc`, §11.1 |
+
+**C** at every step. The same pass carries the recon planes: the recon table's
+first `u64` (wire `0x88 + slot*0x10`) becomes DPB entry + 48 -> RefFrameInfo +
+72 -> `sRecon.Y_MSB` at `PICMGMT + 0x898` (fw `ldr x21,[x20,#40]` `0x2b75c`,
+`str x21,[x19]` `0x2b764`; `ldr x10,[x11,#48]` `0x2d53c`, `str x10,[x22,#72]`
+`0x2d540`; `ldr x12,[x2,#72]` `0x2c314`, `str x12,[x1,#2200]` `0x2c338`), and
+the entry's second `u64` (wire `0x88 + slot*0x10 + 8`) becomes `sRecon.Y_LSB`
+at `PICMGMT + 0x8A0` (`0x2d550` / `0x2c328`).
+
+**That recon half is already confirmed on hardware.** The 2026-09-13 run got
+past `setPipe`'s `sRecon.Y_MSB != 0` / `& 127 == 0` asserts (fw `0x55358` /
+`0x55310`) *and* reached `setLRME`, which is only possible if `setRefPointers`
+ran — and if it ran, `PICMGMT + 0xC20` was necessarily overwritten, which is
+exactly why our per-frame value did not help. One mechanism, two fields: the
+one we filled at Start worked, the one we left zero asserted.
+
+### 13.2 The rest of the table, and the neighbouring ones
+
+`AVE_VIDEO_PARAMS` (wire = block + `0x60`) carries three DPB-indexed tables
+back to back, all `[2 sets][17 slots]`:
+
+| block | wire | shape | contents | evidence |
+|---:|---:|---|---|---|
+| `+0x28` | `0x88` | 2 x 17 x `0x10` | recon: `{luma, luma_LSB}` | kext `0xfffffe0008eaef08`–`0xeaef58`; fw `0x2b75c`–`0x2b770` |
+| `+0x248` | **`0x2A8`** | 2 x 17 x `8` | **LowResRef** (LRME scaled luma) | kext `0xeaefcc`/`0xeaf004`; fw `0x2b780`/`0x2b788` |
+| `+0xF650` | `0xF6B0` | 2 x 17 x `8` | Colocated | kext `0xeaef74`–`0xeaefb8`; fw `ldr x21,[x21,x3]` `0x2b78c` (x3 = `0xf650`), `str x21,[x20,#512]` `0x2b790` |
+
+`0x28 + 2*0x110 = 0x248` and `0x248 + 2*0x88 = 0x358` (the LowResResult table,
+wire `0x3B8`) — the three are contiguous, which is the cross-check that the
+stride and count readings are right. This also resolves docs/46 §12's open
+"16 versus 2 x 17" question: the host writes 2 x 17 and the firmware's
+`InitEncodingParameters` copy loop (`0x5d6ac`–`0x5d728`) separately takes the
+**first `u64` of 16 of them** into `ctrl+3256` for `p_apsReconPictures`. Two
+different consumers of the same table, not a contradiction.
+
+### 13.3 How many slots must be valid: `max_num_ref_frames + 1`, set 0 only
+
+- `InitEncodingParameters` calls `ProvideReferenceFrames` with
+  `numRefs = SPS max_num_ref_frames` (`ldr w1,[x24,#1072]` fw `0x5dd14`, x24 =
+  `cmd + 0x105AC`, so wire `0x109DC` = `MAX_REF`; `bl 0x2b530` at `0x5dd38`).
+- Its slot loop runs `numRefs + 1` times (`add w14,w1,#1` `0x2b628`, unrolled
+  `0x2b640`/`0x2b63c`, remainder `0x2b744`), and its set loop runs `[dpb+32]`
+  times (`ldrb w10,[x0,#32]` `0x2b614`, `cmp x11,x10` `0x2b670`).
+- `H264VideoEncoderDPB::H264VideoEncoderDPB` sets `[this+32] = 1`
+  (`mov w8,#1` `0x2d1c0`, `strb w8,[x0,#32]` `0x2d1c4`). **Only set 0 exists.**
+- Apple allocates exactly that many: `AVE_CalcBufNumOfLowResRef` (kext
+  `0xfffffe0008ea55d8`) returns `n + 1` (`csinc w8,wzr,w0,eq` `0xea55f0`), and
+  `AVE_CreateInternalSurfaces` (kext `0xfffffe0008f3a414`) creates one surface
+  per slot at `SurfaceSet + 0x9A8`, `[type][layer][num]` with strides
+  `0x110`/`0x88`/`8` — the same shape the wire table has.
+  `AVE_CalcBufTypeNumOfLowResRef` (`0xea55b0`) returns 1 for the call site's
+  `w0 = 0` (`0xec7264`), so only the first of the two wire sets is filled, and
+  the second (block `+0xFAE0`) stays zero. **C.**
+- The InfoSet slots behind those counts are `+196` type, `+204` layer, `+208`
+  num, `+212` size (kext `0xec726c`, `0xec7278`, `0xec7290`, `0xec72bc`) —
+  matching docs/47's `LowResRef` row (`0xC4`/`0xCC`/`0xD0`/`0xD4`).
+
+We send `max_num_ref_frames = 1`, so **two slots**: slot 0 is the entry this
+frame encodes into (`ManageDPBBuffer` reads the index at `ctx+4228`, which
+`InitPointerAndVariables` zeroes — `str wzr,[x16,#4228]` `0x2bd1c`) and slot 1
+is read as the "next" entry in the same call (`0x2d504`–`0x2d524`).
+
+**Size per slot is unchanged from §11.2** — `AVE_CalcBufSizeOfLowResRef`
+(`0xfffffe0008ea560c`), AVC arm `0xea56a4`–`0xea56b4`,
+`ALIGN(ALIGN(4*W,256) * ((H+63)>>4), 512)` = `0x3C000` at 1280x720. The
+function is per-surface, so the count multiplies it: 480 KiB for two slots.
+
+### 13.4 What changed in the driver
+
+`driver/ave_abi.h` — `struct ave_start_avc_layout` gains
+`low_res_ref_set` / `_stride` / `_max`; 13.5 = `0x2A8` / `8` / `17`, 26.6.2 =
+`AVE_OFF_NONE` (no counterpart located; its `ProvideReferenceFrames` was not
+read).
+
+`driver/ave_cmd.h`, `driver/ave_cmd.c` — `struct ave_avc_session` gains
+`low_res_ref[AVE_DPB_MAX]` / `n_low_res_ref`, in the **same slot order** as
+`recon[]`. The builder writes them into the new table, and refuses: a table for
+an ABI that has none, a count that is not exactly `n_recon`, a count past
+`low_res_ref_max`, a zero hole, and any entry that is not 64-aligned. Zero
+entries (`n_low_res_ref == 0`) is allowed and writes nothing — that is the
+control.
+
+`driver/ave_session.c`:
+
+- `ave_session_alloc_dpb()`, called before `Start_AVC` alongside
+  `ave_session_alloc_nbr()`, carves `session_dpb` DPB slots out of **two**
+  coherent arenas (one recon, one LowResRef) so the mapping count does not grow
+  with the slot count, and checks the 128-/64-byte alignment rather than
+  assuming it.
+- **`session_dpb` (default 2)** — slots published in both tables. The number is
+  derived (`max_num_ref_frames + 1`, §13.3), not guessed. `session_dpb=1`
+  reproduces the recon table of the `Start_AVC` the firmware accepted on
+  2026-09-13 21:13.
+- **`session_lowres=0` still reproduces the assert**, and now means it: it
+  leaves the Start-time table *and* the per-frame field zero. With only the
+  per-frame field zeroed the run would no longer reproduce anything, because
+  the per-frame field is inert.
+- The per-frame `PICMGMT + 0xC20` is still written, from slot 0, and the log
+  line now says it is inert and names the instruction that overwrites it.
+- The old `ave_session_alloc_lowres()` is gone; `ave_session_lowres_size()`
+  stays and is used per slot. `session_lowres_kb` still overrides the per-slot
+  size, because the row count in the formula is inferred.
+
+Buffers still belong to `ave->session_bufs` and are released by `ave_remove()`
+after `ave_power_off()`; the 4 GiB allocation guard is unchanged and now covers
+the two arenas.
+
+### 13.5 Harness
+
+```
+tools/abi_selftest      698 checks, 0 failures
+tools/session_selftest  207 checks, 0 failures   (was 167)
+tools/ipc_selftest    32120 checks, 0 failures
+```
+
+New `session_selftest` checks: every recon slot lands at
+`recon_set + i*recon_stride` and inside the command; every LowResRef slot lands
+at `low_res_ref_set + i*low_res_ref_stride`, inside the command, and does not
+overlap the recon table; the stride is a `u64` and the table is at least
+`session_dpb` slots deep; the slot one past the last published one is still
+zero; and the negative controls — a 32- but not 64-aligned entry, a zero hole
+in the middle, fewer entries than DPB slots, more entries than the table holds,
+a table offered to the 26.6.2 ABI (which has none), and the deliberate
+`n_low_res_ref = 0` control, which must build **and** leave all 17 slots zero.
+
+Both halves were validated against a negative control ([00](00-methodology.md)
+trap 2): deleting the builder's write makes exactly the two "not at wire
+`0x2a8`/`0x2b0`" checks fail, and disabling the validation makes exactly the
+five rejection checks fail.
+
+### 13.6 Reproduce
+
+```sh
+# host: the LowResRef table, and the two tables around it
+AVE_MACOS=13.5 python3 tools/disas.py --kext --addr 0xfffffe0008eaefbc -n 0x70
+AVE_MACOS=13.5 python3 tools/disas.py --kext 'AVE_CHM_SetFwBuf' -n 0x400
+
+# firmware: VideoParams -> DPB context -> DPB entry -> PICMGMT
+AVE_MACOS=13.5 python3 tools/disas.py --fw --addr 0x2b614 -n 0x1a0   # ProvideReferenceFrames
+AVE_MACOS=13.5 python3 tools/disas.py --fw --addr 0x2bcb0 -n 0x18c   # InitPointerAndVariables
+AVE_MACOS=13.5 python3 tools/disas.py --fw --addr 0x2d4d8 -n 0x90    # ManageDPBBuffer
+AVE_MACOS=13.5 python3 tools/disas.py --fw --addr 0x2c314 -n 0x40    # setRefPointers
+
+# how many slots: numRefs from the SPS, one set only
+AVE_MACOS=13.5 python3 tools/disas.py --fw --addr 0x5dd0c -n 0x30
+AVE_MACOS=13.5 python3 tools/disas.py --fw --addr 0x2d1a8 -n 0x28
+
+# Apple's own count and size for the same surface
+AVE_MACOS=13.5 python3 tools/disas.py --kext --addr 0xfffffe0008ea55b0 -n 0x5c
+AVE_MACOS=13.5 python3 tools/disas.py --kext --addr 0xfffffe0008ea560c -n 0xd4
+AVE_MACOS=13.5 python3 tools/disas.py --kext --addr 0xfffffe0008f3a408 -n 0x94
+```
+
+### 13.7 Ranked: what most likely fails next
+
+1. **Another unconditional per-frame assert further down `setPipe` /
+   `SetTranscode`.** `setLRME` is now clean for an I-only frame (§11.3 plus the
+   buffer), so the next stop is the assert inventory past fw `0x57d30` walked
+   with the `num_ref_idx_l0_active_minus1 < 0` short-circuit applied. Expect a
+   named controller field — the cheap failure.
+2. **A DPB field we still send zero.** `ManageDPBBuffer` also fills
+   `ReferenceFrameInfoData + 8 / +152 / +232` from the *next* slot
+   (fw `0x2d510`–`0x2d524`); with `session_dpb=2` those are now real addresses,
+   but `RefFrameInfo + 296 / +360` are filled from the LowResResult and
+   LowResRCResult tables (wire `0x3B8` / `0x438`, fw `0x2b870`–`0x2b884`) which
+   we leave zero. That copy is gated on the DPB constructor's 8th argument
+   (`[dpb+44]`, `strb w7,[x0,#44]` fw `0x2d1b8`) and, for `FrameType = 3`, on
+   the `cmp w9,#3` branch at fw `0x2d4dc` taking the *IDR* path that does not
+   read them. **`session_frame_type=0` (non-IDR I) takes the other branch
+   (fw `0x2d5a8`), which does read them — that path is untraced, so leave the
+   default at 3.**
+3. **The firmware's own sub-allocator inside `iFwClientMemAddr`**
+   (`encoder_addr_fw_data`, `mbAddressCPUFWData`, `stats_DMA_addr`,
+   `wrDmaBinAddr[]`, `encoder_addr_entropy[]` — §7 items 3 and 4). Unchanged
+   risk; raising `AVE_SESS_FWCLIENTMEM_SIZE` is cheap.
+4. **The LRME engine writing outside the scaled-luma surface.** The formula is
+   Apple's and is now applied per slot, but the row count is still inferred; an
+   over-run is a DART fault, loud and attributable, and the two slots are
+   separate arena entries so the fault address names the slot.
+   `session_lowres_kb` raises it without a rebuild.
+5. **The recon surface layout.** Each slot is `cw*ch*2` and flat.
+   `setRefPointers` derives `sRecon.UV_MSB` as `luma + [dpb+20]`, a
+   firmware-computed offset (fw `0x2c324`, value built in the ctor at
+   `0x2d14c`–`0x2d168`), so the chroma plane lands wherever the firmware thinks
+   it should — inside our mapping, but at an offset we have not checked against
+   the slot size. Worth computing before blaming the picture.
+6. **The colocated table at wire `0xF6B0`.** Left zero. `setRefPointers`
+   publishes it to `PICMGMT + 0x8B8` (fw `str x17,[x1,#2232]` `0x2c4b0`) and
+   `setPipe` skips the whole block when it is zero (fw `cbz x10` `0x554f0`), so
+   it is not a first-frame risk — but it is the same shape as the two tables
+   this section added, and if a later assert names `colo`, the fix is the same
+   three lines.
+7. **Everything in §11.7 from item 5 down** (no completion, the length formula,
+   the parameter-set assembly) — unchanged.
