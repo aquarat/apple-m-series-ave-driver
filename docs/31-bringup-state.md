@@ -836,3 +836,43 @@ session starts.
 Next: phase 6, one encoded frame. `Process` (13.5 id 7, 0x1940 bytes,
 picture block at +0x9C8) with an input surface, then read the coded buffer
 back and check it with ffmpeg.
+
+## 2026-09-13 22:11 — first Process: the firmware encodes into the AVC path, asserts on LowResOutput
+
+`results/frame1-1789333891.kmsg`, fresh boot, `session_selftest=1
+session_frame=1`. Config, Open and Start_AVC accepted again (with the
+SrcNeighbor tables now filled: 80 KiB per slot for 80 MB columns, from the
+docs/47 formula). Then:
+
+```
+session: Process: 1280x720, luma 0xfe800000/0xe1000 chroma 0xfe780000/0x70800,
+         frame_type 3, slot 21; sending 6464 bytes on IO
+fw[0]| Uncompress Ref is not supported
+fw[3]| ASSERT: ./AppleAVE2FW/kf_controller/H9/CAVCController_H13C.cpp, 5782:
+       (pPicParams->sLowResOutput.LowResSrcLumaScaled + EncCom...   [clamped]
+```
+
+and the firmware's history gained two entries beyond the session ones:
+
+```
+6  client 1  LogID 128  line 2906  FrameType 3   AVC
+7  client 1  LogID 131  line 446   FrameType 3   7 0xffffffff807fd2a8 0 0 0 0
+```
+
+**Confirmed:** `Process` (13.5 id 7, 0x1940 bytes) is accepted by the
+dispatcher and reaches `CAVCController_H13C`'s per-frame setup - the command
+id, size, picture-management block offset and the fields set so far are right
+far enough to get into the encoder proper. The IO ack arrived and the
+reply-id filter added after the review reported "0 other completion(s)", so
+the timeout is a real absence, not a mis-captured message.
+
+**The next missing field:** `sLowResOutput.LowResSrcLumaScaled` - a
+low-resolution scaled luma buffer for the motion-estimation (LRME) pass,
+which we send as zero. The assert text is clamped at ~120 characters by the
+firmware's own log path (docs/45), so the full predicate must be read out of
+the image at `CAVCController_H13C.cpp:5782`.
+
+**Unknown:** whether LRME can be switched off for an I-only session (which
+would be simpler than supplying the buffers), what the rest of the
+`sLowResOutput` group is, and whether `Uncompress Ref is not supported`
+matters or is informational.
