@@ -9,6 +9,10 @@ and no hypervisor -- just the kernelcache from any IPSW for the target Mac.
 Usage:
   kext_extract.py <kernelcache.macho> --list
   kext_extract.py <kernelcache.macho> --extract com.apple.driver.AppleAVE2 -o out.macho
+  kext_extract.py <kernelcache.macho> --symbols com.apple.driver.AppleAVE2 -o kext-symbols.txt
+
+--symbols writes the kext's LC_SYMTAB as "<va>  <name>" lines sorted by (va, name),
+the format of data/derived/kext-symbols.txt and what tools/disas.py --kext reads.
 """
 import argparse, struct, sys
 
@@ -35,16 +39,46 @@ def fileset_entries(d):
             end = d.find(b"\0", name_off)
             yield d[name_off:end].decode(), vmaddr, fileoff
 
+def write_symbols(d, kext_off, out):
+    """Dump the kext's own LC_SYMTAB. Its symoff/stroff are offsets into the
+    whole kernelcache (shared __LINKEDIT), so resolve them against d."""
+    for cmd, cmdsize, off in load_commands(d[kext_off:]):
+        if cmd == LC_SYMTAB:
+            symoff, nsyms, stroff, strsize = struct.unpack("<IIII", d[kext_off+off+8:kext_off+off+24])
+            break
+    else:
+        sys.exit("kext has no LC_SYMTAB")
+    syms = []
+    for i in range(nsyms):
+        n_strx, n_type, n_sect, n_desc, n_value = struct.unpack("<IBBHQ", d[symoff+i*16:symoff+i*16+16])
+        end = d.find(b"\0", stroff + n_strx)
+        name = d[stroff+n_strx:end].decode("utf-8", "replace")
+        if name:
+            syms.append((n_value, name))
+    with open(out, "w") as f:
+        for v, name in sorted(syms):
+            f.write(f"{v:#018x}  {name}\n")
+    return len(syms)
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("kernelcache")
     ap.add_argument("--list", action="store_true")
     ap.add_argument("--grep", help="substring filter for --list")
     ap.add_argument("--extract", help="entry id to extract")
+    ap.add_argument("--symbols", help="entry id whose symbol table to dump (text, to -o)")
     ap.add_argument("-o", "--out", default="kext.macho")
     a = ap.parse_args()
     d = open(a.kernelcache, "rb").read()
     entries = sorted(fileset_entries(d), key=lambda e: e[2])
+
+    if a.symbols:
+        for name, vmaddr, fileoff in entries:
+            if name == a.symbols:
+                n = write_symbols(d, fileoff, a.out)
+                print(f"{name}: {n} symbols -> {a.out}")
+                return
+        sys.exit(f"no fileset entry named {a.symbols}")
 
     if a.list or not a.extract:
         for name, vmaddr, fileoff in entries:
