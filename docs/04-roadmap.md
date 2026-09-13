@@ -41,7 +41,7 @@ individual docs. What remains:
 | 1 — fwextract plumbing | not started (see note below) |
 | 2 — static host-side analysis | **substantially done** |
 | 2b — tracing | not started (not on the critical path) |
-| 3 — transport bring-up | **blocked: the core cannot fetch its first instruction** — [41](41-apple-fetch-path.md), [42](42-asc-firmware-ownership.md) |
+| 3 — transport bring-up | **done 2026-09-13: firmware boots and sends message 1** (needs the patched m1n1 that programs the AVE DAPF) — [31](31-bringup-state.md), [49](49-dapf-write-reset.md), [50](50-m1n1-ave-dapf.md) |
 | 4 — IPC transport live | spec in progress — [36](36-ipc-implementation.md) |
 | 5 — session setup | struct map substantially done — [20](20-command-structs.md), [37](37-start-avc-session.md) |
 | 6 — one encoded frame | statically specified — [32](32-picmgmt-params.md), [37](37-start-avc-session.md), [38](38-dimension-convention.md), [39](39-input-format.md) |

@@ -623,3 +623,36 @@ dialect it rejects.
 > which bypass passes out untranslated. In "the dump", the list at
 > `0x1000165eaa0` is **ANE** (`ane0` at bus `0x84000000`).
 
+## 2026-09-13 19:25 — THE AVE FIRMWARE BOOTS AND SENDS MESSAGE 1
+
+`results/n3-start-1789323963.kmsg`. Patched m1n1 stage 2 (`v1.6.1-1-g1ae6361`,
+docs/50) had programmed AVE's DAPF from the live ADT: slot 0 TEXT
+`0x10000b28000-0x10000c13ffc` r0 `0x11`, slot 1 the `0x1f0` window, slot 2 the
+ADT MMIO entry. Linux made **no** DAPF writes. Overlay `variant=3`, `apple-ave
+stop_after=15 fw_map_data=1 fw_map_text=2`:
+
+- 13.5 pre-start scratch: `scratch0=0x8042006 scratch1=0x0 scratch2=0xe`;
+  RVBAR untouched (`0x102010000b28001`).
+- Halted control: CPU_STATUS `0x2a` STOPPED.
+- ASC start at 252.365; **9 ms later** the IRQ captured the firmware's first
+  message: status `0x1`, **`MSG 1: 0x00000007 0x00009bc0 0x00000100
+  0x000c0000`** — exactly the macOS 13.5 values predicted statically
+  (docs/45: 7 channels, `0x9BC0`-byte channel block, protocol `0x100`,
+  `0xC0000`).
+- **19 pages changed** in the 16 MiB window, first at `+0xf6a000` =
+  physical `0x10001a92000`, inside iBoot's AVE DATA segment: the firmware is
+  executing and writing its data.
+- **Zero DART faults**, no SError, no disabled IRQ; the machine stayed up
+  through a 30 s hold and the stage-15 power-off.
+
+**Confirmed, closing the fetch-path question (docs/44):** with the DAPF
+admitting TEXT physically and nothing mapped at DVA `0xb28000`, the reset
+fetch succeeded — the admitted physical TEXT fetch passes through the DART
+untranslated (H1). DATA is reached through the `0x1f0` window via the DART
+mapping DVA `0xec000` → `0x10001a90000`. The locked RVBAR was never the
+problem; the missing DAPF entry was.
+
+After message 1, CPU_STATUS sampled `0x2c` (IDLE, not RUNNING) for 200 ms:
+the firmware is waiting for the host's message 2, which `stop_after=15` does
+not send. Next: `stop_after=16`, the 13.5 handshake (messages 2-5, seven
+channels, TERMINAL log).

@@ -231,3 +231,6 @@ again, `sudo update-m1n1` regenerates a stock `boot.bin`.
     (E1's inference, now shown directly for AVE).
   - The MMIO entry is the ADT's as listed (`0x506…`, ave1's span, docs/44
     addendum); ave0's own `0x40d050000-0x40dc69000` is not admitted.
+- **2026-09-13 19:25** — with this DAPF, the AVE core boots iBoot's firmware
+  and sends message 1 (`7 / 0x9bc0 / 0x100 / 0xc0000`), zero DART faults.
+  See docs/31.
