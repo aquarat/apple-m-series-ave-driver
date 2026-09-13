@@ -387,6 +387,7 @@ static int ave_fw_check_iboot_placement(struct ave_device *ave)
 	 * is 0x4000, and the literal sits at 0x423c. That mistake oopsed E3a
 	 * on 2026-09-13 (results/e3a-*.log).
 	 */
+	ave_step(ave, "next: memremap + read iBoot TEXT literal");
 	p = memremap(AVE_IBOOT_TEXT_PHYS,
 		     PAGE_ALIGN(AVE_IBOOT_DATA_LITERAL_OFF + 8), MEMREMAP_WB);
 	if (!p) {
@@ -444,6 +445,8 @@ static int ave_fw_map_one(struct ave_device *ave, struct iommu_domain *domain,
 	if (ret)
 		return ret;
 
+	ave_step(ave, "next: iommu_map %s dva %#llx -> phys %#llx +%#zx", what,
+		 (u64)dva, (u64)phys, (size_t)size);
 	ret = iommu_map(domain, dva, phys, size, prot, GFP_KERNEL);
 	if (ret) {
 		dev_err(ave->dev, "  %s: iommu_map failed: %d\n", what, ret);

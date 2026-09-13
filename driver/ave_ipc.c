@@ -617,6 +617,7 @@ int ave_boot_config(struct ave_device *ave)
 	ave->boot_phase = AVE_BOOT_ARGS_WRITTEN;
 	spin_unlock_irqrestore(&ave->ipc_lock, flags);
 
+	ave_step(ave, "next: pre-start scratch writes");
 	/* Order is Apple's: flag first, then scratch 1, then scratch 2. */
 	ave_set_scratch(ave, 0, AVE_BOOT_MAGIC);
 	ave_set_scratch(ave, 1, s1);

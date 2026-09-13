@@ -435,6 +435,9 @@ int ave_dapf_program(struct ave_device *ave,
 	for (i = 0; i < n; i++) {
 		void __iomem *b = ave->dapf + DAPF_ENTRY(i);
 
+		if (i <= 1)
+			ave_step(ave, "next: first write to DAPF slot %u (r0 = 0)", i);
+
 		dev_info(ave->dev, "dapf: write [%2u] r0 %#06x r4 %#06x  %#013llx - %#013llx  %s\n",
 			 i, ent[i].r0, ent[i].r4, ent[i].start, ent[i].end,
 			 ent[i].what ?: "");
@@ -448,6 +451,7 @@ int ave_dapf_program(struct ave_device *ave,
 		writel(ent[i].r0, b + DAPF_R0);
 	}
 
+	ave_step(ave, "all %u DAPF slots written; next: readback", n);
 	for (i = 0; i < n; i++) {
 		struct ave_dapf_entry back;
 		bool ok;

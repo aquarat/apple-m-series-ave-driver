@@ -1,0 +1,20 @@
+#!/bin/bash
+# One E3 step with crash-surviving capture (docs/48).
+#   tools/e3-run.sh NAME insmod-params...
+# Refuses if an IRQ was disabled or apple_ave is already loaded.
+set -u
+cd "$(dirname "$0")/.."
+NAME=$1; shift
+if sudo dmesg | grep -q "Disabling IRQ #"; then echo "REFUSING: IRQ disabled; reboot" >&2; exit 1; fi
+if lsmod | grep -q '^apple_ave'; then echo "REFUSING: apple_ave loaded" >&2; exit 1; fi
+LOG=results/$NAME-$(date +%s).kmsg
+{ echo "=== $NAME $(date -Is) commit $(git rev-parse --short HEAD): insmod driver/apple-ave.ko $* ==="; } > "$LOG"; sync
+sudo python3 tools/kmsg_capture.py "$LOG" &
+CAP=$!
+sleep 1
+sudo insmod driver/apple-ave.ko "$@"
+RC=$?
+sleep 3
+echo "=== insmod rc=$RC ===" >> "$LOG"; sync
+sudo kill $CAP 2>/dev/null
+echo "$LOG"
