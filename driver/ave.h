@@ -10,6 +10,7 @@
 #ifndef __AVE_H__
 #define __AVE_H__
 
+#include <linux/delay.h>
 #include <linux/device.h>
 #include <linux/io.h>
 #include <linux/reset.h>
@@ -157,6 +158,21 @@ struct ave_device {
 
 	bool			running;
 };
+
+/*
+ * Crash-surviving progress markers. There is no pstore backend on this
+ * machine, so a hard crash leaves nothing but what userspace already synced
+ * to disk. With step_ms=N every marker is logged and then held for N ms, long
+ * enough for an fsync-per-line /dev/kmsg reader to persist it: the last
+ * marker on disk names the operation that killed the machine.
+ */
+extern int ave_step_ms;
+#define ave_step(ave, fmt, ...)						\
+	do {								\
+		dev_info((ave)->dev, "STEP " fmt "\n", ##__VA_ARGS__);	\
+		if (ave_step_ms)					\
+			msleep(ave_step_ms);				\
+	} while (0)
 
 static inline u32 ave_read(struct ave_device *ave, unsigned int bank, u32 off)
 {

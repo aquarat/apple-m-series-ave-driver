@@ -49,6 +49,10 @@
  *
  * Default is 0: map nothing, touch nothing. Raise it deliberately.
  */
+int ave_step_ms;
+module_param_named(step_ms, ave_step_ms, int, 0444);
+MODULE_PARM_DESC(step_ms, "hold each STEP marker this many ms so a crash leaves it on disk (0 = off)");
+
 static int stop_after;
 static int rvbar_probe;
 module_param(rvbar_probe, int, 0444);
@@ -782,9 +786,11 @@ iop_config_done:
 	 * Reached with stop_after=12 (we are past the stage-12 early return),
 	 * so E3a can verify the writes by readback without starting the core.
 	 */
+	ave_step(ave, "stage 12 done; next: DAPF programming (if dapf_set)");
 	ret = ave_dapf_program_selected(ave);
 	if (ret)
 		return dev_err_probe(dev, ret, "DAPF program\n");
+	ave_step(ave, "DAPF step returned");
 
 	ave_fw_snapshot_phys(ave);
 	if (stop_after >= AVE_STAGE_ASC_START) {
@@ -793,9 +799,11 @@ iop_config_done:
 	}
 
 	if (ave_stage(dev, AVE_STAGE_ASC_START)) {
+		ave_step(ave, "next: ASC start (core released)");
 		ret = ave_asc_start(ave);
 		if (ret)
 			return dev_err_probe(dev, ret, "ASC start\n");
+		ave_step(ave, "ASC start returned");
 		ave_stage_ok(dev, AVE_STAGE_ASC_START);
 	} else {
 		return 0;
