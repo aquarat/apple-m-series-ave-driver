@@ -63,6 +63,16 @@ struct ave_avc_session {
 	u64	fw_client_mem_addr;	/* must be non-zero on 13.5 */
 	u32	fw_client_mem_size;
 
+	/*
+	 * Where the firmware writes the SPS+PPS it generates. Required
+	 * wherever the ABI has the field: 13.5 dereferences it unguarded and
+	 * asserts "MappedMemory.cpp, 39: paddr != 0" if it is zero (docs/52).
+	 * The firmware's copies into it are NOT bounded by param_sets_size, so
+	 * the buffer must be comfortably larger than any SPS+PPS pair.
+	 */
+	u64	param_sets_addr;
+	u32	param_sets_size;
+
 	const struct ave_recon_buf *recon;	/* DPB surfaces */
 	u32	n_recon;			/* 1..abi recon_max */
 	const struct ave_buf	*coded;		/* bitstream buffers */
