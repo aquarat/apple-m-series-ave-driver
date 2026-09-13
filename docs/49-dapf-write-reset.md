@@ -269,3 +269,39 @@ a quiesce marker → touching this DART's TCR/`ENABLED_STREAMS` is itself
 fatal (unlikely: apple-dart writes both); resets at the first slot write
 even quiesced and in m1n1 order → Linux cannot write this DAPF at runtime,
 go to N3 (m1n1).
+
+## N1 result — 2026-09-13, `results/n1-1789303951.kmsg`: reset before any DAPF write
+
+Same completed steps as E3a attempt 3 (iBoot checks, DATA `iommu_map`
+verified, 13.5 scratch writes, stage 12, DART/DAPF reads), then "m1n1 order
+leaves 14 non-empty slots beyond 2", then the last line on disk:
+`STEP next: quiesce DART - all TCRs 0 (saved TCR[0] 0x80)`. **The machine
+reset** during that 1.5 s hold or at the first `writel(0, cpudart + 0x100)`.
+No DAPF register was written.
+
+What this changes:
+
+- apple-dart writes this same DART's TCRs at probe (`apple_dart_hw_reset`)
+  and issues stream commands / TLB invalidations to it during stages 9-10 of
+  this very run, without incident. **Our** first write to the block has now
+  reset the SoC twice, at two different registers (DAPF slot 0 r0, TCR[0]).
+- Both resets came about 3.1 s after the pre-start scratch-write marker, and
+  both immediately after a 1.5 s marker hold. The logs cannot distinguish
+  "the write resets" from "something earlier armed a reset a few seconds
+  later, which landed during the hold".
+
+Hypotheses now:
+
+- **H-write**: any write by this driver to the CPUDART/DAPF block resets
+  the SoC (mechanism unknown - apple-dart's writes to the same physical
+  block do not).
+- **H-delay**: an earlier step (13.5 scratch writes with no running firmware,
+  or the RW DART mapping of iBoot DATA) arms a SoC-level reset that fires a
+  few seconds later, independent of any DART write.
+
+Discriminating run (N1b), one boot at most: identical steps through stage
+12, then **no DART writes** and a 30 s hold with a marker every 2 s; then a
+single same-value write (`TCR[0] <- its current 0x80`) with a marker after
+it and a 10 s hold. Reset during the hold → H-delay; reset right at the
+same-value write → H-write (value-independent); survival → the value (TCR
+0 / DAPF r0 0) matters.
