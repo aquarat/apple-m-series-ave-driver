@@ -656,3 +656,28 @@ After message 1, CPU_STATUS sampled `0x2c` (IDLE, not RUNNING) for 200 ms:
 the firmware is waiting for the host's message 2, which `stop_after=15` does
 not send. Next: `stop_after=16`, the 13.5 handshake (messages 2-5, seven
 channels, TERMINAL log).
+
+## 2026-09-13 19:30 — second start in the same boot: silent (DATA not restored)
+
+`results/n3-handshake-1789324173.kmsg`, `stop_after=16`, same setup as the
+successful run, same boot, after that run's power-off. ASC released at
+462.76; **no message 1** in 6 s (stage 14) nor 2 s more (handshake:
+`-ETIMEDOUT`); CPU_STATUS `0x2c`; **no page of the 16 MiB window changed**;
+zero DART faults. The probe failed cleanly (IRQ quiesced, powered off, iBoot
+DATA mapping removed).
+
+**Inferred cause:** the first start modified iBoot's DATA (19 pages), and the
+second start ran on that state. macOS restores DATA before every start -
+13.5 `AVE_Firmware::UpdateImage` (`0xfffffe0008f11ae4`, docs/45 row 32), 26.6.2
+`AVE_FwImg::UpdateImage` → `RestoreCTRRData` (docs/42 §4-5). We do not.
+
+Pristine DATA is reconstructible: in the pre-boot dump
+(`data/blobs/iboot-window-16m.bin`, taken before any successful start) DATA's
+first `0x64000` bytes equal the 13.5 image's DATA except iBoot's 147 filled
+bytes, and every page from `0x64000` to the end of the dump (`0x98000`) is
+zero (bss, initialised by the firmware; the remaining `0x9c000` bytes are
+assumed zero - inferred).
+
+Next: (1) confirm by running `stop_after=16` as the **first** start of a
+fresh boot; (2) implement the restore - copy the pristine `0x64000` bytes
+plus zero fill over physical DATA before every start, as macOS does.
