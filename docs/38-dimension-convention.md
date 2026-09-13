@@ -11,6 +11,16 @@ Every row is marked **confirmed** (read out of an instruction, VA cited),
 **inferred** (a chain of reasoning over confirmed facts) or **unknown**, per
 [00-methodology.md](00-methodology.md).
 
+> **Version note (2026-09-13).** Offsets here are **macOS 26.6.2** and stand for
+> that build. On **macOS 13.5** (the firmware this machine runs,
+> [43](43-macos-13.5-firmware.md)) the width/height fields are at
+> `sCAveCmdAvcInit + 0x60` / `+ 0x64` (fw `0x5ced0`, `ProcessInitStage2`
+> `0x1445c`) and the SPS `pic_width_in_mbs_minus1` / `pic_height_in_map_units_minus1`
+> at `+0x109E4` / `+0x109E8`. The central finding **is the same on both**: the
+> 13.5 AVC controller also takes the macroblock grid from the SPS fields
+> (`0x5d0a4`, `0x5d154`, +1 at `0x5d1b8`). The per-derivation analysis of §§2–7
+> was not repeated on 13.5. See [46](46-abi-13.5-commands-session.md) §9.
+
 Firmware VAs are **image virtual addresses** (`__TEXT` vmaddr 0, fileoff
 `0x4000`). Addresses from `strings -t x data/blobs/ave_h13c.bin` are **file
 offsets** and are `VA + 0x4000`; both forms are given where a string is cited.

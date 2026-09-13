@@ -1,3 +1,21 @@
+> ## Version note (2026-09-13): macOS 13.5
+>
+> This document is **macOS 26.6.2** and stands for that build. On **macOS
+> 13.5** (the firmware this machine runs, [43](43-macos-13.5-firmware.md)) the
+> buffer tables **differ by version**: `AVE_CHM_SetFwBuf` writes into a
+> `0xFED0` block that the Start builder copies to `sCAveCmdAvcInit + 0x60`
+> (`0xfffffe0008ea99bc`, `0xfffffe0008ea9b3c`); inside that block DPB is
+> 2 × 17 × `0x10` at `+0x28`, CodedData 20 × u64 at `+0x458` with 20 × u32
+> sizes at `+0x4F8`, CodedHeader at `+0x560`/`+0x600`. Coded buffers are
+> clamped to **20** (not 30) and the coded-header size is **`0x23000`** (not
+> `0xC000`). The per-frame input and output addresses live in a `0xF68`-byte
+> `AVE_PICMGMT_PARAMS` embedded at `sCAveCmdAvcEncode + 0x9C8` (luma
+> `+0x8C0`, coded `+0xC08`). The Reset-replays-Start arithmetic has a 13.5
+> counterpart: Reset `0x32DB0 = 0x48 + 0x32D68` and HevcInit
+> `0x32DC8 = 0x60 + 0x32D68`, both built from the same constant in the kext
+> (`0xfffffe0008ead99c`–`b4`, `0xfffffe0008ea9f64`–`84`). Details:
+> [46](46-abi-13.5-commands-session.md) §10.
+
 > ## Corrections from [32-picmgmt-params.md](32-picmgmt-params.md)
 >
 > Three items in this document's section 5.2 are wrong:

@@ -8,6 +8,26 @@ Everything in the tables below is read directly out of the disassembly and is
 cited with the VA of the instruction it came from. Anything not read out of an
 instruction is marked **inferred** or **unknown**.
 
+> **Version note (2026-09-13).** Everything in this document was read from
+> **macOS 26.6.2** (25G83) and stands for that build. On **macOS 13.5**
+> (22G74, the firmware this machine actually runs, [43](43-macos-13.5-firmware.md))
+> the wire command ABI **differs by version** in ids, sizes and header layout.
+> On 13.5: the dispatcher is at firmware `0xd614` and accepts ids **1..14**
+> (`cmp w8,#0xd` at `0xd6e4`, jump table `0xe2e8`); names come from the
+> firmware's own `CAVE_CMD_*` table at `0xed060`: 1 `CONFIG` `0x70`,
+> 2 `START` (host "Open") `0x40`, 3 `RESET` `0x32DB0`, 4 `AVC_INIT` (host
+> "Start_AVC") `0x10E10`, 5 `HEVC_INIT` `0x32DC8`, 6 `UNINIT` (host "Stop")
+> `0x40`, 7 `AVC_ENCODE` `0x1940`, 8 `HEVC_ENCODE` `0x6838`,
+> 9 `LRME_STANDALONE` `0x6838`, 10 `MCTF_PROCESS` (no handler), 11 `FLUSH`
+> `0x40`, 12 `STOP` (host "Close") `0x48`, 13 `COMPLETE` `0x40`,
+> 14 `POWERDOWN` (host "Halt") `0x40`; there is no Priority command. The
+> 13.5 header is `+0x10` **u32** client id, `+0x18` codec (**0 = AVC,
+> 1 = HEVC**), `+0x1C` slot, `+0x20` priority, `+0x28` timeout; host slots
+> are bounded `<= 40`. Full table and VAs: [46](46-abi-13.5-commands-session.md).
+> A 26.6.2-shaped command sent to 13.5 firmware hits the `insize` assert and
+> the firmware spins (e.g. Config: `cmp w22,#0x70` at `0xd704` → `_bsp_assert_fail`
+> and `b .` at `0xde8c`).
+
 Reproduce any line with:
 
 ```sh

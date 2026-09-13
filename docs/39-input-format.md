@@ -14,6 +14,21 @@ Every row is marked **confirmed** (read out of an instruction, VA cited),
 **inferred** (a chain over confirmed facts, stated as such) or **unknown**, per
 [00-methodology.md](00-methodology.md).
 
+> **Version note (2026-09-13).** This document is **macOS 26.6.2** and stands for
+> that build. On **macOS 13.5** (the firmware this machine runs,
+> [43](43-macos-13.5-firmware.md)) the headline **is the same on both** — no
+> format selector; the firmware derives the format from SPS `chroma_format_idc`
+> (`sCAveCmdAvcInit + 0x105D8`, fw `0x5d12c`) and bit depth (`+0x105E0`,
+> fw `0x5d430`–`48`), and "10bit content is not supported" is log-only (setPipe
+> `0x540dc`–`f8`) — but the offsets **differ by version**. The per-frame
+> `AVE_PICMGMT_PARAMS` is `0xF68` bytes at `sCAveCmdAvcEncode + 0x9C8`; inside
+> it luma addr `+0x8C0`, luma stride `+0x8C8`, chroma addr `+0x8D0`, chroma
+> stride `+0x8D8` (kext `0xfffffe0008eb0904`–`14`), with **no plane size
+> fields**; `bInputCompressed` is `+0x6F3` and on 13.5 selects only the stride
+> source, not the address union. The host stride rule (non-zero, `% 64`) is the
+> same on both but drops the size term. See
+> [46](46-abi-13.5-commands-session.md) §10.
+
 Firmware VAs are **image virtual addresses** (`__TEXT` vmaddr 0, fileoff
 `0x4000`). String addresses quoted from `strings -t x data/blobs/ave_h13c.bin`
 are **file offsets** and are `VA + 0x4000`; both forms are given.

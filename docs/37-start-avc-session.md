@@ -11,6 +11,20 @@ Every row is marked **confirmed** (read out of an instruction, VA cited),
 **inferred** (a chain of reasoning over confirmed facts, stated as such) or
 **unknown**, per [00-methodology.md](00-methodology.md).
 
+> **Version note (2026-09-13).** This document is **macOS 26.6.2** and stands
+> for that build. On **macOS 13.5** (the firmware this machine runs,
+> [43](43-macos-13.5-firmware.md)) Start_AVC is `CAVE_CMD_AVC_INIT`, id **4**,
+> **`0x10E10`** bytes, and its layout **differs by version**: `AVE_VIDEO_PARAMS`
+> at `+0x60` (width `+0x60`, height `+0x64`, fw `0x5ced0`), `AVE_FW_RC_PARAMS`
+> at `+0xFF30` (bitrate `+0xFF30`, frame rate `+0xFF4C`, `ui32RCFlag` `+0xFF50`
+> with 0 OFF / 1 ON / **2 FIXQP**, QP I/P/B `+0xFFB4/B8/BC`), SPS params at
+> `+0x105B0` (`0x6AC`; profile `+0x105B4` and level `+0x105D0` as **raw
+> `profile_idc`/`level_idc`**, not the enums of §3), PPS at `+0x10C5C` (`0x184`;
+> entropy `+0x10C68`). On 13.5 there is no `header_len == 0` check (§5.2), a
+> bFWCreatesHeader mismatch returns `0xEE0005` rather than -1001 (§5.1), there
+> is no `Check_RCMode` -1002 list (§5.9), and the VUI has no timing fields.
+> Full side-by-side with VAs: [46](46-abi-13.5-commands-session.md) §9.
+
 Firmware VAs are **image virtual addresses** (`__TEXT` vmaddr 0, fileoff
 `0x4000`). String addresses quoted from `strings -t x data/blobs/ave_h13c.bin`
 are **file offsets** and are `VA + 0x4000`.
