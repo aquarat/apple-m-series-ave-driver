@@ -121,9 +121,16 @@
  * data/blobs/macos-13.5/adt.bin, decoded with m1n1's dapf_t8020_config
  * layout (dapf.c:12-20): {u64 start, u64 end, u8 unk1, u8 r0_hi, u8 r0_lo,
  * u8 unk2, u32 r4}, r0 = (r0_hi << 4) | r0_lo. Addresses are AP-physical.
+ *
+ * END ADDRESSES ARE STORED WITH THE LOW TWO BITS CLEAR. E1 (2026-09-13) read
+ * ISP's live DAPF, which m1n1 programmed from the ADT: 0x1f0ffffffff reads
+ * back 0x1f0fffffffc, 0x28e584043 reads 0x28e584040. So the register holds
+ * the inclusive address of the last admitted 4-byte word. Programming the
+ * ADT value verbatim would fail the readback check, so the values here are
+ * already masked.
  */
 static const struct ave_dapf_entry ave_dapf_window = {
-	.start = 0x1f000000000ULL, .end = 0x1f0ffffffffULL,
+	.start = 0x1f000000000ULL, .end = 0x1f0fffffffcULL,
 	.r0 = 0x33, .r4 = 1,
 	.what = "0x1f0 window (dart-ave0[0], dart-ave1[0], dart-isp0[0])",
 };
@@ -144,15 +151,23 @@ static const struct ave_dapf_entry ave_dapf_mmio_adt = {
 
 /*
  * iBoot's TEXT, physical, as the bootstrap addresses it (docs/44 §2.4).
- * Permissions copied from the 0x1f0 window entry - the ADT's only r0 = 0x33
- * entry and the one the firmware executes through for DATA; MMIO entries
- * are 0x31. The meaning of the r0 bits is unknown.
+ *
+ * r0 = 0x11 is copied from ISP's live DAPF (E1, 2026-09-13): slot 0 there is
+ * 0x10000c68000 - 0x100015e7ffc, r0 0x11, r4 1 - exactly ISP's TEXT
+ * carve-out, which is what ISP's locked RVBAR points at. That entry is not in
+ * the restore ADT; iBoot injects it. The meaning of the r0 bits is still
+ * unknown, but 0x11 is what a working ASC on this machine uses for the same
+ * job. (This entry first copied the window's 0x33.)
  */
 static const struct ave_dapf_entry ave_dapf_text = {
 	.start = AVE_IBOOT_TEXT_PHYS,
-	.end = AVE_IBOOT_TEXT_PHYS + AVE_IBOOT_TEXT_SIZE - 1,	/* 0x10000c13fff */
-	.r0 = 0x33, .r4 = 1,
+	.end = AVE_IBOOT_TEXT_PHYS + AVE_IBOOT_TEXT_SIZE - 4,	/* 0x10000c13ffc */
+	.r0 = 0x11, .r4 = 1,
 	.what = "iBoot TEXT, physical",
+};
+
+static const struct ave_dapf_entry ave_dapf_cleared = {
+	.what = "cleared",
 };
 
 static bool dapf_dump;
@@ -170,10 +185,6 @@ module_param(dapf_mmio, charp, 0444);
 MODULE_PARM_DESC(dapf_mmio,
 		 "E3 MMIO entry: ave0 (default; 0x40d050000-0x40dc69000, dart-ave1's entry) | adt (0x506000000-0x507c6c000, as dart-ave0 lists it) | both | none");
 
-static bool dapf_allow_stale;
-module_param(dapf_allow_stale, bool, 0444);
-MODULE_PARM_DESC(dapf_allow_stale,
-		 "E3: program even if DAPF slots beyond the new set are non-zero (default: refuse)");
 
 static int ave_dapf_check_power(struct ave_device *ave)
 {
@@ -323,7 +334,8 @@ static bool ave_dapf_slot_read(struct ave_device *ave, unsigned int i,
 
 static bool ave_dapf_covers(const struct ave_dapf_entry *e, u64 addr)
 {
-	return e->r0 && addr >= e->start && addr <= e->end;
+	/* start > end is uninitialised garbage (E2), not an entry. */
+	return e->r0 && e->start <= e->end && addr >= e->start && addr <= e->end;
 }
 
 static void ave_dapf_dump_entries(struct ave_device *ave, const char *tag)
@@ -412,13 +424,23 @@ int ave_dapf_program(struct ave_device *ave,
 		return -EPERM;
 	}
 
-	/* Exactly m1n1's dapf_init_t8020() order: r4, start, end, then r0. */
+	/*
+	 * Enabling a slot: m1n1's dapf_init_t8020() order, r4, start, end,
+	 * then r0 last. Clearing a slot (r0 == 0): r0 FIRST, so a stale entry
+	 * is disabled before its range is rewritten and never admits a
+	 * half-written range in between.
+	 */
 	for (i = 0; i < n; i++) {
 		void __iomem *b = ave->dapf + DAPF_ENTRY(i);
 
 		dev_info(ave->dev, "dapf: write [%2u] r0 %#06x r4 %#06x  %#013llx - %#013llx  %s\n",
 			 i, ent[i].r0, ent[i].r4, ent[i].start, ent[i].end,
 			 ent[i].what ?: "");
+		if (!ent[i].r0)
+			writel(0, b + DAPF_R0);
+		if (ent[i].end & 3)
+			dev_warn(ave->dev, "dapf: [%2u] end %#llx has low bits set; the register will drop them\n",
+				 i, ent[i].end);
 		writel(ent[i].r4, b + DAPF_R4);
 		writeq(ent[i].start, b + DAPF_START);
 		writeq(ent[i].end, b + DAPF_END);
@@ -522,43 +544,42 @@ int ave_dapf_program_selected(struct ave_device *ave)
 	ave_dapf_dump_dart(ave, "E3 before");
 	ave_dapf_dump_entries(ave, "E3 before");
 
-	/* ADT order first (window, MMIO), firmware range appended. */
+	/*
+	 * Write ALL 16 slots, in a fixed layout that mirrors ISP's live DAPF
+	 * (E1): slot 0 = TEXT, slot 1 = the 0x1f0 window, then MMIO, every
+	 * other slot cleared. E2 (2026-09-13) found AVE's DAPF full of stable
+	 * uninitialised contents that survive power gating - nobody programs
+	 * it after cold reset - so leaving any slot untouched would let
+	 * garbage decide the result. The negative control differs from the
+	 * real run in slot 0 alone, and clearing removes any TEXT entry an
+	 * earlier dapf_set=text load in this boot left behind.
+	 */
+	for (i = 0; i < AVE_DAPF_MAX_ENTRIES; i++)
+		set[i] = ave_dapf_cleared;
+	set[0] = want_text ? ave_dapf_text : ave_dapf_cleared;
+	n = 1;
 	set[n++] = ave_dapf_window;
 	if (mmio_ave0)
 		set[n++] = ave_dapf_mmio_ave0;
 	if (mmio_adt)
 		set[n++] = ave_dapf_mmio_adt;
-	if (want_text)
-		set[n++] = ave_dapf_text;
 
-	/*
-	 * A leftover entry beyond the new set - from an earlier dapf_set=text
-	 * load in this boot, if DAPF state survives gating - would admit TEXT
-	 * behind the negative control's back and turn "must still fault" into
-	 * a false "the writes do nothing".
-	 */
-	for (i = n; i < AVE_DAPF_MAX_ENTRIES; i++) {
+	for (i = 0; i < AVE_DAPF_MAX_ENTRIES; i++) {
 		struct ave_dapf_entry e;
 
-		if (ave_dapf_slot_read(ave, i, &e)) {
-			stale++;
-			dev_warn(ave->dev,
-				 "dapf: slot %u beyond the new set is non-empty: r0 %#x %#llx - %#llx\n",
-				 i, e.r0, e.start, e.end);
-		}
+		if (i >= n || (i == 0 && !want_text))
+			if (ave_dapf_slot_read(ave, i, &e))
+				stale++;
 	}
-	if (stale && !dapf_allow_stale) {
-		dev_err(ave->dev,
-			"dapf: REFUSING - %u stale slot(s) would contaminate the result; reboot, or pass dapf_allow_stale=1 knowingly\n",
-			stale);
-		return -EBUSY;
-	}
+	if (stale)
+		dev_info(ave->dev, "dapf: clearing %u non-empty slot(s) outside the new set\n",
+			 stale);
 
 	dev_info(ave->dev, "dapf: E3 dapf_set=%s dapf_mmio=%s: %u entries%s\n",
 		 dapf_set, dapf_mmio, n,
 		 want_text ? "" : "  (NEGATIVE CONTROL: no TEXT entry - must still fault NO_DAPF_MATCH at TEXT+0x200)");
 
-	ret = ave_dapf_program(ave, set, n);
+	ret = ave_dapf_program(ave, set, AVE_DAPF_MAX_ENTRIES);
 	if (ret)
 		return ret;
 

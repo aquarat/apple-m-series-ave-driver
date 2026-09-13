@@ -1,0 +1,42 @@
+[   75.591757] isp_peek: loading out-of-tree module taints kernel.
+[   75.591763] isp_peek: module verification failed: signature and/or required key missing - tainting kernel
+[   75.592059] isp_peek: ISP bound and active; pinned ISP + 10 power domains + DART 0x00000003860e8000
+[   75.592065] isp_peek: CPU_STATUS  0x0000002d RUNNING IDLE
+[   75.592066] isp_peek: CPU_CONTROL 0x00000010 RUN
+[   75.592069] isp_peek: RVBAR       0x0102010000c68001  lock(bit0)=1  base 0x10000c68000
+[   75.592070] isp_peek: ISP TEXT phys from /reserved-memory (IOVA 0): 0x10000c68000
+[   75.592070] isp_peek: verdict: RVBAR = ISP TEXT PHYSICAL; check below for the admitting DAPF entry
+[   75.592072] isp_peek: DAPF[ 0] r0 0x0011 r4 0x0001  0x10000c68000 - 0x100015e7ffc  DIFF  <- admits RVBAR base
+[   75.592075] isp_peek: DAPF[ 1] r0 0x0033 r4 0x0001  0x1f000000000 - 0x1f0fffffffc  DIFF
+[   75.592078] isp_peek: DAPF[ 2] r0 0x0031 r4 0x0001  0x0028e584000 - 0x0028e584040  DIFF
+[   75.592081] isp_peek: DAPF[ 3] r0 0x0031 r4 0x0001  0x0028e0b8000 - 0x0028e0bfffc  DIFF
+[   75.592083] isp_peek: DAPF[ 4] r0 0x0031 r4 0x0001  0x0039a000000 - 0x0039a000048  DIFF
+[   75.592085] isp_peek: DAPF[ 5] r0 0x0031 r4 0x0001  0x0039b010000 - 0x0039b0130b0  DIFF
+[   75.592087] isp_peek: DAPF[ 6] r0 0x0031 r4 0x0001  0x0039b014000 - 0x0039b0170b0  DIFF
+[   75.592089] isp_peek: DAPF[ 7] r0 0x0031 r4 0x0001  0x0039b018000 - 0x0039b01b0b0  DIFF
+[   75.592092] isp_peek: DAPF[ 8] r0 0x0031 r4 0x0001  0x0028ec3c000 - 0x0028ec3c000  DIFF
+[   75.592094] isp_peek: DAPF[ 9] r0 0x0031 r4 0x0001  0x0029342c000 - 0x00293448000  DIFF
+[   75.592096] isp_peek: DAPF[10] r0 0x0031 r4 0x0001  0x00285460000 - 0x00285460000  DIFF
+[   75.592098] isp_peek: DAPF[11] r0 0x0031 r4 0x0001  0x00200004000 - 0x002000d63f8  DIFF (range is another ADT slot)
+[   75.592101] isp_peek: DAPF[12] r0 0x0031 r4 0x0001  0x00201004000 - 0x002010d63f8  DIFF (range is another ADT slot)
+[   75.592104] isp_peek: DAPF[13] r0 0x0031 r4 0x0001  0x00202004000 - 0x002020d63f8  DIFF (range is another ADT slot)
+[   75.592107] isp_peek: DAPF[14] r0 0x0031 r4 0x0001  0x00203004000 - 0x002030d63f8  DIFF (range is another ADT slot)
+[   75.592109] isp_peek: DAPF[15] r0 0x0031 r4 0x0001  0x0028e3d0000 - 0x0028e3d0bfc  no ADT entry
+[   75.592110] isp_peek: DAPF: 16 non-empty, 0/15 match the 13.5 ADT slot-for-slot
+[   75.592111] isp_peek: DART 0x00000003860e8000 DAPF_LOCK 0x00000000
+[   75.592112] isp_peek: DART TCR[ 0] 0x00000080 TRANSLATE
+[   75.592114] isp_peek: DART TCR[ 1] 0x00000000
+[   75.592115] isp_peek: DART TCR[ 2] 0x00000000
+[   75.592115] isp_peek: DART TCR[ 3] 0x00000000
+[   75.592116] isp_peek: DART TCR[ 4] 0x00000000
+[   75.592117] isp_peek: DART TCR[ 5] 0x00000000
+[   75.592118] isp_peek: DART TCR[ 6] 0x00000000
+[   75.592118] isp_peek: DART TCR[ 7] 0x00000000
+[   75.592119] isp_peek: DART TCR[ 8] 0x00000000
+[   75.592120] isp_peek: DART TCR[ 9] 0x00000000
+[   75.592120] isp_peek: DART TCR[10] 0x00000000
+[   75.592121] isp_peek: DART TCR[11] 0x00000000
+[   75.592122] isp_peek: DART TCR[12] 0x00000000
+[   75.592123] isp_peek: DART TCR[13] 0x00000000
+[   75.592124] isp_peek: DART TCR[14] 0x00000000
+[   75.592124] isp_peek: DART TCR[15] 0x00000000
