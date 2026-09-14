@@ -931,3 +931,13 @@ the start sequence left `CPU_STATUS` at `0x2e`: RUN does not bring a core out
 of the Halt `wfi`. macOS power-cycles VENC between Halt and restart; here only
 `venc_sys` stays on (DARTs suspended, no active child, no always-on), and the
 DAPF entry lives inside it. Details [55](55-halt-command.md) §10.
+
+## 2026-09-14 08:39 — R2: reset restarts the core; restarted firmware dies before message 1
+
+`results/r2-1789371544.kmsg`. After the pulse (DAPF fingerprint unchanged) and
+a restore, the core runs - it rewrote 56 KiB of DATA - but faults once on
+`0x39b200000` (a UART, NO_DAPF_MATCH) 9 ms in, never sends message 1, and ends
+in the post-exception `0x28`. Inferred: an early exception whose report went to
+the UART. Next step is reading that report out of DATA
+([55](55-halt-command.md) §12, `tools/crash_scan.py`, `physdump full=1`).
+Machine lost power afterwards (unrelated); repo and logs intact.

@@ -640,3 +640,49 @@ Consequence: the reset does not take the DAPF with it, so restarting after a
 Halt in the same boot is **not ruled out**. The next discriminator is a full
 start after the pulse: `core_reset=2 fw_restore_data=1`, handshake, Config,
 Halt.
+
+---
+
+## 12. R2 (2026-09-14 08:39): the reset restarts the core, and the restarted firmware dies before message 1
+
+`results/r2-1789371544.kmsg`, commit `feec90e`, same boot as §10-§11. Both
+loads: `core_reset=2 fw_restore_data=1 session_selftest=1
+session_config_only=1 fw_halt=1`.
+
+- **Load 1:** fingerprint `0x335a86dea8522727` before and after the pulse, TEXT
+  fetch admitted; `CPU_STATUS 0x22`; restore wrote DATA (0 bytes had drifted -
+  nothing had run since H2's restore); `ASC start` **returned OK** this time
+  (unlike §10, where RUN did nothing). 9 ms later, **one** DART fault:
+  `status 0x80000800 stream 0 code 0x800` (NO_DAPF_MATCH) **at
+  `0x39b200000`**. No message 1 in 6 s; handshake timeout. Unload: Halt
+  correctly not sent (no Config).
+- **Load 2:** `CPU_STATUS 0x28` before the pulse - the same value the H1 crash
+  left - and the restore found **56 462 bytes drifted**. So load 1's core
+  **executed** and wrote DATA. Pulse, fingerprint unchanged, restore, start:
+  the identical silent failure.
+
+**What `0x39b200000` is:** `serial@39b200000` in the live DT - a UART. The
+same u64 sits statically in the firmware (image file `0xf2e38`) and in pristine
+DATA at `+0x2e38` (VA `0xeee38`), as the second word of a
+`{0xeb6a8, 0x39b200000, 0x1000}` record, and in the ADT. **C** that the
+firmware carries it; **U** which code reads it (no direct `adr`/`adrp` to
+`0xeee38` in TEXT - it is reached through a table).
+
+**Reading (I):** a fresh boot never touches the UART (no such fault in any
+earlier run), and `0x28` is the post-exception state. The likeliest story is
+that the restarted firmware **took an exception early**, and with no host IPC
+up its report path went to the serial console, which the DAPF does not admit.
+The UART access is then a symptom; the cause is whatever differs between a
+cold iBoot start and a reset-and-restore start. Candidates, none tested: state
+outside DATA that iBoot writes once; ASC/CPU state the block reset does not
+clear (`0x22` vs a cold `0x2a`); or DATA beyond `+0x98000`, which the pristine
+blob fills with zeros because the dump it came from stopped there (docs/51 §7).
+
+**The cheap discriminator is the firmware's own report.** It formats crash text
+on a stack inside DATA (H1's `!! Exception !! ... pc ... esr` came from that
+path). `tools/crash_scan.py` diffs a DATA copy against pristine and pulls
+newly-written strings and nearby code pointers, validated by a negative and a
+planted positive control. `test/physdump.ko full=1` now copies through the end
+of DATA (the default 16 MiB window stopped `0x9c000` short - which is also why
+the pristine blob's tail is assumed zero); that range has been read and written
+on hardware by the restore, so it is no longer unexplored memory.
