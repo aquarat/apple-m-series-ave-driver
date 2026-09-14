@@ -200,6 +200,30 @@ MODULE_PARM_DESC(session_lowres_kb,
  * session_entropy=0 leaves the table zero and should reproduce the :8020
  * assert: the negative control for this change, same as session_lowres=0.
  */
+/*
+ * docs/57 cause #1: set Start_AVC NEED_LSB_PLANES and give each DPB slot an
+ * LSB (tile-metadata) plane. Without it the firmware never programs the pipe's
+ * recon writer ("Uncompress Ref is not supported") and the Pipe never finishes
+ * (F5). Layout per slot: LSB at +0, MSB at +AVE_SESS_LSB_SPAN - the firmware
+ * derives both chroma planes from the two luma ones (fw 0x2d14c, 0x2c314).
+ */
+static bool session_lsb;
+module_param(session_lsb, bool, 0444);
+MODULE_PARM_DESC(session_lsb,
+	"set NEED_LSB_PLANES (Start_AVC 0xFD7D) and publish per-slot LSB planes, so the firmware programs the recon writer (docs/57 #1)");
+#define AVE_SESS_LSB_SPAN	0x20000
+
+/*
+ * docs/57 cause #2: macOS calls AVE_DPM_TuneUpPipe before every command, which
+ * ends in SetClockGating(false) = SVE +0x38 <- 0. This driver only ever writes 1
+ * there (stage 7). session_sve_ungate=1 writes 0 just before Process and 1
+ * again once it returns.
+ */
+static bool session_sve_ungate;
+module_param(session_sve_ungate, bool, 0444);
+MODULE_PARM_DESC(session_sve_ungate,
+	"write SVE +0x38 = 0 (clock gating off, as AVE_DPM_TuneUpPipe does) around Process (docs/57 #2)");
+
 static bool session_ignore_dart;
 module_param(session_ignore_dart, bool, 0444);
 MODULE_PARM_DESC(session_ignore_dart,
@@ -898,7 +922,17 @@ static int ave_session_start_avc(struct ave_device *ave,
 		recon[i].addr = bufs->dpb[i].recon;
 		/* used only where the ABI's recon_size != NONE (26.6.2) */
 		recon[i].luma_size = cw * ch;
+		if (session_lsb) {
+			/* LSB plane at the slot base, MSB after it (docs/57). */
+			recon[i].lsb_addr = bufs->dpb[i].recon;
+			recon[i].addr = bufs->dpb[i].recon + AVE_SESS_LSB_SPAN;
+		}
 	}
+	s.need_lsb_planes = session_lsb;
+	if (session_lsb)
+		dev_info(ave->dev,
+			 "session: Start_AVC: NEED_LSB_PLANES=1; slot 0 LSB %pad MSB %#llx (slot %#x bytes)\n",
+			 &bufs->dpb[0].recon, recon[0].addr, bufs->recon_size);
 	coded.addr = coded_iova;
 	coded.size = AVE_SESS_CODED_SIZE;
 	coded_hdr.addr = hdr_iova;
@@ -1414,8 +1448,33 @@ static int ave_session_process(struct ave_device *ave,
 		}
 	}
 
+	if (session_sve_ungate) {
+		ave_write(ave, AVE_BANK_SVE, AVE_SVE_IDLE, 0);
+		dev_info(ave->dev, "session: SVE +0x%x <- 0 (clock gating off) for Process\n",
+			 AVE_SVE_IDLE);
+	}
+
 	ret = ave_session_cmd(ave, abi, AVE_OP_PROCESS_AVC, "Process",
 			      cmd_iova, cmd_len, client_id);
+
+	/*
+	 * Did the firmware program the pipe's recon writer? The only code that
+	 * does (fw 0x54f90, behind NEED_LSB_PLANES) writes 0x800314B1 to
+	 * 0x40D130240 and the recon Y/UV addresses to +0xC/+0x1C/+0xDC.
+	 * Configuration registers the firmware writes; read-only here, and
+	 * deliberately not the interrupt-status registers (docs/57 #4).
+	 */
+	dev_info(ave->dev,
+		 "session: recon writer 0x40D130240 = %#010x (want 0x800314b1 when programmed); +0x24c %#010x +0x25c %#010x +0x31c %#010x\n",
+		 ave_read(ave, AVE_BANK_DPE, 0x30240),
+		 ave_read(ave, AVE_BANK_DPE, 0x3024c),
+		 ave_read(ave, AVE_BANK_DPE, 0x3025c),
+		 ave_read(ave, AVE_BANK_DPE, 0x3031c));
+
+	if (session_sve_ungate) {
+		ave_write(ave, AVE_BANK_SVE, AVE_SVE_IDLE, 1);
+		dev_info(ave->dev, "session: SVE +0x%x <- 1 after Process\n", AVE_SVE_IDLE);
+	}
 	if (ret)
 		return ret;
 

@@ -1391,3 +1391,31 @@ block reset clears the datapath DART's translation and leaves the CPUDART's.
 The driver now copies the CPUDART's SID 0/1 TTBRs and TCRs into DART1 right
 after a pulse (`ave_dart_restore_datapath`, read back), so same-boot restarts
 keep the datapath mapped; the before-Process check still guards it.
+
+---
+
+## 17. Corrections from docs/57 (static, 2026-09-14)
+
+Annotations, not retractions:
+
+- **§11.5 "we do not need a compression flag" is wrong.** Start_AVC byte
+  `0xFD7D` (`NEED_LSB_PLANES`, fw `0x5d08c` -> `this+0x24058`) gates the only code
+  that programs the pipe's recon writer (`0x54f90` -> `0x40D130240 =
+  0x800314B1` plus the recon Y/UV addresses). With it 0 the firmware logs
+  `Uncompress Ref is not supported` and never configures recon output - the
+  leading explanation for F5's Pipe hang.
+- **§13.1 "the recon half is confirmed on hardware" overstates it.** The recon
+  MSB asserts sit behind the same flag and never ran.
+- The recon table entry is `{MSB u64, LSB u64}`; the firmware derives both
+  chroma planes from the two luma ones.
+- Overlay `variant=3/4` power-domains are really `venc_sys, venc_pipe5,
+  venc_me0, venc_pipe4, afnc4_ioa` (checked against the live DT: `0xc5` is
+  `afnc4_ioa`); `venc_dma` is powered only as a parent and `venc_me1` (no
+  phandle) not at all. The DTS comments mislabel `0xc2` and `0xc5`. Left as is
+  for now to keep variables apart; docs/57 ranks it #3.
+
+**Driver (untested):** `session_lsb=1` sets `0xFD7D` and publishes an LSB plane
+per DPB slot (LSB at slot+0, MSB at slot+0x20000); `session_sve_ungate=1`
+writes SVE `+0x38 = 0` around Process as `AVE_DPM_TuneUpPipe` does (docs/57
+#2); after Process the driver reads `0x40D130240` (+`0x24c/0x25c/0x31c`) and
+prints whether the recon writer was programmed.

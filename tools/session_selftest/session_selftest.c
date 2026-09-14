@@ -177,8 +177,8 @@ static void test_abi(enum ave_fw_abi which, const char *name)
 	{
 		struct ave_cmd_ctx c = { .count = 3, .client_id = SESS_CLIENT_ID };
 		struct ave_recon_buf recon[SESS_DPB] = {
-			{ IOVA_RECON,		    SESS_WIDTH * SESS_HEIGHT },
-			{ IOVA_RECON + 0x1000000ull, SESS_WIDTH * SESS_HEIGHT },
+			{ IOVA_RECON,		    SESS_WIDTH * SESS_HEIGHT, 0 },
+			{ IOVA_RECON + 0x1000000ull, SESS_WIDTH * SESS_HEIGHT, 0 },
 		};
 		struct ave_buf coded = { .addr = IOVA_CODED, .size = SESS_CODED_SIZE };
 		struct ave_buf coded_hdr = {

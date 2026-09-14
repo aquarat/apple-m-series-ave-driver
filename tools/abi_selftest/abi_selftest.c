@@ -328,8 +328,8 @@ static void test_config(void)
 /* ------------------------------------------------------------------------ */
 
 static const struct ave_recon_buf RECON[2] = {
-	{ 0x0000000200000000ull, 0x001fe000 },
-	{ 0x0000000200400000ull, 0x001fe000 },
+	{ 0x0000000200000000ull, 0x001fe000, 0 },
+	{ 0x0000000200400000ull, 0x001fe000, 0 },
 };
 static const struct ave_buf CODED[2] = {
 	{ 0x0000000300000000ull, 0x2f8000 },
@@ -448,7 +448,44 @@ static void test_start_13_5(void)
 	E8(buf, 0x10cd8, 1, "PPS bFWCreatesHeader (fw 0x5dd68)");
 	expect_rest_zero(buf, 0x10e10);
 
+	/*
+	 * NEED_LSB_PLANES (docs/57): u8 1 at wire 0xFD7D (fw 0x5d08c ->
+	 * this+0x24058) and each recon entry's second u64 = the LSB plane.
+	 */
+	begin("13.5 start_avc need_lsb_planes");
+	{
+		static struct ave_recon_buf rl[2];
+
+		s = session_1080p(true);
+		rl[0] = RECON[0]; rl[0].lsb_addr = 0x0000000200800000ull;
+		rl[1] = RECON[1]; rl[1].lsb_addr = 0x0000000200c00000ull;
+		s.recon = rl;
+		s.need_lsb_planes = true;
+		memset(buf, 0, sizeof(buf));
+		expect_int(ave_cmd_build_start_avc(a, buf, sizeof(buf), &CTX, &s),
+			   0x10e10, "size unchanged");
+		E8(buf, 0xfd7d, 1, "NEED_LSB_PLANES (fw 0x5d08c)");
+		E64(buf, 0x88, RECON[0].addr, "recon[0] MSB unchanged");
+		E64(buf, 0x90, rl[0].lsb_addr, "recon[0] LSB at entry+8");
+		E64(buf, 0x98, RECON[1].addr, "recon[1] MSB unchanged");
+		E64(buf, 0xa0, rl[1].lsb_addr, "recon[1] LSB at entry+8");
+
+		rl[1].lsb_addr = 0;
+		expect_int(ave_cmd_build_start_avc(a, buf, sizeof(buf), &CTX, &s),
+			   -EINVAL, "an LSB plane missing");
+		rl[1].lsb_addr = 0x0000000200c00040ull;
+		expect_int(ave_cmd_build_start_avc(a, buf, sizeof(buf), &CTX, &s),
+			   -EINVAL, "LSB plane & 127 (fw 0x54f94)");
+		s.need_lsb_planes = false;
+		memset(buf, 0, sizeof(buf));
+		ave_cmd_build_start_avc(a, buf, sizeof(buf), &CTX, &s);
+		E8(buf, 0xfd7d, 0, "flag off: 0xFD7D stays 0");
+		E64(buf, 0x90, 0, "flag off: no LSB written");
+		s.recon = RECON;
+	}
+
 	begin("13.5 start_avc negatives");
+	s = session_1080p(true);
 	expect_int(ave_cmd_build_start_avc(a, buf, 0x10e0f, &CTX, &s), -EINVAL, "len short by 1");
 	s.n_recon = 17;
 	expect_int(ave_cmd_build_start_avc(a, buf, sizeof(buf), &CTX, &s), -EINVAL,

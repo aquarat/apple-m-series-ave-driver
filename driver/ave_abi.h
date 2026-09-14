@@ -972,6 +972,9 @@ struct ave_start_avc_layout {
 	 * firmware never touches that buffer.
 	 */
 	u32	sve_num;		/* u32; AVE_OFF_NONE = not located */
+	/* u8 NEED_LSB_PLANES and the recon entry's LSB-plane u64 (docs/57). */
+	u32	need_lsb_planes;	/* AVE_OFF_NONE = not located */
+	u32	recon_lsb_addr;		/* offset inside a recon entry */
 	/* DPB (recon) table: recon_max entries, recon_stride apart */
 	u32	recon_set;
 	u32	recon_stride;
@@ -1314,6 +1317,8 @@ const struct ave_cmd_abi ave_cmd_abi_13_5 = {
 		.param_sets_addr = 0xfb30,	/* fw ldr x20,[x23,#880] 0x5df28; kext VP+0xFAD0 0xfffffe0008eaee10 */
 		.param_sets_size = 0xfb38,	/* fw ldr w2,[x23,#888] 0x5de44 */
 		.sve_num	= 0x10de8,	/* docs/54; single core = 1 */
+		.need_lsb_planes = 0xfd7d,	/* fw 0x5d08c -> this+0x24058, docs/57 */
+		.recon_lsb_addr	= 0x08,		/* entry {MSB u64, LSB u64}, docs/53 13 */
 		.rc_mode	= 0xff50,	/* ui32RCFlag, ldr w8,[x10,#32] 0x5ceb4 */
 		.rc_mode_fixed_qp = 2,		/* AVE_RC_FIXQP: cmp w10,#0x2 0x41158,
 						 * string 0x4e69c */
