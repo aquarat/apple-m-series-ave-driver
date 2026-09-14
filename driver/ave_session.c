@@ -176,6 +176,30 @@ MODULE_PARM_DESC(session_lowres_kb,
 	"size of each LRME scaled-luma surface in KiB (0 = AVE_CalcBufSizeOfLowResRef formula)");
 
 /*
+ * The entropy-coding working buffers, EncCommParams.encoder_addr_entropy[i][0]
+ * - the last unconditional assert on the per-frame path (docs/54).
+ * SetTranscode requires the first four non-zero and 64-byte aligned, asserting
+ * CAVCController_H13C.cpp:8020 / :8021 at fw 0x59558 / 0x595a0.
+ *
+ * Size per buffer is the kext's AVE_CalcBufSizeOfEntropyCoding AVC arm (kext
+ * 0xfffffe0008ea5bd0): ALIGN_DOWN(64*W + 960, 1024) * K, where K is either 8
+ * or ceil(ceil(H/16)/4). The flag that picks K was not pinned, so we take the
+ * larger - 960 KiB each at 1280x720.
+ *
+ * session_entropy=0 leaves the table zero and should reproduce the :8020
+ * assert: the negative control for this change, same as session_lowres=0.
+ */
+static bool session_entropy = true;
+module_param(session_entropy, bool, 0444);
+MODULE_PARM_DESC(session_entropy,
+	"publish the entropy-coding buffers in Process (default on; 0 should reproduce ASSERT CAVCController_H13C.cpp:8020)");
+
+static unsigned int session_entropy_kb;	/* 0 = the kext formula above */
+module_param(session_entropy_kb, uint, 0444);
+MODULE_PARM_DESC(session_entropy_kb,
+	"size of each entropy-coding buffer in KiB (0 = AVE_CalcBufSizeOfEntropyCoding formula, larger K)");
+
+/*
  * How many DPB slots Start_AVC publishes - one reconstruction surface and one
  * LowResRef surface each.
  *
@@ -383,6 +407,8 @@ struct ave_sess_bufs {
 	u32		low_res_stride;	/* for the log line only */
 	u64		nbr[AVE_SRC_NBR_GROUPS][AVE_SRC_NBR_MAX];
 	u32		n_nbr;
+	u64		entropy[AVE_ENTROPY_MAX];
+	u32		n_entropy;
 
 	/* debugfs: only created once a frame actually came back. */
 	struct dentry		*dbg_dir;
@@ -1017,6 +1043,79 @@ static void ave_session_alloc_nbr(struct ave_device *ave,
 	bufs->n_nbr = AVE_SRC_NBR_MAX;
 }
 
+/* AVE_CalcBufSizeOfEntropyCoding, AVC arm, taking the larger K (see above). */
+static size_t ave_session_entropy_size(u32 cw, u32 ch)
+{
+	size_t row = ALIGN_DOWN((size_t)64 * cw + 960, 1024);
+	u32 k = max_t(u32, 8, DIV_ROUND_UP(DIV_ROUND_UP(ch, 16), 4));
+
+	return row * k;
+}
+
+static void ave_session_alloc_entropy(struct ave_device *ave,
+				      const struct ave_cmd_abi *abi,
+				      struct ave_sess_bufs *bufs)
+{
+	struct ave_sess_arena a = {};
+	u32 cw = ave_mb_align(session_width);
+	u32 ch = ave_mb_align(session_height);
+	u32 n = abi->process_avc.entropy_max;
+	size_t each;
+	u32 i;
+
+	if (!session_frame)
+		return;
+	if (!session_entropy) {
+		dev_warn(ave->dev,
+			 "session: session_entropy=0: the entropy table is left zero, expect ASSERT CAVCController_H13C.cpp:8020\n");
+		return;
+	}
+	if (abi->process_avc.entropy_set == AVE_OFF_NONE || !n) {
+		dev_info(ave->dev,
+			 "session: ABI %s has no located entropy table; not publishing one\n",
+			 abi->name);
+		return;
+	}
+	n = min_t(u32, n, AVE_ENTROPY_MAX);
+
+	each = session_entropy_kb ? (size_t)session_entropy_kb << 10
+				  : ave_session_entropy_size(cw, ch);
+	if (!each || each > SZ_64M) {
+		dev_warn(ave->dev,
+			 "session: entropy buffer size %zu out of range; not publishing\n",
+			 each);
+		return;
+	}
+
+	a.size = ALIGN(each, 128) * n + 128;
+	a.cpu = ave_sess_dma_alloc(bufs, a.size, &a.iova);
+	if (!a.cpu) {
+		dev_warn(ave->dev,
+			 "session: entropy arena (%zu bytes) allocation failed\n",
+			 a.size);
+		return;
+	}
+	memset(a.cpu, 0, a.size);
+
+	for (i = 0; i < n; i++) {
+		dma_addr_t iova;
+
+		/* 128-aligned by the arena, so the :8021 & 63 check holds. */
+		if (!ave_sess_arena_take(&a, each, &iova)) {
+			/* A partial table would fail the builder's check. */
+			bufs->n_entropy = 0;
+			return;
+		}
+		bufs->entropy[i] = iova;
+	}
+	bufs->n_entropy = n;
+	dev_info(ave->dev,
+		 "session: entropy: %u buffers of %zu KiB at %#llx..%#llx%s\n",
+		 n, each >> 10, bufs->entropy[0], bufs->entropy[n - 1],
+		 session_entropy_kb ? " (size overridden by session_entropy_kb)"
+				    : " (kext formula, larger K)");
+}
+
 /*
  * A deterministic, legal, non-uniform NV12 frame: a horizontal luma ramp over
  * the legal 16..235 range that also steps per macroblock row, near-grey chroma
@@ -1250,6 +1349,12 @@ static int ave_session_process(struct ave_device *ave,
 	if (abi->process_avc.low_res_src != AVE_OFF_NONE)
 		f.low_res_src_addr = bufs->dpb[0].low_res;
 
+	/* encoder_addr_entropy[i][0], docs/54; 0 rows = the :8020 control. */
+	if (bufs->n_entropy) {
+		memcpy(f.entropy, bufs->entropy, sizeof(f.entropy));
+		f.n_entropy = bufs->n_entropy;
+	}
+
 	if (bufs->n_nbr && abi->process_avc.src_nbr_max) {
 		memcpy(f.src_nbr, bufs->nbr, sizeof(f.src_nbr));
 		f.n_src_nbr = min(bufs->n_nbr, abi->process_avc.src_nbr_max);
@@ -1411,6 +1516,7 @@ int ave_session_selftest(struct ave_device *ave)
 
 	/* Must precede Start_AVC: these tables are published in that command. */
 	ave_session_alloc_nbr(ave, bufs);
+	ave_session_alloc_entropy(ave, abi, bufs);
 	ave_session_alloc_dpb(ave, bufs);
 
 	ret = ave_session_start_avc(ave, abi, bufs, AVE_SESS_CLIENT_ID);
