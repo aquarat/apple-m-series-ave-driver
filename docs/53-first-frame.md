@@ -1276,3 +1276,40 @@ AVE_MACOS=13.5 python3 tools/disas.py --kext --addr 0xfffffe0008f3a408 -n 0x94
    three lines.
 7. **Everything in §11.7 from item 5 down** (no completion, the length formula,
    the parameter-set assembly) — unchanged.
+
+---
+
+## 14. F3 (2026-09-14 12:20): no assert - the hardware runs, and its DMA fails
+
+`results/f3-1789384805.kmsg`, commit `19d669d`, same-boot restart
+(`core_reset=2 fw_restore_data=1 ... fw_halt=1`), `session_frame=1`, with the
+docs/54 entropy table (4 x 960 KiB) and `sSVEMap.iNum = 1`.
+
+- Config, Open, Start_AVC **ACCEPTED** (`0xee0000`); Process sent (6464 bytes) and
+  **acked** - and for the first time **no assert**. docs/54's static pass was
+  right: nothing left on the path asserted.
+- The firmware **started the encoder hardware**: heartbeat shows `LRMEFS`,
+  `LRMERC`, `Pipe`, `xcode` all `StartCount 1-0-1-0`. Its history log records
+  Config / Open / Start AVC / `AVC` frame 0 type 3 (IDR).
+- It then printed `Uncompress Ref is not supported` once, `AXI Error: 0x0 0x1 0x0
+  0x0` x12 and `AXI Error: 0x3 0x1 0x0 0x0` x7, and from 2 s on
+  `Controller Heart Beat ERROR: LRME HANG` / `PIPE HANG` every second. No
+  completion; Process timed out after 2 s.
+- Linux: IRQ 130 (AIC 1028, shared by both AVE DART nodes) fired ~29 000 times
+  with both `apple_dart_irq` handlers returning IRQ_NONE -> `nobody cared`,
+  **disabled**. apple-dart printed no translation fault.
+- **Halt with a client open works** (docs/55 §6 [U] -> C): scratch 0
+  `0x08042006`, `0x2e`. Load 2 recovered with reset + restore, Config accepted,
+  clean halt.
+
+**Reading (I):** the ASC CPU reaches our buffers through the CPUDART
+(40d040000), the only DART in `iommus`. The encoder's own bus-master DMA does
+not go through that instance. With nothing mapped where it looks, its AXI
+transactions fail, the pipeline hangs, and an instance Linux does not service
+holds the shared DART interrupt. Which instance - the `DART` at 40d030000, the
+`SMMU` at 40d020000, or both - is docs/56's question. Linux's ISP node attaches
+all its DART instances (`iommus = <&dart_isp0 0>, <&dart_isp1 0>, <&dart_isp2
+0>`); overlay `variant=4` does the same for AVE.
+
+IRQ 130 being disabled removes DART fault reporting for the rest of the boot,
+so the next hardware run needs a reboot regardless.
