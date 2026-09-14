@@ -29,6 +29,7 @@ stated) or **[U] unknown**.
 | Does `CPU_STATUS` bit 1 (STOPPED) then read 1? | Almost certainly yes | **I** (§5) |
 | Does anything clear `CPU_CONTROL`? | **No.** The only writes to `+0x400044` in the whole kext are the three inside `AVE_IOP_Start_*` | **C** |
 | Precondition | `AVE_HwC::m_state` (`[HwC+160]`) **== 3** = "IOP started" | **C** |
+| **Firmware-side precondition** (added 2026-09-14, **measured**) | **Config must have been processed with `bCreateMcpu = 1`.** `ProcessPowerDown` calls through `[this+0x7A10]` with no null check (`10d44`/`10d48`), and that object's only creator is `ProcessConfig` (`str x0,[x19,#31248]` `0xe84c`, behind `this[1358]` = `bCreateMcpu`, docs/46). Halt before Config = NULL data abort, not a halt. See §9 | **C** |
 | Must clients be closed first? | macOS queues per-client Stop+Close and drains them first; the firmware does **not** check | **C** / **C** |
 | Restart after Halt | Full `StartUpIOP`: **DATA restore**, scratch 0/1/2, `IOP::Config`, `IOP::Start` (4 writes incl. `CPU_CONTROL = 0`) | **C** |
 | Bytes the firmware actually reads | the **u16 at `+0x00`** and the transport length. Nothing else | **C** |
@@ -229,7 +230,7 @@ halt. **[C]**
 | `10cfc` | `CAVEPipeISRManager::MaskAll` (`0x38218`) on `[this+31256]`, if non-null | mask every pipe interrupt |
 | `10d34` | `AVE_History_Add(hist, readTimeBase(), 0, 0x80, 3430, -1, -1, str)` (`0x22d08`) | trace record |
 | `10d40` | `CAVEPriorityQueue::FlushAll` (`0x189e8`) on `this+0x7A38` | drop queued work |
-| `10d50` | virtual `vptr+184` on `[this+0x7A10]` (the codec controller) | **[U]** which method |
+| `10d50` | virtual `vptr+184` on `[this+0x7A10]` (a controller created only in `ProcessConfig`, `0xe84c`, behind `bCreateMcpu`) | **[U]** which method. **Not null-checked** (unlike `+0x7A18` at `10cf8`): with no Config, `10d48` faults — measured, §9 |
 | `10d58` | `CAVECommonController::ProcessChipReset(true)` (`0x2328c`) | long RMW sequence over the AVE datapath register block (same shape as the Config handler's, [46](46-abi-13.5-commands-session.md) §) |
 | `10d74` | `str wzr, [regbase + 0x1050000]` | one 32-bit zero write into the AVE register block (base from the runtime table at fw `0x21a7b8`, the same base `ProcessChipReset` uses). Host-side meaning **[U]** |
 | `10d90` | `br [[CEnvironment*]+48]` | tail call — see below |
@@ -504,3 +505,58 @@ nothing — see [00](00-methodology.md) Trap 2 and Trap 7.
 provoke a stop is not part of this: macOS never does it
 (§5 item 6), it is already known not to work ([31](31-bringup-state.md) stage
 15), and it is not needed — the Halt path replaces it entirely.
+
+---
+
+## 9. First hardware run (2026-09-14): Halt before Config crashes the firmware
+
+`results/h1-1789369083.kmsg`, commit `73de91d`. Fresh boot, patched m1n1,
+overlay `variant=3`. Load 1 `stop_after=16 fw_map_data=1 fw_map_text=2
+fw_halt=1` — handshake complete, **no Config sent**. `rmmod` sent the Halt.
+
+- The scratch-0 clear stuck (read back 0), the command went out on IO, and the
+  firmware **received and dispatched it** — within 0.6 ms it printed on
+  TERMINAL:
+
+  ```
+  !! Exception !! crash type 4
+  [Call stack] 0x10D48 0xDE40 0xA1CC8 0xA1AB4 0xA19AC 0xB3448
+  pc 0x10D48  psr 0x60000004  far 0x0  esr 0x96000007  lr 0x10D44
+  ```
+
+  `esr 0x96000007` = data abort, same EL, translation fault level 3; `far 0`.
+  `0xDE40` is the `bl 0x10ca8` in the id-14 dispatch arm (after the size check
+  at `0xde08`), and `0x10D44`/`0x10D48` is `ldr x0,[x19,#31248]; ldr x8,[x0]`
+  — a NULL object pointer at `CmdProcessor+0x7A10`.
+- The only instruction in the image that stores a non-zero value there is
+  `0xe84c`, in `ProcessConfig`, gated on `this[1358]` — `bCreateMcpu`, set from
+  Config `+0x41` at `0xe54c` (docs/46 §row `bCreateMcpu`). Everything else is
+  the zeroing at `0xb684` or reads. **C.**
+- Scratch 0 stayed 0 for the full second, so the poll said "no" correctly:
+  **the discriminator works in the failure direction.** Nothing wedged; unload
+  completed and powered off.
+- Load 2 read `CPU_STATUS 0x28` (not STOPPED, not the running `0x2c`: a
+  crashed core), and `fw_restore_data=1` **refused**, as designed. That is the
+  restore gate's first real "no".
+
+The §0 claim "the firmware does **not** check" preconditions is still literally
+true — it checks nothing — but it *depends* on Config having run. macOS never
+reaches this state because `StartUpIOP` always sends Config before the IOP is
+considered up.
+
+**Driver change:** `ave_session_halt()` now refuses unless Config was accepted
+with `create_mcpu` (`ave->mcpu_created`), and `session_config_only=1` stops the
+self-test after Config so Halt can be proven with no client open.
+`tools/halt-run.sh` refuses a load 1 without `session_selftest=1`.
+
+**Next run** (needs a fresh boot — the crashed core is not STOPPED):
+
+```sh
+sudo insmod test/ave-overlay.ko variant=3
+tools/halt-run.sh h2 \
+  "stop_after=16 fw_map_data=1 fw_map_text=2 session_selftest=1 session_config_only=1 fw_halt=1" \
+  "stop_after=16 fw_map_data=1 fw_map_text=2 session_selftest=1 session_config_only=1 fw_halt=1 fw_restore_data=1"
+```
+
+Load 2 halts again, so a success leaves the core STOPPED for further loads in
+the same boot.

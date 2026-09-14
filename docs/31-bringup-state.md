@@ -909,3 +909,14 @@ Start_AVC recon table (wire `0x88`, stride `0x10`) is copied at
 descriptor's `+64`, i.e. which command field (or InfoSet/surface-set entry,
 docs/15-19) carries the low-res surface per recon buffer. The per-frame
 `sLowResOutput` field is not it.
+
+## 2026-09-14 07:58 — Halt reaches the firmware; without Config it crashes instead of halting
+
+`results/h1-1789369083.kmsg`, commit `73de91d`. The firmware received command
+14 and took a NULL data abort at `0x10D48`: `ProcessPowerDown` calls a
+controller at `CmdProcessor+0x7A10` that only `ProcessConfig` creates, and this
+run sent no Config. Scratch 0 stayed 0 (the poll correctly said no), unload was
+clean, and on the second load `fw_restore_data` correctly refused a core that
+was not STOPPED (`CPU_STATUS 0x28`). Full analysis and the corrected procedure
+in [55](55-halt-command.md) §9. Machine healthy; next firmware start needs a
+fresh boot.
