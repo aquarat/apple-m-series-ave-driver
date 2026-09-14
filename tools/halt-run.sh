@@ -76,6 +76,28 @@ save_debugfs() {
     fi
 }
 
+# OVERLAY=N applies test/ave-overlay.ko variant=N inside the captured window,
+# then waits OVERLAY_WAIT seconds (default 30) with heartbeats before load 1.
+# F6 (2026-09-14) reset the machine about 10 s after the overlay was applied by
+# hand and before this script's first marker, so there was no evidence which
+# of the two did it. With the overlay in here, a death in that phase leaves
+# fsync'd markers saying so.
+if [ -n "${OVERLAY:-}" ]; then
+    if lsmod | grep -q '^ave_overlay'; then
+        step "overlay already applied this boot; OVERLAY=$OVERLAY ignored"
+    else
+        step "applying overlay variant=$OVERLAY"
+        sudo insmod test/ave-overlay.ko variant="$OVERLAY"; RCO=$?
+        step "overlay insmod returned rc=$RCO"
+        [ $RCO -eq 0 ] || { echo "$LOG"; exit 1; }
+        W=${OVERLAY_WAIT:-30}
+        for ((t = 0; t < W; t += 5)); do
+            step "overlay applied, t=${t}s of ${W}s before load 1"
+            sleep 5
+        done
+    fi
+fi
+
 step "load 1: insmod $P1"
 # shellcheck disable=SC2086
 sudo insmod driver/apple-ave.ko $P1; RC1=$?
