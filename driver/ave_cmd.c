@@ -295,6 +295,19 @@ int ave_cmd_build_start_avc(const struct ave_cmd_abi *abi, u8 *buf, size_t len,
 	for (i = 0; i < s->n_recon; i++)
 		if (!s->recon[i].addr || (s->recon[i].addr & 127))
 			return -EINVAL;
+	/*
+	 * NEED_LSB_PLANES: the layout must have it, and every recon entry then
+	 * needs a 128-aligned LSB plane - the firmware asserts & 127 on all
+	 * four recon planes (fw 0x55310 / 0x5541c / 0x58068 / 0x54f94).
+	 */
+	if (s->need_lsb_planes) {
+		if (l->need_lsb_planes == AVE_OFF_NONE ||
+		    l->recon_lsb_addr == AVE_OFF_NONE)
+			return -EINVAL;
+		for (i = 0; i < s->n_recon; i++)
+			if (!s->recon[i].lsb_addr || (s->recon[i].lsb_addr & 127))
+				return -EINVAL;
+	}
 	if (s->n_low_res_ref) {
 		/*
 		 * One LowResRef per DPB slot, in slot order, or none at all.
@@ -385,7 +398,11 @@ int ave_cmd_build_start_avc(const struct ave_cmd_abi *abi, u8 *buf, size_t len,
 		/* 26.6.2 uncompressed entry is {base, luma, base, 0}, docs/21 §3.2 */
 		if (l->recon_meta_addr != AVE_OFF_NONE)
 			wr64(&w, e + l->recon_meta_addr, s->recon[i].addr);
+		if (s->need_lsb_planes)
+			wr64(&w, e + l->recon_lsb_addr, s->recon[i].lsb_addr);
 	}
+	if (s->need_lsb_planes)
+		wr8(&w, l->need_lsb_planes, 1);
 	for (i = 0; i < s->n_low_res_ref; i++)
 		wr64(&w, l->low_res_ref_set + i * l->low_res_ref_stride,
 		     s->low_res_ref[i]);

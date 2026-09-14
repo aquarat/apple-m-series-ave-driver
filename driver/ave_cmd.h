@@ -38,6 +38,12 @@ struct ave_config_params {
 struct ave_recon_buf {
 	u64	addr;		/* luma data plane, 128-byte aligned */
 	u32	luma_size;	/* luma data bytes (26.6.2 entry dataSize) */
+	/*
+	 * 13.5 only, with ave_avc_session.need_lsb_planes: the tile-metadata
+	 * ("LSB") plane, the entry's second u64. The firmware derives both
+	 * chroma planes from the two luma ones (docs/57 Q4). 0 = none.
+	 */
+	u64	lsb_addr;
 };
 
 struct ave_buf {
@@ -70,6 +76,14 @@ struct ave_avc_session {
 	 * The firmware's copies into it are NOT bounded by param_sets_size, so
 	 * the buffer must be comfortably larger than any SPS+PPS pair.
 	 */
+	/*
+	 * Start_AVC NEED_LSB_PLANES (13.5 wire 0xFD7D). The only code that
+	 * programs the pipe's recon writer runs when it is set (fw 0x54f90 ->
+	 * 0x40D130240 = 0x800314B1); left 0, the firmware logs "Uncompress Ref
+	 * is not supported" and the Pipe never finishes (F5, docs/57). When
+	 * true every recon[] entry needs an lsb_addr.
+	 */
+	bool	need_lsb_planes;
 	u64	param_sets_addr;
 	u32	param_sets_size;
 

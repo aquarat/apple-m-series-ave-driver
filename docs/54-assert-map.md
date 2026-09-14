@@ -512,3 +512,11 @@ AVE_MACOS=13.5 python3 tools/disas.py --fw --addr 0x460b0 -n 0x20    # kClientBu
 AVE_MACOS=13.5 python3 tools/disas.py --fw --addr 0x5dcc4 -n 0x20    # hAvcDPB
 AVE_MACOS=13.5 python3 tools/disas.py --fw --addr 0x5dea0 -n 0x20    # hRateControl
 ```
+
+---
+
+## Addendum (2026-09-14, docs/57)
+
+Rows #23 and #25 (recon Y/UV MSB asserts) are **not reached** with
+`NEED_LSB_PLANES` = 0: they sit behind Start_AVC `0xFD7D`, which gates recon
+programming. #32 is resolved: Config `+0x40`/`+0x41` select `ConfigureMCPUs`.
