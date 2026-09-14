@@ -952,3 +952,11 @@ symbols show `CPlatformEnvironment` reading SVE scratch 0, finding it is not
 reset at stage 13 had wiped the scratch values stage 11 wrote. The reset now
 runs at stage 7 and stage 13 checks the magic. Full trace
 [55](55-halt-command.md) §13.
+
+## 2026-09-14 11:16 — R4: firmware restarts in the same boot; iteration no longer needs a reboot
+
+`results/r4-1789381015.kmsg`. With the block reset moved to stage 7, two
+consecutive loads - one from the crashed core R3 left, one from a halted core,
+the second with the blob's stale STKG - each reset, restored DATA, completed
+the handshake, had Config accepted, and halted cleanly. No DART faults, no IRQ
+issues. About 7 s per cycle. [55](55-halt-command.md) §14.
