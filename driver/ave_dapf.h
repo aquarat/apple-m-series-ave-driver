@@ -92,4 +92,11 @@ int ave_dapf_program_selected(struct ave_device *ave);
  */
 int ave_dart_datapath_check(struct ave_device *ave, const char *tag);
 
+/*
+ * After a block reset, copy the CPUDART's SID 0/1 TTBRs and TCRs into the
+ * datapath DART, which the pulse clears (F4 vs F5). Reads back every value.
+ * 0 on success or when nothing needed writing; -ENODEV without a second DART.
+ */
+int ave_dart_restore_datapath(struct ave_device *ave);
+
 #endif /* __AVE_DAPF_H__ */

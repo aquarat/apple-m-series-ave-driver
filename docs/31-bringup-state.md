@@ -981,3 +981,11 @@ logged the same address and stormed IRQ 127. Halt and unload were clean, then
 the machine reset within ~2 s (cause unknown). The driver now refuses Process
 unless DART1's translation matches the CPUDART's. Next: F5 on a fresh boot
 without the pulse or an unload. [53](53-first-frame.md) §15.
+
+## 2026-09-14 14:21 — F5: datapath mapped, no faults; LRME completes, Pipe hangs
+
+`results/f5-1789392104.kmsg`. Cold boot, no pulse: DART1 matched the CPUDART,
+Process ran with zero DART/SMMU/AXI faults, the LRME hang disappeared and only
+`PIPE HANG` remains. Together with F4 this shows the stage-7 pulse wipes
+DART1's translation; the driver now restores it after the pulse. Pipe hang
+analysis in progress (docs/57). [53](53-first-frame.md) §16.

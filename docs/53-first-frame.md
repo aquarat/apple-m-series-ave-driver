@@ -1362,3 +1362,32 @@ HOLD=15 tools/e3-run.sh f5 stop_after=16 fw_map_data=1 fw_map_text=2 \
 No `core_reset` (a cold core is already STOPPED), so if DART1 matches at
 "before Process" the pulse was the culprit; if it does not, the attach is.
 `e3-run.sh` does not unload, avoiding F4's post-unload reset; reboot afterwards.
+
+---
+
+## 16. F5 (2026-09-14 14:21): datapath mapped, zero faults, LRME finishes, the Pipe hangs
+
+`results/f5-1789392104.kmsg`, commit `74ba0ff`, fresh boot, overlay `variant=4`,
+**no `core_reset`** (cold core), `dapf_dump=1 smmu_watch=1 session_frame=1`,
+held loaded (`e3-run.sh`, no unload).
+
+- Stage-8 dump: **DART1 (0x40d030000) SIDs 0 and 1 `TCR 0x80 TRANSLATE`, TTBR
+  `0x901c2044 VALID` - identical to the CPUDART**. Before Process:
+  `dart: SID0 CPUDART TCR 0x80 TTBR 0x901c2044 | DART1 TCR 0x80 TTBR 0x901c2044 ->
+  MATCH`; Process sent.
+- **Zero** DART translation faults, **zero** SMMU faults, **zero** AXI errors,
+  no IRQ trouble.
+- Firmware: `Uncompress Ref is not supported`, then from +2 s `Controller Heart
+  Beat ERROR: PIPE HANG: 1, 1`, `ENC: StartCount 1-1-1-0, Idle 1-1-0-1`, per-stage
+  lines only for `Pipe` and `xcode`. Compare F3/F4 (DMA unmapped): `1-0-1-0 /
+  0-1-0-1`, **LRME HANG** and PIPE HANG, lines for LRMEFS, LRMERC, Pipe, xcode.
+  **Mapping the datapath let the LRME stages finish; the Pipe now hangs without
+  any fault.** No Process completion. What the fields encode: docs/57 (in
+  progress).
+
+**The F4 question is answered (C, by the pair):** with the pulse (F4) DART1
+had no TTBR; without it (F5) DART1 matched the CPUDART exactly. The stage-7
+block reset clears the datapath DART's translation and leaves the CPUDART's.
+The driver now copies the CPUDART's SID 0/1 TTBRs and TCRs into DART1 right
+after a pulse (`ave_dart_restore_datapath`, read back), so same-boot restarts
+keep the datapath mapped; the before-Process check still guards it.

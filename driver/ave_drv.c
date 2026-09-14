@@ -815,6 +815,16 @@ static int ave_probe_stages(struct platform_device *pdev)
 			ave_write(ave, AVE_BANK_SVE, AVE_SVE_IDLE, 1);
 			dev_info(dev, "  re-wrote SVE+0x%x after the reset\n",
 				 AVE_SVE_IDLE);
+			/*
+			 * The pulse also clears the datapath DART's
+			 * translation (F4 vs F5, docs/53 16). Without it the
+			 * encoder's DMA faults on every buffer - and the
+			 * before-Process check would refuse to start it. No-op
+			 * when no second DART is attached (overlay < 4).
+			 */
+			ret = ave_dart_restore_datapath(ave);
+			if (ret && ret != -ENODEV)
+				return dev_err_probe(dev, ret, "DART1 restore\n");
 		}
 		ave_stage_ok(dev, AVE_STAGE_WRITE_IDLE);
 	} else {
