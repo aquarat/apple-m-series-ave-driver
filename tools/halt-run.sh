@@ -64,6 +64,18 @@ sleep 1
 
 step() { echo "=== $* ===" | sudo tee -a "$LOG" >/dev/null; sync; }
 
+# The session publishes an encoded frame under debugfs, and remove() tears it
+# down - so copy whatever is there before each unload, or a successful encode
+# would leave nothing behind.
+save_debugfs() {
+    local d=/sys/kernel/debug/apple_ave out=${LOG%.kmsg}-$1
+    if sudo test -d "$d" && [ -n "$(sudo ls -A "$d" 2>/dev/null)" ]; then
+        mkdir -p "$out"
+        for f in $(sudo ls "$d"); do sudo cat "$d/$f" > "$out/$f"; done
+        step "saved debugfs output to $out: $(ls "$out" | tr '\n' ' ')"
+    fi
+}
+
 step "load 1: insmod $P1"
 # shellcheck disable=SC2086
 sudo insmod driver/apple-ave.ko $P1; RC1=$?
@@ -72,6 +84,7 @@ sleep 3
 
 # The Halt happens in here. If the core does not stop, rmmod is where the
 # machine is most likely to wedge, so the marker goes in before the call.
+save_debugfs load1
 step "unload 1 (the Halt is sent from ave_remove)"
 sudo rmmod apple_ave; RCU=$?
 step "unload 1 returned rc=$RCU"
@@ -88,6 +101,7 @@ sudo insmod driver/apple-ave.ko $P2; RC2=$?
 step "load 2 returned rc=$RC2"
 sleep 3
 
+save_debugfs load2
 step "unload 2"
 sudo rmmod apple_ave 2>/dev/null
 step "done: load1=$RC1 unload1=$RCU load2=$RC2"
