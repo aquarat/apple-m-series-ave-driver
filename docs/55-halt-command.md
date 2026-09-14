@@ -751,3 +751,42 @@ first SVE write and before every other write to the block, and re-issues that
 write if it pulsed; it logs scratch 0-2 after the pulse. Stage 13 refuses to
 start the core unless scratch 0 reads `0x08042006`, so this class of failure
 now reports itself in one line instead of a six-second silence.
+
+---
+
+## 14. R4 (2026-09-14 11:16): restart without a reboot works
+
+`results/r4-1789381015.kmsg`, commit `1742cfa`, same boot as §13 (core left
+crashed at `0x28` by R3). Both loads `core_reset=2 fw_restore_data=1
+session_selftest=1 session_config_only=1 fw_halt=1`; load 1 adds
+`fw_restore_stkg=<this boot's cold cookie>`, load 2 uses the blob's.
+
+| | load 1 | load 2 |
+|---|---|---|
+| `CPU_STATUS` before pulse | `0x28` (crashed, R3) | `0x2e` (halted, unload 1) |
+| scratch after pulse | `0 0 0` | `0 0 0` |
+| DAPF fingerprint | unchanged, TEXT admitted | unchanged, TEXT admitted |
+| stage-11 scratch writes (now after the pulse) | `0x8042006 0 0xe` | same |
+| DATA restore | 56 462 drifted (R3's crash), verified | 301 013 drifted (a full run), verified |
+| STKG restored | cold value | **blob value** |
+| handshake | **complete, "encoder ready"** | **complete, "encoder ready"** |
+| Config | ACCEPTED `0xee0000` | ACCEPTED `0xee0000` |
+| Halt on unload | `0x08042006`, `0x2e` STOPPED | same |
+
+No DART faults, no IRQ trouble, no leaked buffers.
+
+**Confirmed (C):**
+
+- The block reset clears the SVE scratch registers (logged `0 0 0` each time).
+- With the reset ahead of the stage-11 writes, a reset-and-restore start boots
+  exactly like a cold one - from a halted core **and** from a crashed one.
+- **The stale STKG from the blob is fine** (load 2). docs/51 §2.3's argument
+  holds; no per-boot dump is needed for normal use.
+- The whole cycle - reset, restore, handshake, Config, Halt - takes about
+  **7 seconds** and can repeat within one boot. **An iteration no longer costs a
+  reboot**, and a firmware that asserts can be recovered by the next load's
+  reset rather than by rebooting.
+
+Standard parameters for a same-boot load from now on:
+`core_reset=2 fw_restore_data=1 ... fw_halt=1` (and `session_selftest=1`, since
+Halt needs Config).
