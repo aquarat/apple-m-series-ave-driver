@@ -391,6 +391,23 @@ module_param(fw_restore_data, int, 0444);
 MODULE_PARM_DESC(fw_restore_data,
 		 "0 = off (default) | 1 = restore pristine DATA over phys 0x10001a90000 before the core starts (mirrors macOS) | 2 = dry run, compare and report but write nothing");
 
+/*
+ * Override the STKG stack-guard word (DATA+0x3a38) in the restored image.
+ *
+ * The pristine blob carries the cookie of the boot its dump came from, and
+ * docs/51 2.3 argued that installing a stale cookie is self-consistent. R2
+ * (docs/55 12) then showed a reset-and-restore start dying early, and a cold
+ * full dump of the next boot (r3) differed from the blob ONLY inside this
+ * word. Passing that boot's cold value here makes the restore write exactly
+ * the cold DATA, so the next restart either works (the cookie was the cause)
+ * or rules it out for good. 0 = use the blob's value. Applied to the in-memory
+ * copy after the sha256 gate, so the read-back verifies what was written.
+ */
+static ulong fw_restore_stkg;
+module_param(fw_restore_stkg, ulong, 0444);
+MODULE_PARM_DESC(fw_restore_stkg,
+		 "write this 64-bit value over the STKG word at DATA+0x3a38 in the restored image (0 = the blob's own)");
+
 static char *fw_restore_path = AVE_FW_PRISTINE_NAME;
 module_param(fw_restore_path, charp, 0444);
 MODULE_PARM_DESC(fw_restore_path,
@@ -761,6 +778,13 @@ static int ave_fw_load_pristine(struct ave_device *ave)
 		goto out;
 	}
 	memcpy(buf, fw->data, AVE_IBOOT_DATA_SIZE);
+	if (fw_restore_stkg) {
+		dev_info(ave->dev,
+			 "fw_restore_data: STKG override %#lx replaces the blob's %#llx (fw_restore_stkg)\n",
+			 fw_restore_stkg,
+			 get_unaligned_le64(buf + AVE_DATA_STKG_OFF));
+		put_unaligned_le64(fw_restore_stkg, buf + AVE_DATA_STKG_OFF);
+	}
 	ave->iboot_data_pristine = buf;
 	dev_info(ave->dev,
 		 "fw_restore_data: pristine DATA from %s, %#llx bytes, sha256 %*phN OK\n",

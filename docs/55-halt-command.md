@@ -686,3 +686,68 @@ planted positive control. `test/physdump.ko full=1` now copies through the end
 of DATA (the default 16 MiB window stopped `0x9c000` short - which is also why
 the pristine blob's tail is assumed zero); that range has been read and written
 on hardware by the restore, so it is no longer unexplored memory.
+
+---
+
+## 13. R3 (2026-09-14 11:04): root cause - the reset wiped scratch 0, and the firmware booted into its UART console
+
+`results/r3-1789380356.kmsg`, commit `b771580`. Fresh boot.
+
+**Step 1 - cold full dump before any start** (`physdump full=1`,
+`data/blobs/r3-cold-full.bin`, gitignored). Cold DATA vs the pristine blob:
+**7 bytes differ, all inside the STKG word at +0x3a38**; the tail
+`+0x98000..0x134000` is **all zero**. So the blob is correct and the zero tail
+was never a problem. **C.**
+
+**Step 2 - restart with this boot's exact cold DATA.** Load 1 cold start,
+Config, Halt (`0x08042006`, `0x2e`). Load 2 `core_reset=2 fw_restore_data=1
+fw_restore_stkg=0x6e14c23b2faec5` - the blob with the cold cookie, verified
+offline to be byte-identical to this boot's cold DATA. Result identical to R2:
+UART DAPF miss at +16 ms, no message 1. **STKG ruled out; all of DATA ruled
+out. C.**
+
+**Step 3 - post-failure dump** (`r3-after-restart-full.bin`) through
+`tools/crash_scan.py` against the cold DATA:
+
+- TEXT unchanged (0 words). DATA: **56 462 bytes, 82 pages - the same count as
+  R2**: the failure is deterministic.
+- New strings: RTKit pools, `System Thread`, `Terminator`, `MMUManager`,
+  `ISRManager`, `IPIManager`, `GPTimer0`, the RTKit banner. No crash text (the
+  report goes straight to the UART, which faults).
+- The boot stack, symbolised with `data/blobs/macos-13.5/derived/symbols.txt`:
+  `__rtk_arm_start_bootstrap_area` -> `_main` -> `CPlatformEnvironment::Create`
+  -> `CPlatformEnvironment::CPlatformEnvironment+0x228` (`0xa6074`) -> the device
+  dispatch at `0xaff50` -> `__rtk_arch_vectors` -> `__rtk_arch_exception` ->
+  `_crashlog_get_exception_type` / `_crashlog_create_callstack_section` ->
+  `_RTK_abort`.
+
+**The mechanism (C, every step a VA):**
+
+1. `CPlatformEnvironment` ctor reads SVE scratch 0 through
+   `CPlatformGPIOManager` (`0xa5f80`-`0xa5f90`, vtable `+40` = Read, index 0) and
+   compares it with `w22 = 0x08042006` (`0xa5e78`/`0xa5e84`):
+   `strb (scratch0 != 0x08042006), [this, #420]` at `0xa5fa0`.
+2. At `0xa6050`, if `[this+420]` is set it opens `[0xeeec0]` =
+   `_RTK_dev_samsunguart_0` (`0xeee30`: `{_RTK_dev_samsunguart_dispatch,
+   0x39b200000, 0x1000}`) - the UART debug console.
+3. `0x39b200000` is not admitted by the AVE DAPF -> the DART fault we saw ->
+   exception -> crashlog -> `_RTK_abort` -> more console output -> dead.
+
+The per-CPU RTKit boot word (`VA 0x14c358`: `0xfeed1b00` cold, `0xcafe4b0b`
+warm, `0xbaadf1ac` -> `__rtk_unexpected_reset`) was restored to the cold value,
+so that path was not involved.
+
+**Why scratch 0 was wrong:** the driver writes `0x08042006 / 0 / 0xe` to scratch
+0/1/2 at stage 11, and `core_reset` pulsed at the head of stage 13. The r3 load
+2 stage-15 dump reads **all scratch registers 0** afterwards. The block reset
+clears the SVE registers, erasing the stage-11 writes. **C** (the writes are
+logged, the zeros are logged, nothing else touches them in between).
+
+So none of this was about the core, DATA or the firmware's reset detection -
+it was the driver's own stage order.
+
+**Fix (driver):** `ave_core_reset()` now runs inside stage 7, right after Apple's
+first SVE write and before every other write to the block, and re-issues that
+write if it pulsed; it logs scratch 0-2 after the pulse. Stage 13 refuses to
+start the core unless scratch 0 reads `0x08042006`, so this class of failure
+now reports itself in one line instead of a six-second silence.
