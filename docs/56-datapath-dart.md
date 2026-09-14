@@ -366,3 +366,13 @@ ave0: video-encoder@40d100000 {
   exists **[U]**.
 - Bit meanings of the SMMU `+0x40` status and of the firmware AXI registers **[U]**.
 - The two flags behind `Uncompress Ref is not supported` **[U]**.
+
+---
+
+## Addendum (2026-09-14, F4 on hardware)
+
+Q1's "which instance" is now **C**: with both DARTs attached, the encoder's DMA
+faulted on **0x40d030000 stream 0** at the input buffer's IOVA
+(`results/f4-1789387926.kmsg`). Q3 is **C** too: the SMMU raised the shared
+line, with the faulting IOVA at SMMU `+0x50`. The open problem is that DART1's
+stream-0 TTBR was not valid at the time - see [53](53-first-frame.md) §15.

@@ -285,24 +285,55 @@ static int ave_dapf_map(struct ave_device *ave)
 	ave->dapf_phys = rf->start;
 	dev_info(ave->dev, "dapf: mapped CPUDART %pa and DAPF %pa (not requested)\n",
 		 &ave->cpudart_phys, &ave->dapf_phys);
+
+	/*
+	 * The datapath DART (0x40d030000), if the overlay attaches it
+	 * (variant=4). F4 showed the encoder's DMA translating through it -
+	 * and faulting there with NO_TTBR while the CPUDART was fine - so it
+	 * is read alongside the CPUDART from now on. Found through the
+	 * iommus phandles, never by address alone.
+	 */
+	ave->dart1 = NULL;
+	for (int i = 1; ; i++) {
+		struct of_phandle_args args;
+
+		if (of_parse_phandle_with_args(ave->dev->of_node, "iommus",
+					       "#iommu-cells", i, &args))
+			break;
+		ret = of_address_to_resource(args.np, 0, &ri);
+		of_node_put(args.np);
+		if (!ret && ri.start == AVE_DART1_PHYS) {
+			ave->dart1 = devm_ioremap(ave->dev, ri.start, DART_MAP_SIZE);
+			if (ave->dart1)
+				dev_info(ave->dev, "dapf: mapped datapath DART %#llx (not requested)\n",
+					 AVE_DART1_PHYS);
+			break;
+		}
+	}
 	return 0;
 }
 
-static void ave_dapf_dump_tcr(struct ave_device *ave, unsigned int sid)
+static void ave_dart_dump_tcr(struct ave_device *ave, void __iomem *base,
+			      const char *name, unsigned int sid)
 {
-	u32 tcr = readl(ave->cpudart + DART_TCR(sid));
+	u32 tcr = readl(base + DART_TCR(sid));
 	unsigned int i;
 
-	dev_info(ave->dev, "dapf:   TCR[%2u]  = %#010x%s%s%s\n", sid, tcr,
+	dev_info(ave->dev, "dapf:   %s TCR[%2u]  = %#010x%s%s%s\n", name, sid, tcr,
 		 tcr & DART_TCR_TRANSLATE ? " TRANSLATE" : "",
 		 tcr & DART_TCR_BYPASS_DART ? " BYPASS_DART" : "",
 		 tcr & DART_TCR_BYPASS_DAPF ? " BYPASS_DAPF" : "");
 	for (i = 0; i < 4; i++) {
-		u32 t = readl(ave->cpudart + DART_TTBR(sid, i));
+		u32 t = readl(base + DART_TTBR(sid, i));
 
-		dev_info(ave->dev, "dapf:   TTBR[%2u][%u] = %#010x%s\n", sid, i, t,
-			 t & DART_TTBR_VALID ? " VALID" : "");
+		dev_info(ave->dev, "dapf:   %s TTBR[%2u][%u] = %#010x%s\n", name,
+			 sid, i, t, t & DART_TTBR_VALID ? " VALID" : "");
 	}
+}
+
+static void ave_dapf_dump_tcr(struct ave_device *ave, unsigned int sid)
+{
+	ave_dart_dump_tcr(ave, ave->cpudart, "CPUDART", sid);
 }
 
 static void ave_dapf_dump_dart(struct ave_device *ave, const char *tag)
@@ -343,6 +374,58 @@ static void ave_dapf_dump_dart(struct ave_device *ave, const char *tag)
 	ave_dapf_dump_tcr(ave, 0);
 	ave_dapf_dump_tcr(ave, 1);
 	ave_dapf_dump_tcr(ave, 15);
+	if (ave->dart1) {
+		u32 e1 = readl(ave->dart1 + DART_ERROR);
+
+		dev_info(ave->dev, "dapf: [%s] datapath DART %#llx: ERROR %#010x ENABLED_STREAMS %#010x REMAP[0] %#010x\n",
+			 tag, AVE_DART1_PHYS, e1,
+			 readl(ave->dart1 + DART_ENABLED_STREAMS),
+			 readl(ave->dart1 + DART_REMAP(0)));
+		ave_dart_dump_tcr(ave, ave->dart1, "DART1", 0);
+		ave_dart_dump_tcr(ave, ave->dart1, "DART1", 1);
+	}
+}
+
+/*
+ * Does the datapath DART translate with the same tables as the CPUDART?
+ *
+ * macOS programs every dart-ave0 instance with one translation (docs/56), and
+ * apple-dart does the same for every DART in iommus - the CPUDART's SIDs 0 and
+ * 1 both read TTBR 0x901c0584 in F4. The encoder's DMA goes through
+ * 0x40d030000 (F4: NO_TTBR faults there at the input frame's IOVA), so if its
+ * stream-0 translation does not match the CPUDART's, starting the hardware
+ * only buys an SMMU fault storm - and F4 ended in a machine reset shortly
+ * after. Returns 0 when they match (or when there is no second DART to
+ * compare), -EIO when they do not. Reads only.
+ */
+int ave_dart_datapath_check(struct ave_device *ave, const char *tag)
+{
+	u32 c_tcr, c_ttbr, d_tcr, d_ttbr;
+	int ret;
+
+	ret = ave_dapf_check_power(ave);
+	if (ret)
+		return ret;
+	ret = ave_dapf_map(ave);
+	if (ret)
+		return ret;
+	if (!ave->dart1) {
+		dev_warn(ave->dev, "dart: [%s] no datapath DART in iommus (overlay variant=4?); cannot check\n",
+			 tag);
+		return -ENODEV;
+	}
+
+	c_tcr = readl(ave->cpudart + DART_TCR(0));
+	c_ttbr = readl(ave->cpudart + DART_TTBR(0, 0));
+	d_tcr = readl(ave->dart1 + DART_TCR(0));
+	d_ttbr = readl(ave->dart1 + DART_TTBR(0, 0));
+	dev_info(ave->dev, "dart: [%s] SID0 CPUDART TCR %#x TTBR %#010x | DART1 TCR %#x TTBR %#010x -> %s\n",
+		 tag, c_tcr, c_ttbr, d_tcr, d_ttbr,
+		 (d_ttbr == c_ttbr && d_tcr == c_tcr && (d_ttbr & DART_TTBR_VALID))
+		 ? "MATCH" : "MISMATCH");
+	if (d_ttbr != c_ttbr || d_tcr != c_tcr || !(d_ttbr & DART_TTBR_VALID))
+		return -EIO;
+	return 0;
 }
 
 static bool ave_dapf_slot_read(struct ave_device *ave, unsigned int i,

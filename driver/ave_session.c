@@ -49,6 +49,7 @@
 #include "ave.h"
 #include "ave_abi_boot.h"	/* AVE_CH_IO, ave_ipc_alloc/free */
 #include "ave_cmd.h"
+#include "ave_dapf.h"
 #include "ave_session.h"
 
 /* ------------------------------------------------------------------------ */
@@ -199,6 +200,11 @@ MODULE_PARM_DESC(session_lowres_kb,
  * session_entropy=0 leaves the table zero and should reproduce the :8020
  * assert: the negative control for this change, same as session_lowres=0.
  */
+static bool session_ignore_dart;
+module_param(session_ignore_dart, bool, 0444);
+MODULE_PARM_DESC(session_ignore_dart,
+	"send Process even when the datapath DART's TTBR does not match the CPUDART's (F4 ended in a machine reset)");
+
 static bool session_entropy = true;
 module_param(session_entropy, bool, 0444);
 MODULE_PARM_DESC(session_entropy,
@@ -1391,6 +1397,22 @@ static int ave_session_process(struct ave_device *ave,
 	dev_info(ave->dev,
 		 "session: Process: LowResSrcLumaScaled %#llx at PICMGMT+%#x - INERT, setRefPointers overwrites it from DPB slot 0 (fw 0x2c320); LowResResults left zero\n",
 		 f.low_res_src_addr, abi->process_avc.low_res_src);
+
+	/*
+	 * Process starts the encoder hardware, whose DMA translates through the
+	 * datapath DART (F4). If that DART's tables do not match the CPUDART's,
+	 * the run can only end in an SMMU fault storm - F4's did, and the
+	 * machine reset shortly after. Check first, refuse on a mismatch.
+	 */
+	if (!session_ignore_dart) {
+		ret = ave_dart_datapath_check(ave, "before Process");
+		if (ret) {
+			dev_err(ave->dev,
+				"session: Process: NOT SENT - the datapath DART does not translate like the CPUDART (%d); session_ignore_dart=1 overrides\n",
+				ret);
+			return ret;
+		}
+	}
 
 	ret = ave_session_cmd(ave, abi, AVE_OP_PROCESS_AVC, "Process",
 			      cmd_iova, cmd_len, client_id);

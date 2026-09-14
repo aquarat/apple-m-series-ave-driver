@@ -1313,3 +1313,52 @@ all its DART instances (`iommus = <&dart_isp0 0>, <&dart_isp1 0>, <&dart_isp2
 
 IRQ 130 being disabled removes DART fault reporting for the rest of the boot,
 so the next hardware run needs a reboot regardless.
+
+---
+
+## 15. F4 (2026-09-14 13:12): the datapath translates through DART1 - which had no TTBR - and the machine reset after unload
+
+`results/f4-1789387926.kmsg`, commit `0b45961`, fresh boot, overlay
+`variant=4` (both DARTs, SIDs 0 and 1), `core_reset=2 ... smmu_watch=1
+session_frame=1`.
+
+- Everything up to Process as in F3; no assert; hardware started.
+- **`apple-dart 40d030000.iommu: translation fault: status 0x80000001 stream 0
+  code 0x1 (NO TTBR FOR IOVA) at 0xfe000000`**, then `0xfe03c000`, `0xfe054000`,
+  `0xfe070000`, ... - stepping through the **input luma buffer** (IOVA
+  `0xfe000000`, `0xe1000` bytes). **C: the encoder's DMA goes through the
+  `DART` instance 0x40d030000, stream 0**, as docs/56 inferred.
+- On that DART stream 0 had **no valid TTBR**, although the device is attached
+  to it. At the same time the CPUDART read `TCR[0] = TCR[1] = 0x80 TRANSLATE,
+  TTBR[0][0] = TTBR[1][0] = 0x901c0584 VALID`, before and after the stage-7
+  pulse - so apple-dart programs every SID in `iommus`, and DART1 should have
+  held the same TTBR.
+- AXI errors `0x3 0x1 0x0 0x0` x18. SMMU watch: baseline `+0x40 = 0x09000000`;
+  on fault `+0x40 = 0x80000040`, `+0x48 = 0x300`, **`+0x50 = 0xfe000000`**
+  (the same IOVA), `+0x58 = 0x180`, `+0x60 = 8`; **100 059** fault interrupts,
+  IRQ 127 disabled. **C** that the SMMU raises the shared line and records the
+  faulting address at `+0x50`.
+- Halt worked (`0x08042006`, `0x2e`), unload completed, **then the machine reset
+  within ~2 s**, before load 2's first marker. Nothing was running; cause
+  **U**. Candidates: the teardown touching a datapath DART / SMMU still in
+  error (runtime suspend of the newly linked DART1 reads its registers), or a
+  leaf domain gating under a hung bus master.
+
+**Open question that decides the next step:** why DART1's TTBR is invalid.
+Either the stage-7 block reset wipes DART1 (only the CPUDART was ever checked
+across it - R1, R4), or apple-dart never programmed it. The driver now dumps
+DART1's TCR/TTBR next to the CPUDART's and **refuses to send Process unless
+DART1's SID-0 TCR/TTBR match the CPUDART's** (`session_ignore_dart=1`
+overrides), so a known-bad run stops before it starts the hardware.
+
+**Next run (F5), fresh boot, no pulse, no unload:**
+
+```sh
+sudo insmod test/ave-overlay.ko variant=4
+HOLD=15 tools/e3-run.sh f5 stop_after=16 fw_map_data=1 fw_map_text=2 \
+    dapf_dump=1 smmu_watch=1 session_selftest=1 session_frame=1
+```
+
+No `core_reset` (a cold core is already STOPPED), so if DART1 matches at
+"before Process" the pulse was the culprit; if it does not, the attach is.
+`e3-run.sh` does not unload, avoiding F4's post-unload reset; reboot afterwards.
