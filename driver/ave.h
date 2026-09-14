@@ -172,6 +172,15 @@ struct ave_device {
 	void			*session_bufs;
 
 	bool			running;
+	/*
+	 * Config was accepted with bCreateMcpu = 1, so the controller object at
+	 * CmdProcessor+0x7A10 exists (created behind that flag, hence
+	 * presumably the McpuController - the name is inferred). Halt calls it
+	 * with no null check (fw 0x10d44), and its only creator is
+	 * ProcessConfig (fw 0xe84c) - so Halt before Config crashes the
+	 * firmware. Measured 2026-09-14, results/h1-1789369083.kmsg.
+	 */
+	bool			mcpu_created;
 };
 
 /*

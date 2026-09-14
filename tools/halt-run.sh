@@ -34,14 +34,20 @@ case " $P1 " in
     *" fw_halt=1 "*) ;;
     *) echo "REFUSING: load 1 has no fw_halt=1, so no Halt would be sent" >&2; exit 1 ;;
 esac
-# Halt with a client still open is [U] in docs/55 6, and a firmware spinning in
-# _bsp_assert_fail never dispatches it at all - so the first run of this
-# experiment should carry no session. Warn rather than refuse: once the halt
-# itself is proven, halting after an encode is exactly what we want to test.
+# Halt calls through the McpuController, which only Config creates (fw 0x10d44,
+# 0xe84c); without it the firmware takes a NULL data abort instead of halting
+# (h1, 2026-09-14). The driver now refuses to send it, so a load 1 without
+# Config would only waste the boot.
 case " $P1 " in
-    *" session_selftest=1 "*)
-        echo "WARNING: load 1 opens a client; halting with one open is untested" >&2
-        echo "         (docs/55 6). Prove the halt with session_selftest=0 first." >&2 ;;
+    *" session_selftest=1 "*) ;;
+    *) echo "REFUSING: load 1 sends no Config (session_selftest=1), so Halt would be refused" >&2; exit 1 ;;
+esac
+# Halt with a client still open is [U] in docs/55 6. Warn rather than refuse:
+# once the halt itself is proven, halting after an encode is what we want.
+case " $P1 " in
+    *" session_config_only=1 "*) ;;
+    *) echo "WARNING: load 1 opens a client; halting with one open is untested" >&2
+       echo "         (docs/55 6). Prove the halt with session_config_only=1 first." >&2 ;;
 esac
 
 LOG=results/$NAME-$(date +%s).kmsg

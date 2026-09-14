@@ -61,6 +61,16 @@ MODULE_PARM_DESC(session_selftest,
 	"send the opening Config/Open/Start_AVC command sequence after boot and log each reply (default off)");
 
 /*
+ * Stop the self-test after Config. Halt needs a controller object that only
+ * Config creates (fw 0x10d44 / 0xe84c), but halting with a client open is
+ * untested (docs/55 6) - so this is the configuration to prove Halt in.
+ */
+static bool session_config_only;
+module_param(session_config_only, bool, 0444);
+MODULE_PARM_DESC(session_config_only,
+	"with session_selftest=1: send Config only, open no client (the state to prove fw_halt in)");
+
+/*
  * Config +0x48 on 13.5 is AVE_Reg::GetDARTAddr(reg type 3), used later by
  * ProcessInitStage2. We have no way to compute it here; the operator can
  * supply it if known. 0 is sent otherwise (and logged loudly).
@@ -655,8 +665,11 @@ static int ave_session_config(struct ave_device *ave,
 		 &shmem_iova, (u32)AVE_SESS_SHMEM_SIZE, session_dsid,
 		 session_reg_dart);
 
-	return ave_session_cmd(ave, abi, AVE_OP_CONFIG, "Config",
-			       cmd_iova, cmd_len, 0);
+	ret = ave_session_cmd(ave, abi, AVE_OP_CONFIG, "Config",
+			      cmd_iova, cmd_len, 0);
+	if (!ret && p.create_mcpu)
+		ave->mcpu_created = true;
+	return ret;
 }
 
 static int ave_session_open(struct ave_device *ave,
@@ -1507,7 +1520,7 @@ int ave_session_selftest(struct ave_device *ave)
 	smp_store_release(&ave->ipc_rx, ave_session_ipc_rx);
 
 	ret = ave_session_config(ave, abi, bufs);
-	if (ret)
+	if (ret || session_config_only)
 		goto out;
 
 	ret = ave_session_open(ave, abi, bufs, AVE_SESS_CLIENT_ID);
@@ -1641,6 +1654,21 @@ int ave_session_halt(struct ave_device *ave)
 	 * (docs/55 §2.1): Halt is only defined for a firmware that is up.
 	 * (Review 2026-09-13, finding 1.)
 	 */
+	/*
+	 * Halt calls through the controller at CmdProcessor+0x7A10 - created
+	 * behind bCreateMcpu, so presumably the McpuController - with no null
+	 * check (fw 0x10ca8:
+	 * ldr x0,[x19,#31248] at 0x10d44, then a vtable call), and only
+	 * ProcessConfig creates it (fw 0xe84c, gated on bCreateMcpu). Sending
+	 * Halt before Config makes the firmware take a NULL data abort instead
+	 * of halting - measured 2026-09-14 (results/h1-1789369083.kmsg: esr
+	 * 0x96000007, far 0, pc 0x10d48, caller 0xde40). macOS never meets
+	 * this because StartUp always sends Config first.
+	 */
+	if (!ave->mcpu_created) {
+		dev_warn(dev, "halt: Config has not run, and Halt calls a controller only Config creates, with no null check (fw 0x10d44); not sending - load with session_selftest=1\n");
+		return -ENOTCONN;
+	}
 	if (!ave->powered || !ave->running ||
 	    !ave->bank[AVE_BANK_SVE].base || !ave->bank[AVE_BANK_ASC].base) {
 		dev_info(dev, "halt: firmware is not up (powered %d, running %d); nothing to halt\n",
