@@ -560,3 +560,53 @@ tools/halt-run.sh h2 \
 
 Load 2 halts again, so a success leaves the core STOPPED for further loads in
 the same boot.
+
+---
+
+## 10. Second hardware run (2026-09-14 08:10): Halt works; restart does not
+
+`results/h2-1789369852.kmsg`, commit `ad89724`. Fresh boot, overlay
+`variant=3`, both loads `session_selftest=1 session_config_only=1 fw_halt=1`,
+load 2 adds `fw_restore_data=1`.
+
+**Load 1 / unload 1 — the Halt, confirmed on hardware:**
+
+```
+session: Config: ACCEPTED, status 0xee0000
+halt: sending command 14, 64 bytes ... on IO (no reply is expected)
+halt: scratch 0 = 0x08042006, the firmware reached its wfi        (+0.5 ms)
+halt: CPU_STATUS 0x0000002e STOPPED after 3 sample(s)
+```
+
+§5's inference is now **C**: after Halt `CPU_STATUS` bit 1 (STOPPED) reads 1.
+No DART fault storm and no IRQ trouble on unload.
+
+**Load 2 — the first real DATA restore, then a start that does not take:**
+
+- The restore gates all passed (`CPU_STATUS 0x2e`, blob sha256, TEXT match,
+  range foreign); **301006 bytes in 167 pages had drifted**, first at
+  DATA+`0x2950`; `0x134000` bytes written, **read-back verified**, 0 bytes
+  differ. docs/51 §7's "whether Linux can write this DRAM at all" is answered:
+  **yes. C.**
+- `ave_asc_start()` then wrote the four `AVE_IOP_Start_Nyx` values and
+  `CPU_STATUS` stayed `0x2e` for 100 ms (`ASC did not become idle`). On a fresh
+  boot the same writes take `0x2a` to `0x2c`.
+
+**Reading:** the core is sitting in `ProcessPowerDown`'s `wfi` loop, and
+`CPU_CONTROL 0 -> RUN` does not reset it. macOS never asks it to: between the
+Halt and `StartUpIOP` it runs `AVE_DPM_PowerOff` (§6), and that power cycle
+is what puts the core back at its reset vector. **I** (consistent with every
+observation; no instruction shows the reset explicitly).
+
+**Why that is hard here:** `pm_genpd_summary` after the run shows the five
+VENC leaves `off-0` and **only `venc_sys` on**, with both DARTs `suspended` and
+no active child - and no `apple,always-on` in its DT node. Its only direct
+devices are the two DARTs. The DART, and the DAPF entry m1n1 installs at boot,
+live in `venc_sys`; Linux cannot write that DAPF (docs/49). So a power cycle
+or reset deep enough to restart the core is expected to take the DAPF entry
+with it. **I**, and exactly what `core_reset` (with its before/after DAPF
+comparison) exists to measure.
+
+**What this run buys regardless:** Halt gives a clean unload (buffers can be
+freed, no fault storm), and the restore is proven. What it does not yet buy is
+a second firmware start in the same boot.

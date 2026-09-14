@@ -920,3 +920,14 @@ clean, and on the second load `fw_restore_data` correctly refused a core that
 was not STOPPED (`CPU_STATUS 0x28`). Full analysis and the corrected procedure
 in [55](55-halt-command.md) §9. Machine healthy; next firmware start needs a
 fresh boot.
+
+## 2026-09-14 08:10 — Halt confirmed; DATA restore writes; restart after Halt does not take
+
+`results/h2-1789369852.kmsg`, commit `ad89724`. With Config sent first, Halt
+works: scratch 0 `0x08042006` within 0.5 ms, `CPU_STATUS 0x2e` STOPPED, clean
+unload. Load 2's DATA restore passed every gate and wrote 0x134000 bytes
+(301006 drifted), read-back verified - Linux can write the firmware DRAM. But
+the start sequence left `CPU_STATUS` at `0x2e`: RUN does not bring a core out
+of the Halt `wfi`. macOS power-cycles VENC between Halt and restart; here only
+`venc_sys` stays on (DARTs suspended, no active child, no always-on), and the
+DAPF entry lives inside it. Details [55](55-halt-command.md) §10.
