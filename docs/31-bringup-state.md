@@ -960,3 +960,14 @@ consecutive loads - one from the crashed core R3 left, one from a halted core,
 the second with the blob's stale STKG - each reset, restored DATA, completed
 the handshake, had Config accepted, and halted cleanly. No DART faults, no IRQ
 issues. About 7 s per cycle. [55](55-halt-command.md) §14.
+
+## 2026-09-14 12:20 — F3: first Process with no assert; the encoder starts and its DMA fails
+
+`results/f3-1789384805.kmsg`. Config/Open/Start_AVC/Process all taken, no
+assert; the firmware started LRME/Pipe/xcode, then logged AXI errors and
+LRME/PIPE hangs. IRQ 130 (shared DART line) stormed unclaimed and was disabled.
+Halt with an open client worked, and load 2 recovered in the same boot. The
+encoder datapath evidently does not translate through the CPUDART, the only
+DART attached. Overlay `variant=4` attaches both DART nodes, like ISP; docs/56
+(in progress) checks whether the SMMU is involved. Reboot needed before the
+next run (IRQ 130 disabled). [53](53-first-frame.md) §14.

@@ -25,6 +25,7 @@
 #include "ave_overlay_noiommu_dtbo.h"
 #include "ave_overlay_e2_dtbo.h"
 #include "ave_overlay_e3_dtbo.h"
+#include "ave_overlay_e4_dtbo.h"
 
 static int ovcs_id;
 
@@ -49,6 +50,10 @@ static int ovcs_id;
  *                      reg entries. The DART is bound and translating; the
  *                      driver may program the DAPF (dapf_set=).
  *
+ * variant=4 (docs/56): variant=3 with both DART nodes in iommus, so the
+ *                      encoder datapath's DART carries the same mappings as
+ *                      the CPUDART - the way Linux attaches ISP's DARTs.
+ *
  * Selected here rather than at build time so the risk is chosen when the
  * module is loaded, with the consequence in front of whoever types it.
  * Any other value is refused; before variants 2 and 3 existed every non-zero
@@ -57,7 +62,7 @@ static int ovcs_id;
 static int variant;
 module_param(variant, int, 0444);
 MODULE_PARM_DESC(variant,
-		 "0 = with DART (default), 1 = no IOMMU: preserves iBoot's DART config, NO backstop, 2 = 1 + cpudart/dapf regs (E2), 3 = 0 + cpudart/dapf regs (E3)");
+		 "0 = with DART (default), 1 = no IOMMU: preserves iBoot's DART config, NO backstop, 2 = 1 + cpudart/dapf regs (E2), 3 = 0 + cpudart/dapf regs (E3), 4 = 3 with both DARTs in iommus (docs/56)");
 
 static int __init ave_ov_init(void)
 {
@@ -85,8 +90,13 @@ static int __init ave_ov_init(void)
 		len = ave_overlay_e3_dtbo_len;
 		pr_warn("ave-overlay: variant=3 - with DART, plus cpudart/dapf regs (E2 control / E3)\n");
 		break;
+	case 4:
+		fdt = ave_overlay_e4_dtbo;
+		len = ave_overlay_e4_dtbo_len;
+		pr_warn("ave-overlay: variant=4 - variant=3 with both DARTs in iommus (docs/56)\n");
+		break;
 	default:
-		pr_err("ave-overlay: variant=%d is not 0, 1, 2 or 3; refusing\n", variant);
+		pr_err("ave-overlay: variant=%d is not 0-4; refusing\n", variant);
 		return -EINVAL;
 	}
 
