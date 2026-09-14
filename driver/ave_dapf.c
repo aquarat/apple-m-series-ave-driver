@@ -409,9 +409,41 @@ static unsigned int ave_dapf_dump_entries(struct ave_device *ave, const char *ta
  * fatal SError (docs/49) - so if a reset clears them, nothing after it can
  * fetch and the only way back is a reboot.
  */
-int ave_dapf_dump_now(struct ave_device *ave, const char *tag,
-		      unsigned int *used)
+/*
+ * FNV-1a over every field of all 16 slots, empty ones included, plus whether
+ * any slot still admits the core's first fetch. A slot count is not enough:
+ * the unused slots on this machine hold uninitialised junk, so the count reads
+ * 16 before and after anything (r1, 2026-09-14) and could never say "no".
+ */
+static u64 ave_dapf_fingerprint(struct ave_device *ave, bool *admits_fetch)
 {
+	u64 h = 0xcbf29ce484222325ULL;
+	unsigned int i;
+
+	*admits_fetch = false;
+	for (i = 0; i < AVE_DAPF_MAX_ENTRIES; i++) {
+		struct ave_dapf_entry e = {};
+		u64 f[4];
+		unsigned int k, b;
+
+		if (ave_dapf_slot_read(ave, i, &e) &&
+		    ave_dapf_covers(&e, AVE_IBOOT_TEXT_PHYS + 0x200))
+			*admits_fetch = true;
+		f[0] = e.r0; f[1] = e.r4; f[2] = e.start; f[3] = e.end;
+		for (k = 0; k < ARRAY_SIZE(f); k++)
+			for (b = 0; b < 64; b += 8) {
+				h ^= (f[k] >> b) & 0xff;
+				h *= 0x100000001b3ULL;
+			}
+	}
+	return h;
+}
+
+int ave_dapf_dump_now(struct ave_device *ave, const char *tag,
+		      u64 *fingerprint, bool *admits_fetch)
+{
+	bool admits;
+	u64 fp;
 	int ret;
 
 	ret = ave_dapf_check_power(ave);
@@ -422,9 +454,14 @@ int ave_dapf_dump_now(struct ave_device *ave, const char *tag,
 		return ret;
 
 	ave_dapf_dump_dart(ave, tag);
-	ret = ave_dapf_dump_entries(ave, tag);
-	if (used)
-		*used = ret;
+	ave_dapf_dump_entries(ave, tag);
+	fp = ave_dapf_fingerprint(ave, &admits);
+	dev_info(ave->dev, "dapf: [%s] fingerprint %#018llx, TEXT fetch %s\n",
+		 tag, fp, admits ? "admitted" : "NOT ADMITTED");
+	if (fingerprint)
+		*fingerprint = fp;
+	if (admits_fetch)
+		*admits_fetch = admits;
 	return 0;
 }
 

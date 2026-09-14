@@ -329,7 +329,8 @@ static void ave_power_off_action(void *data)
 static int ave_core_reset(struct ave_device *ave)
 {
 	struct device *dev = ave->dev;
-	unsigned int before = 0, after = 0;
+	u64 before = 0, after = 0;
+	bool admits = false;
 	bool irq_was_on;
 	u32 st;
 	int ret;
@@ -352,14 +353,14 @@ static int ave_core_reset(struct ave_device *ave)
 	 * question that decides whether this path is viable.
 	 * (Review 2026-09-13, finding 3.)
 	 */
-	ret = ave_dapf_dump_now(ave, "before core reset", &before);
+	ret = ave_dapf_dump_now(ave, "before core reset", &before, NULL);
 	if (ret) {
 		dev_err(dev, "core reset: cannot read the DAPF (%d) - refusing to pulse, since the readback is the whole point (needs overlay variant=2 or 3)\n",
 			ret);
 		return ret;
 	}
 
-	dev_info(dev, "core reset: CPU_STATUS %#010x%s, %u DAPF slot(s) before; pulsing the block reset\n",
+	dev_info(dev, "core reset: CPU_STATUS %#010x%s, DAPF fingerprint %#018llx before; pulsing the block reset\n",
 		 st, st & AVE_ASC_ST_STOPPED ? " STOPPED (core_reset=2)" : " not STOPPED",
 		 before);
 
@@ -403,14 +404,15 @@ static int ave_core_reset(struct ave_device *ave)
 	dev_info(dev, "core reset: CPU_STATUS now %#010x%s\n",
 		 st, st & AVE_ASC_ST_STOPPED ? " STOPPED" : " NOT STOPPED");
 
-	ret = ave_dapf_dump_now(ave, "after core reset", &after);
+	ret = ave_dapf_dump_now(ave, "after core reset", &after, &admits);
 	if (ret) {
 		dev_err(dev, "core reset: DAPF unreadable after the pulse (%d)\n",
 			ret);
 		return ret;
 	}
-	dev_info(dev, "core reset: DAPF slots %u -> %u: %s\n", before, after,
-		 after == before ? "SURVIVED" : "CHANGED");
+	dev_info(dev, "core reset: DAPF fingerprint %#018llx -> %#018llx: %s, TEXT fetch %s\n",
+		 before, after, after == before ? "SURVIVED" : "CHANGED",
+		 admits ? "admitted" : "NOT ADMITTED");
 
 	/*
 	 * core_reset_only: answer the two questions and stop, without ever
@@ -421,7 +423,7 @@ static int ave_core_reset(struct ave_device *ave)
 		dev_info(dev, "core reset: core_reset_only=1, stopping probe here\n");
 		return -ECANCELED;
 	}
-	if (after != before) {
+	if (after != before || !admits) {
 		dev_err(dev, "core reset: the DAPF changed; not starting the core - Linux cannot put those entries back (docs/49), only a reboot can\n");
 		return -ENODEV;
 	}
