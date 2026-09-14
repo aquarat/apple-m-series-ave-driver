@@ -387,6 +387,75 @@ static void ave_dapf_dump_dart(struct ave_device *ave, const char *tag)
 }
 
 /*
+ * Put the datapath DART's translation back after a block reset.
+ *
+ * F4 (pulse at stage 7, then Process): DART1 stream 0 faulted with NO_TTBR at
+ * the input buffer while the CPUDART still held its TTBR. F5 (cold boot, no
+ * pulse): DART1's SIDs 0 and 1 held exactly the CPUDART's TTBR and TCR, and
+ * the datapath ran without a single fault. So the pulse clears DART1's
+ * translation and leaves the CPUDART's alone (R1, R4). The page table itself
+ * is the shared domain's and is untouched; only DART1's pointers to it are
+ * gone.
+ *
+ * This copies the CPUDART's TTBR[sid][0..3] and then TCR[sid] into DART1 for
+ * the SIDs the overlay attaches (0 and 1) - the order apple-dart uses when it
+ * attaches a domain (TTBRs, then enable translation), and the per-instance
+ * mirroring macOS does (docs/56). Every value is read back. No TLB flush: the
+ * reset has just emptied it. Nothing is written when DART1 already matches.
+ */
+int ave_dart_restore_datapath(struct ave_device *ave)
+{
+	static const unsigned int sids[] = { 0, 1 };
+	unsigned int i, k, bad = 0, wrote = 0;
+	int ret;
+
+	ret = ave_dapf_check_power(ave);
+	if (ret)
+		return ret;
+	ret = ave_dapf_map(ave);
+	if (ret)
+		return ret;
+	if (!ave->dart1)
+		return -ENODEV;
+
+	for (i = 0; i < ARRAY_SIZE(sids); i++) {
+		unsigned int sid = sids[i];
+		u32 ctcr = readl(ave->cpudart + DART_TCR(sid));
+		u32 dtcr = readl(ave->dart1 + DART_TCR(sid));
+		bool same = ctcr == dtcr;
+
+		for (k = 0; k < 4; k++)
+			same &= readl(ave->cpudart + DART_TTBR(sid, k)) ==
+				readl(ave->dart1 + DART_TTBR(sid, k));
+		if (same)
+			continue;
+
+		dev_info(ave->dev, "dart: restoring DART1 SID %u: TCR %#x -> %#x, TTBR[0] %#010x -> %#010x\n",
+			 sid, dtcr, ctcr, readl(ave->dart1 + DART_TTBR(sid, 0)),
+			 readl(ave->cpudart + DART_TTBR(sid, 0)));
+		for (k = 0; k < 4; k++)
+			writel(readl(ave->cpudart + DART_TTBR(sid, k)),
+			       ave->dart1 + DART_TTBR(sid, k));
+		writel(ctcr, ave->dart1 + DART_TCR(sid));
+		wrote++;
+
+		for (k = 0; k < 4; k++)
+			bad += readl(ave->dart1 + DART_TTBR(sid, k)) !=
+			       readl(ave->cpudart + DART_TTBR(sid, k));
+		bad += readl(ave->dart1 + DART_TCR(sid)) != ctcr;
+	}
+
+	if (bad) {
+		dev_err(ave->dev, "dart: DART1 restore did not read back (%u mismatches)\n", bad);
+		return -EIO;
+	}
+	dev_info(ave->dev, "dart: DART1 %s\n",
+		 wrote ? "translation restored from the CPUDART, read back OK"
+		       : "already matched the CPUDART; nothing written");
+	return 0;
+}
+
+/*
  * Does the datapath DART translate with the same tables as the CPUDART?
  *
  * macOS programs every dart-ave0 instance with one translation (docs/56), and
