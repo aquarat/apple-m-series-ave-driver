@@ -41,6 +41,7 @@ struct ave_dapf_entry {
 #define AVE_CPUDART_PHYS	0x40d040000ULL	/* dart-ave0 reg[0], bus 0x20d040000 */
 #define AVE_DAPF_PHYS		0x40d044000ULL	/* dart-ave0 reg[3], bus 0x20d044000 */
 #define AVE_DAPF_OFFSET		0x4000		/* DAPF = CPUDART + 0x4000 (ave0, isp0) */
+#define AVE_DART1_PHYS		0x40d030000ULL	/* dart-ave0 "DART": the datapath's (F4, docs/56) */
 
 /* iBoot's 13.5 firmware placement on this machine (docs/43, docs/44 §2.4). */
 #define AVE_IBOOT_TEXT_PHYS	0x10000b28000ULL
@@ -84,5 +85,11 @@ int ave_dapf_write_probe(struct ave_device *ave);
 bool ave_dapf_program_requested(void);
 int ave_dapf_early(void);
 int ave_dapf_program_selected(struct ave_device *ave);
+
+/*
+ * 0 if the datapath DART's SID-0 TCR/TTBR match the CPUDART's, -EIO if not,
+ * -ENODEV if no second DART is attached. Reads only. See ave_dapf.c.
+ */
+int ave_dart_datapath_check(struct ave_device *ave, const char *tag);
 
 #endif /* __AVE_DAPF_H__ */

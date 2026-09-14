@@ -971,3 +971,13 @@ encoder datapath evidently does not translate through the CPUDART, the only
 DART attached. Overlay `variant=4` attaches both DART nodes, like ISP; docs/56
 (in progress) checks whether the SMMU is involved. Reboot needed before the
 next run (IRQ 130 disabled). [53](53-first-frame.md) §14.
+
+## 2026-09-14 13:12 — F4: datapath DMA confirmed on DART 0x40d030000, which had no TTBR; reset after unload
+
+`results/f4-1789387926.kmsg`. With both DARTs attached, apple-dart reported
+`NO TTBR FOR IOVA` faults on 40d030000 stream 0 walking the input buffer
+(`0xfe000000...`), while the CPUDART's SIDs 0/1 held a valid TTBR. The SMMU
+logged the same address and stormed IRQ 127. Halt and unload were clean, then
+the machine reset within ~2 s (cause unknown). The driver now refuses Process
+unless DART1's translation matches the CPUDART's. Next: F5 on a fresh boot
+without the pulse or an unload. [53](53-first-frame.md) §15.

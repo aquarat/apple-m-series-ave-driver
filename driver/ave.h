@@ -104,6 +104,7 @@ struct ave_device {
 	/* --- DAPF / fetch-path state (owner: ave_fw.c / ave_dapf.c work) --- */
 	/* Optional "cpudart"/"dapf" reg entries: devm_ioremap, NOT requested. */
 	void __iomem		*cpudart;
+	void __iomem		*dart1;		/* datapath DART, if in iommus */
 	void __iomem		*dapf;
 	phys_addr_t		cpudart_phys;
 	phys_addr_t		dapf_phys;
