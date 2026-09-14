@@ -13,6 +13,7 @@
 #include <linux/delay.h>
 #include <linux/device.h>
 #include <linux/io.h>
+#include <linux/ratelimit.h>
 #include <linux/reset.h>
 #include <linux/types.h>
 
@@ -119,6 +120,12 @@ struct ave_device {
 	 * unload.
 	 */
 	u8			*iboot_data_pristine;
+	/* dart-ave0 SMMU, read-only fault watch (ave_smmu.c, smmu_watch). */
+	void __iomem		*smmu;
+	int			smmu_irq;
+	bool			smmu_live;	/* handler may read the block */
+	unsigned long		smmu_faults;
+	struct ratelimit_state	smmu_rs;
 	/* --- end DAPF --- */
 
 	/*

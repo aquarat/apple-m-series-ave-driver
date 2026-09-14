@@ -31,6 +31,7 @@
 #include "ave.h"
 #include "ave_dapf.h"
 #include "ave_session.h"
+#include "ave_smmu.h"
 
 #define AVE_ASC_IDLE_TIMEOUT_US		100000
 
@@ -280,6 +281,7 @@ static void ave_power_off(struct ave_device *ave, const char *why)
 {
 	if (!ave->powered)
 		return;
+	ave_smmu_quiesce(ave);	/* before the reference goes: it reads the block */
 	if (ave->irq_enabled) {
 		disable_irq(ave->irq);
 		ave->irq_enabled = false;
@@ -781,6 +783,15 @@ static int ave_probe_stages(struct platform_device *pdev)
 	 */
 	if (ave_stage(dev, AVE_STAGE_WRITE_IDLE)) {
 		bool pulsed;
+
+		/*
+		 * docs/56: watch the SMMU's fault status on the shared DART
+		 * line before anything else touches the block, so its baseline
+		 * is the state the previous load left. No-op unless smmu_watch=1.
+		 */
+		ret = ave_smmu_init(ave);
+		if (ret)
+			return dev_err_probe(dev, ret, "SMMU watch\n");
 
 		dev_info(dev, "  writing 1 to SVE+0x%x (Apple's first access) ...\n",
 			 AVE_SVE_IDLE);
