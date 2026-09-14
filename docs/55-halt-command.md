@@ -610,3 +610,33 @@ comparison) exists to measure.
 **What this run buys regardless:** Halt gives a clean unload (buffers can be
 freed, no fault storm), and the restore is proven. What it does not yet buy is
 a second firmware start in the same boot.
+
+---
+
+## 11. R1 (2026-09-14 08:25): the block reset on a halted core keeps the DAPF
+
+`results/r1-1789370719.kmsg`, commit `db259ea`, the same boot as §10 (core
+halted, `CPU_STATUS 0x2e`, no fault storm). `stop_after=13 core_reset=2
+core_reset_only=1` - pulse and report, never start.
+
+- `reset_control_reset()` returned 0; **the machine did not hang.** This is the
+  quiescent-core case docs/41's clean run also was; docs/25 7c (hang) was not.
+- `CPU_STATUS 0x2e -> 0x22`. STOPPED still set; the IRQ/FIQ-not-pending bits
+  dropped. A fresh boot reads `0x2a` before start, so `0x22` is close but not
+  identical. **Whether the core is really back at its reset vector is U** -
+  only starting it can say.
+- **All 16 DAPF entries identical before and after**, field for field, including
+  m1n1's TEXT entry in slot 0 and the `0x1f0` window in slot 1. DART `CONFIG`,
+  `TCR[0] 0x80`, `TTBR[0][0] 0x901eef14 VALID`, and even the stale `ERROR`
+  word were unchanged too, so the DART itself was not reset. **C.**
+- **The driver's own verdict ("slots 16 -> 16: SURVIVED") was not evidence.**
+  Slots 3-15 hold uninitialised junk, so the count reads 16 whatever happens -
+  a check that could never say "no". The entries were diffed by hand from the
+  log. Fixed after this run: the comparison is now an FNV-1a fingerprint over
+  every field of all 16 slots, plus an explicit "TEXT fetch admitted" check,
+  and the core is not started unless both hold.
+
+Consequence: the reset does not take the DAPF with it, so restarting after a
+Halt in the same boot is **not ruled out**. The next discriminator is a full
+start after the pulse: `core_reset=2 fw_restore_data=1`, handshake, Config,
+Halt.
