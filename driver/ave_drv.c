@@ -62,7 +62,7 @@ MODULE_PARM_DESC(rvbar_probe, "walk test values through the ASC RVBAR and report
 static int core_reset;
 module_param(core_reset, int, 0444);
 MODULE_PARM_DESC(core_reset,
-		 "at stage 13, when the core is still running from an earlier load: 0 = leave it (default), 1 = pulse the block reset and report whether it stops and whether the DAPF survived, 2 = pulse it even when already STOPPED");
+		 "at stage 7, when the core is still up from an earlier load: 0 = leave it (default), 1 = pulse the block reset and report whether it stops and whether the DAPF survived, 2 = pulse it even when already STOPPED");
 
 static bool core_reset_only;
 module_param(core_reset_only, bool, 0444);
@@ -326,7 +326,7 @@ static void ave_power_off_action(void *data)
  * whether this path is viable at all, so it runs even when the reset leaves
  * the core running - that answer is worth the same either way.
  */
-static int ave_core_reset(struct ave_device *ave)
+static int ave_core_reset(struct ave_device *ave, bool *pulsed)
 {
 	struct device *dev = ave->dev;
 	u64 before = 0, after = 0;
@@ -335,6 +335,7 @@ static int ave_core_reset(struct ave_device *ave)
 	u32 st;
 	int ret;
 
+	*pulsed = false;
 	if (!core_reset)
 		return 0;
 
@@ -399,6 +400,18 @@ static int ave_core_reset(struct ave_device *ave)
 	dev_info(dev, "core reset: reset_control_reset() = %d\n", ret);
 	if (ret)
 		return ret;
+	*pulsed = true;
+
+	/*
+	 * The pulse clears the SVE block's registers, scratch included
+	 * (r3, 2026-09-14: 0x8042006/0/0xe written at stage 11 all read 0
+	 * after it). That is why this runs at stage 7 now, ahead of every
+	 * write the driver makes to that block. Logged as evidence each time.
+	 */
+	dev_info(dev, "core reset: SVE scratch after pulse %#x %#x %#x\n",
+		 ave_read(ave, AVE_BANK_SVE, AVE_SVE_SCRATCH(0)),
+		 ave_read(ave, AVE_BANK_SVE, AVE_SVE_SCRATCH(1)),
+		 ave_read(ave, AVE_BANK_SVE, AVE_SVE_SCRATCH(2)));
 
 	st = ave_read(ave, AVE_BANK_ASC, AVE_ASC_CPU_STATUS);
 	dev_info(dev, "core reset: CPU_STATUS now %#010x%s\n",
@@ -767,10 +780,31 @@ static int ave_probe_stages(struct platform_device *pdev)
 	 * One write, nothing else, so the stage has exactly one variable.
 	 */
 	if (ave_stage(dev, AVE_STAGE_WRITE_IDLE)) {
+		bool pulsed;
+
 		dev_info(dev, "  writing 1 to SVE+0x%x (Apple's first access) ...\n",
 			 AVE_SVE_IDLE);
 		ave_write(ave, AVE_BANK_SVE, AVE_SVE_IDLE, 1);
 		dev_info(dev, "  write returned\n");
+		/*
+		 * If the core is still up from an earlier load, reset the block
+		 * here - after Apple's first access, so that ordering holds, but
+		 * before every other write this driver makes to the block. The
+		 * pulse wipes the SVE registers: at stage 13, where this used to
+		 * run, it erased the stage-11 scratch writes, the firmware booted
+		 * with scratch 0 != 0x08042006, switched on its UART debug
+		 * console (CPlatformEnvironment, fw 0xa5f80-0xa5fa0 / 0xa6050) and
+		 * died on a DAPF miss at the UART (r2, r3; docs/55 13). No-op
+		 * unless core_reset=1.
+		 */
+		ret = ave_core_reset(ave, &pulsed);
+		if (ret)
+			return dev_err_probe(dev, ret, "stage-7 core reset\n");
+		if (pulsed) {
+			ave_write(ave, AVE_BANK_SVE, AVE_SVE_IDLE, 1);
+			dev_info(dev, "  re-wrote SVE+0x%x after the reset\n",
+				 AVE_SVE_IDLE);
+		}
 		ave_stage_ok(dev, AVE_STAGE_WRITE_IDLE);
 	} else {
 		return 0;
@@ -993,15 +1027,21 @@ iop_config_done:
 	}
 
 	if (ave_stage(dev, AVE_STAGE_ASC_START)) {
+		u32 s0 = ave_read(ave, AVE_BANK_SVE, AVE_SVE_SCRATCH(0));
+
 		/*
-		 * If the core is still running from an earlier load in this
-		 * boot, stop it first - the restore below writes the DATA
-		 * segment out from under it otherwise. No-op unless
-		 * core_reset=1.
+		 * The firmware reads scratch 0 at boot and, unless it holds
+		 * 0x08042006, enables its UART debug console (fw 0xa5e78 /
+		 * 0xa5fa0) - which on this machine is a DAPF miss and a dead
+		 * boot. Anything that wipes the block after stage 11 causes it,
+		 * so check the one word that decides it instead of finding out
+		 * six seconds later from a silent core. (r3, docs/55 13.)
 		 */
-		ret = ave_core_reset(ave);
-		if (ret)
-			return dev_err_probe(dev, ret, "stage-13 core reset\n");
+		if (s0 != AVE_SCRATCH0_STOPPED) {	/* == the stage-11 boot magic */
+			dev_err(dev, "stage 13: SVE scratch 0 is %#x, not %#x - the firmware would boot into its UART debug console and fault; not starting it\n",
+				s0, AVE_SCRATCH0_STOPPED);
+			return -EINVAL;
+		}
 		/*
 		 * macOS restores a pristine DATA segment before every start
 		 * (docs/31 2026-09-13, docs/45 row 32). Without it the second

@@ -941,3 +941,14 @@ in the post-exception `0x28`. Inferred: an early exception whose report went to
 the UART. Next step is reading that report out of DATA
 ([55](55-halt-command.md) §12, `tools/crash_scan.py`, `physdump full=1`).
 Machine lost power afterwards (unrelated); repo and logs intact.
+
+## 2026-09-14 11:05 — R3: root cause found; the reset erased the boot magic
+
+`results/r3-1789380356.kmsg`. A cold full DATA dump matched the pristine blob
+except STKG, and a restart with this boot's exact cold DATA failed the same
+way, so DATA is ruled out. The post-failure dump's boot stack plus the firmware
+symbols show `CPlatformEnvironment` reading SVE scratch 0, finding it is not
+`0x08042006`, and opening its Samsung UART console - the DAPF miss. The block
+reset at stage 13 had wiped the scratch values stage 11 wrote. The reset now
+runs at stage 7 and stage 13 checks the magic. Full trace
+[55](55-halt-command.md) §13.
