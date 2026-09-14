@@ -989,3 +989,17 @@ Process ran with zero DART/SMMU/AXI faults, the LRME hang disappeared and only
 `PIPE HANG` remains. Together with F4 this shows the stage-7 pulse wipes
 DART1's translation; the driver now restores it after the pulse. Pipe hang
 analysis in progress (docs/57). [53](53-first-frame.md) §16.
+
+## 2026-09-14 15:16 — F6 did not run: the machine reset before the driver loaded
+
+`results/f6-1789395385.kmsg` holds only its header. The capture fsyncs every
+line and the runner syncs a marker before `insmod`; neither was written. The
+previous boot's journal ends at 15:16:25.20 with the runner's opening
+`sudo dmesg` check, ~10 s after overlay `variant=4` was applied by hand. So the
+reset came within about a second of the script starting and before any AVE
+code ran (journald's write-out lag makes this strong but not airtight). The
+same overlay sat idle for 12 s (F5) and 9 min (F4) without incident; whether
+this was the overlay or unrelated is **U**. `halt-run.sh` now takes
+`OVERLAY=N` to apply the overlay inside the captured window with fsync'd
+heartbeats, so a repeat is attributable. F6's changes (`session_lsb`,
+`session_sve_ungate`, the DART1 restore) remain untested.
