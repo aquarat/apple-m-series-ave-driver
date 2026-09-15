@@ -236,6 +236,11 @@ module_param(session_skip_mcpu, bool, 0444);
 MODULE_PARM_DESC(session_skip_mcpu,
 	"Config bSkipMcpu=1: skip MCPU configure/start (departs from macOS; docs/57 #5 discriminator)");
 
+static bool session_nbr_fill;
+module_param(session_nbr_fill, bool, 0444);
+MODULE_PARM_DESC(session_nbr_fill,
+	"fill the SrcNeighbor arena with 0xA5 and report at a Process timeout how much of Info[0]/Pixel[0] the neighbour writers overwrote (docs/59)");
+
 static bool session_diag = true;
 module_param(session_diag, bool, 0444);
 MODULE_PARM_DESC(session_diag,
@@ -463,6 +468,8 @@ struct ave_sess_bufs {
 	size_t		low_res_size;	/* per slot; 0 = none published */
 	u32		low_res_stride;	/* for the log line only */
 	u64		nbr[AVE_SRC_NBR_GROUPS][AVE_SRC_NBR_MAX];
+	void		*nbr_cpu[AVE_SRC_NBR_GROUPS][AVE_SRC_NBR_MAX];
+	size_t		nbr_slot;	/* bytes per slot */
 	u32		n_nbr;
 	u64		entropy[AVE_ENTROPY_MAX];
 	u32		n_entropy;
@@ -1100,15 +1107,24 @@ static void ave_session_alloc_nbr(struct ave_device *ave,
 			 a.size);
 		return;
 	}
-	memset(a.cpu, 0, a.size);
+	/*
+	 * session_nbr_fill: a known non-zero pattern instead of zeros, so the
+	 * timeout can tell whether the neighbour writers ever stored row 0
+	 * (docs/59 read 3). The top row is never read as a neighbour, so the
+	 * pattern cannot reach an encoded MB.
+	 */
+	memset(a.cpu, session_nbr_fill ? 0xa5 : 0, a.size);
+	bufs->nbr_slot = slot;
 
 	for (g = 0; g < AVE_SRC_NBR_GROUPS; g++)
 		for (i = 0; i < AVE_SRC_NBR_MAX; i++) {
 			dma_addr_t iova;
+			void *cpu = ave_sess_arena_take(&a, slot, &iova);
 
-			if (!ave_sess_arena_take(&a, slot, &iova))
+			if (!cpu)
 				return;		/* keeps what it managed */
 			bufs->nbr[g][i] = iova;
+			bufs->nbr_cpu[g][i] = cpu;
 		}
 	bufs->n_nbr = AVE_SRC_NBR_MAX;
 }
@@ -1312,6 +1328,91 @@ static void ave_session_publish(struct ave_device *ave,
 		 need_psets ? "SPS+PPS prepended from paramsets.bin"
 			    : "coded buffer already carries the parameter sets",
 		 coded_nal);
+}
+
+/*
+ * docs/59's reads, all read-only and inside bank 0. The question they settle:
+ * is "currMbRow 1" a stall at row 1, or the pipeline head running ~15 MBs
+ * ahead of a stall still inside row 0?
+ */
+static void ave_session_diag_row0(struct ave_device *ave,
+				  struct ave_sess_bufs *bufs)
+{
+	/* stage host interfaces: MbInput, IntraEst, CAVLC, MotionEst, ModeDecision, ReconLuma, ReconChroma */
+	static const struct { const char *name; u32 off; } hif[] = {
+		{ "MbInput", 0x68000 }, { "IntraEst", 0x142000 },
+		{ "CAVLC", 0x1c8000 }, { "MotionEst", 0x88000 },
+		{ "ModeDec", 0x162000 }, { "ReconLuma", 0x182000 },
+		{ "ReconChroma", 0x1a2000 },
+	};
+	u32 ev0, ev1;
+	int i;
+
+	/* 1. MbInput lookahead counters (DMem 0x40D408000 + x) */
+	ev0 = ave_read(ave, AVE_BANK_DPE, 0x75800);
+	ev1 = ave_read(ave, AVE_BANK_DPE, 0x75804);
+	dev_info(ave->dev,
+		 "session: diag MbInput produced %u consumed %u drain %#x lag %u; last src event %#010x %#010x (y %u x %u last %u); IntraEst curMB %#010x\n",
+		 ave_read(ave, AVE_BANK_DPE, 0x3088a8),
+		 ave_read(ave, AVE_BANK_DPE, 0x309584),
+		 ave_read(ave, AVE_BANK_DPE, 0x309570),
+		 ave_read(ave, AVE_BANK_DPE, 0x70110),
+		 ev0, ev1, (ev0 >> 16) & 0xfff, ev0 & 0x1fff, !!(ev0 & BIT(26)),
+		 ave_read(ave, AVE_BANK_DPE, 0x143180));
+
+	/* 2. every stage's host-if +0/+4/+0xc/+0x10/+0x14 first, +8 last */
+	for (i = 0; i < ARRAY_SIZE(hif); i++)
+		dev_info(ave->dev,
+			 "session: diag hif %-11s +0 %#010x +4 %#010x +c %#010x +10 %#010x +14 %#010x\n",
+			 hif[i].name,
+			 ave_read(ave, AVE_BANK_DPE, hif[i].off),
+			 ave_read(ave, AVE_BANK_DPE, hif[i].off + 0x4),
+			 ave_read(ave, AVE_BANK_DPE, hif[i].off + 0xc),
+			 ave_read(ave, AVE_BANK_DPE, hif[i].off + 0x10),
+			 ave_read(ave, AVE_BANK_DPE, hif[i].off + 0x14));
+	for (i = 0; i < ARRAY_SIZE(hif); i++)
+		dev_info(ave->dev, "session: diag hif %-11s +8 %#010x\n",
+			 hif[i].name, ave_read(ave, AVE_BANK_DPE, hif[i].off + 0x8));
+
+	/* 3. neighbour DMA channels: readers 0x40D120C00.., writers 0x40D130600.. */
+	for (i = 0; i < 0x60; i += 0x10)
+		dev_info(ave->dev,
+			 "session: diag nbr rd +%#04x %08x %08x %08x %08x | wr %08x %08x %08x %08x\n",
+			 i,
+			 ave_read(ave, AVE_BANK_DPE, 0x20c00 + i),
+			 ave_read(ave, AVE_BANK_DPE, 0x20c04 + i),
+			 ave_read(ave, AVE_BANK_DPE, 0x20c08 + i),
+			 ave_read(ave, AVE_BANK_DPE, 0x20c0c + i),
+			 ave_read(ave, AVE_BANK_DPE, 0x30600 + i),
+			 ave_read(ave, AVE_BANK_DPE, 0x30604 + i),
+			 ave_read(ave, AVE_BANK_DPE, 0x30608 + i),
+			 ave_read(ave, AVE_BANK_DPE, 0x3060c + i));
+
+	/* how much of the 0xA5-filled Info[0] / Pixel[0] did the writers change? */
+	if (session_nbr_fill && bufs->nbr_cpu[0][0] && bufs->nbr_cpu[1][0]) {
+		static const char * const gname[2] = { "Info[0]", "Pixel[0]" };
+		int g;
+
+		dma_rmb();
+		for (g = 0; g < 2; g++) {
+			const u8 *b = bufs->nbr_cpu[g][0];
+			size_t k, changed = 0, first = SIZE_MAX, last = 0;
+
+			for (k = 0; k < bufs->nbr_slot; k++) {
+				if (b[k] != 0xa5) {
+					changed++;
+					if (first == SIZE_MAX)
+						first = k;
+					last = k;
+				}
+			}
+			dev_info(ave->dev,
+				 "session: diag nbr fill %s: %zu of %zu bytes changed%s (first %#zx last %#zx)\n",
+				 gname[g], changed, bufs->nbr_slot,
+				 changed ? "" : " - the writer never stored anything",
+				 changed ? first : 0, last);
+		}
+	}
 }
 
 static int ave_session_process(struct ave_device *ave,
@@ -1571,6 +1672,7 @@ static int ave_session_process(struct ave_device *ave,
 			 ave_read(ave, AVE_BANK_DPE, 0x68008),
 			 ave_read(ave, AVE_BANK_DPE, 0x142008),
 			 ave_read(ave, AVE_BANK_DPE, 0x1c8008));
+		ave_session_diag_row0(ave, bufs);
 	}
 
 	if (session_sve_ungate) {
