@@ -1470,3 +1470,24 @@ default on, read-only): VENC_DMA/PIPE4/PIPE5/ME0/ME1 power state, `0x40D110140`
 reference it; `power_me1=1` attaches a holder device to the node's genpd
 provider at stage 6 (the mechanism `genpd_dev_pm_attach_by_id()` uses) and
 logs ME1's PS register afterwards.
+
+---
+
+## 20. F9 (2026-09-15 16:50): ME1 powered, no change
+
+`results/f9-1789487404.kmsg`, commit `ca2d391`, as F8 minus the SVE ungate,
+plus `power_me1=1`.
+
+- `me1: venc_me1 powered; PMGR PS ME1 = 0x3ff`; genpd shows the holder
+  `active`; at the hang all five VENC sub-domains read `0x3ff`.
+- **Identical hang**: `PIPE HANG`, `StartCount 1-1-1-0, Idle 1-1-0-1`,
+  `0x40D110140 = 0` (done clear), `0x40D110128 = 0`, `0x40D120000 =
+  0x80034045`, `0x40D120004 = 0xc0`, scratch 7 `0x04000003`; recon writer
+  programmed; no faults.
+
+docs/57's ranked causes #1 (fixed, not sufficient), #2, #3 and #4 are now all
+tested on hardware. Remaining: #5, the MCPU path - Config asks the firmware to
+create and **start** the pipe's microcontrollers, and a pipe whose MCPUs never
+really run would hang exactly like this. `session_skip_mcpu=1` (Config
+`bSkipMcpu = 1`, departs from macOS) is the discriminator; static analysis of
+what the MCPUs need (docs/58) runs in parallel.

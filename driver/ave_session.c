@@ -224,6 +224,18 @@ module_param(session_sve_ungate, bool, 0444);
 MODULE_PARM_DESC(session_sve_ungate,
 	"write SVE +0x38 = 0 (clock gating off, as AVE_DPM_TuneUpPipe does) around Process (docs/57 #2)");
 
+/*
+ * docs/57 #5: Config bSkipMcpu = 1. The firmware then writes 1 to the seven MCPU
+ * +0x8 registers and skips ConfigureMCPUs / McpuController::Start. macOS sets
+ * it only for the ave-platform=3 boot-arg, so this DEPARTS from macOS - a
+ * discriminator for the pipe hang, not a fix. Create stays 1 (Halt needs the
+ * controller object, docs/55 9).
+ */
+static bool session_skip_mcpu;
+module_param(session_skip_mcpu, bool, 0444);
+MODULE_PARM_DESC(session_skip_mcpu,
+	"Config bSkipMcpu=1: skip MCPU configure/start (departs from macOS; docs/57 #5 discriminator)");
+
 static bool session_diag = true;
 module_param(session_diag, bool, 0444);
 MODULE_PARM_DESC(session_diag,
@@ -675,7 +687,7 @@ static int ave_session_config(struct ave_device *ave,
 	if (!shmem)
 		return -ENOMEM;
 
-	p.skip_mcpu = false;
+	p.skip_mcpu = session_skip_mcpu;	/* docs/57 #5 discriminator */
 	p.create_mcpu = true;			/* create the McpuController */
 	p.reg_dart_addr = session_reg_dart;	/* 13.5 only; builder ignores on 26.6 */
 	p.dsid = session_dsid;
