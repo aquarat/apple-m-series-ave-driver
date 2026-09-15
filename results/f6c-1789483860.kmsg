@@ -1,0 +1,24 @@
+=== f6c 2026-09-15T15:51:00+01:00 commit 9ab1894 ===
+=== load 1: stop_after=16 fw_map_data=1 fw_map_text=2 core_reset=2 fw_restore_data=1 session_selftest=1 session_frame=1 fw_halt=1 smmu_watch=1 session_lsb=1
+=== load 2: stop_after=16 fw_map_data=1 fw_map_text=2 core_reset=2 fw_restore_data=1 session_selftest=1 session_frame=1 fw_halt=1 smmu_watch=1 session_lsb=1 session_sve_ungate=1
+=== applying overlay variant=4 ===
+[16389.986911] ave_overlay: loading out-of-tree module taints kernel.
+[16389.986917] ave_overlay: module verification failed: signature and/or required key missing - tainting kernel
+[16389.987745] ave-overlay: variant=4 - variant=3 with both DARTs in iommus (docs/56)
+[16389.988373] apple-dart 40d040000.iommu: DART [pagesize 4000, 16 streams, bypass support: 1, bypass forced: 0, locked: 0, AS 32 -> 42] initialized
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d040000.iommu
+[16389.988652] apple-dart 40d030000.iommu: DART [pagesize 4000, 16 streams, bypass support: 0, bypass forced: 0, locked: 0, AS 32 -> 42] initialized
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d030000.iommu
+[16389.988804] platform 40d100000.video-encoder: Adding to iommu group 16
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[16389.989004] ave-overlay: applied, ovcs_id=1
+=== overlay insmod returned rc=0 ===
+=== overlay applied, t=0s of 30s before load 1 ===
+=== overlay applied, t=5s of 30s before load 1 ===
+=== overlay applied, t=10s of 30s before load 1 ===
+=== overlay applied, t=15s of 30s before load 1 ===
+=== overlay applied, t=20s of 30s before load 1 ===
+=== overlay applied, t=25s of 30s before load 1 ===
