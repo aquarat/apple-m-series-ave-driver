@@ -1070,3 +1070,10 @@ timeout path now logs the VENC power states and the pipe done/go registers.
 At the hang every VENC sub-domain reads on (`0x3ff`) except ME1 (`0x300`), and
 the pipe done bit is clear, so the hardware never finished. The driver can now
 power ME1 (`power_me1=1`). [53](53-first-frame.md) §19.
+
+## 2026-09-15 16:50 — F9: venc_me1 powered, identical Pipe hang
+
+`results/f9-1789487404.kmsg`. ME1 on (`0x3ff`) through the hang made no
+difference. docs/57 #1-#4 are exhausted; #5 (MCPU start) is next, by
+discriminator (`session_skip_mcpu=1`) and by static analysis.
+[53](53-first-frame.md) §20.
