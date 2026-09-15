@@ -1003,3 +1003,26 @@ this was the overlay or unrelated is **U**. `halt-run.sh` now takes
 `OVERLAY=N` to apply the overlay inside the captured window with fsync'd
 heartbeats, so a repeat is attributable. F6's changes (`session_lsb`,
 `session_sve_ungate`, the DART1 restore) remain untested.
+
+## 2026-09-15 — F6c: the overlay reset reproduces; the driver never loads again
+
+`results/f6c-1789483860.kmsg`, run by the operator's agent on explicit
+instruction: a faithful replication of f6b at the same commit (`9ab1894`,
+modules rebuilt for `vrr3` — same source). **The machine reset ~31 s after
+the overlay was applied, inside the captured window, before load 1.** That is
+three consecutive deaths at 10–31 s after `ave-overlay variant=4` on boots
+where the driver never loaded (F6, f6b, f6c), all silent: no panic, no
+SError, no shutdown records, auditd writing normally one second and gone the
+next.
+
+The audit trail fixes the death point precisely: the dead boot's last journal
+record is the `sudo tee` writing the **load-1 marker** — the on-disk log's
+`t=25s` end is unflushed page cache, not the death point. The F6 fixes remain
+untested.
+
+Full forensics — the survivors' timelines (the F3-day boot bound the driver
+3 s after its overlay; F4's boot survived 9m24s overlay-only and died 0–2 s
+after `remove()`'s power-off instead; F5's boot never unloaded the driver at
+all), the falsified kernel-version and deterministic-lethality hypotheses,
+the apple-dart runtime-PM finding, and the ranked next experiments — are in
+[58](58-overlay-reset.md).
