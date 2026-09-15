@@ -1491,3 +1491,33 @@ create and **start** the pipe's microcontrollers, and a pipe whose MCPUs never
 really run would hang exactly like this. `session_skip_mcpu=1` (Config
 `bSkipMcpu = 1`, departs from macOS) is the discriminator; static analysis of
 what the MCPUs need (docs/58) runs in parallel.
+
+---
+
+## 21. F10 (2026-09-15 17:34): AVE_DPE programmed; the pipe stalls at macroblock row 1
+
+`results/f10-1789490043.kmsg`, commit `2f81a3a`, cold boot, overlay `variant=4`,
+no pulse, `session_lsb=1 power_me1=1 dpe_tunables=1`.
+
+- `dpe: [before] DC000 0x100 DC004 0x40 DC400 0x2900 DC4A4 0 DC5B0 0` ->
+  `[after] DC000 0x101 DC004 0x1000 DC400 0x32901 DC4A4 0 DC5B0 0x1d`, 1+124+123
+  tunables read back. **No change to the hang.**
+- New diagnostics at the timeout (docs/58 §7.0):
+  - **`0x40D12002C = 0x00010009` -> currMbRow 1.** The source reader completed
+    MB row 0 and stopped at row 1 of 45.
+  - Pipe-done enable `0x40D11013C = 0xf007` (bit 2 set - not masked).
+  - Real AXI-error registers `0x40D124000/4`, `0x40D12C000`, `0x40D134000`: all 0.
+  - MCPU run control 1 and IDs 4..10 on all seven; IMem first words
+    `0x10004000 / 0x10001000 / 0x10001800` - images loaded and released.
+  - MCPU host interface: MbInput `+0 0x48000, +4 0, +8 0x2201f`; IntraEst and
+    CAVLC `+0 0x2000, +4 0, +8 0x1f`. MbInput shows pending bits the downstream
+    stages do not.
+
+**Reading (I):** the pipeline starts consuming the frame and stalls almost at
+once, with MbInput apparently waiting on the next stage. A stall at **row 1**
+is what something needed only from the second row on would produce - top
+neighbours written by row 0 through the SrcNeighbor path is the obvious
+candidate. The SrcNeighbor tables are published (4 entries/group, 80 KiB
+slots); whether the firmware programs the neighbour DMA from them, and whether
+13.5's DevType-dependent neighbour counts (docs/47: Info/Pixel count 4 only for
+DevType 17/18, else 1) matter, is docs/59's question.
