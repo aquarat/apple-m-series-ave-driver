@@ -1443,3 +1443,30 @@ userspace are blocked (`CONFIG_IO_STRICT_DEVMEM=y`, regions claimed), so the
 #3/#4 reads are now built into the Process timeout path (`session_diag`,
 default on, read-only): VENC_DMA/PIPE4/PIPE5/ME0/ME1 power state, `0x40D110140`
 (pipe done bit 2), `0x40D110128` (go bit 0), `0x40D120000/4`, scratch 7.
+
+---
+
+## 19. F8 (2026-09-15 16:44): SVE ungate changes nothing; ME1 is off; the pipe really did not finish
+
+`results/f8-1789487084.kmsg`, commit `d37cbea`, cold boot, overlay
+`variant=4`, no pulse, `session_lsb=1 session_sve_ungate=1`.
+
+- SVE `+0x38 <- 0` before Process (and `<- 1` after): **no change** - same
+  `PIPE HANG`, `StartCount 1-1-1-0, Idle 1-1-0-1`. docs/57 #2 ruled out (C for
+  this configuration).
+- Recon writer programmed as in F7 (`0x800314b1`).
+- Timeout diagnostics:
+  - PMGR PS **DMA `0x3ff`, PIPE4 `0x3ff`, PIPE5 `0x3ff`, ME0 `0x3ff`, ME1
+    `0x300`** - every VENC sub-domain on except **ME1, off** (docs/57 #3, C on
+    hardware).
+  - `0x40D110140 = 0` - pipe done bit 2 **clear**: the hardware did not finish;
+    not a lost interrupt (docs/57 #4 ruled out).
+  - `0x40D110128 = 0` (go bit 0 clear - self-clearing or never set, **U**),
+    `0x40D120000 = 0x80034045`, `0x40D120004 = 0xc0` (AXI-side, undecoded).
+  - scratch 7 `0x04000003`: bit 26, the firmware's PIPE HANG flag, as docs/57
+    predicted.
+
+**Next:** power `venc_me1`. Its DT node has no phandle, so the overlay cannot
+reference it; `power_me1=1` attaches a holder device to the node's genpd
+provider at stage 6 (the mechanism `genpd_dev_pm_attach_by_id()` uses) and
+logs ME1's PS register afterwards.

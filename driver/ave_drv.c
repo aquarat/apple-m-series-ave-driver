@@ -70,6 +70,20 @@ module_param(core_reset_settle_ms, uint, 0444);
 MODULE_PARM_DESC(core_reset_settle_ms,
 		 "wait this long after the block reset before reading any register of the block (default 200)");
 
+/*
+ * Power venc_me1 as well. The overlay cannot list it - its DT node has no
+ * phandle - so nothing in Linux ever switches it on. F8 read its PMGR state as
+ * 0x300 (off) at the Pipe hang, while DMA, PIPE4, PIPE5 and ME0 read 0x3ff, and
+ * the pipe's done bit (0x40D110140 bit 2) was clear: the hardware genuinely
+ * did not finish. docs/57 #3. Attached through the node's genpd provider via a
+ * holder device, exactly as genpd_dev_pm_attach_by_id() does internally.
+ */
+static bool power_me1;
+module_param(power_me1, bool, 0444);
+MODULE_PARM_DESC(power_me1,
+		 "also power the venc_me1 domain, which no DT reference reaches (docs/57 #3, F8)");
+#define AVE_ME1_NODE	"/soc/power-management@28e580000/power-controller@8020"
+
 static bool core_reset_only;
 module_param(core_reset_only, bool, 0444);
 MODULE_PARM_DESC(core_reset_only,
@@ -282,11 +296,87 @@ static irqreturn_t ave_irq_handler(int irq, void *data)
  * remove(), probe failure, and the devres action below that covers any
  * probe exit after stage 6. Idempotent. (Review 2026-09-13, finding 1.)
  */
+static void ave_me1_holder_release(struct device *dev)
+{
+	kfree(dev);
+}
+
+static int ave_power_me1_on(struct ave_device *ave)
+{
+	struct of_phandle_args args = {};
+	struct device *vdev;
+	const char *label;
+	int ret;
+
+	if (!power_me1 || ave->me1_dev)
+		return 0;
+
+	args.np = of_find_node_by_path(AVE_ME1_NODE);
+	if (!args.np)
+		return dev_err_probe(ave->dev, -ENODEV, "me1: no %s\n", AVE_ME1_NODE);
+	if (of_property_read_string(args.np, "label", &label) ||
+	    strcmp(label, "venc_me1")) {
+		of_node_put(args.np);
+		return dev_err_probe(ave->dev, -ENODEV,
+				     "me1: %s is not venc_me1; refusing\n", AVE_ME1_NODE);
+	}
+
+	vdev = kzalloc(sizeof(*vdev), GFP_KERNEL);
+	if (!vdev) {
+		of_node_put(args.np);
+		return -ENOMEM;
+	}
+	device_initialize(vdev);
+	vdev->parent = ave->dev;
+	vdev->release = ave_me1_holder_release;
+	dev_set_name(vdev, "%s-venc_me1", dev_name(ave->dev));
+	ret = device_add(vdev);
+	if (ret) {
+		of_node_put(args.np);
+		put_device(vdev);
+		return dev_err_probe(ave->dev, ret, "me1: holder device\n");
+	}
+
+	ret = of_genpd_add_device(&args, vdev);
+	of_node_put(args.np);
+	if (ret) {
+		device_unregister(vdev);
+		return dev_err_probe(ave->dev, ret, "me1: attach to venc_me1\n");
+	}
+	pm_runtime_enable(vdev);
+	ret = pm_runtime_resume_and_get(vdev);
+	if (ret) {
+		pm_runtime_disable(vdev);
+		pm_genpd_remove_device(vdev);
+		device_unregister(vdev);
+		return dev_err_probe(ave->dev, ret, "me1: power on\n");
+	}
+	ave->me1_dev = vdev;
+	dev_info(ave->dev, "me1: venc_me1 powered; PMGR PS ME1 = %#010x\n",
+		 ave_read(ave, AVE_BANK_PMGR_PS, 0x20));
+	return 0;
+}
+
+static void ave_power_me1_off(struct ave_device *ave)
+{
+	struct device *vdev = ave->me1_dev;
+
+	if (!vdev)
+		return;
+	ave->me1_dev = NULL;
+	pm_runtime_put_sync(vdev);
+	pm_runtime_disable(vdev);
+	pm_genpd_remove_device(vdev);
+	device_unregister(vdev);
+	dev_info(ave->dev, "me1: venc_me1 released\n");
+}
+
 static void ave_power_off(struct ave_device *ave, const char *why)
 {
 	if (!ave->powered)
 		return;
 	ave_smmu_quiesce(ave);	/* before the reference goes: it reads the block */
+	ave_power_me1_off(ave);	/* child of venc_me0: release it first */
 	if (ave->irq_enabled) {
 		disable_irq(ave->irq);
 		ave->irq_enabled = false;
@@ -760,6 +850,11 @@ static int ave_probe_stages(struct platform_device *pdev)
 			ave->irq_enabled = true;
 		}
 		dev_info(dev, "  resumed; left powered for inspection\n");
+
+		/* docs/57 #3: venc_me1, which no DT reference powers. */
+		ret = ave_power_me1_on(ave);
+		if (ret)
+			return ret;
 
 		/*
 		 * N1k (docs/49): program the DAPF straight after power-on,
