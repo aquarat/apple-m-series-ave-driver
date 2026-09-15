@@ -1063,3 +1063,10 @@ remain untested.
 with our addresses, but the Pipe still never completes, with no faults. The
 timeout path now logs the VENC power states and the pipe done/go registers.
 [53](53-first-frame.md) §18.
+
+## 2026-09-15 16:44 — F8: clock ungate no effect; venc_me1 is unpowered; pipe genuinely unfinished
+
+`results/f8-1789487084.kmsg`. The SVE clock-gating change made no difference.
+At the hang every VENC sub-domain reads on (`0x3ff`) except ME1 (`0x300`), and
+the pipe done bit is clear, so the hardware never finished. The driver can now
+power ME1 (`power_me1=1`). [53](53-first-frame.md) §19.
