@@ -1507,13 +1507,70 @@ static int ave_session_process(struct ave_device *ave,
 			 ave_read(ave, AVE_BANK_PMGR_PS, 0x10),
 			 ave_read(ave, AVE_BANK_PMGR_PS, 0x18),
 			 ave_read(ave, AVE_BANK_PMGR_PS, 0x20));
+		/*
+		 * docs/58 corrections: 0x40D120000 is the source-DMA config word
+		 * setPipe writes (0x80034045), not an AXI error; the AXI-error
+		 * registers are 0x40D124000/4, 0x40D12C000, 0x40D134000 (fw
+		 * 0x38b20). 0x40D110128 bit 0 is SRCDMAGO.
+		 */
 		dev_info(ave->dev,
-			 "session: diag 0x40D110140 %#010x (pipe done = bit 2) 0x40D110128 %#010x (go = bit 0) 0x40D120000 %#010x 0x40D120004 %#010x scratch7 %#010x\n",
+			 "session: diag 0x40D110140 %#010x (pipe done = bit 2) enable 0x40D11013C %#010x (want bit 2) SRCDMAGO 0x40D110128 %#010x srcdma cfg 0x40D120000 %#010x +4 %#010x scratch7 %#010x\n",
 			 ave_read(ave, AVE_BANK_DPE, 0x10140),
+			 ave_read(ave, AVE_BANK_DPE, 0x1013c),
 			 ave_read(ave, AVE_BANK_DPE, 0x10128),
 			 ave_read(ave, AVE_BANK_DPE, 0x20000),
 			 ave_read(ave, AVE_BANK_DPE, 0x20004),
 			 ave_read(ave, AVE_BANK_SVE, AVE_SVE_SCRATCH(7)));
+		{
+			u32 prog = ave_read(ave, AVE_BANK_DPE, 0x2002c);
+
+			/* docs/58 7.0: currMbRow = 0x40D12002C >> 16; 44 = last of 45 rows */
+			dev_info(ave->dev,
+				 "session: diag srcdma 0x40D12002C %#010x -> currMbRow %u; AXI err 0x40D124000 %#010x 0x40D124004 %#010x 0x40D12C000 %#010x 0x40D134000 %#010x\n",
+				 prog, prog >> 16,
+				 ave_read(ave, AVE_BANK_DPE, 0x24000),
+				 ave_read(ave, AVE_BANK_DPE, 0x24004),
+				 ave_read(ave, AVE_BANK_DPE, 0x2c000),
+				 ave_read(ave, AVE_BANK_DPE, 0x34000));
+		}
+		dev_info(ave->dev,
+			 "session: diag DPE DC000 %#010x DC004 %#010x DC400 %#010x DC4A4 %#010x DC5B0 %#010x\n",
+			 ave_read(ave, AVE_BANK_DPE, 0xdc000),
+			 ave_read(ave, AVE_BANK_DPE, 0xdc004),
+			 ave_read(ave, AVE_BANK_DPE, 0xdc400),
+			 ave_read(ave, AVE_BANK_DPE, 0xdc4a4),
+			 ave_read(ave, AVE_BANK_DPE, 0xdc5b0));
+		{
+			/* MCPU run control +8 (want 1) and ID +4 (want 4..10), docs/58 1.2 */
+			static const u32 mcpu[] = { 0x310000, 0x350000, 0x330000, 0x370000,
+						    0x390000, 0x3b0000, 0x3d0000 };
+			char line[256];
+			int n = 0, i;
+
+			for (i = 0; i < ARRAY_SIZE(mcpu); i++)
+				n += scnprintf(line + n, sizeof(line) - n, " %llx:%x/%x",
+					       0x40D100000ULL + mcpu[i],
+					       ave_read(ave, AVE_BANK_DPE, mcpu[i] + 8),
+					       ave_read(ave, AVE_BANK_DPE, mcpu[i] + 4));
+			dev_info(ave->dev, "session: diag MCPU run/id%s\n", line);
+		}
+		dev_info(ave->dev,
+			 "session: diag MCPU IMem[0] MbInput %#010x (want 0x10004000) IntraEst %#010x (0x10001000) CAVLC %#010x (0x10001800)\n",
+			 ave_read(ave, AVE_BANK_DPE, 0x300000),
+			 ave_read(ave, AVE_BANK_DPE, 0x340000),
+			 ave_read(ave, AVE_BANK_DPE, 0x3c0000));
+		/* host interfaces: +0/+4 first; +8 (irq status, side effect U) last */
+		dev_info(ave->dev,
+			 "session: diag MCPU if MbInput %#x %#x IntraEst %#x %#x CAVLC %#x %#x | +8: %#x %#x %#x\n",
+			 ave_read(ave, AVE_BANK_DPE, 0x68000),
+			 ave_read(ave, AVE_BANK_DPE, 0x68004),
+			 ave_read(ave, AVE_BANK_DPE, 0x142000),
+			 ave_read(ave, AVE_BANK_DPE, 0x142004),
+			 ave_read(ave, AVE_BANK_DPE, 0x1c8000),
+			 ave_read(ave, AVE_BANK_DPE, 0x1c8004),
+			 ave_read(ave, AVE_BANK_DPE, 0x68008),
+			 ave_read(ave, AVE_BANK_DPE, 0x142008),
+			 ave_read(ave, AVE_BANK_DPE, 0x1c8008));
 	}
 
 	if (session_sve_ungate) {
