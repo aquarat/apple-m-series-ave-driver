@@ -1521,3 +1521,42 @@ candidate. The SrcNeighbor tables are published (4 entries/group, 80 KiB
 slots); whether the firmware programs the neighbour DMA from them, and whether
 13.5's DevType-dependent neighbour counts (docs/47: Info/Pixel count 4 only for
 DevType 17/18, else 1) matter, is docs/59's question.
+
+---
+
+## 22. F11 (2026-09-15 18:08): the stall is inside row 0; ModeDecision and ReconLuma are stuck
+
+`results/f11-1789492087.kmsg`, commit `2fb7c67`, as F10 plus `session_nbr_fill=1`.
+Hang unchanged; docs/59's reads at the timeout:
+
+- **MbInput produced 48, consumed 34**, lag 15, drain 0; last source event
+  `0x00010008 / 0x10000000` (y 1, x 8, not last). **Consumed < 80: the encode
+  chain stalled inside row 0**, around MB 34. "currMbRow 1" (unchanged,
+  `0x00010009`) is the lookahead head, as docs/59 predicted. IntraEst current MB
+  `0x00020001`.
+- Stage host interfaces (`+0` enable, `+8` pending, `+0xc/+0x10/+0x14`):
+
+  | stage | +0 | +8 | +0xc | +0x10 | +0x14 |
+  |---|---|---|---|---|---|
+  | MbInput | `0x48000` | `0x2201f` | 0 | 0 | `0x24` |
+  | IntraEst | `0x2000` | `0x1f` | 0 | 0 | 0 |
+  | CAVLC | `0x2000` | `0x1f` | 0 | 0 | 0 |
+  | MotionEst | `0x8000` | `0x201f` | 0 | 0 | 0 |
+  | **ModeDecision** | `0x2000` | **`0x201f`** | 0 | 0 | **`0x80000126`** |
+  | **ReconLuma** | `0x2000` | **`0x201f`** | 0 | 0 | **`0x8000012b`** |
+  | ReconChroma | `0x2000` | `0x1f` | `0x35` | `0x35` | `0x1` |
+
+  **ModeDecision and ReconLuma have bit 13 enabled *and* pending, and bit 31 set
+  in `+0x14`** (docs/59: a stuck bit 31 marks the stage holding the chain). An
+  enabled pending event that is not serviced means those cores are not taking
+  their per-MB interrupt - blocked or faulted (**I**). MotionEst's bit 13 is
+  pending but not enabled, as expected for an I-frame.
+- Neighbour DMA: readers and writers point at our buffers (Info `0xff000000`
+  size `0x1400`, Pixel `0xff050000` size `0x14000`, control `0x80030001`), but
+  **0 of 81 920 bytes changed in Info[0] and Pixel[0]** - the writers stored
+  nothing. Consistent with neighbour output coming from the stalled stages (or
+  only at row end); not necessarily a separate cause.
+- No AXI, DART or SMMU faults; DPE, power, MCPU run/ID/IMem as in F10.
+
+Next: why ModeDecision and ReconLuma stop servicing their MB interrupt
+(docs/60).
