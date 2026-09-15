@@ -1419,3 +1419,27 @@ per DPB slot (LSB at slot+0, MSB at slot+0x20000); `session_sve_ungate=1`
 writes SVE `+0x38 = 0` around Process as `AVE_DPM_TuneUpPipe` does (docs/57
 #2); after Process the driver reads `0x40D130240` (+`0x24c/0x25c/0x31c`) and
 prints whether the recon writer was programmed.
+
+---
+
+## 18. F7 (2026-09-15 16:40): NEED_LSB_PLANES programs the recon writer; the Pipe still hangs
+
+`results/f7-1789486815.kmsg`, commit `2886130`. Cold boot, overlay
+`variant=4`, no pulse, no unload, `session_lsb=1`.
+
+- Start_AVC with `NEED_LSB_PLANES=1`, slot 0 LSB `0xfe800000`, MSB `0xfe820000`:
+  ACCEPTED. DART1 matched before Process.
+- **`Uncompress Ref is not supported` is gone**, and after Process the recon
+  writer reads **`0x40D130240 = 0x800314b1`**, `+0x24c = 0xfe820000` (MSB),
+  `+0x25c = 0xfe800000` (LSB), `+0x31c = 0xfe810000` (derived by the firmware).
+  docs/57 §4.3 is **C on hardware**: the flag gates recon programming, and
+  it now happens.
+- **Still `PIPE HANG`**, `ENC: StartCount 1-1-1-0, Idle 1-1-0-1`, no
+  completion, zero DART/SMMU/AXI faults. So docs/57 #1 was a real bug but not
+  the only one.
+
+The driver was left loaded with the firmware hung; register peeks from
+userspace are blocked (`CONFIG_IO_STRICT_DEVMEM=y`, regions claimed), so the
+#3/#4 reads are now built into the Process timeout path (`session_diag`,
+default on, read-only): VENC_DMA/PIPE4/PIPE5/ME0/ME1 power state, `0x40D110140`
+(pipe done bit 2), `0x40D110128` (go bit 0), `0x40D120000/4`, scratch 7.

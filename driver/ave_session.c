@@ -224,6 +224,11 @@ module_param(session_sve_ungate, bool, 0444);
 MODULE_PARM_DESC(session_sve_ungate,
 	"write SVE +0x38 = 0 (clock gating off, as AVE_DPM_TuneUpPipe does) around Process (docs/57 #2)");
 
+static bool session_diag = true;
+module_param(session_diag, bool, 0444);
+MODULE_PARM_DESC(session_diag,
+	"on a Process timeout, log the VENC power states, the pipe done/go/AXI registers and scratch 7 (read-only, docs/57 #3/#4)");
+
 static bool session_ignore_dart;
 module_param(session_ignore_dart, bool, 0444);
 MODULE_PARM_DESC(session_ignore_dart,
@@ -1470,6 +1475,34 @@ static int ave_session_process(struct ave_device *ave,
 		 ave_read(ave, AVE_BANK_DPE, 0x3024c),
 		 ave_read(ave, AVE_BANK_DPE, 0x3025c),
 		 ave_read(ave, AVE_BANK_DPE, 0x3031c));
+
+	/*
+	 * docs/57 #3 and #4, read-only, at the moment Process gave up:
+	 *  - PMGR power state of VENC_DMA, PIPE4, PIPE5, ME0, ME1 (bank 3 +0x00..
+	 *    +0x20, docs/27 7): is ME1 - which no DT domain powers - off?
+	 *  - 0x40D110140 (pipe done status, bit 2) and 0x40D110128 (bit 0 "go"),
+	 *    0x40D120000/4 (AXI error): did the hardware finish and the done
+	 *    interrupt get lost, or did it never finish? The firmware reads
+	 *    0x40D110140 before acking it, so this read may disturb the
+	 *    diagnosis - never the machine - and the frame is already lost here.
+	 *  - SVE scratch 7: the heartbeat sets bit 26 on PIPE HANG.
+	 */
+	if (ret && session_diag) {
+		dev_info(ave->dev,
+			 "session: diag PS DMA %#010x PIPE4 %#010x PIPE5 %#010x ME0 %#010x ME1 %#010x\n",
+			 ave_read(ave, AVE_BANK_PMGR_PS, 0x00),
+			 ave_read(ave, AVE_BANK_PMGR_PS, 0x08),
+			 ave_read(ave, AVE_BANK_PMGR_PS, 0x10),
+			 ave_read(ave, AVE_BANK_PMGR_PS, 0x18),
+			 ave_read(ave, AVE_BANK_PMGR_PS, 0x20));
+		dev_info(ave->dev,
+			 "session: diag 0x40D110140 %#010x (pipe done = bit 2) 0x40D110128 %#010x (go = bit 0) 0x40D120000 %#010x 0x40D120004 %#010x scratch7 %#010x\n",
+			 ave_read(ave, AVE_BANK_DPE, 0x10140),
+			 ave_read(ave, AVE_BANK_DPE, 0x10128),
+			 ave_read(ave, AVE_BANK_DPE, 0x20000),
+			 ave_read(ave, AVE_BANK_DPE, 0x20004),
+			 ave_read(ave, AVE_BANK_SVE, AVE_SVE_SCRATCH(7)));
+	}
 
 	if (session_sve_ungate) {
 		ave_write(ave, AVE_BANK_SVE, AVE_SVE_IDLE, 1);

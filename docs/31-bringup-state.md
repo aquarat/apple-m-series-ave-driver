@@ -1055,3 +1055,11 @@ any register read of the block; `halt-run.sh` and `e3-run.sh` now sleep 3 s
 between the pre-insmod marker and `insmod`, so the next death at insmod is
 visible as such. F6's actual changes (`session_lsb`, `session_sve_ungate`)
 remain untested.
+
+## 2026-09-15 16:40 — F7: recon writer now programmed (0x800314b1); Pipe still hangs
+
+`results/f7-1789486815.kmsg`. `session_lsb=1` on the safe F5 path: the
+"Uncompress Ref" warning is gone and the firmware programs the recon writer
+with our addresses, but the Pipe still never completes, with no faults. The
+timeout path now logs the VENC power states and the pipe done/go registers.
+[53](53-first-frame.md) §18.
