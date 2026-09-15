@@ -308,6 +308,16 @@ int ave_cmd_build_start_avc(const struct ave_cmd_abi *abi, u8 *buf, size_t len,
 			if (!s->recon[i].lsb_addr || (s->recon[i].lsb_addr & 127))
 				return -EINVAL;
 	}
+	if (s->n_colocated) {
+		if (s->n_colocated != s->n_recon || s->n_colocated > AVE_DPB_MAX ||
+		    l->colocated_set == AVE_OFF_NONE ||
+		    s->n_colocated > l->colocated_max)
+			return -EINVAL;
+		for (i = 0; i < s->n_colocated; i++)
+			if (!s->colocated[i] ||
+			    (s->colocated[i] & (AVE_STRIDE_ALIGN - 1)))
+				return -EINVAL;
+	}
 	if (s->n_low_res_ref) {
 		/*
 		 * One LowResRef per DPB slot, in slot order, or none at all.
@@ -406,6 +416,9 @@ int ave_cmd_build_start_avc(const struct ave_cmd_abi *abi, u8 *buf, size_t len,
 	for (i = 0; i < s->n_low_res_ref; i++)
 		wr64(&w, l->low_res_ref_set + i * l->low_res_ref_stride,
 		     s->low_res_ref[i]);
+	for (i = 0; i < s->n_colocated; i++)
+		wr64(&w, l->colocated_set + i * l->colocated_stride,
+		     s->colocated[i]);
 	for (i = 0; i < s->n_coded; i++) {
 		wr64(&w, l->coded_addr + i * l->coded_addr_stride, s->coded[i].addr);
 		wr32(&w, l->coded_size + i * l->coded_size_stride, s->coded[i].size);

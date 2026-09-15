@@ -241,6 +241,18 @@ module_param(session_nbr_fill, bool, 0444);
 MODULE_PARM_DESC(session_nbr_fill,
 	"fill the SrcNeighbor arena with 0xA5 and report at a Process timeout how much of Info[0]/Pixel[0] the neighbour writers overwrote (docs/59)");
 
+/*
+ * docs/60 cause #1: publish a colocated MV buffer per DPB slot in Start_AVC
+ * (wire 0xF6B0). Left zero, setPipe disables the pipe's colocated writer
+ * (0x40D130380 = 0), the one write channel off for us and on under macOS.
+ * 128 bytes per MB (the Colocated surface), 64-byte aligned, filled with 0x5A
+ * so writes show at the timeout.
+ */
+static bool session_coloc;
+module_param(session_coloc, bool, 0444);
+MODULE_PARM_DESC(session_coloc,
+	"publish per-slot colocated MV buffers in Start_AVC (wire 0xF6B0) so the pipe's colocated writer is enabled (docs/60 #1)");
+
 static bool session_diag = true;
 module_param(session_diag, bool, 0444);
 MODULE_PARM_DESC(session_diag,
@@ -466,6 +478,9 @@ struct ave_sess_bufs {
 	u32		n_dpb;
 	u32		recon_size;	/* per slot */
 	size_t		low_res_size;	/* per slot; 0 = none published */
+	u64		coloc[AVE_SESS_DPB_MAX];	/* colocated MV per slot */
+	void		*coloc_cpu[AVE_SESS_DPB_MAX];
+	size_t		coloc_size;	/* per slot; 0 = none */
 	u32		low_res_stride;	/* for the log line only */
 	u64		nbr[AVE_SRC_NBR_GROUPS][AVE_SRC_NBR_MAX];
 	void		*nbr_cpu[AVE_SRC_NBR_GROUPS][AVE_SRC_NBR_MAX];
@@ -1005,6 +1020,34 @@ static int ave_session_start_avc(struct ave_device *ave,
 				break;
 			}
 	}
+	/* Colocated MV buffers (docs/60 #1), allocated here, all or nothing. */
+	if (session_coloc && abi->start_avc.colocated_set != AVE_OFF_NONE) {
+		size_t sz = ALIGN((size_t)128 * (cw / 16) * (ch / 16), SZ_4K);
+
+		for (i = 0; i < bufs->n_dpb; i++) {
+			dma_addr_t iova;
+			void *cpu = ave_sess_dma_alloc(bufs, sz, &iova);
+
+			if (!cpu) {
+				dev_warn(ave->dev, "session: colocated slot %u allocation failed; table dropped\n", i);
+				bufs->coloc_size = 0;
+				break;
+			}
+			memset(cpu, 0x5a, sz);
+			bufs->coloc[i] = iova;
+			bufs->coloc_cpu[i] = cpu;
+			bufs->coloc_size = sz;
+		}
+		if (bufs->coloc_size) {
+			for (i = 0; i < bufs->n_dpb; i++)
+				s.colocated[i] = bufs->coloc[i];
+			s.n_colocated = bufs->n_dpb;
+			dev_info(ave->dev,
+				 "session: Start_AVC: colocated %u slot(s) of %#zx bytes, slot 0 %#llx at wire %#x (0x5A fill)\n",
+				 bufs->n_dpb, bufs->coloc_size, bufs->coloc[0],
+				 abi->start_avc.colocated_set);
+		}
+	}
 	s.coded = &coded;
 	s.coded_hdr = &coded_hdr;
 	s.n_coded = 1;
@@ -1415,6 +1458,84 @@ static void ave_session_diag_row0(struct ave_device *ave,
 	}
 }
 
+/*
+ * docs/60 reads: the pipe's hardware write channels (full 0x40 windows), once
+ * after Start_AVC and again at the Process timeout, so a channel the firmware
+ * programs for the frame shows up as a change. Read-only, bank 0.
+ */
+static void ave_session_diag_channels(struct ave_device *ave, const char *tag)
+{
+	static const u32 ch[] = { 0x30240, 0x30300, 0x30380, 0x303c0, 0x30400,
+				  0x30440, 0x30480, 0x30600, 0x30640, 0x30700,
+				  0x30780, 0x20bc0 };
+	int i, k;
+
+	for (i = 0; i < ARRAY_SIZE(ch); i++) {
+		u32 v[16];
+
+		for (k = 0; k < 16; k++)
+			v[k] = ave_read(ave, AVE_BANK_DPE, ch[i] + 4 * k);
+		dev_info(ave->dev,
+			 "session: chan [%s] %llx: %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x\n",
+			 tag, 0x40D100000ULL + ch[i], v[0], v[1], v[2], v[3], v[4],
+			 v[5], v[6], v[7], v[8], v[9], v[10], v[11], v[12], v[13],
+			 v[14], v[15]);
+	}
+}
+
+/* docs/60 Q5: MCPU counters, stacks, stage context/go registers. Read-only. */
+static void ave_session_diag_mcpu(struct ave_device *ave,
+				  struct ave_sess_bufs *bufs)
+{
+	static const struct { const char *name; u32 base; } stk[] = {
+		{ "ModeDec", 0x368f60 }, { "ReconLuma", 0x388f60 },
+	};
+	int i, k;
+
+	dev_info(ave->dev,
+		 "session: diag MCPU counters ModeDec entries %u ReconLuma granted %u CAVLC entries %u\n",
+		 ave_read(ave, AVE_BANK_DPE, 0x368a1c),
+		 ave_read(ave, AVE_BANK_DPE, 0x388280),
+		 ave_read(ave, AVE_BANK_DPE, 0x3c87a4));
+	for (i = 0; i < ARRAY_SIZE(stk); i++)
+		for (k = 0; k < 0xa0; k += 0x20)
+			dev_info(ave->dev,
+				 "session: diag stack %-9s %llx: %08x %08x %08x %08x %08x %08x %08x %08x\n",
+				 stk[i].name, 0x40D100000ULL + stk[i].base + k,
+				 ave_read(ave, AVE_BANK_DPE, stk[i].base + k),
+				 ave_read(ave, AVE_BANK_DPE, stk[i].base + k + 4),
+				 ave_read(ave, AVE_BANK_DPE, stk[i].base + k + 8),
+				 ave_read(ave, AVE_BANK_DPE, stk[i].base + k + 12),
+				 ave_read(ave, AVE_BANK_DPE, stk[i].base + k + 16),
+				 ave_read(ave, AVE_BANK_DPE, stk[i].base + k + 20),
+				 ave_read(ave, AVE_BANK_DPE, stk[i].base + k + 24),
+				 ave_read(ave, AVE_BANK_DPE, stk[i].base + k + 28));
+	dev_info(ave->dev,
+		 "session: diag ModeDec ctx 0x40D263000 %08x +180 %08x +184 %08x +228 %08x go 0x40D26A080 %08x +084 %08x | ReconLuma ctx 0x40D283000 %08x +180 %08x +184 %08x +228 %08x go 0x40D28A080 %08x\n",
+		 ave_read(ave, AVE_BANK_DPE, 0x163000),
+		 ave_read(ave, AVE_BANK_DPE, 0x163180),
+		 ave_read(ave, AVE_BANK_DPE, 0x163184),
+		 ave_read(ave, AVE_BANK_DPE, 0x163228),
+		 ave_read(ave, AVE_BANK_DPE, 0x16a080),
+		 ave_read(ave, AVE_BANK_DPE, 0x16a084),
+		 ave_read(ave, AVE_BANK_DPE, 0x183000),
+		 ave_read(ave, AVE_BANK_DPE, 0x183180),
+		 ave_read(ave, AVE_BANK_DPE, 0x183184),
+		 ave_read(ave, AVE_BANK_DPE, 0x183228),
+		 ave_read(ave, AVE_BANK_DPE, 0x18a080));
+
+	if (bufs->coloc_size && bufs->coloc_cpu[0]) {
+		const u8 *b = bufs->coloc_cpu[0];
+		size_t n, changed = 0;
+
+		dma_rmb();
+		for (n = 0; n < bufs->coloc_size; n++)
+			changed += b[n] != 0x5a;
+		dev_info(ave->dev, "session: diag colocated slot 0: %zu of %zu bytes changed\n",
+			 changed, bufs->coloc_size);
+	}
+}
+
 static int ave_session_process(struct ave_device *ave,
 			       const struct ave_cmd_abi *abi,
 			       struct ave_sess_bufs *bufs, u64 client_id)
@@ -1673,6 +1794,8 @@ static int ave_session_process(struct ave_device *ave,
 			 ave_read(ave, AVE_BANK_DPE, 0x142008),
 			 ave_read(ave, AVE_BANK_DPE, 0x1c8008));
 		ave_session_diag_row0(ave, bufs);
+		ave_session_diag_mcpu(ave, bufs);
+		ave_session_diag_channels(ave, "timeout");
 	}
 
 	if (session_sve_ungate) {
@@ -1818,6 +1941,8 @@ int ave_session_selftest(struct ave_device *ave)
 	ave_session_alloc_dpb(ave, bufs);
 
 	ret = ave_session_start_avc(ave, abi, bufs, AVE_SESS_CLIENT_ID);
+	if (!ret && session_frame && session_diag)
+		ave_session_diag_channels(ave, "after Start_AVC");
 	if (ret || !session_frame)
 		goto out;
 
