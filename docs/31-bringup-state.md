@@ -1111,3 +1111,9 @@ no gating flag, and the SrcNeighbor counts/sizes are adequate. No fix is
 indicated yet; the driver now logs MbInput's produced/consumed counters, every
 stage's host interface, the neighbour reader/writer registers, and (with
 `session_nbr_fill=1`) whether the neighbour writers stored anything.
+
+## 2026-09-15 18:08 — F11: stall inside row 0 (~MB 34); ModeDecision and ReconLuma stuck
+
+`results/f11-1789492087.kmsg`. MbInput consumed 34 of 80 row-0 MBs.
+ModeDecision and ReconLuma show an enabled, pending MB event and bit 31 set
+in `+0x14`; the neighbour writers stored nothing. [53](53-first-frame.md) §22.
