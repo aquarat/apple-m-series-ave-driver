@@ -99,6 +99,9 @@ if [ -n "${OVERLAY:-}" ]; then
 fi
 
 step "load 1: insmod $P1"
+# Give the marker time to reach the disk: F6, f6b and f6c died within
+# milliseconds of insmod and the synced marker before it was lost each time.
+sleep 3
 # shellcheck disable=SC2086
 sudo insmod driver/apple-ave.ko $P1; RC1=$?
 step "load 1 returned rc=$RC1"
@@ -118,6 +121,9 @@ if [ $RCU -ne 0 ]; then
 fi
 
 step "load 2: insmod $P2"
+# Give the marker time to reach the disk: F6, f6b and f6c died within
+# milliseconds of insmod and the synced marker before it was lost each time.
+sleep 3
 # shellcheck disable=SC2086
 sudo insmod driver/apple-ave.ko $P2; RC2=$?
 step "load 2 returned rc=$RC2"

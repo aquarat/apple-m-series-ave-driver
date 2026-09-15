@@ -12,7 +12,7 @@ LOG=results/$NAME-$(date +%s).kmsg
 { echo "=== $NAME $(date -Is) commit $(git rev-parse --short HEAD): insmod driver/apple-ave.ko $* ==="; } > "$LOG"; sync
 sudo python3 tools/kmsg_capture.py "$LOG" &
 CAP=$!
-sleep 1
+sleep 3	# let the header reach the disk before insmod (F6: lost otherwise)
 sudo insmod driver/apple-ave.ko "$@"
 RC=$?
 echo "=== insmod returned rc=$RC ===" >> "$LOG"; sync

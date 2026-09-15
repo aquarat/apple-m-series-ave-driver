@@ -1026,3 +1026,32 @@ after `remove()`'s power-off instead; F5's boot never unloaded the driver at
 all), the falsified kernel-version and deterministic-lethality hypotheses,
 the apple-dart runtime-PM finding, and the ranked next experiments — are in
 [58](58-overlay-reset.md).
+
+## 2026-09-15 — F6, f6b, f6c: all three died at insmod, not at the overlay
+
+`results/f6b-1789397677.kmsg`, `results/f6c-1789483860.kmsg` (f6c was a re-run
+of f6b). With the overlay applied inside the captured window, both logs end at
+the `t=25s` heartbeat, and in both boots the journal's last entry is **30.4 s
+after `ave-overlay: applied`** - the end of the runner's 30 s wait, i.e. the
+`sudo tee` of the "load 1: insmod" marker. F6's journal likewise ends at the
+marker before its insmod. So all three reset the machine **within milliseconds
+of `insmod apple-ave`**, before a single probe line or the synced marker
+reached disk. The overlay was a red herring: `irqbalance` classifies the new
+DART IRQ identically in the F4 and F5 boots, which survived, and F4 left the
+same overlay idle for 9 minutes.
+
+**What is new on that path (I):** F6* use `core_reset=2` (a pulse even on a
+cold core) **and** commit `923b52b`'s datapath-DART handling, which reads
+DART1 in the post-pulse dump and then writes its TTBR/TCR
+(`ave_dart_restore_datapath`) immediately after `reset_control_reset()`.
+F4 pulsed a cold core and read the CPUDART, DAPF and SVE straight after without
+trouble, but never touched DART1 then; F5 touched DART1 but never pulsed. The
+one untested combination is touching the instance the pulse clears, at once -
+consistent with a read of a block not yet out of reset hanging the fabric
+(docs/24). Not proven.
+
+**Changes:** `core_reset_settle_ms` (default 200) waits after the pulse before
+any register read of the block; `halt-run.sh` and `e3-run.sh` now sleep 3 s
+between the pre-insmod marker and `insmod`, so the next death at insmod is
+visible as such. F6's actual changes (`session_lsb`, `session_sve_ungate`)
+remain untested.
