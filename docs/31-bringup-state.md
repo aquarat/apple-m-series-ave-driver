@@ -1093,3 +1093,10 @@ tables plus Enable, applied from `AVE_HwC::PowerOn`. Now available as
 `dpe_tunables=1` (tables generated from the kext, every value read back), and
 the timeout diagnostics add `currMbRow`, the pipe-done enable, the real AXI
 registers, DPE state, MCPU run/ID, IMem first words and interface words.
+
+## 2026-09-15 17:34 — F10: AVE_DPE programmed, no change; pipe stalls at MB row 1
+
+`results/f10-1789490043.kmsg`. The DPE tunables applied and read back but the
+hang is unchanged. The new reads locate it: currMbRow 1, no AXI errors,
+pipe-done enabled, all seven MCPUs loaded and running; MbInput has pending
+interface bits the next stage does not. [53](53-first-frame.md) §21.
