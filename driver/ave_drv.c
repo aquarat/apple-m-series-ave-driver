@@ -65,6 +65,11 @@ module_param(core_reset, int, 0444);
 MODULE_PARM_DESC(core_reset,
 		 "at stage 7, when the core is still up from an earlier load: 0 = leave it (default), 1 = pulse the block reset and report whether it stops and whether the DAPF survived, 2 = pulse it even when already STOPPED");
 
+static unsigned int core_reset_settle_ms = 200;
+module_param(core_reset_settle_ms, uint, 0444);
+MODULE_PARM_DESC(core_reset_settle_ms,
+		 "wait this long after the block reset before reading any register of the block (default 200)");
+
 static bool core_reset_only;
 module_param(core_reset_only, bool, 0444);
 MODULE_PARM_DESC(core_reset_only,
@@ -395,6 +400,18 @@ static int ave_core_reset(struct ave_device *ave, bool *pulsed)
 		ave->irq_enabled = false;
 	}
 	ret = reset_control_reset(ave->rst);
+	/*
+	 * Let the block come out of reset before anything reads it. F6, f6b and
+	 * f6c all reset the machine within milliseconds of insmod - too fast
+	 * for a single line to reach disk - and the one thing new on that path
+	 * was touching the datapath DART right after the pulse (the post-pulse
+	 * dump and ave_dart_restore_datapath). A read of a block that is not
+	 * ready hangs the fabric (docs/24). Inferred, not shown; this settle
+	 * time is the cheap guard, and core_reset=1 avoids the pulse on a cold
+	 * core altogether. (docs/31, 2026-09-15.)
+	 */
+	if (core_reset_settle_ms)
+		msleep(core_reset_settle_ms);
 	if (irq_was_on) {
 		enable_irq(ave->irq);
 		ave->irq_enabled = true;
