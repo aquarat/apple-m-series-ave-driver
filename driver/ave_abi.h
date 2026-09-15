@@ -1014,6 +1014,18 @@ struct ave_start_avc_layout {
 	u32	low_res_ref_set;	/* u64[] per DPB slot; NONE = not located */
 	u32	low_res_ref_stride;	/* bytes between slots */
 	u32	low_res_ref_max;	/* slots in one set */
+	/*
+	 * Colocated MV table, one u64 per DPB slot, same slot order as recon.
+	 * docs/60: left zero, setRefPointers (fw 0x2c4b0) copies the zero over
+	 * the per-frame field and setPipe (cbz 0x554f0) writes the pipe's
+	 * colocated-MV writer 0x40D130380 = 0 - disabled - which is the only
+	 * write channel off for us and on under macOS, where the kext fills this
+	 * for every Colocated surface (0xfffffe0008eaef74..efb8). docs/53 13.2
+	 * located the table: VideoParams +0xF650 = wire 0xF6B0, 2 x 17 x 8.
+	 */
+	u32	colocated_set;		/* u64[] per DPB slot; NONE = not located */
+	u32	colocated_stride;
+	u32	colocated_max;
 	/* coded data / coded header tables */
 	u32	coded_max;
 	u32	coded_addr, coded_addr_stride;		/* u64[] */
@@ -1345,6 +1357,9 @@ const struct ave_cmd_abi ave_cmd_abi_13_5 = {
 		/* LowResRef: VideoParams+0x248 = wire 0x2A8, set stride 0x88,
 		 * slot stride 8, 17 slots (kext 0xfffffe0008eaefcc/0xeaf010;
 		 * fw ProvideReferenceFrames ldr x23,[x21,#584] 0x2b780). */
+		.colocated_set      = 0xf6b0,	/* docs/53 13.2, docs/60 */
+		.colocated_stride   = 0x08,
+		.colocated_max      = AVE_DPB_MAX,
 		.low_res_ref_set    = 0x2a8,
 		.low_res_ref_stride = 0x08,
 		.low_res_ref_max    = AVE_DPB_MAX,

@@ -484,6 +484,25 @@ static void test_start_13_5(void)
 		s.recon = RECON;
 	}
 
+	/* Colocated MV table at wire 0xF6B0, stride 8 (docs/53 13.2, docs/60). */
+	begin("13.5 start_avc colocated");
+	s = session_1080p(true);
+	s.n_colocated = 2;
+	s.colocated[0] = 0x0000000210000000ull;
+	s.colocated[1] = 0x0000000210080000ull;
+	memset(buf, 0, sizeof(buf));
+	expect_int(ave_cmd_build_start_avc(a, buf, sizeof(buf), &CTX, &s), 0x10e10, "size unchanged");
+	E64(buf, 0xf6b0, s.colocated[0], "colocated[0] (VideoParams+0xF650)");
+	E64(buf, 0xf6b8, s.colocated[1], "colocated[1]");
+	E64(buf, 0xf6c0, 0, "slot 2 left zero");
+	s.colocated[1] = 0;
+	expect_int(ave_cmd_build_start_avc(a, buf, sizeof(buf), &CTX, &s), -EINVAL, "a zero colocated entry");
+	s.colocated[1] = 0x0000000210080020ull;
+	expect_int(ave_cmd_build_start_avc(a, buf, sizeof(buf), &CTX, &s), -EINVAL, "colocated & 63");
+	s.colocated[1] = 0x0000000210080000ull;
+	s.n_colocated = 1;
+	expect_int(ave_cmd_build_start_avc(a, buf, sizeof(buf), &CTX, &s), -EINVAL, "count != n_recon");
+
 	begin("13.5 start_avc negatives");
 	s = session_1080p(true);
 	expect_int(ave_cmd_build_start_avc(a, buf, 0x10e0f, &CTX, &s), -EINVAL, "len short by 1");

@@ -107,6 +107,13 @@ struct ave_avc_session {
 	 */
 	u64	low_res_ref[AVE_DPB_MAX];
 	u32	n_low_res_ref;			/* 0, or exactly n_recon */
+	/*
+	 * Colocated MV buffers, one per DPB slot, same order as recon[]
+	 * (docs/60). 0 entries leaves the table zero, which disables the pipe's
+	 * colocated writer; kept possible as the control.
+	 */
+	u64	colocated[AVE_DPB_MAX];
+	u32	n_colocated;			/* 0, or exactly n_recon */
 	const struct ave_buf	*coded;		/* bitstream buffers */
 	const struct ave_buf	*coded_hdr;	/* coded-header buffers, same count */
 	u32	n_coded;			/* 1..abi coded_max */

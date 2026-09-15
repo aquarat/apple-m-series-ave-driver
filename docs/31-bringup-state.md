@@ -1117,3 +1117,17 @@ stage's host interface, the neighbour reader/writer registers, and (with
 `results/f11-1789492087.kmsg`. MbInput consumed 34 of 80 row-0 MBs.
 ModeDecision and ReconLuma show an enabled, pending MB event and bit 31 set
 in `+0x14`; the neighbour writers stored nothing. [53](53-first-frame.md) §22.
+
+## 2026-09-15 — docs/60: the stuck MCPUs wait for a hardware grant; the colocated writer is disabled
+
+Static. ModeDecision and ReconLuma are inside their per-MB IRQ handler,
+busy-waiting on a request they posted to the encoder hardware (`+0x14` bit 31 =
+posted, not granted); it is not a fault. Of all the pipe's hardware write
+channels, the only one disabled for us but enabled under macOS is the
+**colocated-MV writer** (`0x40D130380`): our zero Start_AVC colocated table
+(wire `0xF6B0`) is copied over the per-frame field by `setRefPointers` and
+makes `setPipe` switch the writer off. docs/54 listed that table as safely
+zero - true for asserts, not for the pipe. The driver can now publish per-slot
+colocated buffers (`session_coloc=1`, 0x5A-filled) and logs MCPU counters,
+the two stuck cores' stacks and stage registers, and every write channel after
+Start_AVC and at the timeout.
