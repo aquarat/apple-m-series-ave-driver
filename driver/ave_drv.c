@@ -32,6 +32,7 @@
 #include "ave_dapf.h"
 #include "ave_session.h"
 #include "ave_smmu.h"
+#include "ave_dpe_tables.h"
 
 #define AVE_ASC_IDLE_TIMEOUT_US		100000
 
@@ -83,6 +84,19 @@ module_param(power_me1, bool, 0444);
 MODULE_PARM_DESC(power_me1,
 		 "also power the venc_me1 domain, which no DT reference reaches (docs/57 #3, F8)");
 #define AVE_ME1_NODE	"/soc/power-management@28e580000/power-controller@8020"
+
+/*
+ * docs/58 5.1 / 7.1: macOS programs AVE_DPE (0x40D1DC000) on every power-on -
+ * AVE_HwC::PowerOn -> ResetDPE -> AVE_DPE::Reset applies the Castor_6000 CAT and
+ * CAC Default tables, then CAC 8-bit and AVE_DPE::Enable. The firmware never
+ * touches the block and neither did this driver, so the pipe has run with it
+ * at reset defaults. dpe_tunables=1 applies exactly those tables, generated
+ * from the kext (ave_dpe_tables.h).
+ */
+static bool dpe_tunables;
+module_param(dpe_tunables, bool, 0444);
+MODULE_PARM_DESC(dpe_tunables,
+		 "apply macOS's AVE_DPE Castor_6000 tunables and enable (0x40D1DC000) after power-on, before the core starts (docs/58 7.1)");
 
 static bool core_reset_only;
 module_param(core_reset_only, bool, 0444);
@@ -296,6 +310,78 @@ static irqreturn_t ave_irq_handler(int irq, void *data)
  * remove(), probe failure, and the devres action below that covers any
  * probe exit after stage 6. Idempotent. (Review 2026-09-13, finding 1.)
  */
+static void ave_dpe_log(struct ave_device *ave, const char *tag)
+{
+	dev_info(ave->dev,
+		 "dpe: [%s] DC000 %#010x DC004 %#010x DC400 %#010x DC4A4 %#010x DC5B0 %#010x\n",
+		 tag,
+		 ave_read(ave, AVE_BANK_DPE, 0xdc000),
+		 ave_read(ave, AVE_BANK_DPE, 0xdc004),
+		 ave_read(ave, AVE_BANK_DPE, 0xdc400),
+		 ave_read(ave, AVE_BANK_DPE, 0xdc4a4),
+		 ave_read(ave, AVE_BANK_DPE, 0xdc5b0));
+}
+
+/* AVE_DPE::ApplyTunables (kext 0xfffffe0008ee3e4c): read, bic clear, orr set. */
+static void ave_dpe_apply(struct ave_device *ave, u32 base,
+			  const struct ave_dpe_tunable *t, unsigned int n)
+{
+	unsigned int i;
+
+	for (i = 0; i < n; i++) {
+		u32 reg = base + t[i].off;
+		u32 v = ave_read(ave, AVE_BANK_DPE, reg);
+
+		ave_write(ave, AVE_BANK_DPE, reg, (v & ~t[i].clear) | t[i].set);
+	}
+}
+
+/*
+ * The order AVE_DPE::Reset uses (kext 0xfffffe0008ee4c74): CAT and CAC Default
+ * (type 0, 0x4f50), then CAC 8-bit (type 1, 0x50c4) and Enable (0x50cc) -
+ * 0x40D1DC400 |= 3, 0x40D1DC000 |= 1 (0x48e0..0x4908, 0x4b50..0x4b78).
+ * Every value is read back against the table.
+ */
+static int ave_dpe_program(struct ave_device *ave)
+{
+	unsigned int i, bad = 0;
+
+	if (!dpe_tunables)
+		return 0;
+
+	ave_dpe_log(ave, "before");
+	ave_dpe_apply(ave, AVE_DPE_CAT_BASE, ave_dpe_cat_default,
+		      ARRAY_SIZE(ave_dpe_cat_default));
+	ave_dpe_apply(ave, AVE_DPE_CAC_BASE, ave_dpe_cac_default,
+		      ARRAY_SIZE(ave_dpe_cac_default));
+	ave_dpe_apply(ave, AVE_DPE_CAC_BASE, ave_dpe_cac_8bit,
+		      ARRAY_SIZE(ave_dpe_cac_8bit));
+	ave_write(ave, AVE_BANK_DPE, AVE_DPE_CAC_BASE,
+		  ave_read(ave, AVE_BANK_DPE, AVE_DPE_CAC_BASE) | 3);
+	ave_write(ave, AVE_BANK_DPE, AVE_DPE_CAT_BASE,
+		  ave_read(ave, AVE_BANK_DPE, AVE_DPE_CAT_BASE) | 1);
+
+	/* The 8-bit table is the last word on every offset it names. */
+	for (i = 0; i < ARRAY_SIZE(ave_dpe_cac_8bit); i++) {
+		const struct ave_dpe_tunable *t = &ave_dpe_cac_8bit[i];
+		u32 v = ave_read(ave, AVE_BANK_DPE, AVE_DPE_CAC_BASE + t->off);
+
+		if (t->off == 0)	/* Enable ORs bits 0-1 in afterwards */
+			v &= ~3u;
+		if ((v & t->clear) != t->set)
+			bad++;
+	}
+	ave_dpe_log(ave, "after");
+	if (bad) {
+		dev_err(ave->dev, "dpe: %u tunable(s) did not read back\n", bad);
+		return -EIO;
+	}
+	dev_info(ave->dev, "dpe: Castor_6000 tunables applied (%zu+%zu+%zu) and enabled, read back OK\n",
+		 ARRAY_SIZE(ave_dpe_cat_default), ARRAY_SIZE(ave_dpe_cac_default),
+		 ARRAY_SIZE(ave_dpe_cac_8bit));
+	return 0;
+}
+
 static void ave_me1_holder_release(struct device *dev)
 {
 	kfree(dev);
@@ -938,6 +1024,13 @@ static int ave_probe_stages(struct platform_device *pdev)
 			if (ret && ret != -ENODEV)
 				return dev_err_probe(dev, ret, "DART1 restore\n");
 		}
+		/*
+		 * After the block reset (which would clear it) and before the
+		 * core starts. No-op unless dpe_tunables=1. docs/58 7.1.
+		 */
+		ret = ave_dpe_program(ave);
+		if (ret)
+			return dev_err_probe(dev, ret, "AVE_DPE tunables\n");
 		ave_stage_ok(dev, AVE_STAGE_WRITE_IDLE);
 	} else {
 		return 0;

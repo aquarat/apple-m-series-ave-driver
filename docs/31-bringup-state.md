@@ -1077,3 +1077,19 @@ power ME1 (`power_me1=1`). [53](53-first-frame.md) §19.
 difference. docs/57 #1-#4 are exhausted; #5 (MCPU start) is next, by
 discriminator (`session_skip_mcpu=1`) and by static analysis.
 [53](53-first-frame.md) §20.
+
+## 2026-09-15 — docs/58: the MCPUs need nothing from the host; AVE_DPE is never programmed
+
+Static. The pipe's seven MCPUs are Cortex-M cores whose code is embedded in
+the ASC image and loaded by the firmware itself; nothing host-side is missing
+there, and `session_skip_mcpu=1` would release cores with no image and teach
+nothing. SRCDMAGO (`0x40D110128` bit 0) reading 0 at the hang means the pipe
+was kicked. `0x40D120000 = 0x80034045` is a config word the firmware writes,
+not an AXI error; the real AXI-error registers are `0x40D124000/4`,
+`0x40D12C000`, `0x40D134000` - the driver's diag line was mislabelled and is
+corrected. The one host-side programming step macOS always performs and this
+driver never did: **`AVE_DPE` at `0x40D1DC000`**, the `CfgSet_Castor_6000` CAT/CAC
+tables plus Enable, applied from `AVE_HwC::PowerOn`. Now available as
+`dpe_tunables=1` (tables generated from the kext, every value read back), and
+the timeout diagnostics add `currMbRow`, the pipe-done enable, the real AXI
+registers, DPE state, MCPU run/ID, IMem first words and interface words.
