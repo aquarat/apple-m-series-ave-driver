@@ -1100,3 +1100,14 @@ registers, DPE state, MCPU run/ID, IMem first words and interface words.
 hang is unchanged. The new reads locate it: currMbRow 1, no AXI errors,
 pipe-done enabled, all seven MCPUs loaded and running; MbInput has pending
 interface bits the next stage does not. [53](53-first-frame.md) §21.
+
+## 2026-09-15 — docs/59: the "row 1" stall may still be inside row 0
+
+Static. currMbRow is the pipeline head, which runs ~15 MBs ahead of the encode
+stages through MbInput's lookahead gate, so F10 is compatible with a stall
+inside row 0. The MCPU interface words say the chain is backed up downstream
+of MbInput, not starved. The neighbour DMA channels are fully programmed with
+no gating flag, and the SrcNeighbor counts/sizes are adequate. No fix is
+indicated yet; the driver now logs MbInput's produced/consumed counters, every
+stage's host interface, the neighbour reader/writer registers, and (with
+`session_nbr_fill=1`) whether the neighbour writers stored anything.
