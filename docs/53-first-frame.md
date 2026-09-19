@@ -1907,3 +1907,30 @@ With four frames (`session_frames=4`) the run also answers whether
 `frameNumber` reaches the firmware at the right offset and width - the coded
 header's `+0x10C` should read 0,1,2,3 - and whether the frame-type enum is
 right, `+0x110` reading 3,1,1,3.
+
+## What F17's recon dump probably was (hypothesis, testable by F18)
+
+docs/66 §5 gives the recon layout from `AVE_CalcBufSizeOfRecon`: the luma
+plane is `1024 * ceil(W/32) * ceil((H+4)/32)` bytes - **1024 bytes per 32x32
+tile**, which is exactly one byte per pixel, and the separate "meta" (LSB)
+plane holds per-tile metadata. The recon writer is programmed with
+`0x800314B1`, and the firmware refuses to run at all without
+`NEED_LSB_PLANES`, logging "Uncompress Ref is not supported" - i.e. **the
+reconstruction is written compressed**.
+
+Now put that next to what `tools/check_frame.py` measured on F17's dump:
+
+```
+256 written islands, pitch 1024, widths [(32, 216), (28, 40)]
+```
+
+256 tile slots of 1024 bytes each, with ~32 bytes written at the start of
+every one. That is not an empty buffer. It is the compressed payload of 256
+tiles that all hold the same value - a uniform tile costing ~32 bytes.
+
+So "the recon is flat" and "the recon is nearly empty" are the same
+observation, and neither is evidence of a broken recon path: both follow from
+the source being flat. **[I]**, and F18 tests it for free - if the source
+fix lands, the island widths should grow with the picture's detail, and if
+F18's flat-200 frame comes back at 200 the islands should stay ~32 bytes wide
+while the decoded value changes.
