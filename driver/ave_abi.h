@@ -451,6 +451,8 @@ static inline u8 ave_surface_slot(enum ave_surface_idx idx)
 /* DPB capacity: refNum is capped at 16 and the total at a hard 17.
  * Same on both (13.5 kext mov w9,#0x11 0xfffffe0008ea505c; docs/47 §4). */
 #define AVE_DPB_MAX		17
+/* LowResResult surfaces a session publishes: 4 for DevType 12 (docs/65 §Q4). */
+#define AVE_LOW_RES_RESULT_MAX	4
 #define AVE_MAX_REF_FRAMES	16
 
 /*
@@ -1025,6 +1027,28 @@ struct ave_start_avc_layout {
 	u32	low_res_ref_stride;	/* bytes between slots */
 	u32	low_res_ref_max;	/* slots in one set */
 	/*
+	 * sLowResOutput.LowResResults[] - the low-resolution motion search's
+	 * OUTPUT surfaces, session-wide rather than per DPB slot. Not the same
+	 * table as LowResRef above, and the one nobody has ever filled.
+	 *
+	 * Dormant on an I-frame and live from the first P: the readers
+	 * (0x40D120F80 + 0x40i, RDDMAMESFSRSLTS, from
+	 * sLowResOutput.LowResResults[i]) are bounded by
+	 * num_ref_idx_l0_active_minus1, which is -1 with no references. From
+	 * the first P frame setPipe asserts on them:
+	 *   "pPicParams->sLowResOutput.LowResResults[me_ref_index] != 0"
+	 *   CAVCController_H13C.cpp:6184
+	 * The per-frame PICMGMT field (+0xC28) is inert as usual -
+	 * setRefPointers rewrites it - so this Start-time table is the real
+	 * interface, exactly like the entropy table in docs/61 §10.
+	 *
+	 * Size per buffer: ALIGN(4*W, 128) * ceil(H/64) + 1024, 64-byte
+	 * aligned. Count 4 for DevType 12. docs/65 §Q4.
+	 */
+	u32	low_res_result_set;
+	u32	low_res_result_stride;
+	u32	low_res_result_max;
+	/*
 	 * Colocated MV table, one u64 per DPB slot, same slot order as recon.
 	 * docs/60: left zero, setRefPointers (fw 0x2c4b0) copies the zero over
 	 * the per-frame field and setPipe (cbz 0x554f0) writes the pipe's
@@ -1464,6 +1488,9 @@ const struct ave_cmd_abi ave_cmd_abi_13_5 = {
 		.low_res_ref_set    = 0x2a8,
 		.low_res_ref_stride = 0x08,
 		.low_res_ref_max    = AVE_DPB_MAX,
+		.low_res_result_set    = 0x3b8,	/* _S_AVE_SurfaceSet +0xBC8; docs/65 §Q4 */
+		.low_res_result_stride = 0x08,
+		.low_res_result_max    = AVE_LOW_RES_RESULT_MAX,
 		.coded_max	= 20,		/* kext cmp w1,#0x14 0xfffffe0008ea4ce8 */
 		.coded_addr	= 0x4b8,	/* fw ldr x8,[x20,#1112] 0x5d4c8 */
 		.coded_addr_stride = 8,
@@ -1760,6 +1787,10 @@ const struct ave_cmd_abi ave_cmd_abi_26_6 = {
 		 * no AVE_VIDEO_PARAMS sub-block at a known offset and its
 		 * ProvideReferenceFrames was not read, so the builder writes
 		 * nothing and the per-frame PICMGMT field stands alone. */
+		/* Not located on 26.6.2. */
+		.low_res_result_set    = AVE_OFF_NONE,
+		.low_res_result_stride = 0,
+		.low_res_result_max    = 0,
 		.low_res_ref_set    = AVE_OFF_NONE,
 		.low_res_ref_stride = 0,
 		.low_res_ref_max    = 0,

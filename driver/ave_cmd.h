@@ -117,6 +117,16 @@ struct ave_avc_session {
 	u64	low_res_ref[AVE_DPB_MAX];
 	u32	n_low_res_ref;			/* 0, or exactly n_recon */
 	/*
+	 * sLowResOutput.LowResResults[] - the low-res search's output
+	 * surfaces, session-wide, not per DPB slot. An I-frame does not read
+	 * them (the loop is bounded by num_ref_idx_l0_active_minus1 = -1);
+	 * from the first P frame setPipe asserts each published one is
+	 * non-zero, and :6184 fires if it is not. 0 = write none, which is
+	 * the I-only behaviour every run so far has had. docs/65 §Q4.
+	 */
+	u64	low_res_result[AVE_LOW_RES_RESULT_MAX];
+	u32	n_low_res_result;
+	/*
 	 * Colocated MV buffers, one per DPB slot, same order as recon[]
 	 * (docs/60). 0 entries leaves the table zero, which disables the pipe's
 	 * colocated writer; kept possible as the control.

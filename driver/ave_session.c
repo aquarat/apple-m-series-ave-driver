@@ -568,6 +568,11 @@ struct ave_sess_bufs {
 	u32		stride;
 	/* Per-frame PICMGMT recon scratch; one arena, reused every frame. */
 	struct ave_sess_arena pic_recon;
+	/* LowResResult: session-wide, published at Start, read from the first
+	 * P frame onwards (docs/65 §Q4). */
+	dma_addr_t	low_res_result[AVE_LOW_RES_RESULT_MAX];
+	u32		n_low_res_result;
+	size_t		low_res_result_size;
 	void		*psets_cpu;
 	u32		psets_size;
 	/*
@@ -893,6 +898,16 @@ static size_t ave_session_lowres_size(u32 cw, u32 ch, u32 *stride)
 }
 
 /*
+ * One LowResResult surface: the low-resolution search's OUTPUT, session-wide
+ * rather than per DPB slot. ALIGN(4*W, 128) * ceil(H/64) + 1024, from the
+ * kext's own allocator (docs/65 §Q4). 62464 bytes at 1280x720.
+ */
+static size_t ave_session_lowres_result_size(u32 cw, u32 ch)
+{
+	return (size_t)ALIGN(4 * cw, 128) * DIV_ROUND_UP(ch, 64) + 1024;
+}
+
+/*
  * Carve the DPB slots Start_AVC publishes: one reconstruction surface and one
  * LowResRef surface per slot, out of two coherent arenas so the number of
  * mappings does not grow with session_dpb.
@@ -1004,6 +1019,42 @@ static void ave_session_alloc_dpb(struct ave_device *ave,
 	bufs->recon_size = recon_slot;
 	bufs->low_res_size = low_slot;
 	bufs->low_res_stride = lr_stride;
+
+	/*
+	 * LowResResult, out of one arena. An I-frame never reads these - the
+	 * reference loop is bounded by num_ref_idx_l0_active_minus1, which is
+	 * -1 with no references - so leaving them zero is what every run so
+	 * far did and is still the control (session_lowres=0). A P frame
+	 * asserts on them at CAVCController_H13C.cpp:6184.
+	 */
+	if (session_lowres) {
+		struct ave_sess_arena res = {};
+		size_t slot = ALIGN(ave_session_lowres_result_size(cw, ch),
+				    AVE_STRIDE_ALIGN);
+
+		res.size = slot * AVE_LOW_RES_RESULT_MAX;
+		res.cpu = ave_sess_dma_alloc(bufs, res.size, &res.iova);
+		if (!res.cpu) {
+			dev_warn(ave->dev,
+				 "session: LowResResult arena (%zu bytes) failed; a P frame would hit ASSERT CAVCController_H13C.cpp:6184\n",
+				 res.size);
+		} else {
+			memset(res.cpu, 0, res.size);
+			for (i = 0; i < AVE_LOW_RES_RESULT_MAX; i++) {
+				dma_addr_t a;
+
+				if (!ave_sess_arena_take(&res, slot, &a))
+					break;
+				bufs->low_res_result[i] = a;
+				bufs->n_low_res_result = i + 1;
+			}
+			bufs->low_res_result_size = slot;
+			dev_info(ave->dev,
+				 "session: LowResResult %u surface(s) of %#zx bytes from %pad (ALIGN(4*%u,128) * ceil(%u/64) + 1024)\n",
+				 bufs->n_low_res_result, slot, &res.iova,
+				 cw, ch);
+		}
+	}
 
 	dev_info(ave->dev,
 		 "session: DPB %u slot(s): recon %pad +%#zx each; LowResRef %pad +%#zx each, lr_stride %u, %u rows%s\n",
@@ -1211,6 +1262,15 @@ static int ave_session_start_avc(struct ave_device *ave,
 				 bufs->n_dpb, bufs->coloc_size, bufs->coloc[0],
 				 abi->start_avc.colocated_set);
 		}
+	}
+	if (bufs->n_low_res_result && abi->start_avc.low_res_result_set != AVE_OFF_NONE) {
+		for (i = 0; i < bufs->n_low_res_result; i++)
+			s.low_res_result[i] = bufs->low_res_result[i];
+		s.n_low_res_result = bufs->n_low_res_result;
+		dev_info(ave->dev,
+			 "session: Start_AVC: LowResResult %u surface(s) at wire %#x, [0] %#llx - inert for I, required from the first P\n",
+			 s.n_low_res_result, abi->start_avc.low_res_result_set,
+			 s.low_res_result[0]);
 	}
 	s.coded = coded;
 	s.coded_hdr = coded_hdr;
