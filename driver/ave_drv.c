@@ -461,14 +461,36 @@ static void ave_power_off(struct ave_device *ave, const char *why)
 {
 	if (!ave->powered)
 		return;
+	if (ave->keep_powered) {
+		dev_warn(ave->dev,
+			 "power: NOT gating (%s): the teardown was not clean and a gated domain with a live bus master is how this machine resets (docs/63)\n",
+			 why);
+		return;
+	}
 	ave_smmu_quiesce(ave);	/* before the reference goes: it reads the block */
-	ave_power_me1_off(ave);	/* child of venc_me0: release it first */
 	if (ave->irq_enabled) {
 		disable_irq(ave->irq);
 		ave->irq_enabled = false;
 	}
 	if (ave->bank[AVE_BANK_ASC].base)
 		ave_write(ave, AVE_BANK_ASC, AVE_ASC_CPU_CONTROL, 0);
+	/*
+	 * Ack whatever the SVE block still has asserted. macOS reads and
+	 * clears it (GetIntr/ClearIntr, kext 0xf1590c / 0xf15918) before
+	 * gating; we only ever disabled the line, leaving a source asserted
+	 * into a domain that is about to disappear. Write-1-to-clear.
+	 */
+	if (ave->bank[AVE_BANK_SVE].base) {
+		u32 pend = ave_read(ave, AVE_BANK_SVE, AVE_SVE_INTR_STATUS);
+
+		if (pend) {
+			ave_write(ave, AVE_BANK_SVE, AVE_SVE_INTR_STATUS, pend);
+			dev_info(ave->dev, "power: acked SVE interrupt status %#010x before gating\n",
+				 pend);
+		}
+	}
+	/* Child of venc_me0, and the last thing holding a reference. */
+	ave_power_me1_off(ave);
 	ave->powered = false;
 	pm_runtime_put_sync(ave->dev);
 	dev_info(ave->dev, "powered off (%s)\n", why);
@@ -1393,6 +1415,14 @@ static int ave_probe(struct platform_device *pdev)
 static void ave_remove(struct platform_device *pdev)
 {
 	struct ave_device *ave = platform_get_drvdata(pdev);
+	/*
+	 * Cleared by anything that leaves the firmware possibly still using
+	 * memory or the bus. While it is false nothing is unmapped and the
+	 * power reference is kept: a module that unloads leaving VENC powered
+	 * is recoverable by the next load (core_reset=2 fw_restore_data=1,
+	 * docs/55 §14); a machine reset is not. docs/63.
+	 */
+	bool clean_teardown = true;
 
 	/*
 	 * Ask the firmware to halt itself before anything is torn down. It
@@ -1405,13 +1435,37 @@ static void ave_remove(struct platform_device *pdev)
 	 * It also makes the session buffers safe to unmap below, where today
 	 * they have to be leaked.
 	 */
+	/*
+	 * First of all, give the client back. macOS refuses to power AVE down
+	 * with one open (AVE_Drv::TryPowerOff, kext 0xef0920) and drains a
+	 * Stop and a Close per client before it touches power; we abandoned
+	 * ours, and twice the machine reset seconds after a clean unload.
+	 * Both replies are withheld until the client's work has drained, so
+	 * this is also what makes the buffers below safe to free. docs/63.
+	 */
+	if (ave_session_close_client(ave))
+		clean_teardown = false;
+
 	if (ave_session_halt_requested()) {
 		int hret = ave_session_halt(ave);
 
-		if (hret)
+		if (hret) {
 			dev_warn(ave->dev,
 				 "halt: firmware did not stop (%d); unloading the hard way\n",
 				 hret);
+			clean_teardown = false;
+		}
+	} else if (ave->running) {
+		/*
+		 * Without a Halt the core is still executing its heartbeat,
+		 * IPC poller and log-ring writer - which is exactly the state
+		 * F16 unloaded in, and F16 reset the machine seconds later.
+		 * Refuse to unmap anything underneath it. A load that never
+		 * started the core has nothing to halt and is unaffected.
+		 */
+		dev_warn(ave->dev,
+			 "remove: the core is running and no Halt was requested (fw_halt=0); nothing will be unmapped and power will be left on\n");
+		clean_teardown = false;
 	}
 
 	ave_stop(ave);
@@ -1443,22 +1497,38 @@ static void ave_remove(struct platform_device *pdev)
 	 * costs a reboot. Leak them in that case - the memory comes back on the
 	 * next boot. (Review of 19b9d93, finding 4.)
 	 */
-	if (ave->powered && ave->bank[AVE_BANK_ASC].base && ave->session_bufs) {
+	if (ave->powered && ave->bank[AVE_BANK_ASC].base) {
 		u32 st = ave_read(ave, AVE_BANK_ASC, AVE_ASC_CPU_STATUS);
 
 		if (!(st & AVE_ASC_ST_STOPPED)) {
 			dev_warn(ave->dev,
-				 "core not stopped (CPU_STATUS %#x): leaking the session buffers rather than unmapping under live DMA\n",
+				 "core not stopped (CPU_STATUS %#x): nothing will be unmapped and power will be left on\n",
 				 st);
-			ave->session_bufs = NULL;
+			clean_teardown = false;
 		}
 	}
 
-	ave_power_off(ave, "remove");
+	/*
+	 * The order macOS uses, and the reverse of what we did: unmap and free
+	 * everything while the block is STILL POWERED, then gate. Both AVE
+	 * DARTs are runtime-active members of venc_sys and hold it up
+	 * themselves, so an unmap here is safe; an unmap after the domains
+	 * have gated is a register access into a gated block. docs/63 §ranked
+	 * causes 2.
+	 */
+	if (!clean_teardown) {
+		dev_warn(ave->dev,
+			 "remove: teardown was not clean; leaking every DMA region and leaving VENC powered. The next load can recover with core_reset=2 fw_restore_data=1; unloading further is not safe\n");
+		ave->session_bufs = NULL;
+		ave->keep_powered = true;	/* also stops the devres action */
+		return;
+	}
 
 	ave_session_release(ave);
 	ave_fw_unload(ave);
 	ave_ipc_fini(ave);
+
+	ave_power_off(ave, "remove");
 }
 
 static const struct of_device_id ave_of_match[] = {
