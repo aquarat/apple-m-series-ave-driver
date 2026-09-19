@@ -122,6 +122,7 @@ struct ave_avc_session {
 	u64	entropy[AVE_ENTROPY_MAX][AVE_ENTROPY_COLS];
 	u32	n_entropy;			/* rows; 0 = write none */
 	u32	n_entropy_cols;			/* columns; 0 or 1 = column 0 */
+	u32	entropy_size;			/* bytes per buffer; 0 = no size table */
 	const struct ave_buf	*coded;		/* bitstream buffers */
 	const struct ave_buf	*coded_hdr;	/* coded-header buffers, same count */
 	u32	n_coded;			/* 1..abi coded_max */

@@ -438,9 +438,16 @@ int ave_cmd_build_start_avc(const struct ave_cmd_abi *abi, u8 *buf, size_t len,
 	for (i = 0; i < s->n_entropy; i++) {
 		u32 j, cols = s->n_entropy_cols ? s->n_entropy_cols : 1;
 
-		for (j = 0; j < cols; j++)
+		for (j = 0; j < cols; j++) {
 			wr64(&w, l->entropy_set + i * l->entropy_stride_i +
 			     j * l->entropy_stride_j, s->entropy[i][j]);
+			/* Matching size, at an inferred offset (see ave_abi.h). */
+			if (s->entropy_size && l->entropy_size_set != AVE_OFF_NONE)
+				wr32(&w, l->entropy_size_set +
+				     i * l->entropy_size_stride_i +
+				     j * l->entropy_size_stride_j,
+				     s->entropy_size);
+		}
 	}
 	for (i = 0; i < s->n_coded; i++) {
 		wr64(&w, l->coded_addr + i * l->coded_addr_stride, s->coded[i].addr);

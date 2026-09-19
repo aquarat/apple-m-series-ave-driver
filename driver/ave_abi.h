@@ -1044,6 +1044,21 @@ struct ave_start_avc_layout {
 	u32	entropy_stride_j;
 	u32	entropy_max;		/* rows setPipe reads */
 	u32	entropy_cols_max;
+	/*
+	 * The per-buffer SIZE table that goes with entropy_set. INFERRED, never
+	 * seen written: setPipe takes the size from ctrl+0x10C0 + 0x10*ch + 4*j
+	 * while the address comes from ctrl+0xEC0 + 0x20*ch + 8*j (docs/61 Q1),
+	 * and 0x10C0 - 0xEC0 = 0x200 is exactly the address table's length, so
+	 * the two are adjacent u64[16][4] and u32[16][4] blocks. Applying the
+	 * same adjacency to the Start_AVC table puts the sizes at 0xF830 + 0x200
+	 * = 0xFA30, and 0xFA30 + 0x100 = 0xFB30 is param_sets_addr - the gap is
+	 * exactly one u32[16][4]. F14 proved the address half of this reaches
+	 * the hardware (channel 0x1303C0 went from 0 to our IOVA) while the size
+	 * word stayed 0 and the SEB still filled. AVE_OFF_NONE = not located.
+	 */
+	u32	entropy_size_set;
+	u32	entropy_size_stride_i;
+	u32	entropy_size_stride_j;
 	/* coded data / coded header tables */
 	u32	coded_max;
 	u32	coded_addr, coded_addr_stride;		/* u64[] */
@@ -1384,6 +1399,9 @@ const struct ave_cmd_abi ave_cmd_abi_13_5 = {
 		.entropy_stride_j   = 0x08,
 		.entropy_max	    = 4,	/* ctrl[3768] = 4 on our arm */
 		.entropy_cols_max   = 4,
+		.entropy_size_set   = 0xfa30,	/* INFERRED, docs/61 7.2 */
+		.entropy_size_stride_i = 0x10,
+		.entropy_size_stride_j = 0x04,
 		.low_res_ref_set    = 0x2a8,
 		.low_res_ref_stride = 0x08,
 		.low_res_ref_max    = AVE_DPB_MAX,
