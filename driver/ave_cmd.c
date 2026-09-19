@@ -276,6 +276,12 @@ int ave_cmd_build_start_avc(const struct ave_cmd_abi *abi, u8 *buf, size_t len,
 		return -EINVAL;
 	if (s->qp_i > 51 || s->qp_p > 51 || s->qp_b > 51)
 		return -EINVAL;
+	if (s->qp_min > 51 || s->qp_max > 51 ||
+	    (s->qp_max && s->qp_min > s->qp_max))
+		return -EINVAL;
+	/* The firmware's controller needs a target and an ABI that has it. */
+	if (s->rc_enable && (!s->bitrate || l->rc_mode_on == AVE_OFF_NONE))
+		return -EINVAL;
 	prof = ave_avc_profile_enum(s->profile_idc);
 	lvl = ave_avc_level_enum(s->level_idc);
 	if (prof < 0 || lvl < 0 || (s->profile_idc == 66 && s->cabac))
@@ -421,14 +427,26 @@ int ave_cmd_build_start_avc(const struct ave_cmd_abi *abi, u8 *buf, size_t len,
 	/* ---- fixed-QP rate control ---- */
 	wr32(&w, l->frame_rate, s->frame_rate);
 	wr32(&w, l->bitrate, s->bitrate);
-	wr32(&w, l->rc_mode, l->rc_mode_fixed_qp);
-	if (l->rc_feature != AVE_OFF_NONE)
-		wr64(&w, l->rc_feature, l->rc_feature_fixed_qp);
+	if (s->rc_enable) {
+		wr32(&w, l->rc_mode, l->rc_mode_on);
+		/*
+		 * bitrate_sel picks which bitrate field the controller reads;
+		 * 0 keeps the plain ui32BitRate above. The DRL block's layout
+		 * is unknown, so it stays disabled.
+		 */
+		wr32_opt(&w, l->bitrate_sel, 0);
+		wr32_opt(&w, l->frame_rate_div, s->frame_rate_div ?
+						s->frame_rate_div : 1);
+	} else {
+		wr32(&w, l->rc_mode, l->rc_mode_fixed_qp);
+		if (l->rc_feature != AVE_OFF_NONE)
+			wr64(&w, l->rc_feature, l->rc_feature_fixed_qp);
+	}
 	wr32(&w, l->qp_i, s->qp_i);
 	wr32(&w, l->qp_p, s->qp_p);
 	wr32(&w, l->qp_b, s->qp_b);
-	wr32(&w, l->qp_min, 0);
-	wr32(&w, l->qp_max, 51);
+	wr32(&w, l->qp_min, s->qp_min);
+	wr32(&w, l->qp_max, s->qp_max ? s->qp_max : 51);
 	wr32(&w, l->key_interval, s->key_interval);
 	wr32_opt(&w, l->key_interval_strict, s->key_interval);
 	wr32(&w, l->slice_num, 1);

@@ -339,6 +339,45 @@ module_param(session_src_cfg, uint, 0444);
 MODULE_PARM_DESC(session_src_cfg,
 	"Start_AVC wire 0xFCE8 (u8): high byte of the source format word 0x40D12000C (0 = what every run so far sent)");
 
+/*
+ * Rate control. The default reproduces every run so far: ui32RCFlag = 2
+ * (AVE_RC_FIXQP), session_qp on every frame type. session_bitrate switches
+ * to the firmware's own controller (ui32RCFlag = 1) with that target in
+ * BITS PER SECOND - ProcessInit divides it by the frame rate and the pixel
+ * count to get bits per pixel (fw 0x401b8). docs/66 §1.
+ *
+ * A caveat worth knowing before trusting a number: two controller fields
+ * (sCRCInitParams+177 and +180) gate the rate controller's construction and
+ * neither has been traced to a host field, so mode 1 may quietly do nothing.
+ * The discriminator is the slice QP - under fixed QP it provably cannot
+ * vary, so a QP that moves is the controller working.
+ */
+static unsigned int session_bitrate;
+module_param(session_bitrate, uint, 0444);
+MODULE_PARM_DESC(session_bitrate,
+	"target bitrate in bits/s; 0 = fixed QP (the default, and what every run so far used)");
+
+static unsigned int session_fps = 30;
+module_param(session_fps, uint, 0444);
+MODULE_PARM_DESC(session_fps, "frame rate numerator (default 30)");
+
+static unsigned int session_fps_div = 1;
+module_param(session_fps_div, uint, 0444);
+MODULE_PARM_DESC(session_fps_div, "frame rate denominator (default 1)");
+
+static unsigned int session_qp_min = 10;
+module_param(session_qp_min, uint, 0444);
+MODULE_PARM_DESC(session_qp_min, "rate control QP floor (default 10)");
+
+static unsigned int session_qp_max = 51;
+module_param(session_qp_max, uint, 0444);
+MODULE_PARM_DESC(session_qp_max, "rate control QP ceiling (default 51)");
+
+static unsigned int session_idr_period = 1;
+module_param(session_idr_period, uint, 0444);
+MODULE_PARM_DESC(session_idr_period,
+	"ui32IdrPeriod: frames between IDRs (default 1 = every frame)");
+
 /* Override the coded-buffer size (KiB). 0 = Apple's formula. */
 static unsigned int session_coded_kb;
 module_param(session_coded_kb, uint, 0444);
@@ -1262,10 +1301,19 @@ static int ave_session_start_avc(struct ave_device *ave,
 			 "session: Start_AVC: source-path sweep src_mode %#x (expect 0x40D120050=%#x 0x40D1200D0=%#x) src_cfg %#x (expect 0x40D12000C=%#x)\n",
 			 s.src_mode, s.src_mode & 3, s.src_mode >> 2,
 			 s.src_cfg_byte, (s.src_cfg_byte << 16) | (20 << 8));
-	s.frame_rate = 30;
-	s.bitrate = 0;				/* fixed QP */
+	s.frame_rate = session_fps ? session_fps : 30;
+	s.frame_rate_div = session_fps_div ? session_fps_div : 1;
+	s.bitrate = session_bitrate;
+	s.rc_enable = session_bitrate != 0;
 	s.qp_i = s.qp_p = s.qp_b = session_qp;
-	s.key_interval = 1;			/* every frame an IDR (I-only) */
+	s.qp_min = min_t(u32, session_qp_min, 51);
+	s.qp_max = clamp_t(u32, session_qp_max, s.qp_min, 51);
+	s.key_interval = session_idr_period ? session_idr_period : 1;
+	if (s.rc_enable)
+		dev_info(ave->dev,
+			 "session: Start_AVC: rate control ON (ui32RCFlag %u), target %u bit/s at %u/%u fps, QP %u..%u starting at %u - watch the slice QP, which under fixed QP cannot vary\n",
+			 abi->start_avc.rc_mode_on, s.bitrate, s.frame_rate,
+			 s.frame_rate_div, s.qp_min, s.qp_max, session_qp);
 	s.profile_idc = 66;			/* Baseline */
 	s.level_idc = 40;			/* 4.0 - covers 1080p */
 	s.cabac = false;			/* CAVLC (required with Baseline) */

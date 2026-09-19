@@ -59,6 +59,21 @@ struct ave_avc_session {
 	u32	frame_rate;		/* fps, > 0 */
 	u32	bitrate;		/* ignored at fixed QP; may be 0 */
 	u32	qp_i, qp_p, qp_b;	/* 0..51 */
+	u32	qp_min, qp_max;		/* 0..51, qp_min <= qp_max */
+	/*
+	 * false (the default) sends ui32RCFlag = the ABI's fixed-QP value,
+	 * which is what every run so far has done and what makes qp_i/p/b
+	 * mean what they say. true selects the firmware's own rate
+	 * controller, where the QP fields become starting points and
+	 * `bitrate` (bits per second) becomes the target. docs/66 §1.
+	 *
+	 * Note for a host-side controller: on 13.5 the QP is session-scoped
+	 * under fixed QP - there is no per-frame QP field - so changing it
+	 * means a new Start_AVC. Only the firmware's controller varies QP
+	 * per frame.
+	 */
+	bool	rc_enable;
+	u32	frame_rate_div;		/* frame rate is frame_rate/this; 0 = 1 */
 	u32	key_interval;		/* >= 1; 1 = every frame is an IDR */
 	u8	profile_idc;		/* 66, 77 or 100 */
 	u8	level_idc;		/* 10..62 (not 1b) */
