@@ -1686,3 +1686,33 @@ stops overwriting it. 27 new harness checks (774 total).
 too and it is not a hard length. If the address fix lands and the SEB still
 fills, the fallback is a u32 `[16][4]` at Start_AVC wire `0xFA30`, immediately
 after the address table - **not confirmed, not sent**.
+
+---
+
+## 27. F14 (2026-09-19 22:15): the address half lands; the size is still zero
+
+`results/f14-1789852532.kmsg`, commit `2849599`, same flags as F13.
+
+Two of the three checks from §26 passed:
+
+- **`0x40D13078C = 0xff0f0000`** (was 0 in every earlier run). Publishing
+  SrcNeighbor group 3 at wire `0xFED0` reached `ctrl[7896]`. The
+  Start_AVC -> DPB record -> `setRefPointers` -> PICMGMT mechanism is
+  **confirmed on hardware**, independently of the entropy fix.
+- **Entropy channel `0x40D1303C0` now holds `0xfe000000`** (was 0): the table
+  at wire `0xF830` is read by `setPipe`. docs/61 §10 confirmed.
+- **But `+0x10` (the size) is still 0**, `Cveseb buffer write full!` still fires
+  (3x), and every counter is unchanged: produced 3097, consumed 3083, ModeDec
+  3078, ReconLuma 3074, CAVLC 3067. A ring with a valid base and zero length
+  still cannot drain.
+
+**The size table (inferred, now sent).** `setPipe` reads the address from
+`ctrl+0xEC0 + 0x20*ch + 8*j` and the size from `ctrl+0x10C0 + 0x10*ch + 4*j`
+(docs/61 Q1): a `u64[16][4]` (0x200 bytes) immediately followed by a
+`u32[16][4]` (0x100). The same adjacency on the Start_AVC side puts the sizes
+at `0xF830 + 0x200 = 0xFA30`, and `0xFA30 + 0x100 = 0xFB30` is exactly
+`param_sets_addr` - the gap fits one `u32[16][4]` and nothing else is known to
+live there. **Inferred, not confirmed:** no instruction in the firmware writes
+`ctrl+0x10C0`, so the source has never been seen. `session_entropy_size=1`
+(default on) writes it; `=0` is the control. 35 new harness checks (809 total),
+including that `param_sets_addr` is still intact at `0xFB30`.

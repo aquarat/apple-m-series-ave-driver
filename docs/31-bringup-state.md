@@ -1167,3 +1167,12 @@ record every frame, so F13's per-frame entropy matrix could never be read. The
 table belongs at wire 0xF830; the same listing puts SrcNeighbor group 3 at wire
 0xFED0, which the driver never published and whose register (0x40D13078C) has
 read 0 in every run. Both now sent. [53](53-first-frame.md) §26.
+
+## 2026-09-19 22:15 — F14: Start_AVC entropy address lands, size still 0
+
+`results/f14-1789852532.kmsg`. `0x40D13078C` went from 0 to `0xff0f0000` and
+the entropy channel took our address, confirming docs/61 §10's mechanism; the
+channel's size word stayed 0 and the SEB still fills. The size table is
+inferred to sit at wire `0xFA30` (the gap to `param_sets_addr` is exactly one
+u32[16][4]) and is now sent behind `session_entropy_size`.
+[53](53-first-frame.md) §27.

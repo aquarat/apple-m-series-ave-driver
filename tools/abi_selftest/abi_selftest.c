@@ -528,6 +528,26 @@ static void test_start_13_5(void)
 				E64(buf, 0xf830 + 32 * i3 + 8 * j3,
 				    s.entropy[i3][j3], "entropy[i][j] at 0xF830");
 		E64(buf, 0xf830 + 32 * 4, 0, "row 4 left zero");
+		/*
+		 * The size table sits immediately after the address table, at
+		 * 0xFA30 + 16i + 4j (INFERRED: the firmware's own ctrl+0xEC0 and
+		 * ctrl+0x10C0 are 0x200 apart, and 0xFA30 + 0x100 = 0xFB30 =
+		 * param_sets_addr, so the gap is exactly one u32[16][4]).
+		 */
+		s.entropy_size = 0xf0000;
+		memset(buf, 0, sizeof(buf));
+		expect_int(ave_cmd_build_start_avc(a, buf, sizeof(buf), &CTX, &s),
+			   0x10e10, "size unchanged with the size table");
+		for (i3 = 0; i3 < 4; i3++)
+			for (j3 = 0; j3 < 4; j3++) {
+				E64(buf, 0xf830 + 32 * i3 + 8 * j3,
+				    s.entropy[i3][j3], "entropy addr");
+				E32(buf, 0xfa30 + 16 * i3 + 4 * j3, 0xf0000,
+				    "entropy size at 0xFA30 + 16i + 4j");
+			}
+		E32(buf, 0xfa30 + 16 * 4, 0, "size row 4 left zero");
+		E64(buf, 0xfb30, s.param_sets_addr, "param_sets still at 0xFB30");
+		s.entropy_size = 0;
 		s.entropy[1][2] = 0;
 		expect_int(ave_cmd_build_start_avc(a, buf, sizeof(buf), &CTX, &s),
 			   -EINVAL, "a hole in the start-time matrix");
