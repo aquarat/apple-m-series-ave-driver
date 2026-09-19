@@ -465,3 +465,183 @@ eval $K --addr 0xfffffe0008eb0cb8 -n 0x60     # SetDataInfo_FwBuf: per-frame ent
 # writer is  stur w9,[x25,#-12]  with x25 = ctrl+0x10CC:
 grep -nE 'stur\s+w9, \[x25, #-(4|8|12)\]|str\s+w9, \[x25\], #16' $S/fw.S
 ```
+
+---
+
+## 6. The source (input) frame path — added after F17
+
+F17 ran the whole frame with the entropy size table in place (§0): completion
+`0x0E06`, 2709 bytes, ffprobe reads Baseline 1280x720 yuv420p, every stage
+counter at 3845, `currMbRow` 44, no `Cveseb`, no faults. **But every decoded
+pixel is luma 130**, while the published input buffer holds the intended
+horizontal ramp (226 distinct values). The encoder consumed a frame's worth of
+macroblocks of *something that was not our pixels*.
+
+This section answers: where does the source frame address actually reach the
+hardware from?
+
+### 6.1 Verdict: the per-frame PICMGMT fields are the source of truth
+
+**There is no Start-time source table.** `sInput.Y` / `sInput.UV` and their
+strides go from `AVE_PICMGMT_PARAMS` straight into the source-read register
+file, every frame, inside `CAVCController::setPipe`. Nothing in
+`AVE_VIDEO_PARAMS` carries an input surface, and nothing overwrites PICMGMT
+`+0x8C0 .. +0x940`:
+
+- `CAVECommonDPB::setRefPointers` rebuilds **only** PICMGMT `+0x980 .. +0xBF8`
+  (fw `0x2c98c`–`0x2ca4c`, [61](61-mb3083-stall.md) §10.1) — below `+0x980`
+  is untouched. **[C]**
+- `CAVCController::PipePrepareParam` reads PICMGMT `+0x8E0`, `+0x8E8`, `+0x900`
+  (fw `0x48c04`, `0x48c8c`, `0x48cc4`) and writes none of them back. **[C]**
+- None of the 24 `AVE_CHM_SetFwBuf` destination ranges (§1.3) is an input
+  surface; they are all recon/coded/scratch/output buffers. The kext publishes
+  the input only per frame, in `AVE_CHM_SetDataInfo_FwBuf`
+  (`0xeb0904`/`08`/`10`/`14`). **[C]**
+
+So **Q1 = no, and Q4 = nothing.**
+
+### 6.2 The source-read register file at `0x40D1120000`
+
+`setPipe` holds `w25 = 0x1120FA4` (fw `0x54208`+`0x5421c`) and addresses the
+block as `base + (x25 − K)`. Decoding every store between `0x54200` and
+`0x54a10` gives the whole file. `x27` = PICMGMT, `x19` = ctrl,
+`x24 = ctrl + 0x23B38` (fw `0x52f5c`–`0x52f60`), `x8` = the MMIO base pointer.
+
+| MMIO (AP) | written at | value | where it comes from |
+|---|---|---|---|
+| `0x40D1120000` | `0x549bc` | `0x80034045` linear / `0x80034047` compressed | firmware constant `w22 = 0x80034024`, `+0x21` / `+0x23`; arm chosen by PICMGMT `+0x6F3` `bInputCompressed` |
+| `0x40D112000C` | `0x54a08` | `(v_0xFCE8 << 16) \| (ctrl+0xA88 << 8)` | **wire `0xFCE8` u8** + a firmware code (18/20/22 by chroma format, +1 if 10-bit; **20** for 4:2:0 8-bit, fw `0x5d490`–`0x5d4c4`) |
+| **`0x40D1120010`** | **`0x54320`** | **low 32 bits of PICMGMT `+0x8C0` (`sInput.Y`)** | **host, per frame** |
+| **`0x40D1120014`** | `0x54874` / `0x54918` | **PICMGMT `+0x8C8` luma stride** (or `+0x918` when `bInputCompressed`) | **host, per frame** |
+| `0x40D1120018` | `0x54944` | `0x00072065` | compressed arm only |
+| `0x40D112001C` | `0x54998` | 0 on the linear arm | firmware |
+| `0x40D1120020` | `0x54818` | `(PICMGMT[0x8F8] + u16[0x91E]) \| ((PICMGMT[0x8FC] + u16[0x920]) << 16)` — the source **origin**, not a size (§6.3) | host, normally 0 |
+| `0x40D1120024`, `+0x28` | `0x54888`/`0x54894`, `0x54958`/`0x54968` | 0 on the linear arm; PICMGMT `+0x928`/`+0x92C` on the compressed arm | |
+| `0x40D1120050` | `0x54334` | **`v_0xFEC0 & 3`** | **wire `0xFEC0` u16** |
+| `0x40D112005C` | `0x54230` | `(ctrl[4732] & 0xff) \| (ctrl[96·id + 8472] << 8) \| (ctrl+0x20BC << 16)` | firmware only |
+| `0x40D1120080` | `0x549d4` | `0x80034055` / `0x80034057`; **skipped entirely when `chroma_format_idc == 0`** (`cbz` `0x549c8`) | firmware |
+| `0x40D112008C` | `0x54a10` | same word as `+0x0C` | as above |
+| **`0x40D1120090`** | **`0x547dc`** | **low 32 bits of PICMGMT `+0x8D0` (`sInput.UV`)** | **host, per frame**; the whole chroma-address block is skipped when `input_chroma_format == 0` (`cbz w12` `0x54340`), which for AVC is the SPS `chroma_format_idc` (fw `0x5d130`), = 1 for us |
+| **`0x40D1120094`** | `0x5492c` | **PICMGMT `+0x8D8` chroma stride** (or `+0x938`) | **host, per frame** |
+| `0x40D1120098`, `+0x9C` | `0x549ec`, `0x549b8` | compressed arm only | |
+| `0x40D11200A0` | `0x548f8` | chroma origin, halved for 4:2:0 (`0x5483c`/`0x548b0`/`0x548c4` by `chroma_format_idc`) | host, normally 0 |
+| `0x40D11200A4`, `+0xA8` | `0x54898`, `0x549b8` | 0 on the linear arm | |
+| `0x40D11200D0` | `0x547ec` | **`v_0xFEC0 >> 2`** | **wire `0xFEC0` u16** |
+
+All **[C]**. The two firmware-side fields that feed this block resolve to host
+wire offsets like this (both hops confirmed):
+
+```
+wire 0xFEC0  (u16)  --fw 0x5d018--> [x22,#444]   x22 = ctrl+0x23FC4 (fw 0x5cdd8-0x5cde0)
+                    = ctrl+0x24180 = setPipe [x24,#1608]   x24 = ctrl+0x23B38
+                    --> 0x1120050 (&3)  and  0x11200D0 (>>2)
+wire 0xFCE8  (u8)   --fw 0x5d118--> [x22,#41] = ctrl+0x23FED = setPipe [x24,#1205]
+                    --> 0x112000C / 0x112008C, bits 16..23
+```
+
+The base is pinned three ways: in `InitEncodingParameters`
+`x23 = VP + 0xF760` (fw `0x5cdd0`–`0x5cdd4`), and on that base
+`[x23,#880]` = `param_sets_addr` (wire `0xFB30`), `[x23,#1469]` =
+`NEED_LSB_PLANES` (wire `0xFD7D`) and `[x23,#1808]` = SrcNeighborFwData (wire
+`0xFED0`) — three offsets the driver already uses and that the firmware reads
+at exactly those places. **[C]**
+
+### 6.3 `PICMGMT +0x8F8/+0x8FC` is an origin, not a size
+
+Worth stating because it looks like a picture size. The kext writes it **only**
+in the "still offset" mode (`str d0,[x20,#2296]`, `0xeb0aa8`, gated on two
+client bytes at `0xeb0a64`/`0xeb0aa0`); in the ordinary mode it folds
+`StillOffsetW + stride·StillOffsetH` **into the luma address instead**
+(`0xeb0e2c`–`0xeb0e4c`). A size field would always be written. So zero is the
+correct value for a full-frame encode and `0x1120020 = 0` is expected. **[C]**
+This also corrects the "a double at `0x8F8`" note in
+[47](47-abi-13.5-frame-rc-surfaces.md) §1.2: it is two u32s written with one
+64-bit `str d0`, not an IEEE double.
+
+### 6.4 What this rules out
+
+- **A Start-time source table** — none exists (§6.1). **[C]**
+- **`setPipe` bailing before the address write.** The cfg word `0x80034045`
+  observed at `0x40D1120000` is written at fw `0x549bc`, which is *after* the
+  address (`0x54320`), the stride (`0x54874`) and the origin (`0x54818`) in
+  program order along the same straight-line linear-input arm. Observing the
+  cfg word therefore proves the address and stride writes executed. **[C]**
+- **Compressed-input confusion.** `0x80034045` is the `bInputCompressed == 0`
+  arm (`w22 + 0x21`); the compressed arm writes `0x80034047`. Our `+0x6F3 = 0`
+  is being honoured. **[C]**
+- **Cache coherency.** `ave_sess_dma_alloc` uses `dma_alloc_coherent`
+  (`driver/ave_session.c:531`) and hands the DMA API's own IOVA to the command,
+  so there is no unflushed CPU write and no hand-rolled mapping. **[C]**
+- **A firmware MB-input override.** `bEnableFwOverride` and
+  `bEnableMBInputCtrl` are `AVE_VIDEO_PARAMS` booleans (firmware assert string
+  `(pInVideoParams->bEnableFwOverride==0) || (pInVideoParams->bEnableMBInputCtrl==0)`,
+  fw string `0xc90a2`); we leave both zero, so no override is armed. **[C]**
+- **Our per-frame input block being incomplete.** Every PICMGMT offset in
+  `+0x8B8 .. +0x940` that the firmware reads on the linear arm is one the
+  driver writes, except the origin pair (§6.3, correctly 0) and the
+  compressed-only fields. `+0x8F0` — which the driver *does* write as
+  `scratch[2]` — has **no firmware reader at all**. **[C]**
+
+### 6.5 What is left: the two format words, and the rest of the scalar block
+
+`AVE_VIDEO_PARAMS` is a verbatim pass-through from user space (§1.2), so the
+kext cannot tell us the *value* of `wire 0xFEC0`; it can only tell us that
+Apple's user library supplies one and we supply zero. What the firmware reads
+from that scalar block, all through `x23 = VP + 0xF760`, is:
+
+| wire | width | fw read | goes to |
+|---|---|---|---|
+| `0xFCD8` | u32 | `0x5cedc` | |
+| `0xFCDC`, `0xFCDD`, `0xFCDE` | u8 | `0x5cf38`–`0x5cf48` | |
+| `0xFCE0` | u16 | `0x5cf0c` | |
+| `0xFCE2`, `0xFCE3`, `0xFCE4`, `0xFCE5`, `0xFCE6`, `0xFCE9` | u8 | `0x5cf28`–`0x5d0ac` | |
+| **`0xFCE8`** | **u8** | **`0x5d118`** | **MMIO `0x112000C`/`0x112008C` bits 16..23** |
+| `0xFCEA` | u16 | `0x5d024` | |
+| `0xFCEC` | u32 | `0x5cf50` | |
+| `0xFCF0`, `0xFCF2`, `0xFCF4` | u16 | `0x5cef4`–`0x5cf04` | |
+| `0xFD30` | u32 | `0x5cf18` | `ctrl+0x2C1F8` |
+| `0xFD7D` | u8 | `0x5d08c` | `NEED_LSB_PLANES` — the driver writes this one |
+| `0xFD7E` | u8 | `0x5d09c` | |
+| `0xFD80`..`0xFDA4` | 10 × u32 | `0x5d0bc`–`0x5d10c` | |
+| `0xFEB0` | u8 | `0x5cfd4` | |
+| `0xFEB4` | u32 | `0x5d008` | HEVC derives `input_chroma_format` from bits 2..4 of the same field (`0x83328`+`0x83660`) |
+| `0xFEB8` | u16 | — | kext: `pInfo->VideoParams.numTemporalLayers <= 7` (`0xec95b4`) |
+| **`0xFEC0`** | **u16** | **`0x5d018`** | **MMIO `0x1120050` (`&3`) and `0x11200D0` (`>>2`)** |
+| `0xFEC3` | u8 | `0x5d44c` | an input enum aliased against the SPS bit depth (`v==2 && 8-bit → 1`, `v==3 && 10-bit → 2`, `0x5d454`–`0x5d46c`); stored to `ctrl+0x24194`, **no reader found** |
+| `0xFEC4` | u16 | `0x5d474` | `ctrl+0x24196`, no reader found |
+| `0xFEC8` | u32 | `0x5d480` | `ctrl+0x24198`, no reader found |
+| `0xFECC`, `0xFECD`, `0xFECE` | u8 | `0x5cfe0`–`0x5cfe4`, `0x5d938` | |
+| `0xFEF8` | u32 | `0x5dc9c` | RC |
+| `0xFEFC` | u8 | `0x5cddc` | |
+| `0xFF00`..`0xFF10` | 5 × u32 | `0x5cdec`–`0x5ce2c` | |
+| `0xFF20` | u32 | `0x5dacc` | RC |
+| `0xFF24` | u32 | `0x5cf88` | `ctrl+0x24D68`; kext asserts **`0 < VideoParams.iNumViews <= 2`** (`0xec9078`, string `0xfffffe00071f090b`) |
+| `0xFF28` | u32 | — | kext asserts the same 1..2 range (`0xec9068`) |
+
+**[C]** for every read; the field names are **[U]** except the three the kext's
+own assert strings give (`numTemporalLayers`, `iNumViews`,
+`separate_colour_plane_flag`).
+
+The driver writes **one** field of this entire block (`0xFD7D`). Two of them —
+`0xFF24` and `0xFF28` — are values Apple's own kext **refuses to accept as
+zero**, so a macOS session always carries `1` there and ours carries `0`.
+
+### 6.6 Ranked next steps for the constant-picture failure
+
+Because the cfg word proves the address/stride writes executed (§6.4) and the
+buffer is coherent, the remaining possibilities are narrow.
+
+| # | hypothesis | change / read | what confirms it |
+|---:|---|---|---|
+| **1** | **Read the registers before guessing.** The host side of the source path is now fully enumerated (§6.2); one snapshot settles whether our IOVA reached the hardware | read `0x40D1120010`, `+0x14`, `+0x20`, `+0x50`, `+0x0C`, and `0x40D1120090`, `+0x94`, `+0xA0`, `+0xD0`, `+0x8C`, at the timeout | expected today: `0xfd300000`, `0x500`, `0`, **`0`**, `0x00001400`, `0xfd280000`, `0x500`, `0`, **`0`**, `0x00001400`. If `+0x10` is **not** `0xfd300000` the wire offset or the truncation is wrong; if it **is**, the fetch used our address and the two zeros at `+0x50`/`+0xD0` are the only host-side gap left |
+| 2 | wire `0xFF24` / `0xFF28` = 0 where Apple requires 1 | write **1** to both (u32) | free, certain from Apple's validator; the firmware only tests `iNumViews == 2` for a stereo path (`0x78188`, `0x79dac`), so this is hygiene, not expected to fix the picture |
+| 3 | wire `0xFEC0` (u16) selects the source memory layout and 0 is not "8-bit linear NV12" | **value [U]** — do not guess blind. If #1 shows the address is present, sweep `0xFEC0` over `1, 2, 4, 5, 0x11` and watch `0x40D1120050` / `0x40D11200D0` change; a value that changes the decoded picture away from flat 130 identifies it | `0x1120050 = v & 3`, `0x11200D0 = v >> 2` must change accordingly |
+| 4 | the source DMA read our buffer but the pipe ignored it | encode a **constant** luma plane (all 200) with nothing else changed | output 200 ⇒ the DMA does read our buffer and the ramp result is a *content* problem (offset, tiling, or the debugfs dump not being the published buffer); output ~130 again ⇒ the DMA never delivered our bytes |
+| 5 | `NEED_LSB_PLANES = 1` on an 8-bit session | set `session_lsb=0` (wire `0xFD7D` = 0) | it is optional: `setPipe`'s LSB asserts are behind `[x24,#1312]` (fw `0x54f7c`), which *is* this byte, so clearing it removes the split-plane recon entirely. It also explains the near-empty recon MSB plane (8032/262144 non-zero) independently of the source problem |
+
+**On the "value" question, plainly:** `AVE_VIDEO_PARAMS` is copied byte for byte
+from user space (§1.2, `0xecc1bc`). For `0xFEC0` the kext neither writes nor
+validates it, and the firmware only splits it into two register fields. There
+is therefore **no value to read out of either binary** — the honest move is the
+register snapshot in row 1, which costs the same single reboot and either
+closes the question or points at row 3 with a measurable handle.

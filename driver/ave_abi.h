@@ -1087,6 +1087,35 @@ struct ave_start_avc_layout {
 	 */
 	u32	src_nbr_set[AVE_SRC_NBR_GROUPS];
 	u32	src_nbr_max;		/* entries per group; 0 = no such table */
+	/*
+	 * The only two host-supplied AVE_VIDEO_PARAMS scalars that reach the
+	 * source-read register block at 0x40D1120000, and we have been sending
+	 * both as zero since the first encode (docs/62 §6).
+	 *
+	 * src_mode (u16) is split in two by CAVCController::setPipe:
+	 *   0x40D1120050 = src_mode & 3    (fw 0x54334)
+	 *   0x40D11200D0 = src_mode >> 2   (fw 0x547ec)
+	 * reaching the firmware as [x22,#444] off ctrl+0x23FC4 (fw 0x5d018).
+	 * The kext neither writes nor validates it - AVE_VIDEO_PARAMS is a
+	 * byte-for-byte pass-through from user space (AVE_Client_Config,
+	 * kext 0xecc1bc) - so the value is [U] and must be swept, not guessed.
+	 *
+	 * src_cfg_byte (u8) lands in bits 16+ of the source format word:
+	 *   0x40D112000C = (src_cfg_byte << 16) | (fmt_code << 8)  (fw 0x54a08)
+	 * with fmt_code from the chroma format (20 for our 8-bit 4:2:0).
+	 * Firmware side [x22,#41] = ctrl+0x23FED (fw 0x5d118). Also [U].
+	 */
+	u32	src_mode;		/* u16; AVE_OFF_NONE = not located */
+	u32	src_cfg_byte;		/* u8;  AVE_OFF_NONE = not located */
+	/*
+	 * iNumViews. Apple's own kext refuses to send the command unless
+	 * 0 < iNumViews <= 2 (pInfo validator, kext 0xec9078, assert string
+	 * 0xfffffe00071f090b) and we send zero, which macOS would reject. The
+	 * firmware only tests == 2, for a stereo path (fw 0x78188, 0x79dac),
+	 * so writing 1 is hygiene rather than a fix. Two adjacent offsets carry
+	 * the same range check. docs/62 §6.5.
+	 */
+	u32	num_views[2];		/* u32 each; AVE_OFF_NONE = not located */
 	/* parameter-set blocks */
 	u32	sps_block, sps_block_size;
 	u32	pps_block, pps_block_size;
@@ -1447,6 +1476,9 @@ const struct ave_cmd_abi ave_cmd_abi_13_5 = {
 		 */
 		.src_nbr_set	= { 0xf7d0, 0xf7f0, 0xf810, 0xfed0 },
 		.src_nbr_max	= 4,
+		.src_mode	= 0xfec0,	/* fw 0x5d018 -> [x22,#444], docs/62 §6.2 */
+		.src_cfg_byte	= 0xfce8,	/* fw 0x5d118 -> [x22,#41],  docs/62 §6.2 */
+		.num_views	= { 0xff24, 0xff28 },	/* kext 0xec9078 rejects 0 */
 		.sps_block	= 0x105b0,	/* memcpy 0x6ac from payload+0x10550 0x5ce68-90 */
 		.sps_block_size	= 0x6ac,
 		.pps_block	= 0x10c5c,	/* memcpy 0x184 from payload+0x10bfc 0x5ce94-ac */
@@ -1719,6 +1751,11 @@ const struct ave_cmd_abi ave_cmd_abi_26_6 = {
 		.src_nbr_set	= { AVE_OFF_NONE, AVE_OFF_NONE,
 				    AVE_OFF_NONE, AVE_OFF_NONE },
 		.src_nbr_max	= 0,
+		/* The 13.5 source-path scalars (docs/62 §6) were located in the
+		 * 13.5 firmware only; the 26.6.2 offsets are not known. */
+		.src_mode	= AVE_OFF_NONE,
+		.src_cfg_byte	= AVE_OFF_NONE,
+		.num_views	= { AVE_OFF_NONE, AVE_OFF_NONE },
 		.sps_block	= AVE_START_SPS_OFF,
 		.sps_block_size	= AVE_START_SPS_SIZE,
 		.pps_block	= AVE_START_PPS_OFF,

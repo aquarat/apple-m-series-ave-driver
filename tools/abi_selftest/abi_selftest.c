@@ -407,6 +407,8 @@ static void test_start_13_5(void)
 	/* AVE_FW_RC_PARAMS, docs/47 §2 */
 	E32(buf, 0xff34, 1, "ui32IdrPeriod (fw 0x5d9e8)");
 	E32(buf, 0xff4c, 30, "ExpectedFrameRate (fw 0x5d9c4)");
+	E32(buf, 0xff24, 1, "iNumViews (kext 0xec9078: 0 < n <= 2)");
+	E32(buf, 0xff28, 1, "iNumViews second range check");
 	E32(buf, 0xff50, 2, "ui32RCFlag = AVE_RC_FIXQP (fw 0x5ceb4, 0x41158)");
 	E32(buf, 0xff88, 0, "QP min (fw 0x5d9f0)");
 	E32(buf, 0xff8c, 51, "QP max (fw 0x5da00)");
@@ -483,6 +485,33 @@ static void test_start_13_5(void)
 		E64(buf, 0x90, 0, "flag off: no LSB written");
 		s.recon = RECON;
 	}
+
+	/*
+	 * The source-path scalars and iNumViews (docs/62 §6). iNumViews is
+	 * unconditional - Apple's own validator rejects zero - while the two
+	 * source scalars are written only when a sweep asks for them, so the
+	 * default image must be byte-identical to what F17 sent.
+	 */
+	begin("13.5 start_avc source path");
+	s = session_1080p(true);
+	memset(buf, 0, sizeof(buf));
+	expect_int(ave_cmd_build_start_avc(a, buf, sizeof(buf), &CTX, &s),
+		   0x10e10, "size unchanged");
+	E32(buf, 0xff24, 1, "iNumViews (kext 0xec9078 rejects 0)");
+	E32(buf, 0xff28, 1, "iNumViews second range check");
+	E16(buf, 0xfec0, 0, "src_mode unset stays 0 (as every run to F17)");
+	E8(buf, 0xfce8, 0, "src_cfg_byte unset stays 0");
+
+	s.src_mode = 0x15;
+	s.src_cfg_byte = 0x03;
+	memset(buf, 0, sizeof(buf));
+	expect_int(ave_cmd_build_start_avc(a, buf, sizeof(buf), &CTX, &s),
+		   0x10e10, "size unchanged with a sweep value");
+	E16(buf, 0xfec0, 0x15, "src_mode (fw 0x5d018: &3 -> 0x...050, >>2 -> 0x...0D0)");
+	E8(buf, 0xfce8, 0x03, "src_cfg_byte (fw 0x5d118 -> 0x40D12000C bits 16+)");
+	E8(buf, 0xfec2, 0, "src_mode is a u16, not wider");
+	s.src_mode = 0;
+	s.src_cfg_byte = 0;
 
 	/* Colocated MV table at wire 0xF6B0, stride 8 (docs/53 13.2, docs/60). */
 	begin("13.5 start_avc colocated");

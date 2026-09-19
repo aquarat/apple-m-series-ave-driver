@@ -316,6 +316,41 @@ module_param(session_dpb, uint, 0444);
 MODULE_PARM_DESC(session_dpb,
 	"DPB slots published at Start_AVC: recon + LowResRef surfaces (default 2 = max_num_ref_frames+1)");
 
+/*
+ * The source-path experiment knobs (docs/62 §6). Nothing here is known-good:
+ * every run up to F17 sent zero for both, and the kext passes both through
+ * from user space without ever writing or checking them, so there is no value
+ * to copy from Apple. They exist to be swept.
+ *
+ *   session_src_mode  wire 0xFEC0, u16. setPipe splits it:
+ *                     0x40D120050 = v & 3, 0x40D1200D0 = v >> 2.
+ *   session_src_cfg   wire 0xFCE8, u8, into bits 16+ of 0x40D12000C.
+ *
+ * Both registers appear in the 0x20000 channel windows the diagnostics
+ * already dump, so a sweep is observable: set a value, read the register.
+ */
+static unsigned int session_src_mode;
+module_param(session_src_mode, uint, 0444);
+MODULE_PARM_DESC(session_src_mode,
+	"Start_AVC wire 0xFEC0 (u16): source-read mode, split into 0x40D120050 and 0x40D1200D0 (0 = what every run so far sent)");
+
+static unsigned int session_src_cfg;
+module_param(session_src_cfg, uint, 0444);
+MODULE_PARM_DESC(session_src_cfg,
+	"Start_AVC wire 0xFCE8 (u8): high byte of the source format word 0x40D12000C (0 = what every run so far sent)");
+
+/*
+ * Encode a constant luma plane instead of the ramp. The cheapest possible
+ * discriminator for F17's result: if the decoded picture comes back at this
+ * value the source DMA does read our buffer and the ramp failure is an
+ * addressing or layout problem; if it comes back at ~130 again the hardware
+ * never delivered our bytes at all. One load, no ABI guesses.
+ */
+static unsigned int session_flat_luma;
+module_param(session_flat_luma, uint, 0444);
+MODULE_PARM_DESC(session_flat_luma,
+	"fill the source luma with this constant (1..255) instead of the ramp; 0 = ramp");
+
 /* AVE_FRAME_TYPE_IDR (3) by default; 0 = I (non-IDR). */
 static unsigned int session_frame_type = AVE_FRAME_TYPE_IDR;
 module_param(session_frame_type, uint, 0444);
@@ -1012,6 +1047,13 @@ static int ave_session_start_avc(struct ave_device *ave,
 
 	s.width = session_width;
 	s.height = session_height;
+	s.src_mode = (u16)session_src_mode;
+	s.src_cfg_byte = (u8)session_src_cfg;
+	if (session_src_mode || session_src_cfg)
+		dev_info(ave->dev,
+			 "session: Start_AVC: source-path sweep src_mode %#x (expect 0x40D120050=%#x 0x40D1200D0=%#x) src_cfg %#x (expect 0x40D12000C=%#x)\n",
+			 s.src_mode, s.src_mode & 3, s.src_mode >> 2,
+			 s.src_cfg_byte, (s.src_cfg_byte << 16) | (20 << 8));
 	s.frame_rate = 30;
 	s.bitrate = 0;				/* fixed QP */
 	s.qp_i = s.qp_p = s.qp_b = session_qp;
@@ -1333,7 +1375,8 @@ static void ave_session_fill_input(u8 *luma, u8 *chroma, u32 stride,
 		u8 *row = luma + (size_t)y * stride;
 
 		for (x = 0; x < w; x++)
-			row[x] = (u8)(16 + ((x * 219) / (w ? w : 1)) +
+			row[x] = session_flat_luma ? (u8)session_flat_luma :
+				 (u8)(16 + ((x * 219) / (w ? w : 1)) +
 				      ((y / AVE_MB_SIZE) & 7));
 		if (stride > w)
 			memset(row + w, 0, stride - w);
@@ -1703,6 +1746,10 @@ static int ave_session_process(struct ave_device *ave,
 		return -EINVAL;
 	}
 	ave_session_fill_input(luma, chroma, stride, cw, ch);
+	if (session_flat_luma)
+		dev_info(ave->dev,
+			 "session: source luma is a CONSTANT %u, not the ramp: a decoded picture at %u means the source DMA read our buffer, one at ~130 means it did not (docs/62 §6)\n",
+			 session_flat_luma, session_flat_luma);
 	bufs->src_cpu = luma;
 	bufs->src_size = min_t(size_t, luma_bytes, SZ_256K);
 
@@ -1835,6 +1882,30 @@ static int ave_session_process(struct ave_device *ave,
 		 ave_read(ave, AVE_BANK_DPE, 0x3024c),
 		 ave_read(ave, AVE_BANK_DPE, 0x3025c),
 		 ave_read(ave, AVE_BANK_DPE, 0x3031c));
+
+	/*
+	 * Did the source reader get OUR buffer? CAVCController::setPipe writes
+	 * the low 32 bits of PICMGMT +0x8C0 to 0x40D120010 and the stride to
+	 * +0x14, chroma to +0x90/+0x94, and the mode pair to +0x50/+0xD0 from
+	 * wire 0xFEC0 (docs/62 §6.2). F17 left the comparison to be done by
+	 * hand afterwards; do it here, where the expected value is known.
+	 */
+	{
+		u32 got = ave_read(ave, AVE_BANK_DPE, 0x20010);
+		u32 want = lower_32_bits(luma_iova);
+
+		dev_info(ave->dev,
+			 "session: source reader 0x40D120010 = %#010x (want %#010x: %s) stride +0x14 %#x (want %#x) chroma +0x90 %#010x (want %#010x) fmt +0x0C %#010x mode +0x50 %#x +0xD0 %#x\n",
+			 got, want,
+			 got == want ? "OUR BUFFER" :
+			 got ? "A DIFFERENT ADDRESS" : "NEVER PROGRAMMED",
+			 ave_read(ave, AVE_BANK_DPE, 0x20014), stride,
+			 ave_read(ave, AVE_BANK_DPE, 0x20090),
+			 lower_32_bits(chroma_iova),
+			 ave_read(ave, AVE_BANK_DPE, 0x2000c),
+			 ave_read(ave, AVE_BANK_DPE, 0x20050),
+			 ave_read(ave, AVE_BANK_DPE, 0x200d0));
+	}
 
 	/*
 	 * docs/57 #3 and #4, read-only, at the moment Process gave up:

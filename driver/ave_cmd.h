@@ -84,6 +84,15 @@ struct ave_avc_session {
 	 * true every recon[] entry needs an lsb_addr.
 	 */
 	bool	need_lsb_planes;
+	/*
+	 * The two AVE_VIDEO_PARAMS scalars that reach the source-read register
+	 * block (start_avc.src_mode / .src_cfg_byte, docs/62 §6). Neither value
+	 * is known - the kext passes both through from user space without
+	 * touching them - so these are here to be swept on hardware rather than
+	 * set from analysis. Zero reproduces every run up to F17.
+	 */
+	u16	src_mode;
+	u8	src_cfg_byte;
 	u64	param_sets_addr;
 	u32	param_sets_size;
 
