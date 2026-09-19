@@ -263,10 +263,10 @@ MODULE_PARM_DESC(session_coloc,
  * control: the kext refuses to send a command with a zero size here, and a
  * zero-length ring cannot drain - which is what fills the SEB.
  */
-static bool session_entropy_size = true;
+static bool session_entropy_size;	/* opt-in: see F15 */
 module_param(session_entropy_size, bool, 0444);
 MODULE_PARM_DESC(session_entropy_size,
-	"also write the entropy buffer sizes at Start_AVC wire 0xFA30 (inferred offset, docs/61 7.2)");
+	"write the entropy buffer sizes at Start_AVC wire 0xFA30, which switches the SEB drain channels on (docs/62 0; off by default since F15 died at insmod on the first build that wrote it)");
 
 static bool session_diag = true;
 module_param(session_diag, bool, 0444);
