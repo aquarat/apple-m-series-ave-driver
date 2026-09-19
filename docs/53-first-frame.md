@@ -1651,3 +1651,38 @@ is 6464. So docs/61 §Q4's "the per-frame PICMGMT block may not be reaching the
 firmware" is not a host-side bug: we send the bytes. Either the firmware's
 per-frame copy into `ctrl+0xEC0` does not run, or it reads a column we do not
 populate - and the size at `ctrl+0x10C0` has no known source at all.
+
+---
+
+## 26. The entropy table belongs to Start_AVC, not Process (docs/61 §10)
+
+`CAVECommonDPB::setRefPointers` rebuilds PICMGMT `+0x980..+0xBF8` **every frame**
+from the DPB record (fw `0x2c98c..0x2ca4c`, 64 u64s from `[x9,#1024]`), so the
+per-frame entropy table we filled in F13 was overwritten before `setPipe` read
+it - which is exactly why F13 was byte-identical to F12. The record is filled at
+**Start_AVC** by `ProvideReferenceFrames` from `VP+0xF770 + 96 + 8n`
+(fw `0x2ba98..0x2bc8c`) = **wire `0xF830 + 32i + 8j`**. Same mechanism docs/60
+found for the colocated pointer, over a 512-byte block.
+
+A second thing falls out of the same listing: **SrcNeighbor group 3 (FwData) is
+at wire `0xFED0`**, not adjacent to the other three. docs/59 §3 called `0xF830`
+"SrcNeighborFwData"; it is row 0 of `encoder_addr_entropy`. The driver had group
+3 as `AVE_OFF_NONE` and never published it - and `InitEncodingParameters`
+(fw `0x5d8a0`) stores that same field to `ctrl[7896]`, the register behind
+`0x40D13078C`, **which reads 0 in every run so far**. Two anomalies, one
+mechanism.
+
+Every gate on the per-frame copy was checked and is open, and the command is not
+truncated (`ProcessAvcEncode` memmoves a hardcoded `0x1940` = 6464 bytes, fw
+`0xf050`), consistent with §25's offline proof that the host bytes are right.
+
+**Changes:** `start_avc.entropy_set = 0xF830` (stride 0x20/0x08, 4 rows x 4
+columns) published from the same 16 buffers, and `start_avc.src_nbr_set[3] =
+0xFED0`. The per-frame write stays - harmless, and correct again if a firmware
+stops overwriting it. 27 new harness checks (774 total).
+
+**`ctrl+0x10C0`, the channel size, still has no writer anywhere in the image**
+(exhaustive scan with a positive control), so macOS most likely leaves it zero
+too and it is not a hard length. If the address fix lands and the SEB still
+fills, the fallback is a u32 `[16][4]` at Start_AVC wire `0xFA30`, immediately
+after the address table - **not confirmed, not sent**.

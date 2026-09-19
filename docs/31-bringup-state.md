@@ -1159,3 +1159,11 @@ firmware writes. An offline dump of our built Process command proves the host
 sends all 16 entropy entries at the right offsets in a correctly sized command,
 so the gap is firmware-side. [53](53-first-frame.md) §25.
 EOF
+
+## 2026-09-19 — docs/61 §10: entropy is a Start_AVC table; SrcNeighbor FwData is at 0xFED0
+
+setRefPointers rebuilds the per-frame PICMGMT block from a Start_AVC-filled DPB
+record every frame, so F13's per-frame entropy matrix could never be read. The
+table belongs at wire 0xF830; the same listing puts SrcNeighbor group 3 at wire
+0xFED0, which the driver never published and whose register (0x40D13078C) has
+read 0 in every run. Both now sent. [53](53-first-frame.md) §26.

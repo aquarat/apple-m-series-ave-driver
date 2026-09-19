@@ -503,6 +503,54 @@ static void test_start_13_5(void)
 	s.n_colocated = 1;
 	expect_int(ave_cmd_build_start_avc(a, buf, sizeof(buf), &CTX, &s), -EINVAL, "count != n_recon");
 
+	/*
+	 * encoder_addr_entropy as a START-time table at wire 0xF830 + 32i + 8j
+	 * (docs/61 10: ProvideReferenceFrames copies VP+0xF770+96+8n, fw
+	 * 0x2ba98..0x2bc8c; setRefPointers then rebuilds the per-frame copy from
+	 * it every frame). Rows 0..3, all four columns.
+	 */
+	begin("13.5 start_avc entropy table");
+	s = session_1080p(true);
+	{
+		u32 i3, j3;
+
+		for (i3 = 0; i3 < 4; i3++)
+			for (j3 = 0; j3 < 4; j3++)
+				s.entropy[i3][j3] = 0x0000000800000000ull +
+						    0x100000ull * (4 * i3 + j3);
+		s.n_entropy = 4;
+		s.n_entropy_cols = 4;
+		memset(buf, 0, sizeof(buf));
+		expect_int(ave_cmd_build_start_avc(a, buf, sizeof(buf), &CTX, &s),
+			   0x10e10, "size unchanged");
+		for (i3 = 0; i3 < 4; i3++)
+			for (j3 = 0; j3 < 4; j3++)
+				E64(buf, 0xf830 + 32 * i3 + 8 * j3,
+				    s.entropy[i3][j3], "entropy[i][j] at 0xF830");
+		E64(buf, 0xf830 + 32 * 4, 0, "row 4 left zero");
+		s.entropy[1][2] = 0;
+		expect_int(ave_cmd_build_start_avc(a, buf, sizeof(buf), &CTX, &s),
+			   -EINVAL, "a hole in the start-time matrix");
+		s.entropy[1][2] = 0x0000000800600020ull;
+		expect_int(ave_cmd_build_start_avc(a, buf, sizeof(buf), &CTX, &s),
+			   -EINVAL, "entropy & 63 (assert :8021)");
+		s.entropy[1][2] = 0x0000000800600000ull;
+		s.n_entropy = 5;
+		expect_int(ave_cmd_build_start_avc(a, buf, sizeof(buf), &CTX, &s),
+			   -EINVAL, "more rows than setPipe reads");
+	}
+
+	/* SrcNeighbor group 3 (FwData) is at wire 0xFED0, not beside the rest. */
+	begin("13.5 start_avc src_nbr group 3");
+	s = session_1080p(true);
+	memset(buf, 0, sizeof(buf));
+	expect_int(ave_cmd_build_start_avc(a, buf, sizeof(buf), &CTX, &s), 0x10e10, "size");
+	E64(buf, 0xf7d0, s.src_nbr[0][0], "SrcNbr Info[0] at 0xF7D0");
+	E64(buf, 0xf7f0, s.src_nbr[1][0], "SrcNbr Pixel[0] at 0xF7F0");
+	E64(buf, 0xf810, s.src_nbr[2][0], "SrcNbr Data[0] at 0xF810");
+	E64(buf, 0xfed0, s.src_nbr[3][0], "SrcNbr FwData[0] at 0xFED0 (docs/61 10)");
+	E64(buf, 0xf830, 0, "0xF830 is entropy row 0, not FwData");
+
 	begin("13.5 start_avc negatives");
 	s = session_1080p(true);
 	expect_int(ave_cmd_build_start_avc(a, buf, 0x10e0f, &CTX, &s), -EINVAL, "len short by 1");

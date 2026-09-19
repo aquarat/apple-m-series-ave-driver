@@ -114,6 +114,14 @@ struct ave_avc_session {
 	 */
 	u64	colocated[AVE_DPB_MAX];
 	u32	n_colocated;			/* 0, or exactly n_recon */
+	/*
+	 * encoder_addr_entropy[row][col], the SEB write buffers. This is where
+	 * the firmware actually takes them from (docs/61 10); the per-frame copy
+	 * in ave_avc_frame is overwritten each frame by setRefPointers.
+	 */
+	u64	entropy[AVE_ENTROPY_MAX][AVE_ENTROPY_COLS];
+	u32	n_entropy;			/* rows; 0 = write none */
+	u32	n_entropy_cols;			/* columns; 0 or 1 = column 0 */
 	const struct ave_buf	*coded;		/* bitstream buffers */
 	const struct ave_buf	*coded_hdr;	/* coded-header buffers, same count */
 	u32	n_coded;			/* 1..abi coded_max */
