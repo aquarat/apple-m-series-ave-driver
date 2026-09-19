@@ -1140,3 +1140,10 @@ went from 34 to **3083 of 3600 macroblocks** and the colocated writer is live
 dump shows the four entropy write channels enabled with a null address: the
 kext fills `encoder_addr_entropy` as a 4-column matrix and we filled one
 column. Fixed in the ABI, builder and session. [53](53-first-frame.md) §23.
+
+## 2026-09-19 18:50 — F13: entropy matrix no effect; stall deterministic at MB 3083
+
+`results/f13-1789840219.kmsg` matches F12 counter for counter, and the four
+`0x40D1303C0`-family channels are still enabled with a null address, refuting
+docs/60's note that they come from `encoder_addr_entropy`. docs/61 takes over.
+[53](53-first-frame.md) §24.

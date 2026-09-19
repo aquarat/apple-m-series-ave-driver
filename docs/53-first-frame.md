@@ -1594,3 +1594,26 @@ nothing behind them.
 session: 4 rows x 4 columns, each entry its own 960 KiB buffer (16 total,
 15 MiB), with the builder refusing a hole or more columns than the wire table
 has (20 new harness checks).
+
+---
+
+## 24. F13 (2026-09-19 18:50): the entropy matrix changes nothing; the stall is deterministic at MB 3083
+
+`results/f13-1789840219.kmsg`, commit `de4a30b`, as F12 with the entropy table
+filled as the full 4 x 4 matrix (`session: entropy: 4 x 4 buffers of 960 KiB`).
+
+**Every counter is identical to F12**: MbInput produced 3097 / consumed 3083,
+last source event y 38 x 48, ModeDec 3078, ReconLuma 3074, CAVLC 3067,
+colocated 194 560 of 462 848 bytes written. So the stall is deterministic and
+the entropy matrix is not on this path.
+
+**And the four channels at `0x40D1303C0 + 0x40k` still read enabled
+(`0x80030001`) with address 0 and size 0**, exactly as in F12. docs/60's note
+that they come from `encoder_addr_entropy` is therefore **refuted on hardware**:
+filling all four columns did not change them. What programs them, and whether
+"enabled with size 0" can block the stage feeding them, is docs/61's first
+question.
+
+The 4 x 4 matrix is kept: it matches what the kext does
+(`AVE_CHM_SetDataInfo_FwBuf`, columns outside, rows inside) and costs only
+memory.
