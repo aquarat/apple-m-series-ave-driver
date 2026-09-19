@@ -513,6 +513,37 @@ static void test_start_13_5(void)
 	s.src_mode = 0;
 	s.src_cfg_byte = 0;
 
+	/*
+	 * LowResResult at wire 0x3B8, stride 8 (docs/65 §Q4): session-wide,
+	 * inert for an I-frame, asserted on from the first P
+	 * (CAVCController_H13C.cpp:6184).
+	 */
+	begin("13.5 start_avc low_res_result");
+	s = session_1080p(true);
+	s.n_low_res_result = 4;
+	s.low_res_result[0] = 0x0000000220000000ull;
+	s.low_res_result[1] = 0x0000000220010000ull;
+	s.low_res_result[2] = 0x0000000220020000ull;
+	s.low_res_result[3] = 0x0000000220030000ull;
+	memset(buf, 0, sizeof(buf));
+	expect_int(ave_cmd_build_start_avc(a, buf, sizeof(buf), &CTX, &s),
+		   0x10e10, "size unchanged");
+	E64(buf, 0x3b8, s.low_res_result[0], "LowResResults[0]");
+	E64(buf, 0x3c0, s.low_res_result[1], "LowResResults[1]");
+	E64(buf, 0x3c8, s.low_res_result[2], "LowResResults[2]");
+	E64(buf, 0x3d0, s.low_res_result[3], "LowResResults[3]");
+	E64(buf, 0x3d8, 0, "entry 4 left zero");
+	s.low_res_result[2] = 0;
+	expect_int(ave_cmd_build_start_avc(a, buf, sizeof(buf), &CTX, &s),
+		   -EINVAL, "a zero LowResResult entry (:6184)");
+	s.low_res_result[2] = 0x0000000220020020ull;
+	expect_int(ave_cmd_build_start_avc(a, buf, sizeof(buf), &CTX, &s),
+		   -EINVAL, "LowResResult & 63 (:6185)");
+	s.n_low_res_result = 0;
+	memset(buf, 0, sizeof(buf));
+	ave_cmd_build_start_avc(a, buf, sizeof(buf), &CTX, &s);
+	E64(buf, 0x3b8, 0, "none published: the I-only control is unchanged");
+
 	/* Colocated MV table at wire 0xF6B0, stride 8 (docs/53 13.2, docs/60). */
 	begin("13.5 start_avc colocated");
 	s = session_1080p(true);

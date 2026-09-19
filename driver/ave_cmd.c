@@ -308,6 +308,22 @@ int ave_cmd_build_start_avc(const struct ave_cmd_abi *abi, u8 *buf, size_t len,
 			if (!s->recon[i].lsb_addr || (s->recon[i].lsb_addr & 127))
 				return -EINVAL;
 	}
+	/*
+	 * LowResResult: all or nothing, non-zero and 64-byte aligned, since
+	 * setPipe asserts both for every entry the reference loop reaches
+	 * (CAVCController_H13C.cpp:6184/6185).
+	 */
+	if (s->n_low_res_result) {
+		if (l->low_res_result_set == AVE_OFF_NONE ||
+		    !l->low_res_result_max ||
+		    s->n_low_res_result > l->low_res_result_max ||
+		    s->n_low_res_result > AVE_LOW_RES_RESULT_MAX)
+			return -EINVAL;
+		for (i = 0; i < s->n_low_res_result; i++)
+			if (!s->low_res_result[i] ||
+			    (s->low_res_result[i] & (AVE_STRIDE_ALIGN - 1)))
+				return -EINVAL;
+	}
 	/* A source-path sweep value is meaningless on an ABI without the field. */
 	if ((s->src_mode && l->src_mode == AVE_OFF_NONE) ||
 	    (s->src_cfg_byte && l->src_cfg_byte == AVE_OFF_NONE))
@@ -451,6 +467,10 @@ int ave_cmd_build_start_avc(const struct ave_cmd_abi *abi, u8 *buf, size_t len,
 	for (i = 0; i < s->n_low_res_ref; i++)
 		wr64(&w, l->low_res_ref_set + i * l->low_res_ref_stride,
 		     s->low_res_ref[i]);
+	/* The low-res search's output surfaces; read from the first P frame. */
+	for (i = 0; i < s->n_low_res_result; i++)
+		wr64(&w, l->low_res_result_set + i * l->low_res_result_stride,
+		     s->low_res_result[i]);
 	for (i = 0; i < s->n_colocated; i++)
 		wr64(&w, l->colocated_set + i * l->colocated_stride,
 		     s->colocated[i]);
