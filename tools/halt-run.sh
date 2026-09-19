@@ -22,7 +22,8 @@ set -u
 cd "$(dirname "$0")/.."
 
 NAME=$1; shift
-P1=${1:-}; P2=${2:-$P1}
+[ $# -ge 1 ] || { echo "usage: $0 NAME 'load-1 params' ['load-2 params' ...]" >&2; exit 1; }
+P1=$1
 
 if sudo dmesg | grep -q "Disabling IRQ #"; then
     echo "REFUSING: an IRQ has been disabled; reboot first" >&2; exit 1
@@ -53,8 +54,7 @@ esac
 LOG=results/$NAME-$(date +%s).kmsg
 {
     echo "=== $NAME $(date -Is) commit $(git rev-parse --short HEAD) ==="
-    echo "=== load 1: $P1"
-    echo "=== load 2: $P2"
+    i=0; for P in "$@"; do i=$((i + 1)); echo "=== load $i: $P"; done
 } > "$LOG"; sync
 
 sudo python3 tools/kmsg_capture.py "$LOG" &
@@ -98,41 +98,37 @@ if [ -n "${OVERLAY:-}" ]; then
     fi
 fi
 
-step "load 1: insmod $P1"
-# Give the marker time to reach the disk: F6, f6b and f6c died within
-# milliseconds of insmod and the synced marker before it was lost each time.
-sleep 3
-# shellcheck disable=SC2086
-sudo insmod driver/apple-ave.ko $P1; RC1=$?
-step "load 1 returned rc=$RC1"
-sleep 3
+# One load per argument. Between loads the firmware is halted (fw_halt=1 in
+# ave_remove) and the next load resets the block, restores DATA and starts it
+# again - R4 proved two starts in one boot, and F3 showed the Halt works even
+# after a pipe hang. That is what makes several hypotheses testable per reboot.
+n=0
+for P in "$@"; do
+    n=$((n + 1))
+    step "load $n: insmod $P"
+    # Give the marker time to reach the disk: F6, f6b and f6c died within
+    # milliseconds of insmod and the synced marker before it was lost each time.
+    sleep 3
+    # shellcheck disable=SC2086
+    sudo insmod driver/apple-ave.ko $P; RC=$?
+    step "load $n returned rc=$RC"
+    sleep 3
 
-# The Halt happens in here. If the core does not stop, rmmod is where the
-# machine is most likely to wedge, so the marker goes in before the call.
-save_debugfs load1
-step "unload 1 (the Halt is sent from ave_remove)"
-sudo rmmod apple_ave; RCU=$?
-step "unload 1 returned rc=$RCU"
-sleep 2
-
-if [ $RCU -ne 0 ]; then
-    step "not attempting load 2: the unload failed"
-    echo "$LOG"; exit 1
-fi
-
-step "load 2: insmod $P2"
-# Give the marker time to reach the disk: F6, f6b and f6c died within
-# milliseconds of insmod and the synced marker before it was lost each time.
-sleep 3
-# shellcheck disable=SC2086
-sudo insmod driver/apple-ave.ko $P2; RC2=$?
-step "load 2 returned rc=$RC2"
-sleep 3
-
-save_debugfs load2
-step "unload 2"
-sudo rmmod apple_ave 2>/dev/null
-step "done: load1=$RC1 unload1=$RCU load2=$RC2"
+    save_debugfs "load$n"
+    step "unload $n (the Halt is sent from ave_remove)"
+    sudo rmmod apple_ave; RCU=$?
+    step "unload $n returned rc=$RCU"
+    sleep 2
+    if [ $RCU -ne 0 ]; then
+        step "stopping: unload $n failed, the core may still be running"
+        echo "$LOG"; exit 1
+    fi
+    if sudo dmesg | grep -q "Disabling IRQ #"; then
+        step "stopping after load $n: an IRQ was disabled, fault reporting is gone"
+        echo "$LOG"; exit 1
+    fi
+done
+step "done: $n load(s)"
 sleep 1
 
 echo "$LOG"
