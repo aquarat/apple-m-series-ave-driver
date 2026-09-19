@@ -209,14 +209,14 @@ MODULE_PARM_DESC(session_lowres_kb,
  * docs/57 cause #1: set Start_AVC NEED_LSB_PLANES and give each DPB slot an
  * LSB (tile-metadata) plane. Without it the firmware never programs the pipe's
  * recon writer ("Uncompress Ref is not supported") and the Pipe never finishes
- * (F5). Layout per slot: LSB at +0, MSB at +AVE_SESS_LSB_SPAN - the firmware
- * derives both chroma planes from the two luma ones (fw 0x2d14c, 0x2c314).
+ * (F5). Layout per slot: the MSB pair at +0 and the LSB pair after it, both
+ * exactly sized by ave_recon_planes(); the firmware derives both chroma planes
+ * from the two luma ones (fw 0x2d14c, 0x2c314).
  */
 static bool session_lsb;
 module_param(session_lsb, bool, 0444);
 MODULE_PARM_DESC(session_lsb,
 	"set NEED_LSB_PLANES (Start_AVC 0xFD7D) and publish per-slot LSB planes, so the firmware programs the recon writer (docs/57 #1)");
-#define AVE_SESS_LSB_SPAN	0x20000
 
 /*
  * docs/57 cause #2: macOS calls AVE_DPM_TuneUpPipe before every command, which
@@ -339,6 +339,12 @@ module_param(session_src_cfg, uint, 0444);
 MODULE_PARM_DESC(session_src_cfg,
 	"Start_AVC wire 0xFCE8 (u8): high byte of the source format word 0x40D12000C (0 = what every run so far sent)");
 
+/* Override the coded-buffer size (KiB). 0 = Apple's formula. */
+static unsigned int session_coded_kb;
+module_param(session_coded_kb, uint, 0444);
+MODULE_PARM_DESC(session_coded_kb,
+	"coded (bitstream) buffer size in KiB; 0 = AVE_CalcBufSizeOfCodedData");
+
 /*
  * How many frames one load encodes: IDR first, then P frames. Default 1, so
  * an experiment that is not about multi-frame behaviour sends exactly what
@@ -384,8 +390,14 @@ MODULE_PARM_DESC(session_frame_type,
 #define AVE_SESS_FWCLIENT_FALLBACK	0xb4000	/* 13.5 GetClientBufferSize */
 #define AVE_SESS_FWCLIENTMEM_SIZE	0x100000
 
-/* One coded (bitstream) output buffer must exceed 3*W*H/4 at encode time. */
-#define AVE_SESS_CODED_SIZE		0x200000
+/*
+ * One coded (bitstream) output buffer. The firmware requires it to exceed
+ * 3*W*H/4 at encode time (fw 0x58358); Apple sizes it with
+ * AVE_CalcBufSizeOfCodedData (kext 0xea4d58), which is what
+ * ave_session_coded_size() reproduces. The fixed 2 MiB this driver used is
+ * enough at 720p and too small from 1080p up. docs/66 §5.
+ */
+#define AVE_SESS_CODED_FLOOR		460800u
 /*
  * The SPS+PPS the firmware generates (docs/52). A pair is a few hundred bytes,
  * but the firmware's copies into this buffer are NOT bounded by the size we
@@ -587,6 +599,7 @@ struct ave_sess_bufs {
 	}		dpb[AVE_SESS_DPB_MAX];
 	u32		n_dpb;
 	u32		recon_size;	/* per slot */
+	u32		recon_msb_span;	/* MSB pair; the LSB pair starts here */
 	size_t		low_res_size;	/* per slot; 0 = none published */
 	u64		coloc[AVE_SESS_DPB_MAX];	/* colocated MV per slot */
 	void		*coloc_cpu[AVE_SESS_DPB_MAX];
@@ -888,6 +901,61 @@ static int ave_session_open(struct ave_device *ave,
  * and the row stride the firmware will program for it. Both come from the
  * comment on session_lowres above; *stride is only for the log line.
  */
+/*
+ * AVE_CalcBufSizeOfCodedData, AVC 8-bit 4:2:0 default path (kext 0xea4d58):
+ * twice the uncompressed frame, floored at 460800 bytes and never reduced
+ * below the uncompressed frame itself. Comfortably above the firmware's own
+ * "CodedBufSize > 3*W*H/4" check. docs/66 §5.
+ */
+static size_t ave_session_coded_size(u32 cw, u32 ch)
+{
+	size_t base = (size_t)cw * ch * 3 / 2;
+	size_t sz = base >= AVE_SESS_CODED_FLOOR
+		  ? base : min(2 * base, (size_t)AVE_SESS_CODED_FLOOR);
+
+	if (session_coded_kb)
+		sz = (size_t)session_coded_kb << 10;
+	return ALIGN(sz, SZ_4K);
+}
+
+/*
+ * The four reconstruction sub-planes, from AVE_CalcBufSizeOfRecon (AVC,
+ * DevType 12, 8-bit 4:2:0, compressed arm - kext 0xfffffe0008ea528c..0xea535c).
+ * The firmware recomputes the luma pair identically in H264VideoEncoderDPB
+ * (fw 0x2d14c-0x2d1a0) and derives the chroma bases in setRefPointers as
+ * UV_MSB = Y_MSB + luma and UV_LSB = Y_LSB + luma_meta (fw 0x2c314-0x2c33c),
+ * so each pair must be contiguous and each pair's size must be exact.
+ *
+ * This replaces the cw*ch*2 over-estimate, which happens to be large enough
+ * at 1280x720 and is NOT at other sizes: at 640x480 the MSB region overruns
+ * the slot, and from 1080p up the fixed 128 KiB LSB window is too small.
+ * docs/66 §5.
+ */
+struct ave_recon_planes {
+	u32	luma, luma_meta, chroma, chroma_meta;
+	u32	msb_span, lsb_span;	/* what a slot must hold, 128-aligned */
+};
+
+static u32 ave_npo2(u32 n)
+{
+	return n <= 1 ? 1 : 1u << (32 - __builtin_clz(n - 1));
+}
+
+static void ave_recon_planes(u32 w, u32 h, struct ave_recon_planes *p)
+{
+	u32 cols   = DIV_ROUND_UP(w, 32);
+	u32 rows   = (h + 35) >> 5;		/* ceil((h + 4) / 32) */
+	u32 cols_c = DIV_ROUND_UP(w / 2, 16);
+	u32 rows_c = ((h / 2) + 19) >> 4;
+
+	p->luma        = 1024u * cols * rows;
+	p->chroma      = ALIGN(512u * cols_c * rows_c, 128);
+	p->luma_meta   = ALIGN(32u * ave_npo2(cols)   * ave_npo2(rows),   128);
+	p->chroma_meta = ALIGN(8u  * ave_npo2(cols_c) * ave_npo2(rows_c), 128);
+	p->msb_span    = ALIGN(p->luma + p->chroma, 128);
+	p->lsb_span    = ALIGN(p->luma_meta + p->chroma_meta, 128);
+}
+
 static size_t ave_session_lowres_size(u32 cw, u32 ch, u32 *stride)
 {
 	u32 lr_stride = ALIGN(4 * cw, 256);
@@ -920,6 +988,7 @@ static void ave_session_alloc_dpb(struct ave_device *ave,
 				  struct ave_sess_bufs *bufs)
 {
 	struct ave_sess_arena recon = {}, low = {};
+	struct ave_recon_planes pl;
 	size_t recon_slot, low_slot = 0;
 	u32 cw, ch, lr_stride = 0;
 	unsigned int i, n;
@@ -942,7 +1011,13 @@ static void ave_session_alloc_dpb(struct ave_device *ave,
 	 * is the docs/38 over-estimate this driver has used since Start_AVC was
 	 * first accepted.
 	 */
-	recon_slot = ALIGN((size_t)cw * ch * 2, SZ_4K);
+	ave_recon_planes(cw, ch, &pl);
+	recon_slot = ALIGN((size_t)pl.msb_span + (session_lsb ? pl.lsb_span : 0),
+			   SZ_4K);
+	dev_info(ave->dev,
+		 "session: recon planes for %ux%u: luma %u + chroma %u = MSB %u; luma_meta %u + chroma_meta %u = LSB %u; slot %#zx\n",
+		 cw, ch, pl.luma, pl.chroma, pl.msb_span,
+		 pl.luma_meta, pl.chroma_meta, pl.lsb_span, recon_slot);
 	recon.size = recon_slot * n;
 	recon.cpu = ave_sess_dma_alloc(bufs, recon.size, &recon.iova);
 	if (!recon.cpu) {
@@ -954,14 +1029,12 @@ static void ave_session_alloc_dpb(struct ave_device *ave,
 	memset(recon.cpu, 0, recon.size);
 	/*
 	 * Slot 0's MSB plane is what the recon writer targets with
-	 * session_lsb (LSB at the slot base, MSB at +AVE_SESS_LSB_SPAN), and it
-	 * is the picture the encoder actually reconstructed - the direct
-	 * comparison against the source.
+	 * session_lsb (the MSB pair is at the slot base), and it is the
+	 * picture the encoder actually reconstructed - the direct comparison
+	 * against the source.
 	 */
-	bufs->recon_cpu = (u8 *)recon.cpu +
-			  (session_lsb ? AVE_SESS_LSB_SPAN : 0);
-	bufs->recon_pub_size = min_t(size_t, recon_slot - (session_lsb ?
-				     AVE_SESS_LSB_SPAN : 0), SZ_256K);
+	bufs->recon_cpu = recon.cpu;
+	bufs->recon_pub_size = min_t(size_t, pl.msb_span, SZ_256K);
 
 	if (session_lowres) {
 		low_slot = ave_session_lowres_size(cw, ch, &lr_stride);
@@ -1017,6 +1090,7 @@ static void ave_session_alloc_dpb(struct ave_device *ave,
 	}
 
 	bufs->recon_size = recon_slot;
+	bufs->recon_msb_span = pl.msb_span;
 	bufs->low_res_size = low_slot;
 	bufs->low_res_stride = lr_stride;
 
@@ -1087,6 +1161,7 @@ static int ave_session_start_avc(struct ave_device *ave,
 	dma_addr_t cmd_iova, fwc_iova, fwcm_iova;
 	dma_addr_t psets_iova;
 	u32 cw, ch, fwc_size, i, n;
+	size_t coded_size;
 	void *psets_cpu;
 	size_t cmd_len;
 	void *cmd;
@@ -1117,14 +1192,15 @@ static int ave_session_start_avc(struct ave_device *ave,
 	 * these tables is what picks the command slot (21 + index), so a
 	 * session that encodes N frames must publish N of them at Start.
 	 */
+	coded_size = ave_session_coded_size(cw, ch);
 	n = clamp_t(u32, session_frames, 1, AVE_SESS_FRAMES_MAX);
 	if (n > abi->start_avc.coded_max)
 		n = abi->start_avc.coded_max;
 	bufs->n_coded = n;
 	for (i = 0; i < n; i++) {
-		bufs->coded[i].cpu = ave_sess_dma_alloc(bufs, AVE_SESS_CODED_SIZE,
+		bufs->coded[i].cpu = ave_sess_dma_alloc(bufs, coded_size,
 							&bufs->coded[i].iova);
-		bufs->coded[i].size = AVE_SESS_CODED_SIZE;
+		bufs->coded[i].size = coded_size;
 		bufs->coded_hdr[i].cpu =
 			ave_sess_dma_alloc(bufs, abi->start_avc.coded_hdr_bytes,
 					   &bufs->coded_hdr[i].iova);
@@ -1155,9 +1231,14 @@ static int ave_session_start_avc(struct ave_device *ave,
 		/* used only where the ABI's recon_size != NONE (26.6.2) */
 		recon[i].luma_size = cw * ch;
 		if (session_lsb) {
-			/* LSB plane at the slot base, MSB after it (docs/57). */
-			recon[i].lsb_addr = bufs->dpb[i].recon;
-			recon[i].addr = bufs->dpb[i].recon + AVE_SESS_LSB_SPAN;
+			/*
+			 * MSB pair at the slot base, LSB pair after it. Both
+			 * spans are exact now (docs/66 §5), so the LSB base
+			 * moves with the resolution instead of sitting at a
+			 * fixed 128 KiB that is too small from 1080p up.
+			 */
+			recon[i].addr = bufs->dpb[i].recon;
+			recon[i].lsb_addr = bufs->dpb[i].recon + bufs->recon_msb_span;
 		}
 	}
 	s.need_lsb_planes = session_lsb;
@@ -2316,6 +2397,20 @@ int ave_session_selftest(struct ave_device *ave)
 	if (!ave->running) {
 		dev_warn(ave->dev, "session: coprocessor not running; skipping\n");
 		return -ENODEV;
+	}
+	/*
+	 * Apple's own limits (kext 0xea3d9c). Nothing checked these before,
+	 * and every buffer formula below is a function of the dimensions - an
+	 * out-of-range one produces a mis-sized allocation and a DMA fault
+	 * rather than an error. docs/66 §4.
+	 */
+	if (session_width < 192 || session_width > 4096 ||
+	    session_height < 96 || session_height > 4096 ||
+	    (session_width & 1) || (session_height & 1)) {
+		dev_err(ave->dev,
+			"session: %ux%u is outside the firmware's 192x96..4096x4096 (and must be even); refusing\n",
+			session_width, session_height);
+		return -EINVAL;
 	}
 
 	abi = ave_cmd_abi_get(ave->fw_abi);
