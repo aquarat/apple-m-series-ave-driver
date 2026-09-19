@@ -1197,3 +1197,13 @@ A full pass over what the 13.5 kext writes into AVC_INIT (id 4) and AVC_ENCODE
 
 So there is no second missing field to batch, and a golden-image harness would
 have caught exactly one bug: not built (docs/62 4).
+
+## 2026-09-19 23:12/23:30 — F16/F17: a decodable H.264 frame, but not of our source
+
+The encode completes with no Cveseb, completion 0x0E06, and ffprobe reads the
+output as H.264 Baseline 1280x720. Every stage counter covers the whole frame.
+But the decoded picture is uniform luma 130 and the reconstruction buffer is
+empty while the source buffer holds the ramp: the source reader never read our
+pixels. Also: rmmod preceded a machine reset for the second time (F4, F16), so
+the driver now stays loaded and each experiment takes a boot.
+[53](53-first-frame.md) §28.

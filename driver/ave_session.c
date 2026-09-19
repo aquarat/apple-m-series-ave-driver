@@ -1415,21 +1415,27 @@ static void ave_session_publish(struct ave_device *ave,
 	if (bufs->src_cpu && bufs->recon_cpu) {
 		const u8 *src = bufs->src_cpu, *rec = bufs->recon_cpu;
 		u32 n = min_t(u32, bufs->src_size, bufs->recon_pub_size);
-		u32 src_distinct = 0, rec_distinct = 0;
-		u8 seen_s[256] = {}, seen_r[256] = {};
+		u32 src_distinct = 0, rec_distinct = 0, rec_nonzero = 0;
+		DECLARE_BITMAP(seen_s, 256) = {};
+		DECLARE_BITMAP(seen_r, 256) = {};
 		u32 k;
 
 		dma_rmb();
 		for (k = 0; k < n; k++) {
-			if (!seen_s[src[k]]++)
+			/* A u8 tally wrapped at 256 and printed >256 distinct
+			 * values of a byte in F17; bitmaps cannot. */
+			if (!test_and_set_bit(src[k], seen_s))
 				src_distinct++;
-			if (!seen_r[rec[k]]++)
+			if (!test_and_set_bit(rec[k], seen_r))
 				rec_distinct++;
+			rec_nonzero += !!rec[k];
 		}
 		dev_info(ave->dev,
 			 "session: frame: source crc %#010x (%u distinct values, first %u %u %u %u), recon crc %#010x (%u distinct, first %u %u %u %u) over %u bytes\n",
 			 crc32(0, src, n), src_distinct, src[0], src[1], src[2], src[3],
 			 crc32(0, rec, n), rec_distinct, rec[0], rec[1], rec[2], rec[3], n);
+		dev_info(ave->dev, "session: frame: recon non-zero bytes %u of %u\n",
+			 rec_nonzero, n);
 		if (rec_distinct <= 2 && src_distinct > 2)
 			dev_warn(ave->dev,
 				 "session: frame: the reconstruction is flat while the source is not - the encoder did not read our pixels\n");
@@ -1576,7 +1582,15 @@ static void ave_session_diag_channels(struct ave_device *ave, const char *tag)
 {
 	static const u32 ch[] = { 0x30240, 0x30300, 0x30380, 0x303c0, 0x30400,
 				  0x30440, 0x30480, 0x30600, 0x30640, 0x30700,
-				  0x30780, 0x20bc0 };
+				  0x30780, 0x20bc0,
+				  /*
+				   * The source reader. F17: the frame completed
+				   * with every stage counting 3845 MBs, yet the
+				   * reconstruction was empty and the source ramp
+				   * untouched - so where this channel points is
+				   * the question.
+				   */
+				  0x20000, 0x20040, 0x20080, 0x200c0 };
 	int i, k;
 
 	for (i = 0; i < ARRAY_SIZE(ch); i++) {

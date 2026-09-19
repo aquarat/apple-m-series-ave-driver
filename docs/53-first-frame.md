@@ -1716,3 +1716,49 @@ live there. **Inferred, not confirmed:** no instruction in the firmware writes
 `ctrl+0x10C0`, so the source has never been seen. `session_entropy_size=1`
 (default on) writes it; `=0` is the control. 35 new harness checks (809 total),
 including that `param_sets_addr` is still intact at `0xFB30`.
+
+---
+
+## 28. F16/F17: the pipeline completes - and encodes the wrong picture
+
+`results/f16-1789855975.kmsg` (+ `-load1/`), `results/f17-1789857052.kmsg`
+(+ `-load1/`), commits `8826a1c` / `600e365`.
+
+**What works, end to end.** With the entropy size table at wire `0xFA30`
+enabled the encode completes: **no `Cveseb buffer write full!`**, completion
+**`0x0E06` status `0xee0000`**, 2709 bytes in one slice, `FrameTypeReturned 3`,
+21 bytes of SPS+PPS. `ffprobe` reads `frame.h264` independently as **H.264
+Baseline 1280x720 yuv420p** and ffmpeg decodes it. F17 adds the proof the pipe
+ran the whole frame: MbInput produced = consumed = 3845, ModeDec 3845,
+ReconLuma 3845, CAVLC 3845, `currMbRow 44` (last row), drain 1, zero
+DART/SMMU/AXI faults, and the four entropy channels holding **both** address
+and size `0xf0000` with non-zero progress words.
+
+**What is wrong.** The decoded picture is **uniform luma 130**. The buffers,
+compared offline:
+
+| buffer | distinct values | content |
+|---|---|---|
+| `input_luma.bin` (what we wrote) | 226 | the ramp, `16,16,16,17 ... 234` |
+| `recon_luma.bin` (DPB slot 0 MSB) | 2 | 8032 non-zero bytes of 262144 |
+
+So the hardware consumed a frame's worth of macroblocks **without reading our
+pixels**, and 2709 bytes is the cost of encoding nothing. The host side is not
+at fault: the ramp is in the very allocation whose IOVA the Process command
+publishes (`luma 0xfd300000/0xe1000`, stride 1280), written before the command
+is sent.
+
+**Apparatus note:** the in-driver "distinct values" counter used a `u8` tally
+and wrapped, printing 1100 and 1025 distinct values of a *byte*. It is a
+bitmap now; the offline comparison above is what the conclusion rests on.
+A statistic that cannot say "impossible" is worth nothing.
+
+**Also learned, the hard way:** `rmmod` is unsafe. The machine reset seconds
+after a clean unload following F16 - core idle, no faults, unload logged
+success - which is the same shape as F4's post-unload reset. Until that is
+understood each experiment gets its own boot and the driver stays loaded
+(`e3-run.sh`, never `halt-run.sh`).
+
+Open: where the source-read channel (`0x40D120000 + 0x40k`) gets its base
+address, and whether the input surface is a Start-time table like recon,
+colocated and entropy turned out to be.
