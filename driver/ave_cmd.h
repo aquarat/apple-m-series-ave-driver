@@ -191,8 +191,9 @@ struct ave_avc_frame {
 	 * 0 entries leave the table zero, which reproduces the assert - kept
 	 * as the negative control, exactly like low_res_src_addr above.
 	 */
-	u64	entropy[AVE_ENTROPY_MAX];
-	u32	n_entropy;		/* 0 = write none */
+	u64	entropy[AVE_ENTROPY_MAX][AVE_ENTROPY_COLS];
+	u32	n_entropy;		/* rows; 0 = write none */
+	u32	n_entropy_cols;		/* columns; 0 or 1 = column 0 only */
 
 	/* Per-frame source-neighbour scratch, [group][index]; % 64. */
 	u64	src_nbr[AVE_SRC_NBR_GROUPS][AVE_SRC_NBR_MAX];

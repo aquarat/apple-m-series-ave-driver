@@ -1131,3 +1131,12 @@ zero - true for asserts, not for the pipe. The driver can now publish per-slot
 colocated buffers (`session_coloc=1`, 0x5A-filled) and logs MCPU counters,
 the two stuck cores' stacks and stage registers, and every write channel after
 Start_AVC and at the timeout.
+
+## 2026-09-19 18:44 — F12: colocated writer fixed the row-0 stall; entropy channels are null
+
+`results/f12-1789839843.kmsg`. With per-slot colocated MV buffers the encode
+went from 34 to **3083 of 3600 macroblocks** and the colocated writer is live
+(194 KiB of the fill overwritten). It now stalls near row 38, and the channel
+dump shows the four entropy write channels enabled with a null address: the
+kext fills `encoder_addr_entropy` as a 4-column matrix and we filled one
+column. Fixed in the ABI, builder and session. [53](53-first-frame.md) §23.

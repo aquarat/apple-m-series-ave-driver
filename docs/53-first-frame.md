@@ -1560,3 +1560,37 @@ Hang unchanged; docs/59's reads at the timeout:
 
 Next: why ModeDecision and ReconLuma stop servicing their MB interrupt
 (docs/60).
+
+---
+
+## 23. F12 (2026-09-19 18:44): the colocated writer was the row-0 stall - 34 -> 3083 MBs
+
+`results/f12-1789839843.kmsg`, commit `1f2f9e5`, as F11 plus `session_coloc=1`.
+
+- Start_AVC published 2 colocated slots of `0x71000` bytes (slot 0 `0xfe100000`)
+  at wire `0xF6B0`. The pipe's colocated writer came up **enabled**:
+  `0x40D130380 = 0x80030001`, address `0xfe100000`, size `0x38400` - and
+  **194 560 of 462 848 fill bytes were overwritten**. docs/60 #1 **confirmed**.
+- **MbInput consumed 3083 of 3600** (was 34), produced 3097, last source event
+  y 38 x 48; ModeDec entries 3078, ReconLuma granted 3074, CAVLC entries 3067.
+  The frame now encodes almost to the end and stalls around **row 38 of 45**.
+- ModeDecision and ReconLuma are again posted-and-not-granted
+  (`+0x14 = 0x80000126 / 0x8000012b`).
+- **The channel snapshots name the next gap.** At the timeout the four entropy
+  write channels `0x1303C0`, `0x130400`, `0x130440`, `0x130480` read control
+  `0x80030001` (**enabled**) with **address 0 and size 0**, while every other
+  channel holds a real buffer (recon `0xfe820000`/`0xfe810000`, colocated
+  `0xfe100000`, neighbours `0xff000000`/`0xff050000`).
+
+**Why (C):** `AVE_CHM_SetDataInfo_FwBuf` fills `encoder_addr_entropy` as a
+**matrix** - columns `j = 0..3` on the outside, rows `i = 0..15` inside, one
+surface per entry, stopping at the first null (kext `0xfffffe0008eb0cb8..0d0c`,
+entry `[i][j]` at `+0xA00 + 32i + 8j`). `PipePrepareParam` copies **all four
+columns** of a row (fw `0x48800..0x4881c`). We filled column 0 only (docs/54's
+`[i][transcode_buffer_id]`), so the pipe's four channels were enabled with
+nothing behind them.
+
+**Change:** the entropy table is now a matrix in the ABI, the builder and the
+session: 4 rows x 4 columns, each entry its own 960 KiB buffer (16 total,
+15 MiB), with the builder refusing a hole or more columns than the wire table
+has (20 new harness checks).

@@ -685,28 +685,61 @@ static void test_process_13_5(void)
 	begin("13.5 process_avc entropy table");
 	f = frame_idr();
 	f.n_entropy = 4;
-	f.entropy[0] = 0x0000000700000000ull;
-	f.entropy[1] = 0x00000007000f0000ull;
-	f.entropy[2] = 0x00000007001e0000ull;
-	f.entropy[3] = 0x00000007002d0000ull;
+	f.n_entropy_cols = 1;
+	f.entropy[0][0] = 0x0000000700000000ull;
+	f.entropy[1][0] = 0x00000007000f0000ull;
+	f.entropy[2][0] = 0x00000007001e0000ull;
+	f.entropy[3][0] = 0x00000007002d0000ull;
 	memset(buf, 0, sizeof(buf));
 	ret = ave_cmd_build_process_avc(a, buf, sizeof(buf), &CTX, 40, &f);
 	expect_int(ret, 0x1940, "size unchanged");
-	E64(buf, P + 0xa00, f.entropy[0], "entropy[0][0] (wire 0x13C8)");
-	E64(buf, P + 0xa20, f.entropy[1], "entropy[1][0] (wire 0x13E8)");
-	E64(buf, P + 0xa40, f.entropy[2], "entropy[2][0] (wire 0x1408)");
-	E64(buf, P + 0xa60, f.entropy[3], "entropy[3][0] (wire 0x1428)");
-	E64(buf, P + 0xa08, 0, "[0][1] left zero: j = transcode_buffer_id = 0");
+	E64(buf, P + 0xa00, f.entropy[0][0], "entropy[0][0] (wire 0x13C8)");
+	E64(buf, P + 0xa20, f.entropy[1][0], "entropy[1][0] (wire 0x13E8)");
+	E64(buf, P + 0xa40, f.entropy[2][0], "entropy[2][0] (wire 0x1408)");
+	E64(buf, P + 0xa60, f.entropy[3][0], "entropy[3][0] (wire 0x1428)");
+	E64(buf, P + 0xa08, 0, "[0][1] left zero with one column");
 	E64(buf, P + 0xa80, 0, "row 4 left zero: only ctrl+3768 = 4 are read");
 
-	begin("13.5 process_avc entropy negatives");
-	f.entropy[2] = 0;
+	/*
+	 * All four columns: the kext writes entry [i][j] at +0xA00 + 32i + 8j
+	 * (columns outside, rows inside, kext 0xfffffe0008eb0cb8..0d0c).
+	 */
+	begin("13.5 process_avc entropy matrix");
+	{
+		u32 i2, j2;
+
+		for (i2 = 0; i2 < 4; i2++)
+			for (j2 = 0; j2 < 4; j2++)
+				f.entropy[i2][j2] = 0x0000000700000000ull +
+						    0x100000ull * (4 * i2 + j2);
+		f.n_entropy_cols = 4;
+		memset(buf, 0, sizeof(buf));
+		expect_int(ave_cmd_build_process_avc(a, buf, sizeof(buf), &CTX, 40, &f),
+			   0x1940, "size unchanged");
+		for (i2 = 0; i2 < 4; i2++)
+			for (j2 = 0; j2 < 4; j2++)
+				E64(buf, P + 0xa00 + 32 * i2 + 8 * j2,
+				    f.entropy[i2][j2], "entropy[i][j]");
+		E64(buf, P + 0xa18 + 32 * 4, 0, "row 4 still zero");
+		f.entropy[2][3] = 0;
+		expect_int(ave_cmd_build_process_avc(a, buf, sizeof(buf), &CTX, 40, &f),
+			   -EINVAL, "a hole in the matrix");
+		f.entropy[2][3] = 0x0000000700b00000ull;
+		f.n_entropy_cols = 5;
+		expect_int(ave_cmd_build_process_avc(a, buf, sizeof(buf), &CTX, 40, &f),
+			   -EINVAL, "more columns than the wire table has");
+		f.n_entropy_cols = 1;
+	}
+
+	begin("13.5 process_avc entropy negatives (one column)");
+
+	f.entropy[2][0] = 0;
 	expect_int(ave_cmd_build_process_avc(a, buf, sizeof(buf), &CTX, 40, &f),
 		   -EINVAL, "a zero entry in a table we claim to fill (:8020)");
-	f.entropy[2] = 0x0000000700000020ull;
+	f.entropy[2][0] = 0x0000000700000020ull;
 	expect_int(ave_cmd_build_process_avc(a, buf, sizeof(buf), &CTX, 40, &f),
 		   -EINVAL, "entry % 64 (:8021)");
-	f.entropy[2] = 0x00000007001e0000ull;
+	f.entropy[2][0] = 0x00000007001e0000ull;
 	f.n_entropy = 17;
 	expect_int(ave_cmd_build_process_avc(a, buf, sizeof(buf), &CTX, 40, &f),
 		   -EINVAL, "more rows than the wire table holds");

@@ -187,7 +187,11 @@ MODULE_PARM_DESC(session_lowres_kb,
 	"size of each LRME scaled-luma surface in KiB (0 = AVE_CalcBufSizeOfLowResRef formula)");
 
 /*
- * The entropy-coding working buffers, EncCommParams.encoder_addr_entropy[i][0]
+ * The entropy-coding working buffers, EncCommParams.encoder_addr_entropy[i][j].
+ * The kext fills a matrix - columns 0..3 outside, rows inside (kext
+ * 0xfffffe0008eb0cb8) - and F12 showed the pipe's four entropy write channels
+ * (0x1303C0 + 0x40k) enabled with a null address while only column 0 was
+ * filled, so every column gets its own buffer now.
  * - the last unconditional assert on the per-frame path (docs/54).
  * SetTranscode requires the first four non-zero and 64-byte aligned, asserting
  * CAVCController_H13C.cpp:8020 / :8021 at fw 0x59558 / 0x595a0.
@@ -486,8 +490,9 @@ struct ave_sess_bufs {
 	void		*nbr_cpu[AVE_SRC_NBR_GROUPS][AVE_SRC_NBR_MAX];
 	size_t		nbr_slot;	/* bytes per slot */
 	u32		n_nbr;
-	u64		entropy[AVE_ENTROPY_MAX];
-	u32		n_entropy;
+	u64		entropy[AVE_ENTROPY_MAX][AVE_ENTROPY_COLS];
+	u32		n_entropy;	/* rows */
+	u32		n_entropy_cols;
 
 	/* debugfs: only created once a frame actually came back. */
 	struct dentry		*dbg_dir;
@@ -1188,7 +1193,7 @@ static void ave_session_alloc_entropy(struct ave_device *ave,
 	struct ave_sess_arena a = {};
 	u32 cw = ave_mb_align(session_width);
 	u32 ch = ave_mb_align(session_height);
-	u32 n = abi->process_avc.entropy_max;
+	u32 n = abi->process_avc.entropy_max, cols;
 	size_t each;
 	u32 i;
 
@@ -1216,7 +1221,10 @@ static void ave_session_alloc_entropy(struct ave_device *ave,
 		return;
 	}
 
-	a.size = ALIGN(each, 128) * n + 128;
+	cols = abi->process_avc.entropy_cols_max ? abi->process_avc.entropy_cols_max : 1;
+	if (cols > AVE_ENTROPY_COLS)
+		cols = AVE_ENTROPY_COLS;
+	a.size = ALIGN(each, 128) * n * cols + 128;
 	a.cpu = ave_sess_dma_alloc(bufs, a.size, &a.iova);
 	if (!a.cpu) {
 		dev_warn(ave->dev,
@@ -1227,20 +1235,26 @@ static void ave_session_alloc_entropy(struct ave_device *ave,
 	memset(a.cpu, 0, a.size);
 
 	for (i = 0; i < n; i++) {
-		dma_addr_t iova;
+		u32 j;
 
-		/* 128-aligned by the arena, so the :8021 & 63 check holds. */
-		if (!ave_sess_arena_take(&a, each, &iova)) {
-			/* A partial table would fail the builder's check. */
-			bufs->n_entropy = 0;
-			return;
+		for (j = 0; j < cols; j++) {
+			dma_addr_t iova;
+
+			/* 128-aligned by the arena, so the :8021 check holds. */
+			if (!ave_sess_arena_take(&a, each, &iova)) {
+				/* A partial table would fail the builder. */
+				bufs->n_entropy = 0;
+				return;
+			}
+			bufs->entropy[i][j] = iova;
 		}
-		bufs->entropy[i] = iova;
 	}
 	bufs->n_entropy = n;
+	bufs->n_entropy_cols = cols;
 	dev_info(ave->dev,
-		 "session: entropy: %u buffers of %zu KiB at %#llx..%#llx%s\n",
-		 n, each >> 10, bufs->entropy[0], bufs->entropy[n - 1],
+		 "session: entropy: %u x %u buffers of %zu KiB at %#llx..%#llx%s\n",
+		 n, cols, each >> 10, bufs->entropy[0][0],
+		 bufs->entropy[n - 1][cols - 1],
 		 session_entropy_kb ? " (size overridden by session_entropy_kb)"
 				    : " (kext formula, larger K)");
 }
@@ -1645,6 +1659,7 @@ static int ave_session_process(struct ave_device *ave,
 	if (bufs->n_entropy) {
 		memcpy(f.entropy, bufs->entropy, sizeof(f.entropy));
 		f.n_entropy = bufs->n_entropy;
+		f.n_entropy_cols = bufs->n_entropy_cols;
 	}
 
 	if (bufs->n_nbr && abi->process_avc.src_nbr_max) {
