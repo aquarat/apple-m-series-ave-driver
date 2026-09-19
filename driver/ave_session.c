@@ -1025,6 +1025,25 @@ static int ave_session_start_avc(struct ave_device *ave,
 				break;
 			}
 	}
+	/*
+	 * The entropy/SEB buffers belong in Start_AVC: the firmware rebuilds the
+	 * per-frame copy from this table every frame (docs/61 10), which is why
+	 * F13's per-frame matrix changed nothing. Same buffers as the Process
+	 * table; ave_session_alloc_entropy() has already allocated them.
+	 */
+	if (bufs->n_entropy && abi->start_avc.entropy_set != AVE_OFF_NONE) {
+		u32 rows = min_t(u32, bufs->n_entropy, abi->start_avc.entropy_max);
+
+		memcpy(s.entropy, bufs->entropy, sizeof(s.entropy));
+		s.n_entropy = rows;
+		s.n_entropy_cols = min_t(u32, bufs->n_entropy_cols,
+					 abi->start_avc.entropy_cols_max);
+		dev_info(ave->dev,
+			 "session: Start_AVC: entropy %u x %u at wire %#x, slot 0 %#llx\n",
+			 s.n_entropy, s.n_entropy_cols,
+			 abi->start_avc.entropy_set, s.entropy[0][0]);
+	}
+
 	/* Colocated MV buffers (docs/60 #1), allocated here, all or nothing. */
 	if (session_coloc && abi->start_avc.colocated_set != AVE_OFF_NONE) {
 		size_t sz = ALIGN((size_t)128 * (cw / 16) * (ch / 16), SZ_4K);

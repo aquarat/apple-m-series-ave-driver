@@ -8,6 +8,10 @@ wired at Start_AVC wire `0xF6B0` ([60](60-md-recon-stall.md) §6.1) the stall
 moved from MB ~34 to MB ~3083. F13 filled `encoder_addr_entropy` as the full
 4x4 matrix instead of column 0 and is **byte-identical to F12 in every counter**.
 
+**Resolved in §10:** the firmware overwrites the per-frame entropy table from a
+**Start_AVC** record before it ever reads it, so no change to the Process
+command could have mattered. The table belongs at Start_AVC wire `0xF830`.
+
 Continues [57](57-pipe-hang.md), [58](58-pipe-start.md), [59](59-row1-stall.md),
 [60](60-md-recon-stall.md) and [53](53-first-frame.md) §21-§23. Conventions as
 docs/60: firmware VAs are 13.5 image VAs (file offset = VA + `0x4000`); MCPU VAs
@@ -28,14 +32,15 @@ here was run on hardware.
 | **The firmware already named the failure** | F12 and F13 print `Cveseb buffer write full!` **four times, 1.4 ms after the Process command and ~2 s before the hang report**. That string is the handler for **bit 12 of `0x40D110140`** (`0x38ba0..0x38be0`), inside `CAVEPipeISRManager`. It appears in **no other run** in `results/` | C |
 | Q1: what are `0x40D1303C0 + 0x40k` | The **four pipe-side entropy / SEB write-DMA channels**. Control is written `0x80030001` unconditionally (`0x55d54..0x55d70`); address ← `EncCommParams.encoder_addr_entropy[k_ch][j]` at `ctrl+0xEC0`, size ← the companion u32 table at `ctrl+0x10C0`, both indexed by `j = ctrl[4740]` | C |
 | …what programs them | `ctrl+0xEC0` is copied **per frame** from **PICMGMT `+0xA00`** by `PipePrepareParam` (`0x487a4..0x48bea`), `ctrl[3768]` = `num_encoder_addr_entropy` rows (= **4** on our single-core arm, `0x5d064/0x5d074`). **`ctrl+0x10C0` has no writer anywhere in the image** | C (copy) / C-negative (size, Trap 3 caveat) |
+| **Why it reads zero although we send it (§10)** | **`setRefPointers` overwrites PICMGMT `+0x980..+0xBFF` on every frame** (`0x2c98c..0x2ca4c`) from a per-DPB-slot record that `ProvideReferenceFrames` filled at **Start_AVC** from **wire `0xF830`** (`0x2ba98..`, `x8 = VP + 0xF770`). The driver has never written `0xF830`: `ave_abi.h` mislabels it as the fourth SrcNeighbor group (which really lives at wire **`0xFED0`**) and leaves it `AVE_OFF_NONE`. So the entropy table must go in **Start_AVC**, not Process | C (copy) / I (wire, 3-way cross-check) |
 | …are they Transcode-only / normally idle | **No.** They are *pipe* write channels, enabled on every AVC pipe start regardless of Transcode. The four *Transcode* channels are a different block, `0x11208C0 + 0x40i`, programmed in `ProcessTranscodeStart` (`0x58fd0..0x590f0`). docs/60 §3.2's "entropy ×4 … CAVLC is idle so not the blocker" is superseded | C |
 | …can "enabled with size 0" block the pipe | Yes, and it is the only channel class in that state. `0x40D11013C = 0xf007` enables exactly bits 0,1,2,12,13,14,15 — the four `… buffer write full` sources are armed, and bit 12 fired | C |
 | Q2: what stops at ~3083 | The syntax-element (SEB) path. CAVLC ran 3067 MBs into an on-chip buffer whose DMA drain has a **null address and zero size**, so nothing ever left; when the internal buffer filled, bit 12 fired and the whole chain back-pressured within ~30 MBs. No ring sized 3040-3090 MBs exists in host memory; the depth is on-chip and **[U]** | C (evidence) / I (mechanism) |
 | Q3: recon `+0x14/+0x18` | **Not counters.** `+0x14 = 0x700D1 \| (LSB-gate byte << 2)` is a firmware constant (`0x552ec..0x552fc`, chroma `0x58050`); `+0x18` is identical in the *after Start_AVC* and *timeout* dumps, so it is static per-channel config. The only recon word that moved is **`+0x20`** (`0 → 0x0024002a` luma, `0x0024002c` chroma) | C |
 | …neighbour `+0x14/+0x18` | These **are** hardware pointers: zeroed by `ResetDMANeighborRegs` (`0x27c88`), zero in the after-Start_AVC dump, non-zero at the timeout. Info `0xc00/0x980` = 48 and 38 records of 64 B in an 80-record ring; Pixel `0x3c00/0x7500`. Exact semantics **[U]** | C / U |
-| Q4: still-zero host fields | `0x130780`'s address (`ctrl[7896]` ← **PICMGMT `+0x9E0`**, only writer `0x486a8`) also reads **0**, although the driver publishes `src_nbr[3][0] = 0xff0f0000` there. Two independent PICMGMT fields at `+0x9E0` and `+0xA00` read back as zero — that is the one apparatus question to settle before anything else (§4.1) | C |
-| Q5 | `0x40D110140` in full (bit 12 is the answer), the four Transcode read channels for comparison, the MCPU MB counters, and a **host-side dump of the built Process command at `0x1340..0x1450`** which costs no run at all | — |
-| Best next step | §6.1: prove the Process command really carries PICMGMT `+0x9E0/+0xA00` (host-side, free), then find the source of the `ctrl+0x10C0` size before spending a boot | — |
+| Q4: still-zero host fields | `0x130780`'s address (`ctrl[7896]`) reads **0** for the same reason, one table earlier: its Start_AVC source is wire **`0xFED0`** (`0x5d8a0`, `x8+1792`), which the driver leaves `AVE_OFF_NONE`. Two anomalies, one mechanism (§4.1, §10.3) | C |
+| Q5 | `0x40D110140` in full (bit 12 is the answer), the four Transcode read channels for comparison, the MCPU MB counters, and the four entropy channels' `+0xC/+0x10` | — |
+| **Best next step** | **§7.1: send `encoder_addr_entropy` in Start_AVC at wire `0xF830 + 0x20i + 8j` (u64, 64-byte aligned, rows 0-3, all four columns), and `src_nbr_set[3]` at wire `0xFED0`** | — |
 
 ---
 
@@ -188,6 +193,9 @@ session init by `memset(ctrl+0xa70, 0, 0x244b0)` at `0x467c8..0x467d8` **[C]**):
 48808  …+8 -> +8   48810  …+16 -> +16   48818  …+24 -> +24
 ```
 
+**But the source is not the table we sent** — `setRefPointers` has already
+overwritten PICMGMT `+0xA00` from a Start_AVC-time record. See **§10**.
+
 **[C]** `x26` is PICMGMT beyond doubt: the same function reads `[x26,#3244]`
 (`+0xCAC` = `frame_type`), `[x26,#3248]` (`+0xCB0` = `ctx_index`),
 `[x26,#3088]` (`+0xC10` = `out_coded_hdr`) and `[x26,#2232]` (`+0x8B8` =
@@ -302,52 +310,43 @@ discriminates §6.1 from any fixed-size-ring theory on its own.
 
 ---
 
-## 4. Q4 — host-supplied fields still zero, and one apparatus problem
+## 4. Q4 — host-supplied fields still zero
 
-### 4.1 PICMGMT `+0x9E0` reads back as zero too — settle this first
+### 4.1 RESOLVED: the firmware throws our per-frame values away
 
-`ctrl[7888]` and `ctrl[7896]` have exactly **one** writer in the image:
+*(Was: "PICMGMT `+0x9E0` reads back as zero too — settle this first". The
+coordinator built the same Process command in userspace and dumped wire
+`0x1340..0x1450`: all sixteen entropy entries are present at
+`0x13C8 + 0x20i + 8j`, the SrcNeighbor group-3 field is present at `+0x9E0`,
+and the command is 6464 bytes against a declared size of 6464. **The host side
+is not at fault.** The firmware-side reason is §10.)*
+
+`ctrl[7888]` and `ctrl[7896]` have exactly **two** writers in the image:
 
 ```
-486a4  ldr x8,[x26,#2528]  ; PICMGMT + 0x9E0
-486a8  str x8,[x19,#7896]
-486ac  ldr x8,[x26,#2528]
-486b0  str x8,[x19,#7888]
+5d8a0  ldr x8,[x23,#1808] ; str x8,[x19,#7896]   ; InitEncodingParameters, Start_AVC
+5d8a8  ldr x8,[x23,#1808] ; str x8,[x19,#7888]
+486a4  ldr x8,[x26,#2528] ; str x8,[x19,#7896]   ; PipePrepareParam, PICMGMT + 0x9E0
+486ac  ldr x8,[x26,#2528] ; str x8,[x19,#7888]
 ```
 
-**[C]** (immediate scan for `#7888]` / `#7896]` returns these two stores and
-nothing else.) `setPipe` then writes `ctrl[7896]` to `0x113078C` and
-`ctrl[7888]` to `0x1120E4C` (`0x55934..0x55944`, `0x5590c..0x55930`). **[C]**
-
-F13 at the timeout: `0x40D130780: 80030000 … +0xC = 00000000 +0x10 = 00001400`.
-**[C]** So `PICMGMT + 0x9E0 = 0` as the firmware read it — while the driver
-publishes `src_nbr[3][0] = 0xff0f0000` at `process_avc.src_nbr_set[3] = 0x9e0`
-(`driver/ave_abi.h:1509`, `driver/ave_cmd.c:634-637`, log line
-`SrcNeighbor 4 entries/group at 0xff000000 0xff050000 0xff0a0000 0xff0f0000`).
-
-The entropy address at `+0xA00` is zero in the same way. Two adjacent
-host-published PICMGMT fields, two different code paths in the firmware, both
-reading zero. The fields that demonstrably *did* arrive (`+0x980`/`+0x9A0`, the
-neighbour addresses at `0x40D130600/640 = ff000000/ff050000`) are **also** set
-at Start_AVC by `InitEncodingParameters` (`0x5d874..0x5d89c`,
-[59](59-row1-stall.md) §2.3), so they are **not** evidence that the per-frame
-block landed.
-
-**We therefore have no positive evidence that any per-frame PICMGMT field above
-`+0x8C8` reaches the firmware, and two pieces of negative evidence.** Static
-analysis says the copy at `0x487a4` is ungated once `ctrl[3768] = 4`, and the
-driver's builder writes `base(0x9c8) + 0xa00` and `+ 0x9e0` inside a 6464-byte
-command whose bounds check passes. The two cannot both be true. **[U]** — and
-it is cheap to settle host-side (§5.1) before spending a boot on anything else.
+**[C]** Both sources are the **same host field** seen from two sides
+(§10.3): `x23 + 1808` is Start_AVC wire **`0xFED0`**, and PICMGMT `+0x9E0` is
+what `setRefPointers` copies *from* that same Start_AVC field every frame. The
+driver leaves `start_avc.src_nbr_set[3] = AVE_OFF_NONE`
+(`driver/ave_abi.h:1391`), so the field is zero at Start_AVC, `setRefPointers`
+writes that zero over PICMGMT `+0x9E0`, and `0x40D13078C` reads 0 — exactly as
+observed, with the bytes we sent in Process discarded in between. The same
+mechanism, one table further on, is what zeroes the entropy addresses.
 
 ### 4.2 The rest of the late-consumed fields
 
 | field | wire / PICMGMT | firmware use | our state | Conf |
 |---|---|---|---|---|
-| `encoder_addr_entropy[i][j]` | PICMGMT `+0xA00`, wire `0x9c8+0xa00 = 0x13C8` | `ctrl+0xEC0` → the four SEB writers' address | **0** at the channel | C |
+| `encoder_addr_entropy[i][j]` | **Start_AVC wire `0xF830 + 0x20i + 8j`** (§10.3); the per-frame PICMGMT `+0xA00` copy is overwritten from it | `ctrl+0xEC0` → the four SEB writers' address | **0** at the channel — we never write `0xF830` | C / I (wire) |
 | entropy size/credit | `ctrl+0x10C0` — **no firmware writer, no located host field** | the four SEB writers' size | **0** | C / U |
 | `num_encoder_addr_entropy` | firmware-set = 4 | gates the copy and `SetTranscode` | 4 | C |
-| split-context address | PICMGMT `+0x9E0` (`src_nbr` group 3) | `0x113078C`, `0x1120E4C` | **0**; channel control `0x80030000` (disabled), so harmless in itself | C |
+| SrcNeighbor FwData / split-context address | **Start_AVC wire `0xFED0`** (`0x5d8a0`); PICMGMT `+0x9E0` is overwritten from it | `0x113078C`, `0x1120E4C` | **0**; channel control `0x80030000` (disabled), so harmless in itself | C / I (wire) |
 | MB stats / MB address | gate `ctrl+0x23FCF`, wire `0xFF76` | `0x1130700` `0x80030000`, size `0x40` | designed off-state, no assert; **not** a stall candidate | C ([60](60-md-recon-stall.md) §3.2) |
 | stats DMA | gate `[ctrl+0x122b]+2429/2430` | gate off | same | C ([59](59-row1-stall.md) §4) |
 | ME SFS results readers | `low_res_results`, PICMGMT `+0xC28` | inert in sync LRME | zero on purpose | C |
@@ -413,17 +412,14 @@ counter already does.
 
 ## 6. Q5 — what to read, and in what order
 
-### 6.1 Costs no run at all (do this first)
+### 6.1 Costs no run at all — done
 
-1. **Dump the built Process command before sending it.** In
-   `ave_session_frame()`, after `ave_cmd_build_process_avc` succeeds, print
-   `cmd[0x1340..0x1450]` (that is PICMGMT `+0x978 .. +0xA88`: the four
-   `src_nbr` groups and the whole entropy matrix). This settles §4.1 with no
-   hardware: either the IOVAs are there, in which case the firmware's reads of
-   PICMGMT `+0x9E0/+0xA00` are the mystery and `process_avc.picmgmt = 0x9c8`
-   needs re-deriving, or they are not, in which case the bug is in the builder.
-2. Print `abi->cmd[AVE_OP_PROCESS_AVC].size` next to the "sending N bytes" line
-   so `w->size` is visible.
+The coordinator dumped the built Process command at wire `0x1340..0x1450` in
+userspace: all sixteen entropy entries present at `0x13C8 + 0x20i + 8j`, the
+SrcNeighbor group-3 field present at `+0x9E0`, 6464 bytes against a declared
+6464. The host side is clean; §10 is the firmware-side answer. Keep the dump as
+a regression check, and add the same one for the **Start_AVC** command at wire
+`0xF7D0..0xFA30` once §7.1 is implemented.
 
 ### 6.2 Reads to add to the next run (bank 0, read-only)
 
@@ -458,101 +454,117 @@ Proposals for the operator (AGENTS.md); nothing here was run. **Fixed** means:
 MbInput consumed reaches 3600, `0x40D110140` bit 2 set, `StartCount 1-1-1-1`,
 completion id `0x0E06`, `frame.h264` non-empty.
 
-### 7.1 The entropy / SEB write channels are enabled with a null address and zero size (high)
+### 7.1 `encoder_addr_entropy` is a **Start_AVC** table, and we send it only in Process (high — this is the bug)
 
-**Why.** §1: the firmware logs `Cveseb buffer write full!` four times, at the
-exact moment of the stall, only in the runs that reached CAVLC, on a
-pipe-level interrupt bit that this session has enabled. §2: the four channels
-in that role are armed unconditionally and read address 0, size 0. §3: every
-buffer we own still had room, and the whole chain stopped within 30 MBs of the
-tail.
+**Why.** §10. `setRefPointers` overwrites PICMGMT `+0xA00..+0xBFF` on every
+frame from a per-DPB-slot record that `ProvideReferenceFrames` filled at
+Start_AVC from **wire `0xF830`**, which the driver has never written. Whatever
+the Process command carries at PICMGMT `+0xA00` is destroyed before
+`PipePrepareParam` reads it, so `ctrl+0xEC0` is zero, so the four SEB write
+channels get address 0, so the SEB never drains and raises
+`Cveseb buffer write full` (§1) after ~3070 MBs.
 
-**Change.** Two parts, and the second is the one still missing a wire offset:
+This also explains, with no extra assumption, why F13's 4x4 fill was
+byte-identical to F12 (both were overwritten) and why PICMGMT `+0x9E0` reads
+zero (§4.1, the same mechanism one table earlier).
 
-1. *Address.* Make PICMGMT `+0xA00` actually arrive. Wire offset
-   `process_avc.picmgmt (0x9c8) + 0xA00 = 0x13C8`, u64, 64-byte aligned
-   (assert `CAVCController_H13C.cpp:8021`). Keep the full 4x4 fill (§2.3):
-   the four channels index the four **rows**, and which column is read is a
-   firmware choice we do not control. Size per buffer: the driver's existing
-   `AVE_CalcBufSizeOfEntropyCoding` figure (960 KiB) is what macOS allocates;
-   keep it. Verify with §6.1 **before** the run.
-2. *Size.* The channel's `+0x10` comes from `EncCommParams + 0x650`
-   (`ctrl + 0x10C0 + 0x10·i + 4·j`), which **nothing in the firmware writes**
-   (§2.4). Locate its host field before the run: the candidates are a
-   Start_AVC/Config table the kext writes that we have not decoded, or a
-   PICMGMT field adjacent to `+0xA00`. Grep the kext for stores of a *size*
-   next to `AVE_CHM_SetDataInfo_FwBuf`'s `0xfffffe0008eb0cb8` loop and for
-   callers of `AVE_CalcBufSizeOfEntropyCoding`
-   (`0xfffffe0008ea5bd0`). Until it is found, the address alone may not be
-   enough: a channel with a real address and size 0 is still a zero-length
-   ring.
+**Change — the one that matters.** In the **Start_AVC** command, write the
+entropy table at:
 
-**Apparatus check.** At the timeout `0x40D1303CC/0x113040C/0x113044C/0x113048C`
-must hold the four entropy IOVAs (low 32 bits) and `0x11303D0 + 0x40k` a
-non-zero size. If they are still 0, the table did not land and §7.2 is the
-live problem, not this.
+| | |
+|---|---|
+| wire offset | **`0xF830 + 0x20·i + 8·j`**, `i = 0..15` rows, `j = 0..3` columns |
+| width | u64 little-endian IOVA |
+| alignment | 64 bytes (`& 63 == 0`, assert `CAVCController_H13C.cpp:8021`) |
+| rows that matter | `i = 0..3` — `num_encoder_addr_entropy` is 4 on the single-core arm (fw `0x5d064/0x5d074`) and `setPipe` reads exactly rows 0-3 |
+| columns | fill all four; `setPipe` reads column `ctrl[4740]` and the host does not choose it |
+| buffer size | unchanged: the driver's existing `AVE_CalcBufSizeOfEntropyCoding` figure, 960 KiB each, 16 buffers already allocated |
+| table extent | `0xF830 .. 0xFA2F` (512 B). Leave rows 4-15 zero, or point them at the same buffers — nothing reads them for the Pipe |
 
-**Confirm.** No `Cveseb buffer write full!` in the log, the entropy buffers'
-first bytes changed from their fill pattern, consumed reaches 3600, then
-*Fixed*. **Refute.** The channels are programmed, the buffers are written, and
-the stall stays at ~3083 with bit 12 still firing — then the SEB drain is not
-these channels and §7.3 takes over.
+In `driver/ave_abi.h` this is a new `start_avc.entropy_set = 0xf830`,
+`entropy_stride_i = 0x20`, `entropy_stride_j = 0x08`, `entropy_max = 4`,
+`entropy_cols_max = 4`, and `ave_cmd_build_start_avc` grows the same loop the
+Process builder already has. **Keep** the Process-side write: it is harmless,
+and if a future firmware stops overwriting PICMGMT it becomes the right place
+again.
 
-### 7.2 The per-frame PICMGMT block above ~`+0x9C0` is not reaching the firmware (high, and it gates 7.1)
+**Second change, same family (free, do it in the same patch).** Set
+`start_avc.src_nbr_set[3] = 0xfed0` (currently `AVE_OFF_NONE`,
+`driver/ave_abi.h:1391`) and publish the fourth SrcNeighbor group there. Two
+firmware sites read that exact field (`0x5d8a0` at Start_AVC and `0x2ba7c` per
+frame), and it is what feeds `0x40D1120E4C` / `0x40D113078C`. It is not known
+to be needed for the Pipe, but it is a one-line witness that the whole
+mechanism is understood (§7.1 *Confirm*).
 
-**Why.** §4.1: `PICMGMT + 0x9E0` and `PICMGMT + 0xA00` both read back as zero
-through two unrelated firmware paths, while the driver publishes both. Every
-PICMGMT field we can *prove* arrived is also set at Start_AVC.
+**Apparatus check.** At the timeout
+`0x40D1303CC / 0x113040C / 0x113044C / 0x113048C` must hold the low 32 bits of
+the four entropy IOVAs. If they are still 0, the wire offset is wrong — re-read
+`0x2ba14..0x2bc90` and check that `x8 = VP + 0xF770` still holds (§10.2).
 
-**Change.** None on the wire until §6.1 says which side is wrong. If the bytes
-are in the command buffer, re-derive `process_avc.picmgmt` and `picmgmt_size`
-from the kext (`0xfffffe0008eac9bc`, `0xfffffe0008eac9c4`) and from
-`ProcessAVC`'s **two** PICMGMT bases — `x21 + 0x9c8` (`0x145c8`) and
-`x21 + 0x55b0` (`0x145ac`), selected by a branch upstream of `0x145a0`
-(**[C]**, the selector itself is **[U]**). If the bytes are *not* in the
-buffer, the bug is in `ave_cmd_build_process_avc` and costs no run to fix.
+**Confirm.** No `Cveseb buffer write full!` in the log; `0x40D113078C =
+0xff0f0000` (the group-3 SrcNeighbor IOVA, from the second change); the entropy
+buffers' `0x5A` fill overwritten; MbInput consumed → 3600; then *Fixed*.
+**Refute.** The four addresses appear, the buffers are written, and the stall
+stays at ~3083 with bit 12 still firing — then the size question (§7.2) is real
+and the SEB needs `ctrl+0x10C0` as well.
 
-**Confirm.** `0x40D113078C` becomes `0xff0f0000` (the group-3 SrcNeighbor IOVA)
-in the same run that the entropy addresses appear. That single register is the
-cheapest witness that the per-frame block landed.
+### 7.2 The channel size `ctrl+0x10C0` may still be zero (medium, but only after 7.1)
 
-### 7.3 The SEB drains somewhere else and the four channels are a red herring (medium-low)
+**Why.** §2.4: `EncCommParams + 0x650` has **no writer anywhere in the image**,
+host-fed or computed, and no companion table sits next to the addresses in
+either the Start_AVC record (§10.2: the per-slot copy is u64 addresses only,
+`x8+96 … x8+600`, with nothing u32-shaped after it) or in `PipePrepareParam`
+(§10.4: its only stores into `ctrl` in the whole `3700..4600` range are
+`3776/3784/3792/3800` and `4544/4552/4560/4568`).
 
-**Why.** The mapping "`Cveseb` = the `encoder_addr_entropy` writers" is **[I]**,
-from the unit name `MCPU_Seb5`, the pipe-vs-XC split of bits 12/13, and the
-count of four. No code read says which channel the SEB writes to.
+Two readings, and 7.1's run separates them:
 
-**Change.** None. Decide it with reads: if §7.1's change makes the four
-channels live and bit 12 still fires, the SEB drain is one of
-`0x40D130700` (stats, deliberately disabled, size `0x40`) or `0x40D130780`
-(split context, address 0 per §4.1) — both of which are also degenerate on our
-session, and both of which §7.2 would fix for free.
+- **macOS leaves it zero too** and `+0x10` is not a hard length for this
+  channel class — the SEB's record size is fixed in hardware and the field is a
+  credit that only matters in a mode we are not in. Then 7.1 alone fixes the
+  stall. This is the reading the evidence currently favours: a firmware that
+  *never* writes a field cannot depend on it for its own normal path.
+- **There is a writer behind a computed base** (Trap 3) that only runs on a
+  path we have not entered — most plausibly one keyed on
+  `ctrl[4740]`/`transcode_buffer_id`, since every reader indexes by it.
 
-**Confirm.** Bit 12 stops firing when a *different* channel is given an
-address. **Refute.** Bit 12 keeps firing with every pipe write channel
-programmed.
+**Change.** None yet; there is no wire offset to send because no host field
+feeds it. If 7.1 is refuted, re-attack it from the kext: find the callers of
+`AVE_CalcBufSizeOfEntropyCoding` (`0xfffffe0008ea5bd0`) and
+`AVE_CalcBufNumOfEntropyCoding` (`0xfffffe0008ea5ba8`) and see whether either
+size reaches a command field, and look for a u32 table at Start_AVC wire
+`0xFA30` (immediately after the address table) with the same 4-entry rows.
 
-### 7.4 The stall MB is a fixed-size on-chip resource unrelated to the SEB (low)
+**Confirm.** `0x11303D0 + 0x40k` non-zero at the timeout without us sending
+anything — which would mean the firmware computes it once the address is live.
+
+### 7.3 The SEB drains somewhere else and the four channels are a red herring (low)
+
+**Why.** "`Cveseb` = the `encoder_addr_entropy` writers" is **[I]**, from the
+unit name `MCPU_Seb5`, the pipe-vs-XC split of bits 12/13, and the count of
+four. No code read says which channel the SEB writes to. §10 weakens this
+further: the four channels are now a *known* host-side omission with a known
+fix, which is the ordinary shape of every bug this bring-up has had.
+
+**Change.** None. If 7.1 lands and bit 12 still fires, the remaining degenerate
+pipe writers are `0x40D130700` (stats, deliberately disabled) and
+`0x40D130780` (fixed for free by 7.1's second change).
+
+### 7.4 The stall MB is a fixed-count on-chip resource unrelated to the SEB (low)
 
 **Why.** 3083 is oddly reproducible (F12 and F13 byte-identical).
 
-**Change.** None; it is a free rider on any other run. Encode the *same* frame
-at QP 45 and at QP 10 (`session_qp`) with everything else unchanged. If the
-stall MB moves with the bitrate, the resource is bit-count-limited and §7.1 is
-right. If it stays at exactly 3083, the resource is MB-count-limited and this
-document's mechanism is wrong.
-
-**Confirm/refute** as stated — this is the single cheapest discriminator in the
-list and it does not depend on finding the size field.
+**Change.** None; it rides along on any run. Encode the same frame at QP 45 and
+at QP 10 (`session_qp`) with nothing else changed. Stall MB moves with the
+bitrate ⇒ the SEB mechanism is right. Stays at exactly 3083 ⇒ this document's
+mechanism is wrong. Cheapest discriminator in the list, and it does not depend
+on 7.1 landing.
 
 ### 7.5 Colocated / recon / neighbour buffers (very low)
 
 All are programmed with live addresses and sizes at the timeout, all had room
-left, and none of them has an error bit set. `0x40D120BC0` (the colocated
-reader) is `0x80030000` with size `0x38400` — disabled, which is correct for an
-IDR with no references. No change. **[C]**
+left, none has an error bit set. No change. **[C]**
 
----
 
 ## 8. Corrections to other documents (not edited here)
 
@@ -578,6 +590,22 @@ IDR with no references. No change. **[C]**
 5. **docs/57/58's `0x40D11013C`**: now confirmed as the interrupt-enable
    register for `0x40D110140`, and `0xf007` is exactly the seven bits with
    handlers this session can take (§1.1). **[C]**
+6. **docs/59 §3 and `driver/ave_abi.h:1391/1509`**, the fourth SrcNeighbor
+   group: **wire `0xF830` is not `SrcNeighborFwData`, it is
+   `encoder_addr_entropy[16][4]`** (§10.3). The real fourth group is at wire
+   **`0xFED0`** (`0x5d8a0`, `0x2ba78`). Nothing broke so far only because
+   `start_avc.src_nbr_set[3]` is `AVE_OFF_NONE`, so the driver never wrote
+   `0xF830` at all. The per-frame `process_avc.src_nbr_set[3] = 0x9e0` is a
+   correct PICMGMT offset but is overwritten by `setRefPointers` every frame.
+7. **docs/60 §3.3 item 3** ("`setRefPointers` did run and matched slot 0 …
+   `PICMGMT+0x8B8` was overwritten with 0"): correct, and much broader than
+   recorded — the same function overwrites **PICMGMT `+0x980` through
+   `+0xBFF`** from the Start_AVC DPB record (§10.1). Any per-frame IOVA the
+   driver publishes in that range is discarded. **[C]**
+8. **docs/54's "`encoder_addr_entropy` … the last unconditional assert left on
+   the per-frame path"**: the table is a *session* input, not a per-frame one.
+   The `:8020/:8021` asserts in `SetTranscode` test the copy that came from
+   Start_AVC by way of `setRefPointers`. **[I]**
 
 ---
 
@@ -619,7 +647,148 @@ eval $M --addr 0x588d0 -n 0xd0          # bfrcredit at ctrl+0x1BC0, wrDmaBinAddr
 # recon channel words
 eval $M --addr 0x552a8 -n 0x60          # +0x10 size, +0x14 = 0x700D1|gate<<2
 eval $M --addr 0x58010 -n 0x50          # the chroma twin
+# WHY ctrl+0xEC0 IS ZERO (section 10)
+eval $M --addr 0x2c930 -n 0x160         # setRefPointers: PICMGMT +0x980..+0xBFF overwritten
+eval $M --addr 0x2ca50 -n 0x40          # ... continuing to +0xBF8
+eval $M --addr 0x2b614 -n 0x14          # ProvideReferenceFrames: w8 = 0xf770
+eval $M --addr 0x2b838 -n 0x8           # x8 = VP + 0xF770
+eval $M --addr 0x2ba00 -n 0x120         # the per-slot record fill; x8+96 = entropy table
+eval $M --addr 0x2bb20 -n 0x1a0         # ... to x8+600 (64 u64)
+eval $M --addr 0x5d874 -n 0x50          # InitEncodingParameters: [x23,#16]=0xF7D0, [x23,#1808]=0xFED0
+eval $M --addr 0x48140 -n 0x160         # PipePrepareParam gates: ctrl[5176] fresh-frame path
+eval $M --addr 0xf020 -n 0x70           # ProcessAvcEncode memmoves the whole 6464-byte command
+eval $M --addr 0x14558 -n 0xd0          # SendCommandToQueue: PICMGMT = cmd + 0x9c8 (AVC arm)
 # kext
 AVE_MACOS=13.5 python3 tools/disas.py --kext --addr 0xfffffe0008eb0cb8 -n 0x60   # PICMGMT+0xA00 fill
 AVE_MACOS=13.5 python3 tools/disas.py --kext --addr 0xfffffe0008ea5b88 -n 0x90   # entropy size helpers
 ```
+
+
+---
+
+## 10. Why `ctrl+0xEC0` is zero although the host sends the table
+
+This section answers the one question left after the coordinator settled the
+host side. The short version: **`encoder_addr_entropy` is a Start_AVC table,
+not a per-frame one.** The firmware overwrites the per-frame copy from a
+session-time record before it ever reads it — the same trick docs/60 found for
+the colocated MV pointer, applied to a much larger block.
+
+### 10.1 `setRefPointers` overwrites PICMGMT `+0x980 .. +0xBFF` every frame
+
+`CAVECommonDPB::setRefPointers(AVE_PICMGMT_PARAMS *x1, ReferenceFrameInfoData *)`
+(`0x2c314`), called per frame from `H264VideoEncoderDPB::ManageDPBBuffer`
+(`0x2d294`, `bl` at `0x2d6e8`):
+
+```
+2c98c  ldr x9,[x0,#4704]                       ; the per-frame DPB record
+2c990  ldr x10,[x9,#896]  ; str x10,[x1,#2432] ; -> PICMGMT + 0x980  SrcNbr Info[0]
+2c998  ldr x10,[x9,#928]  ; str x10,[x1,#2464] ; -> +0x9A0  Pixel[0]
+2c9a0  ldr x10,[x9,#960]  ; str x10,[x1,#2496] ; -> +0x9C0  Data[0]
+ …                                             ; entries [1..3] of each group
+2c9f0  ldr x10,[x9,#992]  ; str x10,[x1,#2528] ; -> +0x9E0  FwData[0]
+2ca10  ldr x10,[x9,#1024] ; str x10,[x1,#2560] ; -> +0xA00  entropy[0][0]
+2ca18  ldr x10,[x9,#1032] ; str x10,[x1,#2568] ; -> +0xA08  entropy[0][1]
+ …  continuing in lockstep to  [x9,#1528] -> [x1,#3064] = PICMGMT + 0xBF8
+```
+
+**[C]** for every store (a straight linear copy of 64 u64, `[x9,#1024+8n] →
+PICMGMT+0xA00+8n`). `x1` is PICMGMT by the mangled signature, and the same
+function is already known to overwrite `+0x8B8` (docs/60 §3.3) and `+0xC20`
+(docs/53). **[C]**
+
+This is why the coordinator's host-side dump and the hardware disagree: both
+are right. We put the table on the wire; `setRefPointers` runs first and
+replaces it.
+
+### 10.2 The record it copies from is filled at Start_AVC, from wire `0xF830`
+
+`CAVECommonDPB::ProvideReferenceFrames(u32, AVE_VIDEO_PARAMS *x2)` (`0x2b530`):
+
+```
+2b61c  mov w8, #0xf770
+2b83c  add x8, x2, x8                          ; x8 = VP + 0xF770
+2ba14  ldr x9,[x8]        ; str x9,[x0,#952]   ; SrcNbr Info[0]
+2ba20  ldr x9,[x8,#32]    ; str x9,[x0,#984]   ; Pixel[0]
+2ba28  ldr x9,[x8,#64]    ; str x9,[x0,#1016]  ; Data[0]
+ …                                             ; entries [1..3] of each group
+2ba78  ldr x9,[x8,#1792]  ; str x9,[x0,#1048]  ; FwData[0]
+2ba98  ldr x9,[x8,#96]    ; str x9,[x0,#1080]  ; entropy[0][0]
+2baa0  ldr x9,[x8,#104]   ; str x9,[x0,#1088]  ; entropy[0][1]
+ …  linear to  [x8,#600] -> [x0,#1584]         ; 64 u64 = encoder_addr_entropy[16][4]
+```
+
+**[C]** `x0` is the DPB object (`str wzr,[x0,#4696]` sits in the middle of the
+block, next to the `[x0,#4704]` pointer `setRefPointers` dereferences).
+
+The two listings interlock with a constant offset of **56**: `[x9,#896] =
+[x0,#952]`, `[x9,#928] = [x0,#984]`, `[x9,#992] = [x0,#1048]`, `[x9,#1024] =
+[x0,#1080]`, `[x9,#1528] = [x0,#1584]`. **[I]**, but over twenty independent
+stores agree, so the record `[dpb+4704]` points at is `dpb + 56`. That is the
+same record whose `+512 + 8k` holds the colocated pointers
+(`str x21,[x20,#512]` `0x2b790`, docs/60 §3.3), which is the one field of it
+that F13 proves arrives on hardware (`0x40D13038C = 0xfd500000`, the Start_AVC
+slot-0 colocated buffer). **[C]**
+
+### 10.3 The wire offsets
+
+`AVE_VIDEO_PARAMS` is the Start_AVC command `+0x60`, so **wire = VP + 0x60**
+(docs/53 §13.2, and the driver's own `colocated_set = 0xf6b0` for VP `+0xF650`).
+`InitEncodingParameters` reads the same block through `x23 = VP + 0xF760`
+(`0x5d874`: `[x23,#16]` = VP `+0xF770` = wire `0xF7D0` =
+`encoder_addr_src_nbr_info`, which is the driver's `src_nbr_set[0]`). **[C]**
+Both sites therefore agree that `x8 = VP + 0xF770 = wire 0xF7D0`.
+
+| firmware offset | VP | **wire** | field | driver today |
+|---|---|---|---|---|
+| `x8 + 0 .. 24` | `0xF770` | `0xF7D0` | SrcNeighbor **Info**[0..3] | `src_nbr_set[0]` ✓ |
+| `x8 + 32 .. 56` | `0xF790` | `0xF7F0` | SrcNeighbor **Pixel**[0..3] | `src_nbr_set[1]` ✓ |
+| `x8 + 64 .. 88` | `0xF7B0` | `0xF810` | SrcNeighbor **Data**[0..3] | `src_nbr_set[2]` ✓ |
+| **`x8 + 96 .. 607`** | **`0xF7D0`** | **`0xF830 .. 0xFA2F`** | **`encoder_addr_entropy[16][4]`**, u64, row stride `0x20`, column stride `8` | **not written** |
+| `x8 + 1792 .. 1816` | `0xFE70` | `0xFED0` | SrcNeighbor **FwData**[0..3] | `AVE_OFF_NONE` |
+
+**[C]** for the firmware offsets; **[I]** for the wire column, from the
+`+0x60` convention, cross-checked three ways: `src_nbr_set[0..2]` already work
+at exactly these offsets, `InitEncodingParameters` reaches the FwData field as
+`[x23,#1808]` = VP `+0xFE70` (`0x5d8a0`) which is the same field
+`ProvideReferenceFrames` reads as `x8+1792`, and `colocated_set` lands where
+docs/53 §13.2 put it.
+
+**This is the bug.** docs/59 §3 and `driver/ave_abi.h` treat the fourth
+SrcNeighbor group as sitting at wire `0xF830` (it is `AVE_OFF_NONE` at
+Start_AVC, so nothing was ever written there and nothing broke). `0xF830` is
+not the fourth SrcNeighbor group — it is the **first row of
+`encoder_addr_entropy`**. The real fourth group is at `0xFED0`, half a command
+away.
+
+### 10.4 The gates, for completeness
+
+The coordinator asked which gates could skip the copy. All of them are open on
+our session, so the copy did run — and copied zeros:
+
+- `ProcessPipeStart` skips `PipePrepareParam` only when `ctrl[4664] == 2`
+  (`0x52e10`), the multi-core split. We send `sve_num = 1` → 1. **[C]**
+- Inside `PipePrepareParam`, `cbz w9, 0x481e8` at `0x48184` with
+  `w9 = ctrl[5176]` (`0x480d8`) takes the **fresh-frame** path; the non-zero
+  (chunk-resume) path returns before any field copy. `ctrl[5176]` is the chunk
+  start row, 0 on a fresh frame (`0x59d30`, `0x5ba64`). **[C]**
+- `0x48638` is reached as the **normal exit of the 16-iteration reference loop**
+  (`cmp x13,#0x10 ; b.eq 0x48638` at `0x484b0`), not a special case, and
+  `0x4863c/0x48644` forward both `frame_type == 0` and `== 3` to `0x48668`.
+  Our IDR sends 3, and the firmware history line confirms
+  `FrameType 3` reached it. **[C]**
+- `ctrl[3768]` (`num_encoder_addr_entropy`, the `cbz` at `0x487a0`) is **4**:
+  `InitEncodingParameters` `0x5d05c..0x5d074` writes 4 on the
+  `ctrl[4664] != 2` arm. **[C]**
+- `ctrl[4740]` (the column index) is `cmd[44]` of the pipe command
+  (`0x52da4/0x52db0`), a firmware-internal field; filling all four columns
+  makes it irrelevant.
+- `[x23,#52]` is `cmd[52]` of the same pipe command. Non-zero selects the
+  four-column copy (`0x487e0..0x4888f`); zero selects a variant that
+  **replicates column 0** into all four (`0x48898..0x48b7f`). Either way the
+  source is PICMGMT `+0xA00 + 32i`. **[C]**
+- The command is not truncated: `CFlowControllerBase::ProcessAvcEncode`
+  memmoves the whole command with a hardcoded `mov w2, #0x1940` = **6464**
+  bytes (`0xf050..0xf05c`), and `SendCommandToQueue` then takes PICMGMT as
+  `cmd + 0x9c8` (`0x145c8`). **[C]** So every byte we send is visible to the
+  firmware — it is simply overwritten.

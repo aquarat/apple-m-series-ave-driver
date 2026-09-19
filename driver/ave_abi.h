@@ -1028,6 +1028,22 @@ struct ave_start_avc_layout {
 	u32	colocated_set;		/* u64[] per DPB slot; NONE = not located */
 	u32	colocated_stride;
 	u32	colocated_max;
+	/*
+	 * encoder_addr_entropy[16][4], the SEB/entropy write buffers - a
+	 * START-time table, not a per-frame one (docs/61 10). Every frame
+	 * CAVECommonDPB::setRefPointers copies PICMGMT +0x980..+0xBF8 out of the
+	 * DPB record (fw 0x2c98c..0x2ca4c), so a per-frame write here is
+	 * overwritten before setPipe reads it; the record itself is filled at
+	 * Start_AVC by ProvideReferenceFrames from VP+0xF770 + 96 + 8n
+	 * (fw 0x2ba98..0x2bc8c) = wire 0xF830. Left unpublished, the four SEB
+	 * drain channels (0x40D1303C0 + 0x40k) come up with address 0 and the
+	 * syntax-element buffer fills: "Cveseb buffer write full!" (F12, F13).
+	 */
+	u32	entropy_set;
+	u32	entropy_stride_i;
+	u32	entropy_stride_j;
+	u32	entropy_max;		/* rows setPipe reads */
+	u32	entropy_cols_max;
 	/* coded data / coded header tables */
 	u32	coded_max;
 	u32	coded_addr, coded_addr_stride;		/* u64[] */
@@ -1363,6 +1379,11 @@ const struct ave_cmd_abi ave_cmd_abi_13_5 = {
 		.colocated_set      = 0xf6b0,	/* docs/53 13.2, docs/60 */
 		.colocated_stride   = 0x08,
 		.colocated_max      = AVE_DPB_MAX,
+		.entropy_set	    = 0xf830,	/* docs/61 10: VP+0xF770+96 */
+		.entropy_stride_i   = 0x20,
+		.entropy_stride_j   = 0x08,
+		.entropy_max	    = 4,	/* ctrl[3768] = 4 on our arm */
+		.entropy_cols_max   = 4,
 		.low_res_ref_set    = 0x2a8,
 		.low_res_ref_stride = 0x08,
 		.low_res_ref_max    = AVE_DPB_MAX,
@@ -1388,7 +1409,15 @@ const struct ave_cmd_abi ave_cmd_abi_13_5 = {
 		 * The fourth (wire 0xF830) is a 4x16 table with a size array
 		 * at 0xFA30; not read on any path found - left out.
 		 */
-		.src_nbr_set	= { 0xf7d0, 0xf7f0, 0xf810, AVE_OFF_NONE },
+		/*
+		 * docs/61 10: group 3 (FwData) is at wire 0xFED0, not adjacent to
+		 * the other three - 0xF830 is row 0 of encoder_addr_entropy, which
+		 * docs/59 3 mislabelled as FwData. InitEncodingParameters reads the
+		 * same field as [x23,#1808] with x23 = VP+0xF760 (fw 0x5d8a0) and
+		 * stores it to ctrl[7896], the register behind 0x40D13078C - which
+		 * reads 0 in every run so far.
+		 */
+		.src_nbr_set	= { 0xf7d0, 0xf7f0, 0xf810, 0xfed0 },
 		.src_nbr_max	= 4,
 		.sps_block	= 0x105b0,	/* memcpy 0x6ac from payload+0x10550 0x5ce68-90 */
 		.sps_block_size	= 0x6ac,

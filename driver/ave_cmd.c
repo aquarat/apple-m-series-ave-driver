@@ -308,6 +308,21 @@ int ave_cmd_build_start_avc(const struct ave_cmd_abi *abi, u8 *buf, size_t len,
 			if (!s->recon[i].lsb_addr || (s->recon[i].lsb_addr & 127))
 				return -EINVAL;
 	}
+	if (s->n_entropy) {
+		u32 j, cols = s->n_entropy_cols ? s->n_entropy_cols : 1;
+		u32 cols_max = l->entropy_cols_max ? l->entropy_cols_max : 1;
+
+		if (l->entropy_set == AVE_OFF_NONE || !l->entropy_max ||
+		    s->n_entropy > l->entropy_max ||
+		    s->n_entropy > AVE_ENTROPY_MAX ||
+		    cols > AVE_ENTROPY_COLS || cols > cols_max)
+			return -EINVAL;
+		for (i = 0; i < s->n_entropy; i++)
+			for (j = 0; j < cols; j++)
+				if (!s->entropy[i][j] ||
+				    (s->entropy[i][j] & (AVE_STRIDE_ALIGN - 1)))
+					return -EINVAL;
+	}
 	if (s->n_colocated) {
 		if (s->n_colocated != s->n_recon || s->n_colocated > AVE_DPB_MAX ||
 		    l->colocated_set == AVE_OFF_NONE ||
@@ -419,6 +434,14 @@ int ave_cmd_build_start_avc(const struct ave_cmd_abi *abi, u8 *buf, size_t len,
 	for (i = 0; i < s->n_colocated; i++)
 		wr64(&w, l->colocated_set + i * l->colocated_stride,
 		     s->colocated[i]);
+	/* The SEB write buffers the pipe's drain channels are programmed from. */
+	for (i = 0; i < s->n_entropy; i++) {
+		u32 j, cols = s->n_entropy_cols ? s->n_entropy_cols : 1;
+
+		for (j = 0; j < cols; j++)
+			wr64(&w, l->entropy_set + i * l->entropy_stride_i +
+			     j * l->entropy_stride_j, s->entropy[i][j]);
+	}
 	for (i = 0; i < s->n_coded; i++) {
 		wr64(&w, l->coded_addr + i * l->coded_addr_stride, s->coded[i].addr);
 		wr32(&w, l->coded_size + i * l->coded_size_stride, s->coded[i].size);
@@ -615,9 +638,11 @@ int ave_cmd_build_process_avc(const struct ave_cmd_abi *abi, u8 *buf,
 	if (f->low_res_src_addr && l->low_res_src != AVE_OFF_NONE)
 		wr64(&w, base + l->low_res_src, f->low_res_src_addr);
 	/*
-	 * encoder_addr_entropy[i][j]: column 0 is what SetTranscode asserts
-	 * (docs/54); the pipe's four write channels come from the other
-	 * columns, which the kext also fills (docs/60 note, F12).
+	 * encoder_addr_entropy[i][j] in the per-frame block: column 0 is what
+	 * SetTranscode asserts (docs/54). The pipe's drain channels do NOT come
+	 * from here - setRefPointers overwrites this whole region each frame from
+	 * the Start_AVC table (docs/61 10) - but it is kept: harmless, and right
+	 * again if a firmware ever stops overwriting it.
 	 */
 	for (i = 0; i < f->n_entropy; i++) {
 		u32 j, cols = f->n_entropy_cols ? f->n_entropy_cols : 1;
