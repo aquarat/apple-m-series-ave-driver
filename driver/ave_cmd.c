@@ -538,7 +538,13 @@ int ave_cmd_build_process_avc(const struct ave_cmd_abi *abi, u8 *buf,
 		return -EINVAL;
 	l = &abi->process_avc;
 
+	/*
+	 * I, P and IDR. B is left out deliberately: it needs a reference list
+	 * the session does not build yet, and the firmware's enum accepts it
+	 * (2 and 7) without that being a reason to send it. docs/64 §1.3.
+	 */
 	if (f->frame_type != AVE_FRAME_TYPE_I &&
+	    f->frame_type != AVE_FRAME_TYPE_P &&
 	    f->frame_type != AVE_FRAME_TYPE_IDR)
 		return -EINVAL;
 	if (!f->in_luma_addr || (f->in_luma_addr & (AVE_STRIDE_ALIGN - 1)) ||
@@ -613,8 +619,12 @@ int ave_cmd_build_process_avc(const struct ave_cmd_abi *abi, u8 *buf,
 		wr32(&w, base, l->picmgmt_size);
 
 	wr32(&w, base + l->frame_type, f->frame_type);
-	if (l->frame_num != AVE_OFF_NONE)
-		wr64(&w, base + l->frame_num, f->frame_num);
+	if (l->frame_num != AVE_OFF_NONE) {
+		if (l->frame_num_u32)
+			wr32(&w, base + l->frame_num, (u32)f->frame_num);
+		else
+			wr64(&w, base + l->frame_num, f->frame_num);
+	}
 	if (l->poc != AVE_OFF_NONE)
 		wr32(&w, base + l->poc, f->poc);
 	if (l->frame_rate_f64 != AVE_OFF_NONE && f->frame_rate)
@@ -656,8 +666,9 @@ int ave_cmd_build_process_avc(const struct ave_cmd_abi *abi, u8 *buf,
 	 * given explicitly (anything but 5 skips GetFrameType, fw 0x145d4).
 	 */
 	wr32_opt(&w, base + l->force_key_frame, f->force_key_frame);
+	/* Feeds nal_ref_idc through the rate controller (docs/64 §1.3). */
 	if (l->force_non_ref != AVE_OFF_NONE)
-		wr8(&w, base + l->force_non_ref, 0);
+		wr8(&w, base + l->force_non_ref, f->force_non_ref);
 	if (l->update_param_sets != AVE_OFF_NONE)
 		wr8(&w, base + l->update_param_sets, f->update_param_sets);
 	wr32_opt(&w, base + l->scaling_matrix_mode, 0);
