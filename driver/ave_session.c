@@ -1833,7 +1833,12 @@ static int ave_session_process(struct ave_device *ave,
 	 *    diagnosis - never the machine - and the frame is already lost here.
 	 *  - SVE scratch 7: the heartbeat sets bit 26 on PIPE HANG.
 	 */
-	if (ret && session_diag) {
+	/*
+	 * On failure these say where the pipe stopped; on success they say
+	 * whether the source reader actually walked the frame - F16 completed
+	 * a frame whose picture was flat, so "it finished" is not evidence.
+	 */
+	if (session_diag) {
 		dev_info(ave->dev,
 			 "session: diag PS DMA %#010x PIPE4 %#010x PIPE5 %#010x ME0 %#010x ME1 %#010x\n",
 			 ave_read(ave, AVE_BANK_PMGR_PS, 0x00),
