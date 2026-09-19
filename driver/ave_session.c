@@ -1056,6 +1056,16 @@ static void ave_session_alloc_dpb(struct ave_device *ave,
 		}
 	}
 
+	/*
+	 * Every slot, not just slot 0: the firmware rotates the recon slot per
+	 * frame (ManageDPBBuffer), so a slot whose surfaces were never carved
+	 * would only show up as an assert on the frame that happened to land
+	 * on it. docs/65 §change 3.
+	 */
+	for (i = 0; i < bufs->n_dpb; i++)
+		dev_info(ave->dev,
+			 "session: DPB slot %u: recon %pad LowResRef %pad\n",
+			 i, &bufs->dpb[i].recon, &bufs->dpb[i].low_res);
 	dev_info(ave->dev,
 		 "session: DPB %u slot(s): recon %pad +%#zx each; LowResRef %pad +%#zx each, lr_stride %u, %u rows%s\n",
 		 bufs->n_dpb, &recon.iova, recon_slot,
@@ -1258,9 +1268,16 @@ static int ave_session_start_avc(struct ave_device *ave,
 				s.colocated[i] = bufs->coloc[i];
 			s.n_colocated = bufs->n_dpb;
 			dev_info(ave->dev,
-				 "session: Start_AVC: colocated %u slot(s) of %#zx bytes, slot 0 %#llx at wire %#x (0x5A fill)\n",
-				 bufs->n_dpb, bufs->coloc_size, bufs->coloc[0],
+				 "session: Start_AVC: colocated %u slot(s) of %#zx bytes at wire %#x (0x5A fill)\n",
+				 bufs->n_dpb, bufs->coloc_size,
 				 abi->start_avc.colocated_set);
+			/* Every slot: the firmware rotates which one a frame
+			 * writes, so an unpublished slot only shows up as an
+			 * assert on the frame that lands on it. */
+			for (i = 0; i < bufs->n_dpb; i++)
+				dev_info(ave->dev,
+					 "session: colocated slot %u: %#llx\n",
+					 i, bufs->coloc[i]);
 		}
 	}
 	if (bufs->n_low_res_result && abi->start_avc.low_res_result_set != AVE_OFF_NONE) {
