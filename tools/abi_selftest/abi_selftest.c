@@ -758,6 +758,7 @@ static void test_process_13_5(void)
 	/* id 7, slot = caller's (stp w8,w24,[x23,#24] 0xfffffe0008eac898) */
 	expect_hdr_13_5(7, 0xa, 40, 200);
 	E32(buf, P + 0x000, 0xf68, "PICMGMT[0] = 0xF68 (kext 0xfffffe0008eac9a0)");
+	E32(buf, P + 0xca8, 7, "frameInfo.frameNumber (kext 0xfffffe0008eaaa1c, u32)");
 	E32(buf, P + 0xcac, 3, "FrameType (kext 0xfffffe0008eaaa50)");
 	E8(buf, P + 0x6f3, 0, "bInputCompressed (kext 0xfffffe0008eabb98)");
 	E64(buf, P + 0x8c0, 0x0000000500000000ull, "sInput.Y (kext 0xfffffe0008eb0904)");
@@ -861,10 +862,21 @@ static void test_process_13_5(void)
 	f.in_chroma_stride = 1921;
 	expect_int(ave_cmd_build_process_avc(a, buf, sizeof(buf), &CTX, 21, &f), -EINVAL,
 		   "stride % 64 (kext 0xfffffe0008eb0774)");
+	/*
+	 * P is accepted now (jump table fw 0xcef80: 1 = P); B is not, because
+	 * the session does not build a reference list for it. 4/5/6 the
+	 * firmware itself rejects. docs/64 §1.3.
+	 */
 	f = frame_idr();
-	f.frame_type = 1;
+	f.frame_type = AVE_FRAME_TYPE_P;
+	expect_int(ave_cmd_build_process_avc(a, buf, sizeof(buf), &CTX, 21, &f), 0x1940,
+		   "P frame accepted");
+	f.frame_type = AVE_FRAME_TYPE_B;
 	expect_int(ave_cmd_build_process_avc(a, buf, sizeof(buf), &CTX, 21, &f), -EINVAL,
-		   "P frame refused (I-only builder)");
+		   "B frame still refused: no reference list is built");
+	f.frame_type = 5;
+	expect_int(ave_cmd_build_process_avc(a, buf, sizeof(buf), &CTX, 21, &f), -EINVAL,
+		   "5 is not an IMG_FRAME_TYPE the firmware accepts");
 }
 
 static void test_process_26_6(void)

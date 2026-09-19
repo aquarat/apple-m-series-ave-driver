@@ -636,9 +636,17 @@ static inline u32 ave_coded_data_size_max(u32 w, u32 h, bool hevc)
 #define AVE_PIC_CTX_INDEX		0x4fa4	/* u32, 0 for a single client */
 #define AVE_PIC_FRAME_RATE		0x4fa8	/* double, fps */
 
-/* IMG_FRAME_TYPE values 0 and 3 are the same on both versions
- * (13.5 AVE_H264_PrepareSliceHeader 0x20ff0 / 0x210d4, docs/47 §1.3). */
+/*
+ * IMG_FRAME_TYPE. Values 0 and 3 are the same on both versions (13.5
+ * AVE_H264_PrepareSliceHeader 0x20ff0 / 0x210d4, docs/47 §1.3); the rest of
+ * the 13.5 enum comes from the jump table at fw 0xcef80, base 0x20e38, which
+ * sets nal_unit_type at [x19+8], slice_type at [x19+16] and IdrPicFlag at
+ * [x19+34]. 4, 5 and 6 are rejected with a log rather than an assert.
+ * docs/64 §1.3.
+ */
 #define AVE_FRAME_TYPE_I		0
+#define AVE_FRAME_TYPE_P		1
+#define AVE_FRAME_TYPE_B		2
 #define AVE_FRAME_TYPE_IDR		3
 
 /* Rate-control update sub-block (slice 1). Carries no QP. */
@@ -1186,7 +1194,19 @@ struct ave_process_avc_layout {
 	u32	picmgmt;		/* block offset in the command */
 	u32	picmgmt_size;
 	bool	picmgmt_size_word;	/* block's first u32 = its own size */
-	u32	frame_num;		/* u64, AVE_OFF_NONE on 13.5 */
+	/*
+	 * frameInfo.frameNumber - a monotone per-client counter, NOT the H.264
+	 * frame_num syntax element: the firmware maintains that and idr_pic_id
+	 * itself at ctrl+0x236E0 (fw 0x20e58, 0x210f8). The firmware's command
+	 * queue keys Complete/Dequeue on this word (fw 0x16c78, 0x16858), and
+	 * ManageDPBBuffer asserts frameNumber >= m_iFirstFrameNumber and then
+	 * spins on "b ." if it fails (fw 0x2d350, CAVEDPB.cpp:963). docs/64 §3.
+	 *
+	 * Width differs by version, and getting it wrong is not harmless: on
+	 * 13.5 a u64 store here would clobber frame_type at +0xCAC.
+	 */
+	u32	frame_num;
+	bool	frame_num_u32;		/* false = u64 */
 	u32	poc;			/* s32, AVE_OFF_NONE on 13.5 */
 	u32	frame_rate_f64;		/* IEEE double fps, AVE_OFF_NONE on 13.5 */
 	u32	frame_type;		/* s32 IMG_FRAME_TYPE */
@@ -1526,7 +1546,15 @@ const struct ave_cmd_abi ave_cmd_abi_13_5 = {
 						 * fw add x27,x21,#0x9c8 0x145c8 */
 		.picmgmt_size	= 0xf68,	/* kext mov w2,#0xf68 0xfffffe0008eac9c4 */
 		.picmgmt_size_word = true,	/* kext str w8,[x25] 0xfffffe0008eac9a0 */
-		.frame_num	= AVE_OFF_NONE,	/* no host field; fw SetFrameNum 0x52a84 */
+		/*
+		 * The kext DOES write this (str w8,[x20,#3240], kext
+		 * 0xfffffe0008eaaa1c) and the firmware reads it straight out
+		 * of the command image in CommandQueue::Enqueue (fw 0x166fc).
+		 * Previously AVE_OFF_NONE here, on the mistaken grounds that
+		 * 13.5 had no host field. docs/64 §3.
+		 */
+		.frame_num	= 0xca8,
+		.frame_num_u32	= true,
 		.poc		= AVE_OFF_NONE,	/* no host field (docs/47 §1.2) */
 		.frame_rate_f64	= AVE_OFF_NONE,	/* not located */
 		.frame_type	= 0xcac,	/* kext str w8,[x20,#3244] 0xfffffe0008eaaa50 */

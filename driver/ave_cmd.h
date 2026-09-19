@@ -149,8 +149,14 @@ struct ave_avc_session {
 };
 
 struct ave_avc_frame {
-	u32	frame_type;		/* AVE_FRAME_TYPE_IDR or AVE_FRAME_TYPE_I */
-	u64	frame_num;		/* 26.6.2 only */
+	u32	frame_type;		/* AVE_FRAME_TYPE_{I,P,IDR} */
+	/*
+	 * frameInfo.frameNumber: a monotone per-client counter the firmware
+	 * keys its queue on, not the H.264 frame_num syntax element (which
+	 * the firmware maintains itself). u32 on 13.5, u64 on 26.6.2 - the
+	 * ABI table picks. docs/64 §3.
+	 */
+	u64	frame_num;
 	u32	poc;			/* 26.6.2 only */
 	u32	frame_rate;		/* 26.6.2 only (double field); 0 = omit */
 
@@ -180,6 +186,7 @@ struct ave_avc_frame {
 
 	u32	ctx_index;		/* per-context slot; 0 for one client */
 	bool	force_key_frame;
+	bool	force_non_ref;		/* -> nal_ref_idc = 0 for this frame */
 	bool	update_param_sets;	/* re-emit SPS/PPS accounting on an IDR */
 
 	/*
