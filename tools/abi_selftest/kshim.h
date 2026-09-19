@@ -66,4 +66,9 @@ static inline u64 get_unaligned_le64(const void *p)
 	return get_unaligned_le32(p) | (u64)get_unaligned_le32((const u8 *)p + 4) << 32;
 }
 
+/* The kernel's own definition; ave_cmd.c walks fixed-size layout arrays. */
+#ifndef ARRAY_SIZE
+#define ARRAY_SIZE(a)	((u32)(sizeof(a) / sizeof((a)[0])))
+#endif
+
 #endif

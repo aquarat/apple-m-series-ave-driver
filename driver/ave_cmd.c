@@ -308,6 +308,10 @@ int ave_cmd_build_start_avc(const struct ave_cmd_abi *abi, u8 *buf, size_t len,
 			if (!s->recon[i].lsb_addr || (s->recon[i].lsb_addr & 127))
 				return -EINVAL;
 	}
+	/* A source-path sweep value is meaningless on an ABI without the field. */
+	if ((s->src_mode && l->src_mode == AVE_OFF_NONE) ||
+	    (s->src_cfg_byte && l->src_cfg_byte == AVE_OFF_NONE))
+		return -EINVAL;
 	if (s->n_entropy) {
 		u32 j, cols = s->n_entropy_cols ? s->n_entropy_cols : 1;
 		u32 cols_max = l->entropy_cols_max ? l->entropy_cols_max : 1;
@@ -412,6 +416,22 @@ int ave_cmd_build_start_avc(const struct ave_cmd_abi *abi, u8 *buf, size_t len,
 	wr32(&w, l->key_interval, s->key_interval);
 	wr32_opt(&w, l->key_interval_strict, s->key_interval);
 	wr32(&w, l->slice_num, 1);
+	/*
+	 * iNumViews: Apple's kext refuses to send the command with these zero
+	 * (0 < iNumViews <= 2, kext 0xec9078), and we have been sending zero.
+	 * The firmware only branches on == 2, so this closes a validator we
+	 * were failing rather than changing what the hardware does. docs/62 §6.
+	 */
+	for (i = 0; i < ARRAY_SIZE(l->num_views); i++)
+		wr32_opt(&w, l->num_views[i], 1);
+	/*
+	 * The source-read scalars. Both default to zero, which is exactly what
+	 * every run up to F17 sent; a non-zero value here is an experiment.
+	 */
+	if (s->src_mode)
+		wr16(&w, l->src_mode, s->src_mode);
+	if (s->src_cfg_byte)
+		wr8(&w, l->src_cfg_byte, s->src_cfg_byte);
 
 	/* ---- buffer tables ---- */
 	for (i = 0; i < s->n_recon; i++) {
