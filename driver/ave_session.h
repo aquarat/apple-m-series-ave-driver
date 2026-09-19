@@ -34,6 +34,17 @@ int ave_session_selftest(struct ave_device *ave);
 void ave_session_release(struct ave_device *ave);
 
 /*
+ * Give the firmware its client back - Stop (id 6) then Close (id 12), waiting
+ * for UNINIT_DONE and STOP_DONE - before anything is unmapped or gated. This
+ * is what macOS does and we never did (docs/63); both replies are withheld
+ * until the client's outstanding work has drained, so they are the signal
+ * that the session buffers are safe to free. Needs the IPC transport, so call
+ * it from ave_remove() first of all. 0 when the client was returned (or none
+ * was open).
+ */
+int ave_session_close_client(struct ave_device *ave);
+
+/*
  * Ask the firmware to halt itself (command 14) so that the next load can
  * start it again without rebooting the machine. Sends on IO and waits for SVE
  * scratch 0, because this command never replies (docs/55). Returns 0 when the

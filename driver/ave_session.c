@@ -2136,6 +2136,13 @@ int ave_session_selftest(struct ave_device *ave)
 	ret = ave_session_open(ave, abi, bufs, AVE_SESS_CLIENT_ID);
 	if (ret)
 		goto out;
+	/*
+	 * From here on the firmware holds a registered client, and unloading
+	 * without giving it back is what ave_session_close_client() exists to
+	 * undo (docs/63). Record it even if a later step fails: a client that
+	 * was opened must be closed whatever happened afterwards.
+	 */
+	ave->client_open = true;
 
 	/* Must precede Start_AVC: these tables are published in that command. */
 	ave_session_alloc_nbr(ave, bufs);
@@ -2180,6 +2187,133 @@ out:
 		     : (session_frame ? "encoded one frame OK"
 				      : "reached Start_AVC OK"), ret);
 	return ret;
+}
+
+/* ------------------------------------------------------------------------ */
+/* Close the client: what macOS does before it touches power                 */
+/* ------------------------------------------------------------------------ */
+
+/*
+ * Give the client back to the firmware before unloading (docs/63).
+ *
+ * Twice now the machine has reset seconds after a clean rmmod - once after a
+ * *successful* encode with no faults logged, which is the signature of a
+ * stalled fabric transaction and a watchdog rather than a synchronous abort.
+ * macOS structurally cannot get into that state: AVE_Drv::PowerOff queues
+ * Stop then Close for every live client and drains both queues before any
+ * SetPS(..., 0), and it never unmaps anything as part of powering down - the
+ * unmapping happens far later, at IOService::stop. We did the exact opposite:
+ * gate the domains first, then unmap and free DMA memory, with no Stop and no
+ * Close at all.
+ *
+ * The two replies are the quiesce, not a formality. ProcessUninit (fw 0xf480)
+ * cancels the client's outstanding queue slots and then WITHHOLDS UNINIT_DONE
+ * until the client's produced and consumed counters match (fw 0xfadc-0xfb10).
+ * ProcessStop (fw 0x10690) does not reply at all; it enqueues the Close behind
+ * the client's remaining work (0x107e8) and STOP_DONE is emitted only after
+ * DestroyClient (0x12a64). So waiting for both is the firmware telling us it
+ * has let go of the buffers we are about to free.
+ *
+ * Returns 0 when both commands completed, a negative errno otherwise. The
+ * caller must treat a failure as "the firmware may still be using everything".
+ */
+int ave_session_close_client(struct ave_device *ave)
+{
+	const struct ave_cmd_abi *abi = ave_cmd_abi_get(ave->fw_abi);
+	void (*prev_rx)(struct ave_device *, u32, void *, u32, u32);
+	static const struct {
+		enum ave_op	op;
+		const char	*name;
+	} seq[] = {
+		{ AVE_OP_STOP,  "Stop"  },	/* id 6, slot 7  -> UNINIT_DONE */
+		{ AVE_OP_CLOSE, "Close" },	/* id 12, slot 4 -> STOP_DONE   */
+	};
+	unsigned int i;
+	int ret = 0;
+
+	if (!ave->client_open)
+		return 0;
+	if (!abi || !ave->running || !ave->powered) {
+		dev_warn(ave->dev,
+			 "close: a client is open but the firmware is not up (running %d, powered %d); cannot give it back\n",
+			 ave->running, ave->powered);
+		return -ENODEV;
+	}
+
+	/*
+	 * ave_session_cmd() only completes when ave->ipc_rx is our capturing
+	 * hook, and the self-test restored the previous one when it returned.
+	 * Without this, a *successful* Stop would look like a timeout - the
+	 * same class of mistake as polling a scratch word without clearing it
+	 * first.
+	 */
+	init_completion(&ave_sess_rx.done);
+	prev_rx = ave->ipc_rx;
+	smp_store_release(&ave->ipc_rx, ave_session_ipc_rx);
+
+	for (i = 0; i < ARRAY_SIZE(seq); i++) {
+		struct ave_cmd_ctx ctx = { .count = i, .client_id = AVE_SESS_CLIENT_ID };
+		size_t cmd_len = ave_cmd_size(abi, seq[i].op);
+		dma_addr_t cmd_iova;
+		u8 *cmd;
+
+		if (!cmd_len) {
+			dev_warn(ave->dev, "close: ABI %s has no %s command\n",
+				 abi->name, seq[i].name);
+			ret = -ENODEV;
+			break;
+		}
+		/*
+		 * From the IPC pool, not the session pool: ave_remove() may be
+		 * running with session_bufs already gone, and these buffers
+		 * must outlive the reply either way.
+		 */
+		cmd = ave_ipc_alloc(ave, cmd_len, &cmd_iova);
+		if (!cmd) {
+			ret = -ENOMEM;
+			break;
+		}
+		put_unaligned_le32(AVE_SESS_TIMEOUT_MS, ctx.timeout);
+		ret = ave_cmd_build_simple(abi, seq[i].op, cmd, cmd_len, &ctx);
+		if (ret < 0) {
+			dev_err(ave->dev, "close: %s build failed: %d\n",
+				seq[i].name, ret);
+			ave_ipc_free(ave, cmd, cmd_len);
+			break;
+		}
+		ret = ave_session_cmd(ave, abi, seq[i].op, seq[i].name,
+				      cmd_iova, cmd_len, AVE_SESS_CLIENT_ID);
+		/*
+		 * Not returned to the pool on failure: a firmware that never
+		 * replied may still read the command buffer. ave_ipc_fini()
+		 * frees the whole region later regardless.
+		 */
+		if (!ret)
+			ave_ipc_free(ave, cmd, cmd_len);
+		else
+			break;
+	}
+
+	smp_store_release(&ave->ipc_rx, prev_rx);
+	synchronize_irq(ave->irq);
+
+	if (ret) {
+		/*
+		 * A Stop that times out means the deferred-reply path is still
+		 * holding UNINIT_DONE because work really is in flight - the
+		 * one state in which freeing the buffers is worst.
+		 */
+		dev_err(ave->dev,
+			"close: the firmware did not give the client back (%d); its buffers are still live\n",
+			ret);
+		return ret;
+	}
+
+	ave->client_open = false;
+	dev_info(ave->dev,
+		 "close: client %u returned (Stop -> UNINIT_DONE, Close -> STOP_DONE); the firmware has let go of its buffers\n",
+		 AVE_SESS_CLIENT_ID);
+	return 0;
 }
 
 /* ------------------------------------------------------------------------ */

@@ -190,6 +190,23 @@ struct ave_device {
 	 * firmware. Measured 2026-09-14, results/h1-1789369083.kmsg.
 	 */
 	bool			mcpu_created;
+	/*
+	 * Open (command 2) was accepted, so the firmware has a registered
+	 * client holding queue slots and buffer addresses. macOS never powers
+	 * the block down in this state: AVE_Drv::TryPowerOff refuses unless
+	 * the client list is empty (kext 0xef0920), and AVE_Drv::PowerOff
+	 * queues Stop then Close for every live client and drains both queues
+	 * first (0xeef70c). We abandoned the client instead, and unloaded
+	 * twice into a machine reset seconds later. docs/63.
+	 */
+	bool			client_open;
+	/*
+	 * Set when a teardown could not be proven clean. ave_power_off() then
+	 * refuses to gate, including from its devres action, and the module
+	 * unloads leaving VENC powered - recoverable by the next load, unlike
+	 * a machine reset. docs/63.
+	 */
+	bool			keep_powered;
 };
 
 /*
