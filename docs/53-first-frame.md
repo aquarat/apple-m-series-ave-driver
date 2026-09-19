@@ -1833,3 +1833,77 @@ IOVA it just published.
 Delta from F17 beyond the flat source: `iNumViews = 1` and `frameNumber = 0`
 are now sent, both because Apple's driver sends them. If F18 stops completing
 at all, those two are the first bisect.
+
+## The run queue (2026-09-20)
+
+Four static passes landed together: docs/62 (source path), docs/63 (teardown),
+docs/64 (multi-frame), docs/65 (P-frames). Between them they changed what the
+next few boots should ask, and in what order. One experiment per boot **until
+F19 proves otherwise** - that is the point of F19.
+
+### F18 - does the source DMA read our buffer? (one variable)
+
+```
+session_flat_luma=200      # otherwise exactly F17's parameters
+```
+
+| outcome | means | next |
+|---|---|---|
+| decoded picture = 200 | the DMA reads our bytes; the ramp failure is downstream addressing or layout | compare `recon_luma.bin`'s 1024-pitch layout against the expected tiling |
+| decoded picture ~= 130 | the hardware never delivered our bytes | sweep `session_src_mode` (wire `0xFEC0`) and watch `0x40D120050` / `0x40D1200D0` move |
+
+Grade it with `tools/check_frame.py results/<run>-load1`, which refuses to
+grade until its planted-positive, negative and blank controls all pass.
+
+**Then, in the same boot and only after the log and debugfs are on disk,**
+attempt the new clean unload (docs/63: Stop, Close, Halt, unmap while
+powered, gate last). F18's answer is already saved by then, so a reset costs
+only the reboot we would have needed anyway.
+
+### F19 - is the teardown safe?
+
+If F18's unload survived, repeat it: three load/unload cycles in one boot,
+starting with the control that has always been safe.
+
+```
+tools/halt-run.sh f19 "session_selftest=1 session_config_only=1 fw_halt=1" \
+                      "session_selftest=1 session_frame=1 fw_halt=1 ..." \
+                      "session_selftest=1 session_frame=1 fw_halt=1 ..."
+```
+
+Each unload should log `Stop -> UNINIT_DONE`, `Close -> STOP_DONE`,
+`scratch 0 = 0x08042006`, `CPU_STATUS 0x2e STOPPED`, then the unmaps, then
+`powered off (remove)`. Anything that cannot be proven quiet leaks its
+buffers and keeps the power reference on purpose - the module unloads with
+VENC still powered, and the next load recovers with
+`core_reset=2 fw_restore_data=1`.
+
+Discriminators that can say no: Stop times out but Close replies -> the
+deferred-reply path is holding `UNINIT_DONE` because work really was in
+flight. `Close` returns `0xEE0002` -> `IsClientRegistered` said no, our
+Open/Close bookkeeping is wrong. Everything passes and it still resets ->
+docs/63's rank 1 is wrong, and the next step is an unload that skips the
+runtime-PM put entirely, separating "the gate" from "the unmap".
+
+### F20 - two frames, IDR then P
+
+Only once F18's picture is correct; a P frame predicted from a blank
+reference would tell us nothing.
+
+```
+session_frames=2
+```
+
+docs/65's predicted first failure is an assert, not a fault, and the most
+likely line is the one table nobody had filled until now:
+`CAVCController_H13C.cpp:6184 LowResResults[me_ref_index] != 0`. That is
+published as of this commit, so the interesting outcomes are further down
+docs/65's ordered list. The quiet failure to watch for is frame 2 coming out
+the same size as frame 1 with the reference channels
+(`0x40D128000`, `0x40D128200`, `0x40D120F80`) still zero: that is the
+firmware deriving `num_ref_idx_l0_active_minus1 = -1` and coding intra.
+
+With four frames (`session_frames=4`) the run also answers whether
+`frameNumber` reaches the firmware at the right offset and width - the coded
+header's `+0x10C` should read 0,1,2,3 - and whether the frame-type enum is
+right, `+0x110` reading 3,1,1,3.
