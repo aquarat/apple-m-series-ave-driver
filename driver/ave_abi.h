@@ -781,6 +781,8 @@ static inline u32 ave_coded_data_size_max(u32 w, u32 h, bool hevc)
  * arm sets to 4 (docs/54).
  */
 #define AVE_ENTROPY_MAX			16
+/* Columns of encoder_addr_entropy the kext fills (0xfffffe0008eb0cb8). */
+#define AVE_ENTROPY_COLS		4
 /* Loose per-frame scratch IOVAs (13.5 PICMGMT 0x8E0/0x8E8/0x8F0/0x900). */
 #define AVE_PIC_SCRATCH_MAX		4
 #define ave_mb_align(v)			(((v) + AVE_MB_SIZE - 1) & ~(AVE_MB_SIZE - 1))
@@ -1192,7 +1194,8 @@ struct ave_process_avc_layout {
 	u32	entropy_set;
 	u32	entropy_stride_i;
 	u32	entropy_stride_j;
-	u32	entropy_max;
+	u32	entropy_max;		/* rows the host may fill */
+	u32	entropy_cols_max;	/* columns; 0 = only column 0 */
 	/* Per-frame SrcNbr tables, same shape as start_avc.src_nbr_set. */
 	u32	src_nbr_set[AVE_SRC_NBR_GROUPS];
 	u32	src_nbr_max;
@@ -1496,6 +1499,14 @@ const struct ave_cmd_abi ave_cmd_abi_13_5 = {
 		.entropy_stride_i = 0x20,
 		.entropy_stride_j = 0x08,
 		.entropy_max	= 4,
+		/*
+		 * The kext fills a matrix, not a column: AVE_CHM_SetDataInfo_FwBuf
+		 * loops j = 0..3 outside and i = 0..15 inside, one surface per
+		 * entry (kext 0xfffffe0008eb0cb8..0d0c). F12 showed the four pipe
+		 * entropy write channels (0x1303C0 + 0x40k) enabled with a null
+		 * address while only column 0 was filled.
+		 */
+		.entropy_cols_max = 4,
 		.src_nbr_set	= { 0x980, 0x9a0, 0x9c0, 0x9e0 },
 		.src_nbr_max	= 4,
 		/* kext 0xfffffe0008eb0b10/b44/b68/b84; meanings unknown. */

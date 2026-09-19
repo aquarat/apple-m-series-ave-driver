@@ -521,16 +521,19 @@ int ave_cmd_build_process_avc(const struct ave_cmd_abi *abi, u8 *buf,
 	 * the ABI must have the field.
 	 */
 	if (f->n_entropy) {
-		u32 i;
+		u32 i, j, cols = f->n_entropy_cols ? f->n_entropy_cols : 1;
+		u32 cols_max = l->entropy_cols_max ? l->entropy_cols_max : 1;
 
 		if (l->entropy_set == AVE_OFF_NONE || !l->entropy_max ||
 		    f->n_entropy > l->entropy_max ||
-		    f->n_entropy > AVE_ENTROPY_MAX)
+		    f->n_entropy > AVE_ENTROPY_MAX ||
+		    cols > AVE_ENTROPY_COLS || cols > cols_max)
 			return -EINVAL;
 		for (i = 0; i < f->n_entropy; i++)
-			if (!f->entropy[i] ||
-			    (f->entropy[i] & (AVE_STRIDE_ALIGN - 1)))
-				return -EINVAL;
+			for (j = 0; j < cols; j++)
+				if (!f->entropy[i][j] ||
+				    (f->entropy[i][j] & (AVE_STRIDE_ALIGN - 1)))
+					return -EINVAL;
 	}
 	if (f->n_src_nbr) {
 		u32 g, i;
@@ -611,10 +614,19 @@ int ave_cmd_build_process_avc(const struct ave_cmd_abi *abi, u8 *buf,
 
 	if (f->low_res_src_addr && l->low_res_src != AVE_OFF_NONE)
 		wr64(&w, base + l->low_res_src, f->low_res_src_addr);
-	/* encoder_addr_entropy[i][0]; j = transcode_buffer_id = 0 (docs/54). */
-	for (i = 0; i < f->n_entropy; i++)
-		wr64(&w, base + l->entropy_set + l->entropy_stride_i * i,
-		     f->entropy[i]);
+	/*
+	 * encoder_addr_entropy[i][j]: column 0 is what SetTranscode asserts
+	 * (docs/54); the pipe's four write channels come from the other
+	 * columns, which the kext also fills (docs/60 note, F12).
+	 */
+	for (i = 0; i < f->n_entropy; i++) {
+		u32 j, cols = f->n_entropy_cols ? f->n_entropy_cols : 1;
+
+		for (j = 0; j < cols; j++)
+			wr64(&w, base + l->entropy_set +
+			     l->entropy_stride_i * i + l->entropy_stride_j * j,
+			     f->entropy[i][j]);
+	}
 
 	for (i = 0; i < f->n_src_nbr; i++) {
 		u32 g;
