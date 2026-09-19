@@ -1147,3 +1147,15 @@ column. Fixed in the ABI, builder and session. [53](53-first-frame.md) §23.
 `0x40D1303C0`-family channels are still enabled with a null address, refuting
 docs/60's note that they come from `encoder_addr_entropy`. docs/61 takes over.
 [53](53-first-frame.md) §24.
+
+## 2026-09-19 — the firmware logged it: `Cveseb buffer write full!` (docs/61)
+
+Only in f12/f13, four times each, 1.46 ms after Process: bit 12 of
+`0x40D110140`, the syntax-element buffer. Its four drain channels
+(`0x40D1303C0 + 0x40k`) are enabled with a null address and zero size. The
+address should come from `EncCommParams.encoder_addr_entropy` (copied per frame
+from PICMGMT `+0xA00`); the size from `ctrl+0x10C0`, which nothing in the
+firmware writes. An offline dump of our built Process command proves the host
+sends all 16 entropy entries at the right offsets in a correctly sized command,
+so the gap is firmware-side. [53](53-first-frame.md) §25.
+EOF

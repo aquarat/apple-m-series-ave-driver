@@ -1617,3 +1617,37 @@ question.
 The 4 x 4 matrix is kept: it matches what the kext does
 (`AVE_CHM_SetDataInfo_FwBuf`, columns outside, rows inside) and costs only
 memory.
+
+---
+
+## 25. The firmware named the failure: `Cveseb buffer write full!`
+
+docs/61. `grep -c Cveseb results/f*.kmsg`: **4 in f12 and 4 in f13, 0 in every
+other run** - only the two runs that got past MB 34 and actually ran CAVLC. The
+string is the handler at fw `0x38ba0..0x38be0`, which W1C-acks **bit 12 of
+`0x40D110140`** (`CAVEPipeISRManager.cpp`). Sibling handlers give the whole bit
+map: bit 0 AXI error, bits 1/2/3/5/6/11 semaphores (bit 2 = pipe done), **bit 12
+Cveseb (syntax-element buffer)**, 13 AVC XC full, 14/15 HEVC XC - and the
+observed enable `0x40D11013C = 0xf007` is exactly bits 0,1,2,12,13,14,15, so
+bit 12 was armed. The messages land 1.46 ms after the Process send, ~2 s before
+`PIPE HANG`.
+
+So the stall is the syntax-element buffer filling because its four drain
+channels (`0x40D1303C0 + 0x40k`) are enabled with **address 0 and size 0**
+(§23, §24). docs/61 §Q1: those channels are the pipe-side entropy/SEB write
+DMAs (Transcode uses a different block, `0x11208C0 + 0x40i`); their control word
+is written unconditionally (fw `0x55d54..0x55d6c`), the **address** comes from
+`ctrl+0xEC0 + 0x20*ch + 8*j` with `j = ctrl[4740]` - `EncCommParams.
+encoder_addr_entropy`, copied per frame from PICMGMT `+0xA00` by
+`PipePrepareParam` (fw `0x487a4..0x48bea`) - and the **size** from `ctrl+0x10C0`,
+**which no instruction in the image writes** (exhaustive immediate scan with a
+positive control). CAVLC ran 3067 MBs into a staging buffer nothing drained.
+
+**The host side is verified correct (C, offline):** building the same Process
+command in userspace and dumping wire `0x1340..0x1450` shows all 16 entropy
+entries at `0x13C8 + 32i + 8j` (`0xfec00000`..`0xffb00000` in the test pattern)
+and the neighbour fields at `+0x9E0`, in a 6464-byte command whose declared size
+is 6464. So docs/61 §Q4's "the per-frame PICMGMT block may not be reaching the
+firmware" is not a host-side bug: we send the bytes. Either the firmware's
+per-frame copy into `ctrl+0xEC0` does not run, or it reads a column we do not
+populate - and the size at `ctrl+0x10C0` has no known source at all.
