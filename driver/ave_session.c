@@ -32,6 +32,7 @@
  * to the ones the firmware accepted on 2026-09-13 21:13 (docs/31).
  */
 #include <linux/completion.h>
+#include <linux/crc32.h>
 #include <linux/debugfs.h>
 #include <linux/delay.h>
 #include <linux/dma-mapping.h>
@@ -509,6 +510,11 @@ struct ave_sess_bufs {
 	/* debugfs: only created once a frame actually came back. */
 	struct dentry		*dbg_dir;
 	struct debugfs_blob_wrapper coded_blob, hdr_blob, psets_blob, h264_blob;
+	/* source and reconstruction, to tell "encoded our pixels" from "encoded something" */
+	struct debugfs_blob_wrapper src_blob, recon_blob;
+	void		*src_cpu;
+	void		*recon_cpu;
+	size_t		src_size, recon_pub_size;
 	void			*h264;		/* assembled Annex-B frame */
 	size_t			h264_len;
 };
@@ -843,6 +849,16 @@ static void ave_session_alloc_dpb(struct ave_device *ave,
 		return;
 	}
 	memset(recon.cpu, 0, recon.size);
+	/*
+	 * Slot 0's MSB plane is what the recon writer targets with
+	 * session_lsb (LSB at the slot base, MSB at +AVE_SESS_LSB_SPAN), and it
+	 * is the picture the encoder actually reconstructed - the direct
+	 * comparison against the source.
+	 */
+	bufs->recon_cpu = (u8 *)recon.cpu +
+			  (session_lsb ? AVE_SESS_LSB_SPAN : 0);
+	bufs->recon_pub_size = min_t(size_t, recon_slot - (session_lsb ?
+				     AVE_SESS_LSB_SPAN : 0), SZ_256K);
 
 	if (session_lowres) {
 		low_slot = ave_session_lowres_size(cw, ch, &lr_stride);
@@ -1376,6 +1392,49 @@ static void ave_session_publish(struct ave_device *ave,
 		return;
 	}
 
+	/*
+	 * The frame decoding is not the same question as the frame being ours:
+	 * F16 produced a valid 1280x720 Baseline bitstream whose every pixel
+	 * decoded to luma 130, i.e. the encoder did not read the ramp we wrote.
+	 * Publish the source and the reconstruction so the two can be compared
+	 * directly, and print a CRC of each - a flat recon says the pipe never
+	 * saw our pixels, a ramp-shaped recon says the fault is downstream.
+	 */
+	if (bufs->src_cpu && bufs->src_size) {
+		bufs->src_blob.data = bufs->src_cpu;
+		bufs->src_blob.size = bufs->src_size;
+		debugfs_create_blob("input_luma.bin", 0444, bufs->dbg_dir,
+				    &bufs->src_blob);
+	}
+	if (bufs->recon_cpu && bufs->recon_pub_size) {
+		bufs->recon_blob.data = bufs->recon_cpu;
+		bufs->recon_blob.size = bufs->recon_pub_size;
+		debugfs_create_blob("recon_luma.bin", 0444, bufs->dbg_dir,
+				    &bufs->recon_blob);
+	}
+	if (bufs->src_cpu && bufs->recon_cpu) {
+		const u8 *src = bufs->src_cpu, *rec = bufs->recon_cpu;
+		u32 n = min_t(u32, bufs->src_size, bufs->recon_pub_size);
+		u32 src_distinct = 0, rec_distinct = 0;
+		u8 seen_s[256] = {}, seen_r[256] = {};
+		u32 k;
+
+		dma_rmb();
+		for (k = 0; k < n; k++) {
+			if (!seen_s[src[k]]++)
+				src_distinct++;
+			if (!seen_r[rec[k]]++)
+				rec_distinct++;
+		}
+		dev_info(ave->dev,
+			 "session: frame: source crc %#010x (%u distinct values, first %u %u %u %u), recon crc %#010x (%u distinct, first %u %u %u %u) over %u bytes\n",
+			 crc32(0, src, n), src_distinct, src[0], src[1], src[2], src[3],
+			 crc32(0, rec, n), rec_distinct, rec[0], rec[1], rec[2], rec[3], n);
+		if (rec_distinct <= 2 && src_distinct > 2)
+			dev_warn(ave->dev,
+				 "session: frame: the reconstruction is flat while the source is not - the encoder did not read our pixels\n");
+	}
+
 	bufs->coded_blob.data = bufs->coded_cpu;
 	bufs->coded_blob.size = coded_len;
 	debugfs_create_blob("coded.bin", 0444, bufs->dbg_dir, &bufs->coded_blob);
@@ -1630,6 +1689,8 @@ static int ave_session_process(struct ave_device *ave,
 		return -EINVAL;
 	}
 	ave_session_fill_input(luma, chroma, stride, cw, ch);
+	bufs->src_cpu = luma;
+	bufs->src_size = min_t(size_t, luma_bytes, SZ_256K);
 
 	/*
 	 * Reconstruction planes. setPipe asserts all four are non-zero and
