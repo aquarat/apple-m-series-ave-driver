@@ -1045,16 +1045,26 @@ struct ave_start_avc_layout {
 	u32	entropy_max;		/* rows setPipe reads */
 	u32	entropy_cols_max;
 	/*
-	 * The per-buffer SIZE table that goes with entropy_set. INFERRED, never
-	 * seen written: setPipe takes the size from ctrl+0x10C0 + 0x10*ch + 4*j
-	 * while the address comes from ctrl+0xEC0 + 0x20*ch + 8*j (docs/61 Q1),
-	 * and 0x10C0 - 0xEC0 = 0x200 is exactly the address table's length, so
-	 * the two are adjacent u64[16][4] and u32[16][4] blocks. Applying the
-	 * same adjacency to the Start_AVC table puts the sizes at 0xF830 + 0x200
-	 * = 0xFA30, and 0xFA30 + 0x100 = 0xFB30 is param_sets_addr - the gap is
-	 * exactly one u32[16][4]. F14 proved the address half of this reaches
-	 * the hardware (channel 0x1303C0 went from 0 to our IOVA) while the size
-	 * word stayed 0 and the SEB still filled. AVE_OFF_NONE = not located.
+	 * The per-buffer SIZE table that goes with entropy_set. CONFIRMED from
+	 * both sides (docs/62 0; first inferred from the 0x200 gap, which turned
+	 * out right):
+	 *
+	 *   kext AVE_CHM_SetFwBuf stores AVE_Surface::GetSize() to
+	 *     VP+0xF9D0 + 0x10*i + 4*j = wire 0xFA30 (str w0,[x8,#512]
+	 *     0xfffffe0008eaf2ec), and refuses to send the command if either the
+	 *     IOVA or the size is zero (0xeaf2f0);
+	 *   AVE_Client_InitFwBuf memsets VP+0xF7D0 for 0x200 (u64[16][4]) and
+	 *     VP+0xF9D0 for 0x100 (u32[16][4]) back to back (0xec8fe4/0xec8ff8);
+	 *   firmware InitEncodingParameters copies VP+0xF9D0 -> ctrl+0x10C0 at
+	 *     Start_AVC (fw 0x5d734..0x5d870), 4*sSVEMap.iNum rows x 4 columns -
+	 *     so sve_num = 0 would silently skip the whole copy;
+	 *   setPipe then reads size from ctrl+0x10C0 + 0x10*ch + 4*j into the
+	 *     channel's +0x10 (fw 0x5595c).
+	 *
+	 * docs/61 2.4 concluded no instruction writes ctrl+0x10C0; that scan
+	 * could not see stur with negative offsets off a pre-biased base, which
+	 * is how the copy is written - the Trap 3 caveat docs/61 attached to it.
+	 * AVE_OFF_NONE = not located.
 	 */
 	u32	entropy_size_set;
 	u32	entropy_size_stride_i;

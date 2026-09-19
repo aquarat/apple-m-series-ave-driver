@@ -1176,3 +1176,24 @@ channel's size word stayed 0 and the SEB still fills. The size table is
 inferred to sit at wire `0xFA30` (the gap to `param_sets_addr` is exactly one
 u32[16][4]) and is now sent behind `session_entropy_size`.
 [53](53-first-frame.md) §27.
+
+## 2026-09-19 — docs/62: the entropy size table is confirmed, and it is the only field we still miss
+
+A full pass over what the 13.5 kext writes into AVC_INIT (id 4) and AVC_ENCODE
+(id 7), diffed against `driver/ave_cmd.c`. Two results:
+
+1. **The size table at wire `0xFA30` is confirmed from both sides** - kext
+   `AVE_CHM_SetFwBuf` `str w0,[x8,#512]` (`0xfffffe0008eaf2ec`) writing
+   `AVE_Surface::GetSize()`, and firmware `InitEncodingParameters` copying
+   `VP+0xF9D0 -> ctrl+0x10C0` (fw `0x5d734..0x5d870`). The offset the driver had
+   guessed is right, strides included; only its comment needed correcting.
+   docs/61 2.4's "no writer exists" is superseded: the stores are `stur` with
+   negative offsets off a pre-biased base, invisible to the immediate scan that
+   concluded it - exactly the Trap 3 caveat docs/61 attached.
+2. **Of the twelve fields the kext writes and we do not, eleven are correctly
+   zero** for a fixed-QP Baseline I-frame (transcode, low-res results, MCTF,
+   CrcQPMod, the second table sets, RC-only scalars). Only the size table
+   matters, and it is already sent.
+
+So there is no second missing field to batch, and a golden-image harness would
+have caught exactly one bug: not built (docs/62 4).

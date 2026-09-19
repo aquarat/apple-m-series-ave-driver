@@ -258,9 +258,10 @@ MODULE_PARM_DESC(session_coloc,
 	"publish per-slot colocated MV buffers in Start_AVC (wire 0xF6B0) so the pipe's colocated writer is enabled (docs/60 #1)");
 
 /*
- * Write the entropy size table beside the address table at Start_AVC. The
- * offset is inferred (ave_abi.h), so it is switchable: F14 showed the channel
- * takes our address but keeps size 0, and a zero-length ring cannot drain.
+ * Write the entropy size table beside the address table at Start_AVC
+ * (wire 0xFA30, confirmed both sides in docs/62 0). Kept switchable as the
+ * control: the kext refuses to send a command with a zero size here, and a
+ * zero-length ring cannot drain - which is what fills the SEB.
  */
 static bool session_entropy_size = true;
 module_param(session_entropy_size, bool, 0444);
@@ -1056,7 +1057,7 @@ static int ave_session_start_avc(struct ave_device *ave,
 			 s.n_entropy, s.n_entropy_cols,
 			 abi->start_avc.entropy_set, s.entropy[0][0],
 			 s.entropy_size, abi->start_avc.entropy_size_set,
-			 s.entropy_size ? " (offset INFERRED, docs/61 7.2)" : " (size table off)");
+			 s.entropy_size ? "" : " (size table OFF - control)");
 	}
 
 	/* Colocated MV buffers (docs/60 #1), allocated here, all or nothing. */
