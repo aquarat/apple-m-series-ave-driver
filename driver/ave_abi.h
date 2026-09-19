@@ -954,6 +954,29 @@ struct ave_start_avc_layout {
 	u32	rc_mode_fixed_qp;	/* value of rc_mode for fixed QP */
 	u32	rc_feature;		/* u64 sRC.Feature, 26.6.2 only */
 	u64	rc_feature_fixed_qp;	/* bits to set in rc_feature */
+	/*
+	 * ui32RCFlag's other legal values, and the fields the firmware's own
+	 * rate controller reads once one of them is selected (docs/66 §1).
+	 * 13.5: {0 OFF, 1 ON, 2 FIXQP}; >2 takes the error branch, so 3 is
+	 * NOT "another fixed QP" - ProcessInit sends it down the bitrate arm
+	 * (fw 0x403a0).
+	 *
+	 * ui32BitRate (the existing .bitrate, wire 0xFF30) is in BITS PER
+	 * SECOND: ProcessInit computes bitrate / framerate / (W*H) as
+	 * bits-per-pixel (fw 0x401b8-0x401cc). The frame rate it divides by is
+	 * frame_rate / frame_rate_div.
+	 *
+	 * There is no HRD/VBV on 13.5 - the 26.6.2 kext has VBV, DecideLevel,
+	 * MaxBitRate and CheckResolution symbols and 13.5 has none of them.
+	 * The only leaky-bucket-shaped thing is a 40-byte _S_AVE_DRL_Cfg block
+	 * gated by drl_enable, whose layout is [U]; we leave both at zero.
+	 */
+	u32	rc_mode_on;		/* wire value for "firmware RC"; NONE = absent */
+	u32	frame_rate_div;		/* u32; frame rate is frame_rate/this */
+	u32	bitrate_sel;		/* u32; 2 selects bitrate_alt instead */
+	u32	bitrate_alt;		/* u32 bits/s */
+	u32	drl_enable;		/* u8; gates the DRL config block */
+	u32	drl_cfg;		/* 40-byte block, layout UNKNOWN */
 	u32	qp_i, qp_p, qp_b;	/* u32 */
 	u32	qp_min, qp_max;		/* u32 */
 	u32	key_interval;		/* u32 MaxKeyFrameInterval / IdrPeriod */
@@ -1451,6 +1474,12 @@ const struct ave_cmd_abi ave_cmd_abi_13_5 = {
 		.rc_mode	= 0xff50,	/* ui32RCFlag, ldr w8,[x10,#32] 0x5ceb4 */
 		.rc_mode_fixed_qp = 2,		/* AVE_RC_FIXQP: cmp w10,#0x2 0x41158,
 						 * string 0x4e69c */
+		.rc_mode_on	= 1,		/* docs/66 §1 */
+		.frame_rate_div	= 0xff48,	/* AVEFWRCSettings+0x18 */
+		.bitrate_sel	= 0xff54,	/* +0x24; 2 -> bitrate_alt */
+		.bitrate_alt	= 0xff58,	/* +0x28 */
+		.drl_enable	= 0xff80,	/* +0x50 */
+		.drl_cfg	= 0x10528,	/* 40 bytes, layout UNKNOWN */
 		.rc_feature	= AVE_OFF_NONE,	/* no RC framework switch on 13.5 */
 		.rc_feature_fixed_qp = 0,
 		.qp_i		= 0xffb4,	/* ldp w9,w8,[x10,#132] 0x5cebc */
@@ -1767,6 +1796,14 @@ const struct ave_cmd_abi ave_cmd_abi_26_6 = {
 		.bitrate	= AVE_START_BITRATE,
 		.rc_mode	= AVE_START_RCMODE,
 		.rc_mode_fixed_qp = AVE_RC_MODE_CONST_QP,	/* docs/35 §5 */
+		/* The 26.6.2 ABI configures RC through sRC.RCMode/Feature
+		 * instead; none of the 13.5 scalars were located there. */
+		.rc_mode_on	= AVE_OFF_NONE,
+		.frame_rate_div	= AVE_OFF_NONE,
+		.bitrate_sel	= AVE_OFF_NONE,
+		.bitrate_alt	= AVE_OFF_NONE,
+		.drl_enable	= AVE_OFF_NONE,
+		.drl_cfg	= AVE_OFF_NONE,
 		.rc_feature	= AVE_START_RC_FEATURE,
 		.rc_feature_fixed_qp = AVE_RC_FEATURE_NEW_FRAMEWORK, /* docs/35 §9 */
 		.qp_i		= AVE_START_QP_I,

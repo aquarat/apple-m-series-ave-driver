@@ -513,6 +513,46 @@ static void test_start_13_5(void)
 	s.src_mode = 0;
 	s.src_cfg_byte = 0;
 
+	/* Rate control: ui32RCFlag and the fields it brings in (docs/66 §1). */
+	begin("13.5 start_avc rate control");
+	s = session_1080p(true);
+	memset(buf, 0, sizeof(buf));
+	expect_int(ave_cmd_build_start_avc(a, buf, sizeof(buf), &CTX, &s),
+		   0x10e10, "size unchanged");
+	E32(buf, 0xff50, 2, "default is AVE_RC_FIXQP (fw string 0x4e69c)");
+	E32(buf, 0xff88, 0, "qp_min");
+	E32(buf, 0xff8c, 51, "qp_max defaults to 51");
+	E32(buf, 0xff48, 0, "fixed QP writes no frame-rate divisor");
+
+	s.rc_enable = true;
+	s.bitrate = 2000000;
+	s.frame_rate_div = 1;
+	s.qp_min = 10;
+	s.qp_max = 40;
+	memset(buf, 0, sizeof(buf));
+	expect_int(ave_cmd_build_start_avc(a, buf, sizeof(buf), &CTX, &s),
+		   0x10e10, "size unchanged with RC on");
+	E32(buf, 0xff50, 1, "ui32RCFlag = 1, the firmware's controller");
+	E32(buf, 0xff30, 2000000, "ui32BitRate is bits/second (fw 0x401b8)");
+	E32(buf, 0xff48, 1, "frame-rate divisor");
+	E32(buf, 0xff4c, 30, "frame-rate numerator");
+	E32(buf, 0xff54, 0, "bitrate_sel 0 keeps the plain bitrate field");
+	E32(buf, 0xff88, 10, "qp_min");
+	E32(buf, 0xff8c, 40, "qp_max");
+	E8(buf, 0xff80, 0, "DRL stays disabled: its layout is unknown");
+
+	s.bitrate = 0;
+	expect_int(ave_cmd_build_start_avc(a, buf, sizeof(buf), &CTX, &s),
+		   -EINVAL, "rate control with no target");
+	s.bitrate = 2000000;
+	s.qp_min = 41;
+	expect_int(ave_cmd_build_start_avc(a, buf, sizeof(buf), &CTX, &s),
+		   -EINVAL, "qp_min > qp_max");
+	s.qp_min = 10;
+	s.qp_max = 52;
+	expect_int(ave_cmd_build_start_avc(a, buf, sizeof(buf), &CTX, &s),
+		   -EINVAL, "qp_max > 51");
+
 	/*
 	 * LowResResult at wire 0x3B8, stride 8 (docs/65 §Q4): session-wide,
 	 * inert for an I-frame, asserted on from the first P
