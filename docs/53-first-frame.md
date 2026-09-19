@@ -1762,3 +1762,74 @@ understood each experiment gets its own boot and the driver stays loaded
 Open: where the source-read channel (`0x40D120000 + 0x40k`) gets its base
 address, and whether the input surface is a Start-time table like recon,
 colocated and entropy turned out to be.
+
+## The source path, answered statically (docs/62 §6, 2026-09-20)
+
+The open question above is closed, and the answer is that the input is **not**
+like recon, colocated and entropy. There is no Start-time source table.
+`PICMGMT +0x8C0/+0x8D0` really do program the source-read DMA, every frame,
+through `CAVCController::setPipe`; `setRefPointers` rebuilds only
+`+0x980..+0xBF8`, safely above them, and none of `SetFwBuf`'s 24 destination
+ranges is an input surface.
+
+F17's own log already carries the proof that the programming happened:
+
+| register | F17 read | meaning |
+|---|---|---|
+| `0x40D120000` | `0x80034045` | the **linear**-input config word (`...47` is the compressed arm) |
+| `0x40D12002C` | `0x002c004f` | `currMbRow 44`, last MB column 79 |
+
+`setPipe` writes that config word at fw `0x549bc`, *after* the luma address
+(`0x54320`), the chroma address (`0x547dc`), the origin (`0x54818`) and both
+strides - all on the same straight-line arm. Seeing it means those writes
+executed. And our IOVA was `0xfd300000`: 32-bit clean, so the register, which
+takes only the low 32 bits, lost nothing.
+
+What is left on the host side is exactly two scalars, both of which we have
+sent as zero since the first encode:
+
+| wire | width | reaches | value |
+|---|---|---|---|
+| `0xFEC0` | u16 | `0x40D120050 = v & 3`, `0x40D1200D0 = v >> 2` | **[U]** |
+| `0xFCE8` | u8 | bits 16+ of `0x40D12000C` | **[U]** |
+
+Neither is knowable from the kext: `AVE_VIDEO_PARAMS` is a byte-for-byte
+pass-through from user space, so Apple's driver never writes or validates
+them. They are `session_src_mode` and `session_src_cfg`, to be swept.
+
+Separately, `iNumViews` (wire `0xFF24`/`0xFF28`) is a field Apple's own
+validator refuses to send as zero (`0 < n <= 2`, kext `0xec9078`) and we sent
+zero. It is now 1 unconditionally.
+
+### What `recon_luma.bin` actually is
+
+Characterised by `tools/check_frame.py`, which also grades a run's bitstream
+against its source and refuses to grade anything until a planted positive, a
+negative and a blank control all come out right. On F17:
+
+```
+recon_luma: 262144 bytes, 2 distinct, 8032 non-zero (3.1%)
+recon_luma: 256 written islands, pitch 1024, widths [(32, 216), (28, 40)]
+VERDICT: BLANK  (PSNR 12.1 dB over 261120 compared bytes)
+```
+
+256 rows at a 1024-byte pitch with ~32 bytes written in each, all value 128.
+The 128 is what a blank source produces (DC prediction, no residual); the
+sparsity is a *layout* fact and a separate question, and `session_lsb=0` is
+the cheapest way to test whether the split MSB/LSB planes explain it.
+
+## F18 (proposed, not yet run)
+
+One load, one variable: `session_flat_luma=200`, otherwise F17's parameters.
+
+- decoded picture at 200 -> the source DMA does read our buffer, and the ramp
+  failure is an addressing or layout problem downstream;
+- decoded picture at ~130 again -> the hardware never delivered our bytes.
+
+The same load captures the four `0x20000` register windows (added after F17,
+so never yet seen) and prints its own verdict comparing `0x40D120010` with the
+IOVA it just published.
+
+Delta from F17 beyond the flat source: `iNumViews = 1` and `frameNumber = 0`
+are now sent, both because Apple's driver sends them. If F18 stops completing
+at all, those two are the first bisect.
