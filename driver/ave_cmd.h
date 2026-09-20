@@ -111,6 +111,12 @@ struct ave_avc_session {
 	/* SRCDMAGO bit 3 and bits 4+ (docs/69); 0 = what every run has sent. */
 	u8	src_go_bit3;
 	u8	src_go_bits;
+	/*
+	 * Controller debug verbosity (wire 0xFCD8). Bit 5 is what lets the
+	 * firmware's own "AVC COMMON:: QPY %d nQuant %d" lines out at all.
+	 * docs/70.
+	 */
+	u32	dbg_bits;
 	u64	param_sets_addr;
 	u32	param_sets_size;
 

@@ -334,7 +334,8 @@ int ave_cmd_build_start_avc(const struct ave_cmd_abi *abi, u8 *buf, size_t len,
 	if ((s->src_mode && l->src_mode == AVE_OFF_NONE) ||
 	    (s->src_cfg_byte && l->src_cfg_byte == AVE_OFF_NONE) ||
 	    (s->src_go_bit3 && l->src_go_bit3 == AVE_OFF_NONE) ||
-	    (s->src_go_bits && l->src_go_bits == AVE_OFF_NONE))
+	    (s->src_go_bits && l->src_go_bits == AVE_OFF_NONE) ||
+	    (s->dbg_bits && l->dbg_bits == AVE_OFF_NONE))
 		return -EINVAL;
 	if (s->n_entropy) {
 		u32 j, cols = s->n_entropy_cols ? s->n_entropy_cols : 1;
@@ -484,6 +485,8 @@ int ave_cmd_build_start_avc(const struct ave_cmd_abi *abi, u8 *buf, size_t len,
 		wr8(&w, l->src_go_bit3, s->src_go_bit3);
 	if (s->src_go_bits)
 		wr8(&w, l->src_go_bits, s->src_go_bits);
+	if (s->dbg_bits)
+		wr32(&w, l->dbg_bits, s->dbg_bits);
 
 	/* ---- buffer tables ---- */
 	for (i = 0; i < s->n_recon; i++) {

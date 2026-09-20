@@ -2398,3 +2398,65 @@ Flipping further single bits one boot at a time is not a strategy - each of
 these cost a reboot and returned a mapping we already believed. docs/70 is
 tracing the actual question instead: **what dispatches work to IntraEst, and
 what stops it.**
+
+## Correction (docs/70): "IntraEst never ran" was not sound
+
+I concluded from F21 that the intra estimator never processed a macroblock,
+wrote it into this file as the explanation, and put it in a commit message.
+It does not follow from the evidence.
+
+IntraEst's interrupt handler writes 0 to its host-if `+0xc` and `+0x10` at
+the top of **every** macroblock and never writes them again, so reading zero
+there is what a *running* stage leaves behind. The control was in the same
+log line I quoted: **MbInput produced and consumed 3845 macroblocks and also
+reads `+0xc = +0x10 = 0`**. `+0x14 = 0` is the same story - the handler's
+last post carries no payload. And `curMB` had never been read against a
+control at all; ModeDecision has a byte-identical block at `0x40D263180`
+which nothing has ever looked at.
+
+The one positive reading is `+0 = 0x2000`: only the MCPU's `main` writes
+bit 13, so the core booted and armed. Everything else is consistent with
+IntraEst running normally.
+
+So "IntraEst never ran" is **[U]**, and the symptom to explain is the
+measured one: 3600 macroblocks, all the same type, no coefficients anywhere,
+independent of the source.
+
+This is the second time in two days that I have read a counter without
+asking what a known-good stage reads - the first was the wrapping `u8`
+distinct-value tally in F17. Both were caught by someone applying a control I
+had not.
+
+Also corrected: the register this file called `0x40D143180` is
+`0x40D243180`. The driver was right (`AVE_BANK_DPE + 0x143180`); the AP
+label here was off by `0x100000`.
+
+### F25 (proposed): make the firmware state its own parameters
+
+`session_dbg=0x20`, one variable.
+
+Wire `0xFCD8` bit 5 is the byte `CController::Print` tests before dropping
+every `AVC COMMON::` line (fw `0x924d4`: `ldrb w8,[x0,#408]; cbz w8`). With
+it clear - every run to date - the firmware discards its own diagnostics
+before they reach the TERMINAL ring the driver already drains. The rate limit
+is lifted for the run, since one line per macroblock against 100 per 5 s
+would throw the interesting ones away in the kernel instead.
+
+The same load also dumps, for the first time, the registers that say what the
+encoder actually ran with: QPY and nQuant (`0x40D24A1C8`/`+0x1CC`), their
+ReconLuma and CAVLC mirrors, the 23 ModeDecision cost words at
+`0x40D26A0AC..0x104` (`ProcessPipeReset` seeds each with `0x01000001`, and
+`setPipe` overwrites them from a per-client struct), and **both** curMB
+registers so IntraEst's finally has its control.
+
+Outcomes, all informative:
+
+- `AVC COMMON:: QPY 30 nQuant <non-zero>` -> the QP hypothesis is dead, and
+  the cost-word dump in the same run decides the next one;
+- QPY is not 30, or nQuant is 0 -> that is the bug, and it is on the
+  Start_AVC QP path, nowhere near the source;
+- no `AVC COMMON::` line at all -> a clean no to the whole mechanism, and the
+  register dump still lands.
+
+Unlike F18, F22, F23 and F24, this does not confirm a mapping we already
+believe. It makes the firmware answer.

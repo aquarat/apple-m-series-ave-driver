@@ -356,6 +356,20 @@ MODULE_PARM_DESC(session_src_go,
 	"Start_AVC wire 0xFECC (u8): SRCDMAGO bits 4 and up");
 
 /*
+ * Make the firmware talk (docs/70). Wire 0xFCD8's bit 5 is the single byte
+ * CController::Print tests before dropping every "AVC COMMON::" line, so
+ * with it clear - every run we have ever done - the firmware has been
+ * discarding its own diagnostics before they reach the ring we already
+ * drain. 0x20 is bit 5 alone: the per-frame lines, without DebugInit's
+ * hundreds. The log path allocates shared memory and sends synchronously,
+ * so wider values slow the frame and can overrun the 512-slot ring.
+ */
+static unsigned int session_dbg;
+module_param(session_dbg, uint, 0444);
+MODULE_PARM_DESC(session_dbg,
+	"Start_AVC wire 0xFCD8: firmware debug verbosity. 0x20 = bit 5, which is what lets its own QPY/nQuant lines out at all");
+
+/*
  * Rate control. The default reproduces every run so far: ui32RCFlag = 2
  * (AVE_RC_FIXQP), session_qp on every frame type. session_bitrate switches
  * to the firmware's own controller (ui32RCFlag = 1) with that target in
@@ -1344,6 +1358,20 @@ static int ave_session_start_avc(struct ave_device *ave,
 	s.src_cfg_byte = (u8)session_src_cfg;
 	s.src_go_bit3 = (u8)session_src_bit3;
 	s.src_go_bits = (u8)session_src_go;
+	s.dbg_bits = session_dbg;
+	if (session_dbg) {
+		/*
+		 * The firmware's own lines come through the same ring as
+		 * everything else and would be thrown away by the rate limit
+		 * long before the interesting ones arrive - 100 lines per 5 s
+		 * against one per macroblock.
+		 */
+		ratelimit_state_init(&ave->fwlog_rs, 0, 0);
+		ratelimit_set_flags(&ave->fwlog_rs, RATELIMIT_MSG_ON_RELEASE);
+		dev_info(ave->dev,
+			 "session: Start_AVC: firmware debug bits %#x (wire 0xFCD8); fw log rate limit lifted - expect 'AVC COMMON:: QPY %%d nQuant %%d'\n",
+			 session_dbg);
+	}
 	if (session_src_bit3 || session_src_go)
 		dev_info(ave->dev,
 			 "session: Start_AVC: SRCDMAGO inputs bit3 %#x bits4+ %#x (wire 0xFCE9 / 0xFECC); watch 0x40D110128 and the third reader channel 0x40D120100\n",
@@ -2040,6 +2068,71 @@ static void ave_session_diag_channels(struct ave_device *ave, const char *tag)
 	}
 }
 
+/*
+ * The parameters the encoder actually ran with (docs/70).
+ *
+ * setPipe writes QPY to 0x40D24A1C8 and nQuant to +0x1CC from the session's
+ * QP (fw 0x55e38), mirrors them into ReconLuma and CAVLC, and setPipe/
+ * ProcessPipeReset fill 23 ModeDecision cost words at 0x40D26A0AC..0x104.
+ * Not one of these has ever been read. A QP that arrives as something other
+ * than what we sent, or a zero quantiser or zero cost ladder, produces
+ * exactly what every run has produced: every macroblock coded the same way,
+ * no coefficients, and a byte count that does not move with the source.
+ *
+ * Also here: IntraEst's curMB alongside ModeDecision's, which is the control
+ * that was missing. The two blocks are byte-identical in the MCPU images, so
+ * a ModeDec that demonstrably ran tells us what a "did nothing" curMB really
+ * looks like. Read-only, bank 0.
+ */
+static void ave_session_diag_costs(struct ave_device *ave)
+{
+	u32 i, v[6];
+
+	for (i = 0; i < 6; i++)
+		v[i] = ave_read(ave, AVE_BANK_DPE, 0x14a1c8 + 4 * i);
+	dev_info(ave->dev,
+		 "session: diag QP/lambda 0x40D24A1C8 QPY %u nQuant %#x +0x1D0 %#x +0x1D4 %#x +0x1D8 %#x | enable 0x40D24A394 %#x\n",
+		 v[0], v[1], v[2], v[3], v[4],
+		 ave_read(ave, AVE_BANK_DPE, 0x14a394));
+	dev_info(ave->dev,
+		 "session: diag ReconLuma QP 0x40D28A090 %#x %#x | CAVLC 0x40D2DA08C %#x %#x %#x\n",
+		 ave_read(ave, AVE_BANK_DPE, 0x18a090),
+		 ave_read(ave, AVE_BANK_DPE, 0x18a094),
+		 ave_read(ave, AVE_BANK_DPE, 0x1da08c),
+		 ave_read(ave, AVE_BANK_DPE, 0x1da090),
+		 ave_read(ave, AVE_BANK_DPE, 0x1da094));
+	for (i = 0; i < 24; i += 8)
+		dev_info(ave->dev,
+			 "session: diag ModeDec cost 0x40D26A0%02X: %08x %08x %08x %08x %08x %08x %08x %08x (want 0x01000001)\n",
+			 0xac + 4 * i,
+			 ave_read(ave, AVE_BANK_DPE, 0x16a0ac + 4 * (i + 0)),
+			 ave_read(ave, AVE_BANK_DPE, 0x16a0ac + 4 * (i + 1)),
+			 ave_read(ave, AVE_BANK_DPE, 0x16a0ac + 4 * (i + 2)),
+			 ave_read(ave, AVE_BANK_DPE, 0x16a0ac + 4 * (i + 3)),
+			 ave_read(ave, AVE_BANK_DPE, 0x16a0ac + 4 * (i + 4)),
+			 ave_read(ave, AVE_BANK_DPE, 0x16a0ac + 4 * (i + 5)),
+			 ave_read(ave, AVE_BANK_DPE, 0x16a0ac + 4 * (i + 6)),
+			 ave_read(ave, AVE_BANK_DPE, 0x16a0ac + 4 * (i + 7)));
+	/*
+	 * curMB for IntraEst AND ModeDecision. ModeDec provably processed
+	 * macroblocks, so whatever its curMB reads is what a working stage
+	 * looks like - without that control, IntraEst's 0 means nothing.
+	 * (It meant nothing: I read it as "never ran". docs/70.)
+	 */
+	dev_info(ave->dev,
+		 "session: diag curMB IntraEst 0x40D243180 %#010x %#010x | ModeDec 0x40D263180 %#010x %#010x (the control)\n",
+		 ave_read(ave, AVE_BANK_DPE, 0x143180),
+		 ave_read(ave, AVE_BANK_DPE, 0x143184),
+		 ave_read(ave, AVE_BANK_DPE, 0x163180),
+		 ave_read(ave, AVE_BANK_DPE, 0x163184));
+	dev_info(ave->dev,
+		 "session: diag MESATDSCALING 0x40D190630 %#x +0x19026C %#x | IntraEst DMem 0x40D348000 %#x +0x348764 %#x\n",
+		 ave_read(ave, AVE_BANK_DPE, 0x90630),
+		 ave_read(ave, AVE_BANK_DPE, 0x9026c),
+		 ave_read(ave, AVE_BANK_DPE, 0x248000),
+		 ave_read(ave, AVE_BANK_DPE, 0x248764));
+}
+
 /* docs/60 Q5: MCPU counters, stacks, stage context/go registers. Read-only. */
 static void ave_session_diag_mcpu(struct ave_device *ave,
 				  struct ave_sess_bufs *bufs)
@@ -2438,6 +2531,7 @@ static int ave_session_process(struct ave_device *ave,
 			 ave_read(ave, AVE_BANK_DPE, 0x1c8008));
 		ave_session_diag_row0(ave, bufs);
 		ave_session_diag_mcpu(ave, bufs);
+		ave_session_diag_costs(ave);
 		ave_session_diag_channels(ave, "timeout");
 	}
 
