@@ -2076,3 +2076,31 @@ Stop/Close, no Halt, and no refusal to gate or unmap when the core cannot be
 proven quiet. It gated and unmapped anyway. That is the obvious suspect and
 the next thing to fix; it is also consistent with F4 and F16, which both
 unloaded without a Halt.
+
+## s2 (2026-09-20): a cold core reads STOPPED too
+
+The sweep reset the machine **at insmod**, about 20 s after the overlay went
+in, before stage 7 had logged anything. The cause was the auto-recovery added
+an hour earlier.
+
+`ave_core_reset()` treated `CPU_STATUS & AVE_ASC_ST_STOPPED` as proof that a
+previous load had halted the core. It is not:
+
+| state | CPU_STATUS | STOPPED (bit 1) |
+|---|---|---|
+| cold, never started (F20a's own pre-start read) | `0x2a` | **set** |
+| halted by our Halt (F20a's teardown, s1-9's stage 13) | `0x2e` | set |
+
+They differ only in bit 2, which m1n1 marks as a guess. So on the **first**
+load of a fresh boot the condition was true, and the driver pulsed the block
+reset where none was wanted - the same `reset_control_reset()` that hung the
+fabric in experiment 7c (docs/25).
+
+Recovery is an explicit request again (`core_reset=2 fw_restore_data=1`), and
+stage 13 now names it in the error when it finds a core it cannot start. The
+sweep decides from the kernel log - "has this driver started the core at all
+this boot?" - which is the only source that actually knows.
+
+Both failures in this area came from the same reflex: inferring history from
+a register that does not record it. A cold core and a halted core look the
+same from stage 7, and the honest answer is that the driver cannot tell.

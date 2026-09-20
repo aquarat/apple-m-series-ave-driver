@@ -37,15 +37,20 @@ for v in "$@"; do
     if [ -n "${LOG:-}" ] && grep -q "teardown was not clean" "$LOG"; then
         echo "STOPPING: the previous unload was not clean; reboot before continuing" | tee -a "$SUM"; exit 1
     fi
-    # No recovery flags here on purpose. A load that finds a core halted by
-    # an earlier load recovers by itself now (auto_recover, ave_core_reset);
-    # passing core_reset=2 from the second sweep value onwards was this
-    # script's own bug - it counted loads within the SWEEP, while what
-    # matters is loads within the BOOT, so the first value in a sweep that
-    # followed any earlier load died at stage 13 with "ASC did not become
-    # idle (status 0x2e)". That is s1-9 (docs/53).
+    # Recovery is needed exactly when this driver has already started the
+    # core once THIS BOOT, because the unload halts it and stage 13 cannot
+    # start a halted core. Ask the kernel log, which is the only thing that
+    # knows: counting loads within the sweep was this script's own bug (s1-9
+    # died at stage 13), and keying it off CPU_STATUS inside the driver was
+    # a worse one - a cold core reads 0x2a, which also has STOPPED set, so
+    # the driver pulsed a block reset on a fresh boot and s2-9 reset the
+    # machine at insmod.
+    EXTRA=""
+    if sudo dmesg | grep -q "Apple AVE video encoder ready"; then
+        EXTRA="core_reset=2 fw_restore_data=1"
+    fi
     # shellcheck disable=SC2086
-    LOG=$(OVERLAY=4 HOLD=5 UNLOAD=1 tools/e3-run.sh "$NAME-$v" $BASE session_src_mode="$v")
+    LOG=$(OVERLAY=4 HOLD=5 UNLOAD=1 tools/e3-run.sh "$NAME-$v" $EXTRA $BASE session_src_mode="$v")
     DIR=${LOG%.kmsg}-load1
     REG=$(grep -o "mode +0x50 0x[0-9a-f]* +0xD0 0x[0-9a-f]*" "$LOG" | tail -1)
     BYTES=$(grep -o "frame 0: [0-9]* bytes" "$LOG" | tail -1 | tr -cd '0-9')
