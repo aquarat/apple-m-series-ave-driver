@@ -2029,3 +2029,50 @@ and the pipe:
 source is deliberately flat. With a flat source the question is only whether
 the decode is flat at the *right value*, which PSNR answers alone. It refused
 to grade until fixed, which is what it is for.
+
+## F20a / s1 (2026-09-20): the teardown works, and one experiment per boot ends
+
+**F20a - the full docs/63 sequence, on hardware:**
+
+```
+close: client 1 returned (Stop -> UNINIT_DONE, Close -> STOP_DONE)
+halt:  scratch 0 = 0x08042006, the firmware reached its wfi
+halt:  CPU_STATUS 0x0000002e STOPPED after 3 sample(s)
+powered off (remove)
+=== still alive 8 s after the unload ===
+```
+
+Stop (id 6, slot 7) and Close (id 12, slot 4) were both accepted with
+`0xEE0000` first time - ids, slots, sizes and order all correct from static
+analysis alone. Everything was unmapped **while still powered** and the
+domains gated last, and the machine survived. F4 and F16 both reset within
+seconds of an unload; this did not.
+
+**Then the sweep's first load failed, and the cause was ours.** Stage 13:
+
+```
+ASC did not become idle (status 0x2e)
+error -ETIMEDOUT: ASC start
+```
+
+`0x2e` has bit 1 set - STOPPED - which is exactly the state F20a's clean Halt
+leaves behind. Stage 13 polls for `(CPU_STATUS & 3) == 0`, so **a cleanly
+halted core can never be restarted**, and the recovery (block reset + DATA
+restore) sat behind two module parameters that the sweep script passed from
+its *second* value onwards, because it counted loads within the sweep rather
+than within the boot.
+
+Both are fixed: a STOPPED core is now the ordinary state of every load after
+the first, so `ave_core_reset()` recognises it and recovers automatically
+(`auto_recover=0` disables). `src_mode=9` was therefore never actually
+tested - that run measured the harness.
+
+**Unexplained, and recorded as such:** the machine reset roughly ten seconds
+after the *failed* load's unload. Not after F20a's clean one. The difference
+is that the failed probe took its own error path - `ave_power_off(ave,
+"probe failed")`, `me1: venc_me1 released`, `iboot: DATA unmapped` - and that
+path has **none** of the protections `ave_remove()` was just given: no
+Stop/Close, no Halt, and no refusal to gate or unmap when the core cannot be
+proven quiet. It gated and unmapped anyway. That is the obvious suspect and
+the next thing to fix; it is also consistent with F4 and F16, which both
+unloaded without a Halt.
