@@ -2615,3 +2615,28 @@ turns off the only new code that touches registers while changing nothing
 else. Survives -> the diag code is implicated despite the timing, and the
 bisect continues inside it. Dies at 29 -> the diag code is cleared and the
 suspects are the ABI/builder edits, which would be stranger still.
+
+## F28: n=1 is not a result
+
+`session_diag=0` on the `d9c3f6f` build reached stage 15 and encoded a
+frame. That is **not** evidence that the diagnostics cause the stage-13
+death, and I am recording it as a non-result before it becomes one.
+
+- The first 29 step markers are byte-identical to F26's, and the dead runs
+  stop immediately before `stage 13 (asc-start): starting`. The death is at
+  stage 13.
+- `session_diag` is read at exactly two places, `ave_session.c:2460` and
+  `:2785`, both inside the stage-16 session. It cannot change anything at
+  stage 13.
+- With a base success rate of about 78%, a single success is the *expected*
+  outcome no matter what the parameter does. One run distinguishes nothing.
+
+What does still stand is the binary A/B: 5/5 dead on `d9c3f6f` against 5/5
+alive on the commit before it, which is p ~ 0.005 under that base rate. The
+mechanism remains unexplained, and the honest position is that a correct
+control-flow argument and a strong A/B are in conflict, with neither yet
+explained away.
+
+To settle whether the diagnostics matter would take several runs per arm,
+not one - which is a lot of reboots for a question that is not the goal. The
+goal is three registers.
