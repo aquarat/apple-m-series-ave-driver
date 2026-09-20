@@ -54,7 +54,12 @@ echo "=== insmod rc=$RC ===" >> "$LOG"; sync
 # otherwise leave nothing behind.
 DBG=/sys/kernel/debug/apple_ave
 OUT=${LOG%.kmsg}-load1
-if sudo test -d "$DBG" && [ -n "$(sudo ls -A "$DBG" 2>/dev/null)" ]; then
+# Only if THIS load produced them. A leaked teardown used to leave the
+# previous load's entries in place, and f19b copied F18's frame under its own
+# name before the driver learned to take them down (2026-09-20).
+if [ $RC -ne 0 ]; then
+    step "insmod failed (rc=$RC); not copying debugfs - anything there is not ours"
+elif sudo test -d "$DBG" && [ -n "$(sudo ls -A "$DBG" 2>/dev/null)" ]; then
     mkdir -p "$OUT"
     for f in $(sudo ls "$DBG"); do sudo cat "$DBG/$f" > "$OUT/$f"; done
     sync

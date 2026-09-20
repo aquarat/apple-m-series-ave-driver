@@ -1,0 +1,22 @@
+=== f15 2026-09-19T23:02:06+01:00 commit 64294dc ===
+=== load 1: stop_after=16 fw_map_data=1 fw_map_text=2 dapf_dump=1 smmu_watch=1 session_selftest=1 session_frame=1 session_lsb=1 power_me1=1 dpe_tunables=1 session_coloc=1 fw_halt=1 core_reset=2 fw_restore_data=1
+=== load 2: stop_after=16 fw_map_data=1 fw_map_text=2 dapf_dump=1 smmu_watch=1 session_selftest=1 session_frame=1 session_lsb=1 power_me1=1 dpe_tunables=1 session_coloc=1 fw_halt=1 core_reset=2 fw_restore_data=1 session_entropy_size=0
+=== load 3: stop_after=16 fw_map_data=1 fw_map_text=2 dapf_dump=1 smmu_watch=1 session_selftest=1 session_frame=1 session_lsb=1 power_me1=1 dpe_tunables=1 session_coloc=1 fw_halt=1 core_reset=2 fw_restore_data=1 session_qp=45
+=== applying overlay variant=4 ===
+[   84.959148] ave_overlay: loading out-of-tree module taints kernel.
+[   84.959154] ave_overlay: module verification failed: signature and/or required key missing - tainting kernel
+[   84.959715] ave-overlay: variant=4 - variant=3 with both DARTs in iommus (docs/56)
+[   84.960392] apple-dart 40d040000.iommu: DART [pagesize 4000, 16 streams, bypass support: 1, bypass forced: 0, locked: 0, AS 32 -> 42] initialized
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d040000.iommu
+[   84.960667] apple-dart 40d030000.iommu: DART [pagesize 4000, 16 streams, bypass support: 0, bypass forced: 0, locked: 0, AS 32 -> 42] initialized
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d030000.iommu
+[   84.960819] platform 40d100000.video-encoder: Adding to iommu group 16
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   84.961030] ave-overlay: applied, ovcs_id=1
+=== overlay insmod returned rc=0 ===
+=== overlay applied, t=0s of 10s before load 1 ===
+=== overlay applied, t=5s of 10s before load 1 ===
+=== load 1: insmod stop_after=16 fw_map_data=1 fw_map_text=2 dapf_dump=1 smmu_watch=1 session_selftest=1 session_frame=1 session_lsb=1 power_me1=1 dpe_tunables=1 session_coloc=1 fw_halt=1 core_reset=2 fw_restore_data=1 ===

@@ -2530,6 +2530,23 @@ static int ave_session_process(struct ave_device *ave,
 /* Entry point                                                              */
 /* ------------------------------------------------------------------------ */
 
+/*
+ * Take down the debugfs view without freeing anything behind it. On an
+ * unclean teardown the buffers are deliberately leaked, but the debugfs
+ * entries must still go: they outlive the module otherwise, and a later run
+ * that copies /sys/kernel/debug/apple_ave would silently capture the
+ * PREVIOUS load's frame and label it its own. F19b did exactly that.
+ */
+void ave_session_hide(struct ave_device *ave)
+{
+	struct ave_sess_bufs *bufs = ave->session_bufs;
+
+	if (!bufs || !bufs->dbg_dir)
+		return;
+	debugfs_remove_recursive(bufs->dbg_dir);
+	bufs->dbg_dir = NULL;
+}
+
 void ave_session_release(struct ave_device *ave)
 {
 	struct ave_sess_bufs *bufs = ave->session_bufs;
@@ -2856,10 +2873,19 @@ int ave_session_close_client(struct ave_device *ave)
  * is unknown; if it matters it should show up as one of the polls timing out
  * rather than as a hang.
  */
-static bool fw_halt;
+/*
+ * Default ON since F19b. Without a Halt the core is still running at unload,
+ * so the teardown can never be proven clean, so nothing is unmapped and the
+ * power reference is kept - and a load that keeps power also cannot release
+ * the venc_me1 holder device, which makes the NEXT load fail with -EEXIST.
+ * An opt-in safety measure that guarantees the module can only be loaded
+ * once per boot is not a safety measure. fw_halt=0 still asks for the old
+ * behaviour, deliberately.
+ */
+static bool fw_halt = true;
 module_param(fw_halt, bool, 0444);
 MODULE_PARM_DESC(fw_halt,
-		 "at unload, ask the firmware to halt (command 14) so the next load can start it again without a reboot");
+		 "at unload, ask the firmware to halt (command 14) so the next load can start it again without a reboot (default on)");
 
 /* The advisory _S_AVE_TimeOut ms field; macOS computes cfg[+20]*3000. */
 #define AVE_HALT_CMD_TIMEOUT_MS	3000

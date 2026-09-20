@@ -1,0 +1,1 @@
+=== f17 2026-09-19T23:28:09+01:00 commit 600e365: insmod driver/apple-ave.ko stop_after=16 fw_map_data=1 fw_map_text=2 core_reset=2 fw_restore_data=1 dapf_dump=1 smmu_watch=1 session_selftest=1 session_frame=1 session_lsb=1 power_me1=1 dpe_tunables=1 session_coloc=1 session_entropy_size=1 step_ms=0 ===
