@@ -2558,3 +2558,60 @@ decision is working normally.
   defaults on and runs on **success**, so a surviving F25 returns the whole
   register dump; with `UNLOAD=0` the evidence is on disk before any risky
   teardown. The irreducible gamble is core start, about a coin flip.
+
+## F26/F27 (2026-09-20): it is the binary, and the "same signature" claim was wrong
+
+I accepted a reviewer's conclusion that the stage-13 deaths were an
+intermittent SoC hang at roughly a coin flip, and that `d9c3f6f` was
+"exonerated with certainty". Both halves are wrong, and the table below is
+why. I should have built it before agreeing.
+
+**The 29-step signature is unique to one binary.** Tabulating every run by
+step count:
+
+| run | steps | ready | note |
+|---|---:|---:|---|
+| f10-f14, f16, f17b, f18, f20a, s3-9, f21-f24 | 37 | 1 | encoded a frame |
+| f15, f17a, s1-5, s2-9, s3-5 | 0 | 0 | died at insmod, no marker |
+| f19 | 11 | 0 | early probe |
+| s1-9 | 31 | 0 | clean `-ETIMEDOUT`, stage 13, logged an error |
+| **f25, f25b, f25c x2, f26** | **29** | **0** | **all on the `d9c3f6f` build** |
+
+The earlier failures the reviewer grouped with these died at **0** or **11**
+markers - during insmod, before probe got going - and s1-9 failed at 31 with
+an error line. None of them is the same signature. Lumping them together is
+what produced the coin-flip base rate. Restricted to fresh-boot first loads,
+the real rate of reaching ready is 14 of 18, about 78%, which makes five
+consecutive failures p ~ 0.005 even before the step count is considered.
+
+**F26 exonerates the parameter, F27 convicts the binary.** F26 ran the
+`d9c3f6f` build with `session_dbg` omitted: dead at 29. F27 ran the
+pre-commit build, on the same machine five minutes later, with F24's exact
+parameters: **37 steps, ready, frame encoded**.
+
+| binary | runs | result |
+|---|---|---|
+| pre-`d9c3f6f` | f21-f24, f27 | 5/5 reached ready |
+| `d9c3f6f` | f25, f25b, f25c x2, f26 | 5/5 dead at 29 |
+
+So the cause is in that commit, and `session_dbg` is not it.
+
+**And the mechanism is still unexplained.** Nothing in the diff executes
+before stage 13 - I checked, the reviewer checked independently, and we
+agree on the control flow. `ave_session_diag_costs()` is the only part that
+touches hardware, it has one call site in the stage-16 diag block, and all
+40 of its offsets are inside the DPE bank (largest `0x248764`, bank is
+`0x45c000`). The two struct edits are insertions into a const table whose
+every field carries an explicit wire offset, and into a zero-initialised
+parameter struct.
+
+A correct control-flow argument and a 5/5 A/B cannot both be right about
+this, and the A/B is the harder evidence. Something about that build reaches
+the hardware earlier than the source suggests.
+
+**Next, and it costs no rebuild:** `session_diag=0` on the `d9c3f6f` build.
+That parameter gates every diagnostic block, including the new one, so it
+turns off the only new code that touches registers while changing nothing
+else. Survives -> the diag code is implicated despite the timing, and the
+bisect continues inside it. Dies at 29 -> the diag code is cleared and the
+suspects are the ABI/builder edits, which would be stranger still.
