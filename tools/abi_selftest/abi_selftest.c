@@ -510,6 +510,24 @@ static void test_start_13_5(void)
 	E16(buf, 0xfec0, 0x15, "src_mode (fw 0x5d018: &3 -> 0x...050, >>2 -> 0x...0D0)");
 	E8(buf, 0xfce8, 0x03, "src_cfg_byte (fw 0x5d118 -> 0x40D12000C bits 16+)");
 	E8(buf, 0xfec2, 0, "src_mode is a u16, not wider");
+
+	/* The two SRCDMAGO bytes (docs/69), same all-or-nothing shape. */
+	s.src_go_bit3 = 0x01;
+	s.src_go_bits = 0x07;
+	memset(buf, 0, sizeof(buf));
+	expect_int(ave_cmd_build_start_avc(a, buf, sizeof(buf), &CTX, &s),
+		   0x10e10, "size unchanged with the SRCDMAGO bytes");
+	E8(buf, 0xfce9, 0x01, "src_go_bit3 (fw 0x5cfcc -> SRCDMAGO bit 3)");
+	E8(buf, 0xfecc, 0x07, "src_go_bits (fw 0x5cfe4 -> SRCDMAGO bits 4+)");
+	E8(buf, 0xfcea, 0, "src_go_bit3 is a u8, not wider");
+	E8(buf, 0xfecd, 0, "src_go_bits is a u8, not wider");
+	s.src_go_bit3 = 0;
+	s.src_go_bits = 0;
+	memset(buf, 0, sizeof(buf));
+	ave_cmd_build_start_avc(a, buf, sizeof(buf), &CTX, &s);
+	E8(buf, 0xfce9, 0, "unset stays 0: the default image is unchanged");
+	E8(buf, 0xfecc, 0, "unset stays 0");
+
 	s.src_mode = 0;
 	s.src_cfg_byte = 0;
 

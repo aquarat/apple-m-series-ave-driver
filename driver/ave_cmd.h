@@ -108,6 +108,9 @@ struct ave_avc_session {
 	 */
 	u16	src_mode;
 	u8	src_cfg_byte;
+	/* SRCDMAGO bit 3 and bits 4+ (docs/69); 0 = what every run has sent. */
+	u8	src_go_bit3;
+	u8	src_go_bits;
 	u64	param_sets_addr;
 	u32	param_sets_size;
 

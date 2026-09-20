@@ -1180,6 +1180,26 @@ struct ave_start_avc_layout {
 	u32	src_mode;		/* u16; AVE_OFF_NONE = not located */
 	u32	src_cfg_byte;		/* u8;  AVE_OFF_NONE = not located */
 	/*
+	 * The other two host bytes that reach the source path, both of which
+	 * we have sent as zero since the first encode, and both traced by
+	 * docs/69 to SRCDMAGO (0x40D110128):
+	 *
+	 *   src_go_bit3  -> SRCDMAGO bit 3   (fw 0x57d94)
+	 *   src_go_bits  -> SRCDMAGO bits 4+ (fw 0x57da8 / 0x57db4)
+	 *
+	 * src_go_bit3 additionally gates whether ProcessPipeReset initialises
+	 * a THIRD reader channel at 0x40D120100 (fw 0x4edf0) - the two we
+	 * know about, luma at 0x40D120000 and chroma at +0x80, are both
+	 * programmed and both run. docs/65 read the same byte as a
+	 * sync/async LRME selector.
+	 *
+	 * Like src_mode, neither value is knowable from either binary: the
+	 * kext passes AVE_VIDEO_PARAMS through from user space without
+	 * writing or validating them.
+	 */
+	u32	src_go_bit3;		/* u8; AVE_OFF_NONE = not located */
+	u32	src_go_bits;		/* u8; AVE_OFF_NONE = not located */
+	/*
 	 * iNumViews. Apple's own kext refuses to send the command unless
 	 * 0 < iNumViews <= 2 (pInfo validator, kext 0xec9078, assert string
 	 * 0xfffffe00071f090b) and we send zero, which macOS would reject. The
@@ -1581,6 +1601,8 @@ const struct ave_cmd_abi ave_cmd_abi_13_5 = {
 		.src_nbr_max	= 4,
 		.src_mode	= 0xfec0,	/* fw 0x5d018 -> [x22,#444], docs/62 §6.2 */
 		.src_cfg_byte	= 0xfce8,	/* fw 0x5d118 -> [x22,#41],  docs/62 §6.2 */
+		.src_go_bit3	= 0xfce9,	/* fw 0x5cfcc -> SRCDMAGO bit 3, docs/69 */
+		.src_go_bits	= 0xfecc,	/* fw 0x5cfe4 -> SRCDMAGO bits 4+, docs/69 */
 		.num_views	= { 0xff24, 0xff28 },	/* kext 0xec9078 rejects 0 */
 		.sps_block	= 0x105b0,	/* memcpy 0x6ac from payload+0x10550 0x5ce68-90 */
 		.sps_block_size	= 0x6ac,
@@ -1879,6 +1901,8 @@ const struct ave_cmd_abi ave_cmd_abi_26_6 = {
 		 * 13.5 firmware only; the 26.6.2 offsets are not known. */
 		.src_mode	= AVE_OFF_NONE,
 		.src_cfg_byte	= AVE_OFF_NONE,
+		.src_go_bit3	= AVE_OFF_NONE,
+		.src_go_bits	= AVE_OFF_NONE,
 		.num_views	= { AVE_OFF_NONE, AVE_OFF_NONE },
 		.sps_block	= AVE_START_SPS_OFF,
 		.sps_block_size	= AVE_START_SPS_SIZE,

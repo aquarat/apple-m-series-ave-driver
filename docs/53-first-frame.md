@@ -2277,3 +2277,49 @@ One load, one variable, and it can say no:
   TTBR** -> the hypothesis is dead rather than untested, and the next
   candidates are wire `0xFECC` (SRCDMAGO bits 4+) and `0xFCE9` (bit 3),
   which docs/69 newly traced and which we have always sent as zero.
+
+## F22 (2026-09-20): stream 15 was not it
+
+`variant=5`, one variable. The mapping genuinely took effect:
+
+```
+DART1   TCR[15] = 0x00000080 TRANSLATE   TTBR[15][0] = 0x901a0aa8 VALID
+CPUDART TCR[15] = 0x00000080 TRANSLATE   TTBR[15][0] = 0x901a0aa8 VALID
+```
+
+Both DARTs translate stream 15 with the same page table as stream 0. And
+nothing changed:
+
+```
+diag MbInput ... IntraEst curMB 0x00000000
+diag hif IntraEst  +0 0x00002000 +4 0 +c 0 +10 0 +14 0
+frame 0: 2709 bytes ... MB counts I 3600 P 0 skip 0 = 3600 of 3600
+decoded distinct 1, first 130
+```
+
+So the hypothesis is **dead rather than untested**, which is what the run was
+built to be able to say. Stream 15 is now attached anyway - the ADT declares
+it, so it should be - but it is not what starves IntraEst.
+
+### F23 (proposed): the third reader channel
+
+docs/69 traced two more host bytes that have always been zero, both landing
+in SRCDMAGO (`0x40D110128`):
+
+| wire | u8 | goes to |
+|---|---|---|
+| `0xFCE9` | `session_src_bit3` | SRCDMAGO bit 3, **and** the gate on whether `ProcessPipeReset` initialises a THIRD reader channel at `0x40D120100` (fw `0x4edf0`) |
+| `0xFECC` | `session_src_go` | SRCDMAGO bits 4 and up |
+
+The two reader channels we know about - luma at `0x40D120000`, chroma at
+`+0x80` - are both programmed and both run to the last macroblock. There is a
+third, we have never enabled it, and **we have never even dumped its
+window**: the channel list stopped at `0x200FF`. It does now, along with
+`0x20140`.
+
+The stage that never runs is the intra estimator, which needs source pixels
+of its own. A reader channel that is never initialised because a byte we have
+always sent as zero gates it is a candidate of exactly the shape this project
+has hit five times already.
+
+`session_src_bit3=1`, one variable, everything else as F22.
