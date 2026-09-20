@@ -2159,3 +2159,60 @@ The datapath DART's own error register is non-zero in every run:
 Next run (read-only): dump TCR and TTBR for all sixteen streams on both
 DARTs, plus DART1's ERROR and ERROR_ADDR. One load, no unload. If some
 stream other than 0/1 is enabled but not translating, that is the answer.
+
+## F21 (2026-09-20): the fetch happens, and the output is neutral grey - not black
+
+Read-only survey, one load, no unload.
+
+**The stream-id hypothesis is refuted.** All sixteen streams are enabled on
+both DARTs, but only SIDs 0 and 1 have any configuration, on *both*:
+
+```
+CPUDART TCR[0] = 0x80 TRANSLATE   CPUDART TCR[2..15] = 0
+DART1   TCR[0] = 0x80 TRANSLATE   DART1   TCR[2..15] = 0
+dart: [before Process] SID0 CPUDART TCR 0x80 TTBR 0x9003d5f4 | DART1 TCR 0x80 TTBR 0x9003d5f4 -> MATCH
+```
+
+and DART1's error register has bit 31 (`DART_T8020_ERROR_FLAG`) **clear** in
+every run, so `0x0a0d0000` / `0x0c0f0000` and the address beside them are not
+a latched fault at all. There is no evidence of a stream we failed to
+program.
+
+**Both source channels ran the entire picture.** At the end of the frame:
+
+| | `+0x00` | `+0x0C` | `+0x10` | `+0x14` | `+0x2C` |
+|---|---|---|---|---|---|
+| luma `0x40D120000` | `80034045` | `00001400` | **`fd300000`** | **`00000500`** | `002c004f` |
+| chroma `0x40D120080` | `80034055` | `00001400` | **`fd280000`** | **`00000500`** | `002c004f` |
+
+Our IOVAs, our stride, the linear-input config word, and `0x2c004f` = MB row
+44, column 79 - the last macroblock of a 45-row picture. Right after
+Start_AVC the same words are zero, confirming setPipe programs them at
+Process time.
+
+**The output is exactly 128 everywhere, in both planes.**
+
+```
+luma   distinct 1  [(128, 921600)]
+chroma distinct 1  [(128, 460800)]
+```
+
+This is the observation that reframes the problem. Zeroed memory would
+encode to **black**; neutral 128 with no residual is what an encoder emits
+when it computes **no difference at all**. The pixels are fetched and never
+reach the subtraction.
+
+**Two numbers that do not add up.** The pipe stages each handled 3845
+entries while the coded header reports 3600 of 3600 macroblocks, and
+MbInput's last source event is at **y 47** in a picture 45 macroblock rows
+tall:
+
+```
+MbInput produced 3845 consumed 3845 drain 0x1 lag 0; last src event (y 47 x 72 last 0)
+ModeDec entries 3845  ReconLuma granted 3845  CAVLC entries 3845
+```
+
+3845 = 3840 + 5, and 3840 = 80 x 48. Something in the pipe is running to 48
+macroblock rows - three more than the picture has. That is the most
+diagnostic number we have, and docs/69 is tracing it along with where the
+fetched pixels are actually delivered.
