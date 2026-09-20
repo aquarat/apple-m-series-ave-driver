@@ -745,7 +745,8 @@ int ave_cmd_build_process_avc(const struct ave_cmd_abi *abi, u8 *buf,
 }
 
 int ave_cmd_coded_length(const struct ave_cmd_abi *abi, const void *hdr,
-			 size_t hdr_len, struct ave_coded_info *out)
+			 size_t hdr_len, u32 coded_size,
+			 struct ave_coded_info *out)
 {
 	const struct ave_coded_hdr_layout *c;
 	const u8 *h = hdr;
@@ -763,6 +764,10 @@ int ave_cmd_coded_length(const struct ave_cmd_abi *abi, const void *hdr,
 	out->frame_type = get_unaligned_le32(h + c->frame_type);
 	out->frame_num = get_unaligned_le32(h + c->frame_num);
 	out->sps_pps_bits = get_unaligned_le32(h + c->sps_pps_bits);
+	if (c->cabac_zero_words != AVE_OFF_NONE &&
+	    c->cabac_zero_words + 4u <= hdr_len)
+		out->cabac_zero_words =
+			get_unaligned_le32(h + c->cabac_zero_words);
 
 	for (i = 0; i < c->slice_max; i++) {
 		u32 rec = i * c->slice_stride;
@@ -780,13 +785,28 @@ int ave_cmd_coded_length(const struct ave_cmd_abi *abi, const void *hdr,
 		/* A byte count larger than the whole buffer is nonsense. */
 		if (n > 0x40000000u || written > 0x40000000u - n)
 			return -EPROTO;
+		if (out->n_slice < AVE_CODED_SLICE_MAX) {
+			out->slice[out->n_slice].off = written;
+			out->slice[out->n_slice].len = n - (u32)trim;
+			out->n_slice++;
+		}
 		written += n;
 		removed += (u32)trim;
 		out->slices++;
 	}
 	if (removed > written)
 		return -EPROTO;
+	/*
+	 * The host mirror of the firmware's own overflow test
+	 * ([8312]+[8316]+[8356] <= [8360], fw 0x5bf88). It is also the cheap
+	 * detector for having read a previous frame's stale records: the
+	 * record array is only walked until a zero byte count, which is sound
+	 * only because the buffer was cleared first.
+	 */
+	if (coded_size && written > coded_size)
+		return -EPROTO;
 
+	out->span = written;
 	out->bytes_removed = removed;
 	out->bytes = written - removed;
 	return 0;

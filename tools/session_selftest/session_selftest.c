@@ -531,10 +531,16 @@ static void test_abi(enum ave_fw_abi which, const char *name)
 		      "builder accepted a ZERO coded-header address");
 		f.coded_hdr_addr = IOVA_CODEDHDR;
 
-		f.frame_type = 1;	/* P: not a legal first frame here */
+		/* P (1) is legal now; B (2) still is not - no reference list
+		 * is built for it - and 5 is not an IMG_FRAME_TYPE at all. */
+		f.frame_type = 2;
 		CHECK(ave_cmd_build_process_avc(abi, cmdbuf, sizeof(cmdbuf), &c,
 						SESS_PROCESS_SLOT, &f) == -EINVAL,
-		      "builder accepted a non-I frame type");
+		      "builder accepted a B frame with no reference list");
+		f.frame_type = 5;
+		CHECK(ave_cmd_build_process_avc(abi, cmdbuf, sizeof(cmdbuf), &c,
+						SESS_PROCESS_SLOT, &f) == -EINVAL,
+		      "builder accepted frame type 5");
 		f.frame_type = AVE_FRAME_TYPE_IDR;
 
 		CHECK(ave_cmd_build_process_avc(abi, cmdbuf, sizeof(cmdbuf), &c,
@@ -609,7 +615,7 @@ static void test_abi(enum ave_fw_abi which, const char *name)
 			put_unaligned_le32(7, hdr + c->frame_num);
 			put_unaligned_le32(376, hdr + c->sps_pps_bits);
 
-			CHECK(ave_cmd_coded_length(abi, hdr, sizeof(hdr), &info) == 0,
+			CHECK(ave_cmd_coded_length(abi, hdr, sizeof(hdr), 0, &info) == 0,
 			      "coded_length rejected a well-formed header");
 			CHECK(info.bytes == 1497, "length %u want 1497", info.bytes);
 			CHECK(info.slices == 2, "slices %u want 2", info.slices);
@@ -623,27 +629,27 @@ static void test_abi(enum ave_fw_abi which, const char *name)
 			/* Negative control 1: an all-zero header is zero bytes,
 			 * not a crash and not a plausible length. */
 			memset(hdr, 0, sizeof(hdr));
-			CHECK(ave_cmd_coded_length(abi, hdr, sizeof(hdr), &info) == 0 &&
+			CHECK(ave_cmd_coded_length(abi, hdr, sizeof(hdr), 0, &info) == 0 &&
 			      info.bytes == 0 && info.slices == 0,
 			      "an empty header did not decode as zero slices");
 
 			/* Negative control 2: a negative trim is corruption. */
 			put_unaligned_le32(64, hdr + c->slice_bytes_written);
 			hdr[c->slice_bytes_removed] = 0xff;	/* -1 as s8 */
-			CHECK(ave_cmd_coded_length(abi, hdr, sizeof(hdr), &info) == -EPROTO,
+			CHECK(ave_cmd_coded_length(abi, hdr, sizeof(hdr), 0, &info) == -EPROTO,
 			      "coded_length accepted a negative trim count");
 			hdr[c->slice_bytes_removed] = 0;
 
 			/* Negative control 3: a buffer smaller than the layout
 			 * needs must be refused, not read out of bounds. */
-			CHECK(ave_cmd_coded_length(abi, hdr, c->min_bytes - 1,
+			CHECK(ave_cmd_coded_length(abi, hdr, c->min_bytes - 1, 0,
 						   &info) == -EINVAL,
 			      "coded_length accepted an undersized header buffer");
 
 			/* Negative control 4: a per-slice count that cannot fit
 			 * in any buffer is refused. */
 			put_unaligned_le32(0x7fffffffu, hdr + c->slice_bytes_written);
-			CHECK(ave_cmd_coded_length(abi, hdr, sizeof(hdr), &info) == -EPROTO,
+			CHECK(ave_cmd_coded_length(abi, hdr, sizeof(hdr), 0, &info) == -EPROTO,
 			      "coded_length accepted an absurd byte count");
 		}
 	}
