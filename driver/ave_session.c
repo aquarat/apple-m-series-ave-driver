@@ -422,6 +422,26 @@ module_param(session_flat_luma, uint, 0444);
 MODULE_PARM_DESC(session_flat_luma,
 	"fill the source luma with this constant (1..255) instead of the ramp; 0 = ramp");
 
+/*
+ * Which groups of ave_session_diag_costs() to read. OFF by default, and it
+ * stays off per group until that group is shown survivable: this dump is
+ * what killed the machine in f25, f26 and f29. A register read in a gated
+ * block hangs the fabric (docs/24), and not every offset here is in a block
+ * known to be powered at that point.
+ *
+ *   bit 0  IntraEst cfg 0x40D24A1C8..1D8 and 0x40D24A394
+ *   bit 1  ModeDec cost ladder 0x40D26A0AC..0x104
+ *   bit 2  curMB 0x40D243180 and the 0x40D263180 control
+ *   bit 3  IntraEst DMem 0x40D348000 and ME 0x40D190630
+ *
+ * Each group logs an ave_step() marker first, so with ave_step_ms set the
+ * last marker on disk names the group that hung.
+ */
+static unsigned int session_costs;
+module_param(session_costs, uint, 0444);
+MODULE_PARM_DESC(session_costs,
+	"bitmask of ave_session_diag_costs() register groups to read; 0 = none (default, safe). These reads have hung this machine");
+
 /* AVE_FRAME_TYPE_IDR (3) by default; 0 = I (non-IDR). */
 static unsigned int session_frame_type = AVE_FRAME_TYPE_IDR;
 module_param(session_frame_type, uint, 0444);
@@ -2055,53 +2075,66 @@ static void ave_session_diag_costs(struct ave_device *ave)
 	u32 i, v[6];
 
 	/*
-	 * One fsync'd marker per group, because this function is what killed
-	 * the machine in f25/f26/f29 and we do not yet know which read does
-	 * it. ave_step() holds for ave_step_ms after logging, which is what
-	 * gets the marker onto disk ahead of the access that may hang the
-	 * fabric - the same discipline docs/48 established. Run with
-	 * ave_step_ms=50 and the last marker on disk names the group.
-	 *
-	 * A register read in a gated block hangs this machine (docs/24), and
-	 * not every one of these offsets is in a block we know is powered.
+	 * Every group is opt-in and announces itself first. This function is
+	 * what hung the machine in f25, f26 and f29 - the known-good driver
+	 * plus these reads and nothing else died - so it must not be possible
+	 * to reach any of it by accident, and when it does hang, the last
+	 * marker on disk has to name which group did it.
 	 */
-	ave_step(ave, "diag costs: group 1, IntraEst cfg 0x40D24A1C8..1D8");
-	for (i = 0; i < 6; i++)
-		v[i] = ave_read(ave, AVE_BANK_DPE, 0x14a1c8 + 4 * i);
-	dev_info(ave->dev,
-		 "session: diag QP/lambda 0x40D24A1C8 QPY %u nQuant %#x +0x1D0 %#x +0x1D4 %#x +0x1D8 %#x | enable 0x40D24A394 %#x\n",
-		 v[0], v[1], v[2], v[3], v[4],
-		 ave_read(ave, AVE_BANK_DPE, 0x14a394));
-	ave_step(ave, "diag costs: group 2, ModeDec cost 0x40D26A0AC..104");
-	for (i = 0; i < 24; i += 8)
+	if (!session_costs)
+		return;
+
+	if (session_costs & BIT(0)) {
+		ave_step(ave, "diag costs: group 1, IntraEst cfg 0x40D24A1C8..1D8");
+		for (i = 0; i < 6; i++)
+			v[i] = ave_read(ave, AVE_BANK_DPE, 0x14a1c8 + 4 * i);
 		dev_info(ave->dev,
-			 "session: diag ModeDec cost [%u..]: %08x %08x %08x %08x %08x %08x %08x %08x (seeded 0x01000001)\n",
-			 i,
-			 ave_read(ave, AVE_BANK_DPE, 0x16a0ac + 4 * (i + 0)),
-			 ave_read(ave, AVE_BANK_DPE, 0x16a0ac + 4 * (i + 1)),
-			 ave_read(ave, AVE_BANK_DPE, 0x16a0ac + 4 * (i + 2)),
-			 ave_read(ave, AVE_BANK_DPE, 0x16a0ac + 4 * (i + 3)),
-			 ave_read(ave, AVE_BANK_DPE, 0x16a0ac + 4 * (i + 4)),
-			 ave_read(ave, AVE_BANK_DPE, 0x16a0ac + 4 * (i + 5)),
-			 ave_read(ave, AVE_BANK_DPE, 0x16a0ac + 4 * (i + 6)),
-			 ave_read(ave, AVE_BANK_DPE, 0x16a0ac + 4 * (i + 7)));
-	ave_step(ave, "diag costs: group 3, curMB 0x40D243180 / 0x40D263180");
-	dev_info(ave->dev,
-		 "session: diag curMB IntraEst 0x40D243180 %#010x %#010x | ModeDec 0x40D263180 %#010x %#010x (the control)\n",
-		 ave_read(ave, AVE_BANK_DPE, 0x143180),
-		 ave_read(ave, AVE_BANK_DPE, 0x143184),
-		 ave_read(ave, AVE_BANK_DPE, 0x163180),
-		 ave_read(ave, AVE_BANK_DPE, 0x163184));
-	/*
-	 * Group 4 is the prime suspect: MCPU DMem and the ME block are not
-	 * obviously powered at this point, unlike the pipe registers above.
-	 */
-	ave_step(ave, "diag costs: group 4, IntraEst DMem 0x40D348000 + ME 0x40D190630");
-	dev_info(ave->dev,
-		 "session: diag IntraEst DMem 0x40D348000 %#x +0x348764 %#x | MESATDSCALING 0x40D190630 %#x\n",
-		 ave_read(ave, AVE_BANK_DPE, 0x248000),
-		 ave_read(ave, AVE_BANK_DPE, 0x248764),
-		 ave_read(ave, AVE_BANK_DPE, 0x90630));
+			 "session: diag QP/lambda QPY %u nQuant %#x +0x1D0 %#x +0x1D4 %#x +0x1D8 %#x | enable 0x40D24A394 %#x\n",
+			 v[0], v[1], v[2], v[3], v[4],
+			 ave_read(ave, AVE_BANK_DPE, 0x14a394));
+	}
+	if (session_costs & BIT(1)) {
+		ave_step(ave, "diag costs: group 2, ModeDec cost 0x40D26A0AC..104");
+		for (i = 0; i < 24; i += 8)
+			dev_info(ave->dev,
+				 "session: diag ModeDec cost [%u..]: %08x %08x %08x %08x %08x %08x %08x %08x (seeded 0x01000001)\n",
+				 i,
+				 ave_read(ave, AVE_BANK_DPE, 0x16a0ac + 4 * (i + 0)),
+				 ave_read(ave, AVE_BANK_DPE, 0x16a0ac + 4 * (i + 1)),
+				 ave_read(ave, AVE_BANK_DPE, 0x16a0ac + 4 * (i + 2)),
+				 ave_read(ave, AVE_BANK_DPE, 0x16a0ac + 4 * (i + 3)),
+				 ave_read(ave, AVE_BANK_DPE, 0x16a0ac + 4 * (i + 4)),
+				 ave_read(ave, AVE_BANK_DPE, 0x16a0ac + 4 * (i + 5)),
+				 ave_read(ave, AVE_BANK_DPE, 0x16a0ac + 4 * (i + 6)),
+				 ave_read(ave, AVE_BANK_DPE, 0x16a0ac + 4 * (i + 7)));
+	}
+	if (session_costs & BIT(2)) {
+		/*
+		 * IntraEst's curMB next to ModeDecision's. ModeDec provably
+		 * processes macroblocks, so its value is the control that
+		 * makes IntraEst's mean anything - the control docs/70 caught
+		 * me reasoning without.
+		 */
+		ave_step(ave, "diag costs: group 3, curMB 0x40D243180 / 0x40D263180");
+		dev_info(ave->dev,
+			 "session: diag curMB IntraEst %#010x %#010x | ModeDec %#010x %#010x (the control)\n",
+			 ave_read(ave, AVE_BANK_DPE, 0x143180),
+			 ave_read(ave, AVE_BANK_DPE, 0x143184),
+			 ave_read(ave, AVE_BANK_DPE, 0x163180),
+			 ave_read(ave, AVE_BANK_DPE, 0x163184));
+	}
+	if (session_costs & BIT(3)) {
+		/*
+		 * The prime suspect: MCPU DMem and the ME block are not
+		 * obviously powered here, unlike the pipe registers above.
+		 */
+		ave_step(ave, "diag costs: group 4, IntraEst DMem 0x40D348000 + ME 0x40D190630");
+		dev_info(ave->dev,
+			 "session: diag IntraEst DMem %#x +0x764 %#x | MESATDSCALING %#x\n",
+			 ave_read(ave, AVE_BANK_DPE, 0x248000),
+			 ave_read(ave, AVE_BANK_DPE, 0x248764),
+			 ave_read(ave, AVE_BANK_DPE, 0x90630));
+	}
 }
 
 /* docs/60 Q5: MCPU counters, stacks, stage context/go registers. Read-only. */
