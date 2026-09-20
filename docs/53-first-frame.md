@@ -2766,3 +2766,35 @@ once, we have what F25 set out for.
 
 And measure the base rate honestly while doing it, because nothing in this
 file currently does: every repetition of the identical config is a sample.
+
+### Intervening on core start rather than working around it
+
+Deferring to static work would not make core start more reliable, so:
+
+**The probe was reading tens of megabytes before releasing the core.**
+Between the last durable marker (`STEP DAPF step returned`) and
+`stage 13 (asc-start): starting` the driver ran, on every single load:
+
+| | work |
+|---|---|
+| `ave_fw_snapshot_phys` | `memremap` the firmware carveout, CRC 16 MiB |
+| `ave_fw_identify_phys` | `memremap` again, five-pattern scan over 16 MiB and over our own image |
+| `ave_asc_liveness` | 2000 `CPU_STATUS` reads |
+
+None of it is needed to start the core; it is instrumentation from earlier
+phases that was never turned off. It is also the single riskiest place to be
+doing unnecessary work, and it drowns the log badly enough that nothing near
+it can be trusted. All three are now behind `probe_diag`, default 0.
+
+This is a candidate fix, not a diagnosis. If core start becomes reliable
+with `probe_diag=0`, that is worth knowing on its own terms - and it needs
+repeats of the identical configuration to establish, not one run.
+
+**And a correction to my own capture "fix".** Decoupling `fsync` from write
+improved throughput and made the crash case *worse*: an unsynced record
+lives in page cache, and a hard reset discards page cache. That is why four
+runs appeared to stop at the same line - it was where the 50 ms boundary
+fell in a deterministic burst, not where execution stopped. Per-record
+`fsync` is restored as the default, which is affordable precisely because
+`probe_diag=0` removes the burst. `KMSG_FSYNC_EVERY` can trade it back, with
+a comment saying not to trust the last line if you do.

@@ -84,6 +84,24 @@ module_param(auto_recover, bool, 0444);
 MODULE_PARM_DESC(auto_recover,
 	"UNSAFE, see ave_core_reset: treat a STOPPED CPU_STATUS as a halted core and reset+restore. Cannot distinguish a cold core (0x2a) from a halted one (0x2e); off by default");
 
+/*
+ * Pre-start instrumentation, all off by default (docs/53). Each of these
+ * used to run on every probe, in the window between the last durable marker
+ * and the core release.
+ *
+ *   bit 0  ave_fw_snapshot_phys  - memremap + CRC 16 MiB of the carveout
+ *   bit 1  ave_fw_identify_phys  - memremap + pattern-scan our image and it
+ *   bit 2  ave_asc_liveness      - 2000 CPU_STATUS samples
+ */
+#define AVE_PROBE_DIAG_SNAPSHOT	BIT(0)
+#define AVE_PROBE_DIAG_IDENTIFY	BIT(1)
+#define AVE_PROBE_DIAG_LIVENESS	BIT(2)
+
+static unsigned int probe_diag;
+module_param(probe_diag, uint, 0444);
+MODULE_PARM_DESC(probe_diag,
+	"bitmask of pre-start instrumentation: 1 = carveout CRC, 2 = image scan, 4 = CPU_STATUS liveness. 0 (default) starts the core without reading tens of MiB first");
+
 static int core_reset;
 module_param(core_reset, int, 0444);
 MODULE_PARM_DESC(core_reset,
@@ -1382,10 +1400,28 @@ iop_config_done:
 		return dev_err_probe(dev, ret, "DAPF program\n");
 	ave_step(ave, "DAPF step returned");
 
-	ave_fw_snapshot_phys(ave);
+	/*
+	 * Everything between the marker above and stage 13 is instrumentation
+	 * from earlier phases, and it is heavy: two memremap()s of the
+	 * firmware carveout, a CRC over 16 MiB, a five-pattern scan over that
+	 * and over our own image, and 2000 CPU_STATUS reads. None of it is
+	 * needed to start the core.
+	 *
+	 * It is also the window every failed run dies in. That does not make
+	 * it the cause - four runs stopping at the same log line turned out
+	 * to be where fsync landed, not where execution stopped (docs/53) -
+	 * but a probe that reads tens of megabytes of a coprocessor's carveout
+	 * before releasing it is doing unnecessary work in the riskiest place
+	 * available, and it drowns the log so badly that nothing nearby can be
+	 * trusted. Off by default; probe_diag turns pieces back on.
+	 */
+	if (probe_diag & AVE_PROBE_DIAG_SNAPSHOT)
+		ave_fw_snapshot_phys(ave);
 	if (stop_after >= AVE_STAGE_ASC_START) {
-		ave_fw_identify_phys(ave);
-		ave_asc_liveness(ave, "halted ");
+		if (probe_diag & AVE_PROBE_DIAG_IDENTIFY)
+			ave_fw_identify_phys(ave);
+		if (probe_diag & AVE_PROBE_DIAG_LIVENESS)
+			ave_asc_liveness(ave, "halted ");
 	}
 
 	if (ave_stage(dev, AVE_STAGE_ASC_START)) {
