@@ -2716,3 +2716,53 @@ So the next run identifies the killer in **one** boot rather than four:
 names the group. The run after that sets `session_costs` to `0xf` minus that
 bit and collects the other three groups' registers - which is what F25 was
 for in the first place.
+
+## Stop. I have been reading n=1 comparisons as causes, repeatedly
+
+F30 ran `session_costs=0xf ave_step_ms=50` with the fixed capture, which
+reported **zero lost records**, and it died at the same place as before -
+right after the last `[ours]` scan match, before that function's own summary
+lines. `session_costs` is read at stage 16; the death is well before it. So
+the diag-costs explanation is refuted too.
+
+The full picture, and the problem with it:
+
+| run | config | outcome |
+|---|---|---|
+| f25, f25b, f25c x2 | new binary, `session_dbg=0x20` | died |
+| f26 | new binary, no `session_dbg` | died |
+| f27 | **old binary** | lived |
+| f28 | new binary, `session_diag=0` | lived |
+| f29 | old binary **+ the dump** | died |
+| f30 | new binary, `session_costs=0xf` | died |
+
+Every arm except f25 is a **single run**. I have now, in sequence:
+
+1. called the deaths deterministic and blamed my own commit - wrong, and a
+   reviewer corrected it;
+2. accepted "intermittent coin flip, commit exonerated" - also wrong, the
+   failures had different signatures;
+3. built a 5/5-vs-5/5 A/B and declared the binary the cause;
+4. explained the contradiction by blaming my capture tool - plausible,
+   partly true, and not the cause;
+5. blamed `ave_session_diag_costs()` on a 6-and-6 table made of n=1 arms.
+
+Each step had a story that fitted the data I had. The data was a handful of
+samples from a process that fails maybe half the time at core bring-up, and
+I kept changing a variable between failures, which guarantees a story.
+
+The honest state: **the machine fails to bring the core up a large fraction
+of the time, and I cannot currently attribute that to anything.** The one
+thing genuinely established today is from the bitstream, not the hardware -
+slice QP is 30, the residual is never computed, and that needed no reboot.
+
+### What to do instead
+
+Stop changing variables between failures. Pick the configuration whose data
+we actually want - `session_costs=0xf ave_step_ms=50` - and repeat it
+unchanged until it survives. Each success yields the registers; each failure
+is just a retry, not evidence about a new hypothesis. If the config survives
+once, we have what F25 set out for.
+
+And measure the base rate honestly while doing it, because nothing in this
+file currently does: every repetition of the identical config is a sample.
