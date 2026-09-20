@@ -63,14 +63,26 @@ MODULE_PARM_DESC(rvbar_probe, "walk test values through the ASC RVBAR and report
 
 /*
  * Recover automatically from a core a previous load halted (see
- * ave_core_reset). On by default: with the Halt at unload now unconditional,
- * every load after the first in a boot finds a STOPPED core, and refusing to
- * start it would make the teardown work pointless.
+ * ave_core_reset).
+ *
+ * OFF by default, and the reason is worth keeping: the first version of this
+ * keyed on CPU_STATUS having the STOPPED bit set, on the theory that only a
+ * previous load's Halt could produce that. It cannot tell the two apart. A
+ * COLD core reads 0x2a and a halted one 0x2e - both have STOPPED (bit 1) set
+ * and they differ only in bit 2, which m1n1 itself marks as a guess. So the
+ * condition was true on the first load of a fresh boot, and the driver
+ * pulsed the block reset where none was wanted. s2-9 reset the machine at
+ * insmod, seconds after the overlay went in (2026-09-20).
+ *
+ * Until there is a discriminator that can actually say "a previous load
+ * halted this core", recovery stays an explicit request:
+ * core_reset=2 fw_restore_data=1, which is what stage 13 now tells you to
+ * use when it finds a core it cannot start.
  */
-static bool auto_recover = true;
+static bool auto_recover;
 module_param(auto_recover, bool, 0444);
 MODULE_PARM_DESC(auto_recover,
-	"reset the block and restore DATA when CPU_STATUS reads STOPPED from a previous load (default on)");
+	"UNSAFE, see ave_core_reset: treat a STOPPED CPU_STATUS as a halted core and reset+restore. Cannot distinguish a cold core (0x2a) from a halted one (0x2e); off by default");
 
 static int core_reset;
 module_param(core_reset, int, 0444);
@@ -205,6 +217,17 @@ static int ave_asc_start(struct ave_device *ave)
 	if (ret) {
 		dev_err(ave->dev, "ASC did not become idle (status %#x)\n",
 			status);
+		/*
+		 * 0x2e is the state a previous load's Halt leaves behind, and
+		 * stage 13 polls for (CPU_STATUS & 3) == 0, so it can never
+		 * start. The recovery is a block reset plus a DATA restore -
+		 * a second start over drifted DATA is silent (docs/51) - and
+		 * it has to be asked for, because a cold core reads 0x2a and
+		 * the two cannot be told apart from here.
+		 */
+		if (status & AVE_ASC_ST_STOPPED)
+			dev_err(ave->dev,
+				"ASC: this is what a previous load's Halt leaves behind; reload with core_reset=2 fw_restore_data=1 to reset the block and restore DATA\n");
 		return ret;
 	}
 
@@ -619,7 +642,7 @@ static int ave_core_reset(struct ave_device *ave, bool *pulsed)
 	st = ave_read(ave, AVE_BANK_ASC, AVE_ASC_CPU_STATUS);
 	if ((st & AVE_ASC_ST_STOPPED) && auto_recover && !core_reset) {
 		ave->recover_halted = true;
-		dev_info(dev, "core reset: CPU_STATUS %#010x is STOPPED - a previous load halted this core; resetting the block and restoring DATA automatically (auto_recover=0 disables)\n",
+		dev_warn(dev, "core reset: CPU_STATUS %#010x has STOPPED set and auto_recover was asked for - NOTE a cold core reads 0x2a and also has it set; pulsing the block reset\n",
 			 st);
 	} else if (!core_reset) {
 		return 0;

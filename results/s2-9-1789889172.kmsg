@@ -1,0 +1,20 @@
+=== s2-9 2026-09-20T08:26:12+01:00 commit 5c1edd6: insmod driver/apple-ave.ko stop_after=16 fw_map_data=1 fw_map_text=2 smmu_watch=1 session_selftest=1 session_frame=1 session_lsb=1 power_me1=1 dpe_tunables=1 session_coloc=1 session_entropy_size=1 session_flat_luma=200 session_src_mode=9 ===
+=== applying overlay variant=4 ===
+[ 1820.321265] ave_overlay: loading out-of-tree module taints kernel.
+[ 1820.321271] ave_overlay: module verification failed: signature and/or required key missing - tainting kernel
+[ 1820.322319] ave-overlay: variant=4 - variant=3 with both DARTs in iommus (docs/56)
+[ 1820.323002] apple-dart 40d040000.iommu: DART [pagesize 4000, 16 streams, bypass support: 1, bypass forced: 0, locked: 0, AS 32 -> 42] initialized
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d040000.iommu
+[ 1820.323257] apple-dart 40d030000.iommu: DART [pagesize 4000, 16 streams, bypass support: 0, bypass forced: 0, locked: 0, AS 32 -> 42] initialized
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d030000.iommu
+[ 1820.323467] platform 40d100000.video-encoder: Adding to iommu group 16
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[ 1820.323663] ave-overlay: applied, ovcs_id=1
+=== overlay insmod returned rc=0 ===
+=== overlay applied, t=0s of 20s before insmod ===
+=== overlay applied, t=5s of 20s before insmod ===
+=== overlay applied, t=10s of 20s before insmod ===
+=== overlay applied, t=15s of 20s before insmod ===
