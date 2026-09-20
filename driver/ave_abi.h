@@ -1200,6 +1200,24 @@ struct ave_start_avc_layout {
 	u32	src_go_bit3;		/* u8; AVE_OFF_NONE = not located */
 	u32	src_go_bits;		/* u8; AVE_OFF_NONE = not located */
 	/*
+	 * The controller's debug-verbosity bitfield (docs/70). It reaches
+	 * ctrl+0xA7C (fw 0x5cedc), and setPipe copies its BIT 5 into
+	 * this+408 (fw 0x58550) - which is the single byte CController::Print
+	 * tests before returning (fw 0x924d4: ldrb w8,[x0,#408]; cbz w8).
+	 *
+	 * So with this zero, as in every run we have ever done, the firmware
+	 * drops all of its own "AVC COMMON::" diagnostics before they reach
+	 * the TERMINAL ring the driver already drains. Setting bit 5 makes
+	 * the firmware report its own QP, quantiser and mode parameters
+	 * instead of us inferring them from registers.
+	 *
+	 * Any non-zero value also runs CAVCController::DebugInit; bits 1, 3,
+	 * 4 and 7 add more sections and much more traffic. The log path
+	 * allocates from shared memory and sends synchronously, so start at
+	 * 0x20 - bit 5 alone - rather than anything wider.
+	 */
+	u32	dbg_bits;		/* u32; AVE_OFF_NONE = not located */
+	/*
 	 * iNumViews. Apple's own kext refuses to send the command unless
 	 * 0 < iNumViews <= 2 (pInfo validator, kext 0xec9078, assert string
 	 * 0xfffffe00071f090b) and we send zero, which macOS would reject. The
@@ -1603,6 +1621,7 @@ const struct ave_cmd_abi ave_cmd_abi_13_5 = {
 		.src_cfg_byte	= 0xfce8,	/* fw 0x5d118 -> [x22,#41],  docs/62 §6.2 */
 		.src_go_bit3	= 0xfce9,	/* fw 0x5cfcc -> SRCDMAGO bit 3, docs/69 */
 		.src_go_bits	= 0xfecc,	/* fw 0x5cfe4 -> SRCDMAGO bits 4+, docs/69 */
+		.dbg_bits	= 0xfcd8,	/* fw 0x5cedc -> ctrl+0xA7C, docs/70 */
 		.num_views	= { 0xff24, 0xff28 },	/* kext 0xec9078 rejects 0 */
 		.sps_block	= 0x105b0,	/* memcpy 0x6ac from payload+0x10550 0x5ce68-90 */
 		.sps_block_size	= 0x6ac,
@@ -1903,6 +1922,7 @@ const struct ave_cmd_abi ave_cmd_abi_26_6 = {
 		.src_cfg_byte	= AVE_OFF_NONE,
 		.src_go_bit3	= AVE_OFF_NONE,
 		.src_go_bits	= AVE_OFF_NONE,
+		.dbg_bits	= AVE_OFF_NONE,
 		.num_views	= { AVE_OFF_NONE, AVE_OFF_NONE },
 		.sps_block	= AVE_START_SPS_OFF,
 		.sps_block_size	= AVE_START_SPS_SIZE,
