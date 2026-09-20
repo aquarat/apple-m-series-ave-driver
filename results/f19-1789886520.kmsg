@@ -159,3 +159,304 @@
  DEVICE=+platform:40d100000.video-encoder
 [  445.568867] e3-run heartbeat f19b t=0s
 [  450.618490] e3-run heartbeat f19b t=5s
+[  608.782521] apple-dcp 38bc00000.dcp: RTKit: syslog message: PPipeDCP_H13P.cpp:10490: set_run_mode_safe: deferring: 4 -> 1
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  608.782543] apple-dcp 38bc00000.dcp: RTKit: syslog message: PPipeDCP_H13P.cpp:10395: virtual IOMFBStatus IOMFB::UPPipeDCP_H13P::ready_for_run_mode_change(IOMFB::AppleRegisterStream *): initiating deferred run mod
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  608.782554] apple-dcp 38bc00000.dcp: RTKit: syslog message: UPTSQManager.cpp:150: IOMFBStatus IOMFB::UPTSQManager::power_down_M3(IOMFB::AppleRegisterStream *, UPTSQManager::ModeChangeWaiter *): request mode ch
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  608.788885] apple-dcp 38bc00000.dcp: RTKit: syslog message: UPTSQManager.cpp:162: IOMFBStatus IOMFB::UPTSQManager::power_down_M3(IOMFB::AppleRegisterStream *, UPTSQManager::ModeChangeWaiter *): disabling M3
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  608.789622] apple-dcp 38bc00000.dcp: RTKit: syslog message: PPipeDCP_H13P.cpp:10468: set_run_mode_safe: no need to defer: 1 -> 0
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  608.789725] apple-dcp 38bc00000.dcp: RTKit: syslog message: ck_PCC2DBlm_v5.cpp:3300: Quiescing callback
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  608.868882] apple-dcp 38bc00000.dcp: RTKit: syslog message: eoInterfaceIOAV.cpp:433: IOMFB: VideoInterfaceIOAV::did_power_off: m_power_ctrl->setPower( 0 )
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  608.869076] apple-dcp 38bc00000.dcp: RTKit: syslog message: eoInterfaceIOAV.cpp:146: IOMFB: IOAVVideoInterface terminated
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  608.869205] apple-dcp 38bc00000.dcp: RTKit: syslog message: oInterfaceIOAV.cpp:1094: void VideoInterfaceIOAV::unplug_gated(IOAVVideoInterface *): display HPD removed
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  608.870788] apple-dcp 38bc00000.dcp: RTKit: syslog message: nifiedPipeline.cpp:1356: set_device_enabled_gated: current state: 1, requested state: 0
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  608.871097] apple-dcp 38bc00000.dcp: dcp_poweroff() done
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  770.273311] apple-dcp 38bc00000.dcp: dcp_poweron() starting
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  770.273879] apple-dcp 38bc00000.dcp: RTKit: syslog message: nifiedPipeline.cpp:1356: set_device_enabled_gated: current state: 0, requested state: 1
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  770.274782] apple-dcp 38bc00000.dcp: RTKit: syslog message: PPipeDCP_H13P.cpp:10468: set_run_mode_safe: no need to defer: 0 -> 1
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  770.274795] apple-dcp 38bc00000.dcp: RTKit: syslog message: ock_Tunables_v1.cpp:651: IOMFB: Writing tunables with target 1
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  770.275299] apple-dcp 38bc00000.dcp: RTKit: syslog message: ck_Config_H13P.cpp:1771: program_frame_size: pixel_clock 804560000, vid0 402280000, 00019247 000000a3
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  770.275618] apple-dcp 38bc00000.dcp: RTKit: syslog message: M3Hal_v1.cpp:197: IOMFB: load LED M3 IMem : size 0x7b88
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  770.276055] apple-dcp 38bc00000.dcp: RTKit: syslog message: M3Hal_v1.cpp:197: IOMFB: load LED M3 DMem : size 0x102e0
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  770.277159] apple-dcp 38bc00000.dcp: RTKit: syslog message: ock_PCC2DLTM_v4.cpp:324: IOMFBStatus IOMFB::UPBlock_PCC2DLTM_v4::set_mcpu_power(IOMFB::AppleRegisterStream *, bool) Loading M3 Hal
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  770.277178] apple-dcp 38bc00000.dcp: RTKit: syslog message: M3Hal_v1.cpp:197: IOMFB: load LTM M3 IMem : size 0x73b4
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  770.277543] apple-dcp 38bc00000.dcp: RTKit: syslog message: M3Hal_v1.cpp:197: IOMFB: load LTM M3 DMem : size 0xd194
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  770.278150] apple-dcp 38bc00000.dcp: RTKit: syslog message: ck_PCC2DBlm_v5.cpp:4938: [set_lts_buffer] buffer 0x1f001688000 Add_lo = 0x1688000, Add_hi = 0x1f0, size 0x2500 stride 0x100
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  770.285057] apple-dcp 38bc00000.dcp: RTKit: syslog message: PPipeDCP_H13P.cpp:10468: set_run_mode_safe: no need to defer: 1 -> 2
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  770.285419] apple-dcp 38bc00000.dcp: RTKit: syslog message: eoInterfaceIOAV.cpp:237: bool VideoInterfaceIOAV::open_ioav_gated(): IOAVVideoInterface open failed
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  770.285423] apple-dcp 38bc00000.dcp: RTKit: syslog message: eoInterfaceIOAV.cpp:296: IOMFB: VideoInterfaceIOAV::power_on: m_power_ctrl->setPower( 1 )
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  770.291271] apple-dcp 38bc00000.dcp: RTKit: syslog message: AppleDCPDPTX.cpp:355: [AFK]powering nub 0x863f88
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  770.291442] apple-dcp 38bc00000.dcp: RTKit: syslog message: AppleDCPDPTX.cpp:355: [AFK]powering nub 0x864108
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  770.292795] apple-dcp 38bc00000.dcp: dcp_set_power_state_req returned, 9980 ms remaining
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  770.292800] apple-dcp 38bc00000.dcp: set_digital_out_mode(color:1 timing:2) "3024x1964": 120 804560 3024 3032 3064 3104 1964 2066 2074 2160 0x48 0x0
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  770.292802] apple-dcp 38bc00000.dcp: set_digital_out_mode() color mode depth:8 format:0 colorimetry:16 eotf:0 range:0 vrr:1
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  770.292894] apple-dcp 38bc00000.dcp: RTKit: syslog message: FramebufferDCP.cpp:5931: IOMFBParameter_adaptive_sync Req minRR = 0x0, mediaTargetRate = 0x0, Fractional Rate = 0
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  770.292938] apple-dcp 38bc00000.dcp: RTKit: syslog message: nifiedPipeline.cpp:7462: set_digital_out_mode: Modeset requested for colorID: 1, timingID: 2
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  770.292944] apple-dcp 38bc00000.dcp: RTKit: syslog message: PPipeDCP_H13P.cpp:18011: Dual pipe disabled offset 0
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  770.292971] apple-dcp 38bc00000.dcp: RTKit: syslog message: nifiedPipeline.cpp:7465: set_digital_out_mode returned 8000000a
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  770.292980] apple-dcp 38bc00000.dcp: set_digital_out_mode finished:8500
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  770.414543] apple-dcp 38bc00000.dcp: RTKit: syslog message: ileCDIDPDisplay.cpp:119: [AFK]SAC enable: DP=1 CDI=1
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  770.414559] apple-dcp 38bc00000.dcp: RTKit: syslog message: DCPDP13Service.cpp:60: [AFK]version: 14
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  770.414612] apple-dcp 38bc00000.dcp: RTKit: syslog message: DCPDPService.cpp:76: [AFK]version: 14
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  770.452037] apple-dcp 38bc00000.dcp: RTKit: syslog message: eoInterfaceIOAV.cpp:135: IOMFB: IOAVVideoInterface published
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  770.452052] apple-dcp 38bc00000.dcp: RTKit: syslog message: eoInterfaceIOAV.cpp:714: IOMFBStatus VideoInterfaceIOAV::plug_gated(IOAVVideoInterface *, bool): display HPD asserted
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  770.460829] apple-dcp 38bc00000.dcp: RTKit: syslog message: M3Hal_v1.cpp:197: IOMFB: load BLM M3 IMem : size 0x7598
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  770.461292] apple-dcp 38bc00000.dcp: RTKit: syslog message: M3Hal_v1.cpp:197: IOMFB: load BLM M3 DMem : size 0xaf5c
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  770.461585] apple-dcp 38bc00000.dcp: RTKit: syslog message: FBPropertyManager.h:189: value_t<P> IOMFB::PropMgr::getVal(IOMFB::RuntimeProperty) [P = IOMFB::RuntimePropertyType::boolean]: WARNING - type mismatch on
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  770.461888] apple-dcp 38bc00000.dcp: RTKit: syslog message: PPipeDCP_H13P.cpp:10490: set_run_mode_safe: deferring: 2 -> 4
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  770.461899] apple-dcp 38bc00000.dcp: RTKit: syslog message: PPipeDCP_H13P.cpp:10395: virtual IOMFBStatus IOMFB::UPPipeDCP_H13P::ready_for_run_mode_change(IOMFB::AppleRegisterStream *): initiating deferred run mod
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  770.462008] apple-dcp 38bc00000.dcp: RTKit: syslog message: M3Hal_v1.cpp:197: IOMFB: load APT M3 IMem : size 0x7960
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  770.462127] apple-dcp 38bc00000.dcp: RTKit: syslog message: M3Hal_v1.cpp:197: IOMFB: load APT M3 DMem : size 0x70ac
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  770.462316] apple-dcp 38bc00000.dcp: RTKit: syslog message: CAHandler.cpp:188: IOMFB load_ca_data: Unrecognized data version 0 (expected 1 or 2)
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  770.462658] apple-dcp 38bc00000.dcp: RTKit: syslog message: UPPipe.cpp:3767: IOMFB read_pmu_data_sync: pmu ram read error (e00800d8)
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  770.462810] apple-dcp 38bc00000.dcp: RTKit: syslog message: PPipeDCP_H13P.cpp:14085: IOMFB Int RTBandwidth: program_M3_rt_config: Using Dashboard 28e3d0988
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  770.462906] apple-dcp 38bc00000.dcp: RTKit: syslog message: UPTSQManager.cpp:133: IOMFB: clearing M3 reset
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  770.462954] apple-dcp 38bc00000.dcp: RTKit: syslog message: UPTSQ_Hal_v1.cpp:349: IOMFB: timebase_offset = 4
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  770.476657] apple-dcp 38bc00000.dcp: RTKit: syslog message: UPTSQManager.cpp:105: IOMFB: switch to normal mode succeeded
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  770.488270] apple-dcp 38bc00000.dcp: RTKit: syslog message: MMailboxHandler.cpp:214: pcc firmware: MailBox Printf is enabled in BLM Pipe Line Init
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  770.488356] apple-dcp 38bc00000.dcp: RTKit: syslog message: PPipeDCP_H13P.cpp:17179: handle_stage1_enable blm_en 1 ltm_en 0
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  770.502953] apple-dcp 38bc00000.dcp: set_digital_out_mode(color:1 timing:2) "3024x1964": 120 804560 3024 3032 3064 3104 1964 2066 2074 2160 0x48 0x0
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  770.502971] apple-dcp 38bc00000.dcp: set_digital_out_mode() color mode depth:8 format:0 colorimetry:16 eotf:0 range:0 vrr:1
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  770.503248] apple-dcp 38bc00000.dcp: RTKit: syslog message: FramebufferDCP.cpp:5931: IOMFBParameter_adaptive_sync Req minRR = 0x180000, mediaTargetRate = 0x0, Fractional Rate = 0
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  770.503323] apple-dcp 38bc00000.dcp: RTKit: syslog message: nifiedPipeline.cpp:7462: set_digital_out_mode: Modeset requested for colorID: 1, timingID: 2
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  770.503329] apple-dcp 38bc00000.dcp: RTKit: syslog message: PPipeDCP_H13P.cpp:18011: Dual pipe disabled offset 0
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  770.504033] apple-dcp 38bc00000.dcp: RTKit: syslog message: PPipeDCP_H13P.cpp:10490: set_run_mode_safe: deferring: 4 -> 1
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  770.504042] apple-dcp 38bc00000.dcp: RTKit: syslog message: PPipeDCP_H13P.cpp:10395: virtual IOMFBStatus IOMFB::UPPipeDCP_H13P::ready_for_run_mode_change(IOMFB::AppleRegisterStream *): initiating deferred run mod
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  770.504049] apple-dcp 38bc00000.dcp: RTKit: syslog message: UPTSQManager.cpp:150: IOMFBStatus IOMFB::UPTSQManager::power_down_M3(IOMFB::AppleRegisterStream *, UPTSQManager::ModeChangeWaiter *): request mode ch
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  770.510421] apple-dcp 38bc00000.dcp: RTKit: syslog message: UPTSQManager.cpp:162: IOMFBStatus IOMFB::UPTSQManager::power_down_M3(IOMFB::AppleRegisterStream *, UPTSQManager::ModeChangeWaiter *): disabling M3
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  770.510922] apple-dcp 38bc00000.dcp: RTKit: syslog message: ck_PCC2DBlm_v5.cpp:3300: Quiescing callback
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  770.510974] apple-dcp 38bc00000.dcp: RTKit: syslog message: PPipeDCP_H13P.cpp:10468: set_run_mode_safe: no need to defer: 1 -> 0
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  770.590312] apple-dcp 38bc00000.dcp: RTKit: syslog message: nifiedPipeline.cpp:1356: set_device_enabled_gated: current state: 1, requested state: 0
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  770.590822] apple-dcp 38bc00000.dcp: RTKit: syslog message: nifiedPipeline.cpp:7700: set_mode: timingID: 2 colorID: 1
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  770.592944] apple-dcp 38bc00000.dcp: RTKit: syslog message: PPipeDCP_H13P.cpp:11092: IOMFB updateFrequencies: minimum-frequency property not found, using getClockFrequency(0) instead.
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  770.593191] apple-dcp 38bc00000.dcp: RTKit: syslog message: PPipeDCP_H13P.cpp:11109: IOMFB updateFrequencies EDT ERROR: getClockFrequency(0) (237333328) < videoClock 402278400! Giving up on frequencies.
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  770.593947] apple-dcp 38bc00000.dcp: RTKit: syslog message: nifiedPipeline.cpp:7356: IOMFBStatus UnifiedPipeline::mode_set_gated(uint32_t, uint32_t): 3024x1964@120 Hz link: 1
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  770.594045] apple-dcp 38bc00000.dcp: RTKit: syslog message: nifiedPipeline.cpp:1356: set_device_enabled_gated: current state: 0, requested state: 1
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  770.594377] apple-dcp 38bc00000.dcp: RTKit: syslog message: PPipeDCP_H13P.cpp:10468: set_run_mode_safe: no need to defer: 0 -> 1
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  770.594381] apple-dcp 38bc00000.dcp: RTKit: syslog message: ock_Tunables_v1.cpp:651: IOMFB: Writing tunables with target 1
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  770.594982] apple-dcp 38bc00000.dcp: RTKit: syslog message: ck_Config_H13P.cpp:1771: program_frame_size: pixel_clock 804560000, vid0 402280000, 00019247 000000a3
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  770.595238] apple-dcp 38bc00000.dcp: RTKit: syslog message: M3Hal_v1.cpp:197: IOMFB: load LED M3 IMem : size 0x7b88
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  770.595661] apple-dcp 38bc00000.dcp: RTKit: syslog message: M3Hal_v1.cpp:197: IOMFB: load LED M3 DMem : size 0x102e0
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  770.596777] apple-dcp 38bc00000.dcp: RTKit: syslog message: ock_PCC2DLTM_v4.cpp:324: IOMFBStatus IOMFB::UPBlock_PCC2DLTM_v4::set_mcpu_power(IOMFB::AppleRegisterStream *, bool) Loading M3 Hal
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  770.596783] apple-dcp 38bc00000.dcp: RTKit: syslog message: M3Hal_v1.cpp:197: IOMFB: load LTM M3 IMem : size 0x73b4
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  770.597133] apple-dcp 38bc00000.dcp: RTKit: syslog message: M3Hal_v1.cpp:197: IOMFB: load LTM M3 DMem : size 0xd194
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  770.597589] apple-dcp 38bc00000.dcp: RTKit: syslog message: ck_PCC2DBlm_v5.cpp:4938: [set_lts_buffer] buffer 0x1f001688000 Add_lo = 0x1688000, Add_hi = 0x1f0, size 0x2500 stride 0x100
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  770.604642] apple-dcp 38bc00000.dcp: RTKit: syslog message: PPipeDCP_H13P.cpp:10468: set_run_mode_safe: no need to defer: 1 -> 2
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  770.604938] apple-dcp 38bc00000.dcp: RTKit: syslog message: UPPipeDCP_H13P.cpp:1532: IOMFB: videoClock is zero, defaulting to 402280000
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  770.605029] apple-dcp 38bc00000.dcp: RTKit: syslog message: M3Hal_v1.cpp:197: IOMFB: load BLM M3 IMem : size 0x7598
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  770.605383] apple-dcp 38bc00000.dcp: RTKit: syslog message: M3Hal_v1.cpp:197: IOMFB: load BLM M3 DMem : size 0xaf5c
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  770.605657] apple-dcp 38bc00000.dcp: RTKit: syslog message: FBPropertyManager.h:189: value_t<P> IOMFB::PropMgr::getVal(IOMFB::RuntimeProperty) [P = IOMFB::RuntimePropertyType::boolean]: WARNING - type mismatch on
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  770.605975] apple-dcp 38bc00000.dcp: RTKit: syslog message: PPipeDCP_H13P.cpp:10490: set_run_mode_safe: deferring: 2 -> 4
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  770.605981] apple-dcp 38bc00000.dcp: RTKit: syslog message: PPipeDCP_H13P.cpp:10395: virtual IOMFBStatus IOMFB::UPPipeDCP_H13P::ready_for_run_mode_change(IOMFB::AppleRegisterStream *): initiating deferred run mod
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  770.606037] apple-dcp 38bc00000.dcp: RTKit: syslog message: M3Hal_v1.cpp:197: IOMFB: load APT M3 IMem : size 0x7960
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  770.606183] apple-dcp 38bc00000.dcp: RTKit: syslog message: M3Hal_v1.cpp:197: IOMFB: load APT M3 DMem : size 0x70ac
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  770.606324] apple-dcp 38bc00000.dcp: RTKit: syslog message: CAHandler.cpp:188: IOMFB load_ca_data: Unrecognized data version 0 (expected 1 or 2)
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  770.607500] apple-dcp 38bc00000.dcp: RTKit: syslog message: UPPipe.cpp:3767: IOMFB read_pmu_data_sync: pmu ram read error (e00800d8)
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  770.607713] apple-dcp 38bc00000.dcp: RTKit: syslog message: PPipeDCP_H13P.cpp:14085: IOMFB Int RTBandwidth: program_M3_rt_config: Using Dashboard 28e3d0988
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  770.607805] apple-dcp 38bc00000.dcp: RTKit: syslog message: UPTSQManager.cpp:133: IOMFB: clearing M3 reset
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  770.607848] apple-dcp 38bc00000.dcp: RTKit: syslog message: UPTSQ_Hal_v1.cpp:349: IOMFB: timebase_offset = 4
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  770.621508] apple-dcp 38bc00000.dcp: RTKit: syslog message: UPTSQManager.cpp:105: IOMFB: switch to normal mode succeeded
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  770.621941] apple-dcp 38bc00000.dcp: RTKit: syslog message: eoInterfaceIOAV.cpp:296: IOMFB: VideoInterfaceIOAV::power_on: m_power_ctrl->setPower( 1 )
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  770.627308] apple-dcp 38bc00000.dcp: RTKit: syslog message: MMailboxHandler.cpp:214: pcc firmware: MailBox Printf is enabled in BLM Pipe Line Init
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  770.627895] apple-dcp 38bc00000.dcp: RTKit: syslog message: PPipeDCP_H13P.cpp:17179: handle_stage1_enable blm_en 1 ltm_en 0
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  770.627942] apple-dcp 38bc00000.dcp: set_digital_out_mode finished:8375
+ SUBSYSTEM=platform
+ DEVICE=+platform:38bc00000.dcp
+[  777.852690] evm: overlay not supported
