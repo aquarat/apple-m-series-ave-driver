@@ -465,6 +465,15 @@ static void ave_power_off(struct ave_device *ave, const char *why)
 		dev_warn(ave->dev,
 			 "power: NOT gating (%s): the teardown was not clean and a gated domain with a live bus master is how this machine resets (docs/63)\n",
 			 why);
+		/*
+		 * The holder device is released anyway. It is a registration,
+		 * not a power state, and leaving it behind makes the next
+		 * insmod fail with -EEXIST on its name - which is what F19b
+		 * did - and leaves a struct device owned by a module that has
+		 * been unloaded. A module that can only ever be loaded once
+		 * per boot is not a safer module.
+		 */
+		ave_power_me1_off(ave);
 		return;
 	}
 	ave_smmu_quiesce(ave);	/* before the reference goes: it reads the block */
@@ -1532,6 +1541,7 @@ static void ave_remove(struct platform_device *pdev)
 	if (!clean_teardown) {
 		dev_warn(ave->dev,
 			 "remove: teardown was not clean; leaking every DMA region and leaving VENC powered. The next load can recover with core_reset=2 fw_restore_data=1; unloading further is not safe\n");
+		ave_session_hide(ave);		/* the entries must not outlive us */
 		ave->session_bufs = NULL;
 		ave->keep_powered = true;	/* also stops the devres action */
 		return;

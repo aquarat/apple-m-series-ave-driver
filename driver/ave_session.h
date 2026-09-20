@@ -34,6 +34,13 @@ int ave_session_selftest(struct ave_device *ave);
 void ave_session_release(struct ave_device *ave);
 
 /*
+ * Remove the debugfs view but keep the buffers. For the unload path that
+ * leaks them on purpose: the entries must not outlive the module, or the
+ * next run's capture silently picks up the previous load's frame.
+ */
+void ave_session_hide(struct ave_device *ave);
+
+/*
  * Give the firmware its client back - Stop (id 6) then Close (id 12), waiting
  * for UNINIT_DONE and STOP_DONE - before anything is unmapped or gated. This
  * is what macOS does and we never did (docs/63); both replies are withheld
