@@ -35,7 +35,18 @@ import os
 import sys
 import time
 
-FSYNC_EVERY = 0.05          # seconds; an upper bound on unsynced time
+# Sync EVERY record by default. An unsynced record is in page cache, and a
+# hard reset discards page cache - so batching fsync does not merely delay
+# the log, it deletes the end of it, which is the only part that matters.
+# Decoupling them (2026-09-20) made four runs appear to stop at the same
+# line, which was simply where the 50 ms boundary fell in a deterministic
+# burst of output; the death location was never there.
+#
+# Per-record fsync is only affordable if the driver is not emitting
+# thousands of lines. That is what probe_diag=0 is for. If a run genuinely
+# needs a burst, set KMSG_FSYNC_EVERY to trade the tail for throughput, and
+# do not then trust the last line.
+FSYNC_EVERY = float(os.environ.get("KMSG_FSYNC_EVERY", "0"))
 MARKERS = ("STEP", "stage ", "===")
 
 if len(sys.argv) != 2:
@@ -96,6 +107,7 @@ while True:
     line = (f"[{int(usec) / 1e6:12.6f}] {text}".encode()
             if usec is not None else rec)
     # Markers are the whole point of this tool: sync those immediately.
-    sync = (any(m in text for m in MARKERS)
+    sync = (FSYNC_EVERY <= 0
+            or any(m in text for m in MARKERS)
             or time.monotonic() - last_sync > FSYNC_EVERY)
     emit(line, sync)
