@@ -2323,3 +2323,45 @@ always sent as zero gates it is a candidate of exactly the shape this project
 has hit five times already.
 
 `session_src_bit3=1`, one variable, everything else as F22.
+
+## F23 (2026-09-20): a third reader channel exists, holds our luma address, and never starts
+
+`session_src_bit3=1` (wire `0xFCE9`), one variable. docs/69's trace is
+confirmed on hardware twice over.
+
+**SRCDMAGO changed.** `0x40D110128` read `0x00000000` in every previous run
+and now reads `0x00000008` - bit 3, exactly where docs/69 said wire `0xFCE9`
+lands (fw `0x57d94`).
+
+**And the third reader channel woke up.** It had never been dumped before
+(our channel windows stopped at `0x200FF`):
+
+| channel | `+0x00` | `+0x04` | `+0x08` | `+0x0C` | `+0x10` | `+0x14` | `+0x18` | `+0x2C` |
+|---|---|---|---|---|---|---|---|---|
+| luma `0x40D120000` | `80034045` | `c0` | `c0` | `1400` | `fd300000` | `500` | `2005` | `2c004f` |
+| chroma `0x40D120080` | `80034055` | `c00140` | `c000c0` | `1400` | `fd280000` | `500` | `2005` | `2c004f` |
+| **third `0x40D120100`** | `80034025` | `2000100` | `1800180` | `1400` | **`fd300000`** | `500` | **`0`** | **`0`** |
+
+It holds **our luma IOVA and our stride**, the same format word, and its
+enable bit is set - but `+0x18` is `0` where the two working channels hold
+the `0x2005` that `ProcessPipeReset` writes (fw `0x4ee28`), and `+0x2C` never
+left zero, so it processed no macroblocks. After Start it read `0x00072035`,
+a power-on default like the other two channels' `0x00072065`, and went to
+zero rather than to `0x2005`.
+
+**It is configured and never started.** Its geometry differs from the other
+two - `(0x100, 0x200)` and `(0x180, 0x180)` against luma's `(0xc0, 0)` -
+which is what a downscaled or estimation-side reader would look like.
+
+Unchanged: IntraEst's counters all zero, 3845 entries, 2709 bytes, uniform
+picture. So this is not yet the fix, but the question has moved from "where
+do the fetched pixels go" to "why does this channel not start", and there is
+one host byte left that we still send as zero and that docs/69 traced into
+the same register.
+
+### F24 (proposed)
+
+`session_src_bit3=1 session_src_go=1` - wire `0xFECC`, SRCDMAGO bits 4 and
+up (fw `0x57da8`/`0x57db4`). One variable against F23. Watch `+0x118` for
+`0x2005` and `+0x12C` for macroblock progress; those two words say whether
+the channel started, independently of whether the picture changes.
