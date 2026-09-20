@@ -1934,3 +1934,44 @@ the source being flat. **[I]**, and F18 tests it for free - if the source
 fix lands, the island widths should grow with the picture's detail, and if
 F18's flat-200 frame comes back at 200 the islands should stay ~32 bytes wide
 while the decoded value changes.
+
+## Where this leaves the driver (2026-09-20, all six static passes done)
+
+docs/62 through docs/68 are in, and every actionable finding is in the code.
+What they change about the plan:
+
+**The remaining unknown is small and specific.** The source DMA is programmed
+with our address, the pipe runs every macroblock, the entropy and recon paths
+work, the bitstream is well-formed and decodes. Two undocumented scalars
+(`0xFEC0`, `0xFCE8`) are the only host-side inputs to the source block we have
+never set, and no amount of further static analysis will reveal their values -
+Apple's kext passes them through from user space untouched. They have to be
+swept on hardware. F18 decides whether they even matter.
+
+**Teardown moved from a nuisance to a prerequisite.** docs/68 makes the point
+sharply: a driver whose `close()` can reset the machine cannot be offered to
+userspace at all, and without F19 every step of the remaining work costs a
+reboot. It is now ahead of the V4L2 work, not after it.
+
+**The interface is decided.** V4L2 stateful M2M, single-planar NV12 in /
+H.264 out. Forced rather than chosen: the firmware picks the recon slot, the
+reference list and the DPB rotation and never reports any of it, so userspace
+cannot do what a *stateless* interface is defined by doing. Two consequences
+worth knowing now:
+
+- `ffmpeg -c:v h264_v4l2m2m` requires `-pix_fmt nv12` explicitly, or it
+  refuses to open the encoder.
+- ffmpeg packs the source at its own `linesize` while taking the height from
+  our reported format, so the strides agree only when `width % 64 == 0` and
+  `height % 16 == 0`. 1280x720 qualifies. **1080p does not**, and there is no
+  correct answer for it - only a choice of which side reads out of bounds.
+
+**Known-latent, now fixed:** the DMA mask was 42 bits while the firmware
+programs only the low 32 of the coded and source addresses. The runtime check
+in `ave_sess_dma_alloc()` caught it for our own allocations; an imported
+dmabuf would have bypassed it.
+
+**Open, cheap to answer, nobody has:** `dts/t6001-ave.dtsi` has no
+`dma-coherent`, so the DMA API treats AVE as non-coherent. Whether the
+datapath actually is has never been established, and it decides whether every
+imported source frame gets a cache clean.
