@@ -426,7 +426,14 @@ static int ave_power_me1_on(struct ave_device *ave)
 	device_initialize(vdev);
 	vdev->parent = ave->dev;
 	vdev->release = ave_me1_holder_release;
-	dev_set_name(vdev, "%s-venc_me1", dev_name(ave->dev));
+	/*
+	 * Unique per load. An unclean teardown ABANDONS this device on
+	 * purpose (ave_power_me1_abandon), so a later load in the same boot
+	 * would otherwise collide on the name and fail with -EEXIST - which
+	 * is exactly what F19b did.
+	 */
+	dev_set_name(vdev, "%s-venc_me1.%llu", dev_name(ave->dev),
+		     (unsigned long long)ktime_get_boottime_seconds());
 	ret = device_add(vdev);
 	if (ret) {
 		of_node_put(args.np);
@@ -468,23 +475,60 @@ static void ave_power_me1_off(struct ave_device *ave)
 	dev_info(ave->dev, "me1: venc_me1 released\n");
 }
 
+/*
+ * Deliberately leak the holder, still runtime-active and still attached to
+ * venc_me1, to keep the encoder domains powered after we are gone.
+ *
+ * This is the only lever that survives unbind. The five domains we attached
+ * come from devm_pm_domain_attach_list(), so when ave_remove() returns,
+ * devres calls dev_pm_domain_detach_list() -> genpd_remove_device() +
+ * genpd_queue_power_off_work() for each of them, and venc_me0, venc_pipe4,
+ * venc_pipe5 and venc_dma have no other members and gate. Not gating is NOT
+ * something ave_remove() can decide by skipping pm_runtime_put_sync() - that
+ * only removes one of the two references. What genpd does respect is a
+ * member device that is still runtime-active: this holder keeps venc_me1 on,
+ * which holds sd_count on venc_me0, which holds venc_pipe4/5, which holds
+ * venc_sys. (venc_sys also stays up on its own, because the two DARTs live
+ * in it.)
+ *
+ * The cost is a struct device that outlives the module, whose release
+ * function points into module text - so it must never be dropped, which is
+ * what abandoning it means. That is a real hazard and the reason this path
+ * says to reboot rather than carry on. It is still the better of the two:
+ * gating these domains under a core that is still running is the F16
+ * sequence, and F16 reset the machine.
+ */
+static void ave_power_me1_abandon(struct ave_device *ave)
+{
+	struct device *vdev = ave->me1_dev;
+
+	if (!vdev) {
+		dev_warn(ave->dev,
+			 "me1: no holder to abandon (power_me1=0), so NOTHING holds venc_me0/pipe4/pipe5/dma up; devres will gate them when remove() returns\n");
+		return;
+	}
+	ave->me1_dev = NULL;
+	dev_warn(ave->dev,
+		 "me1: ABANDONING %s, still powered and still attached, to hold venc_me1 -> me0 -> pipe4/5 -> sys up after unload. It can never be freed (its release lives in this module). REBOOT before loading again.\n",
+		 dev_name(vdev));
+}
+
 static void ave_power_off(struct ave_device *ave, const char *why)
 {
 	if (!ave->powered)
 		return;
 	if (ave->keep_powered) {
 		dev_warn(ave->dev,
-			 "power: NOT gating (%s): the teardown was not clean and a gated domain with a live bus master is how this machine resets (docs/63)\n",
+			 "power: skipping the runtime-PM put (%s): the teardown was not clean and gating a domain under a live bus master is how this machine resets (docs/63). Note this alone does NOT keep the domains up - devres detaches them next; the abandoned me1 holder is what does\n",
 			 why);
 		/*
-		 * The holder device is released anyway. It is a registration,
-		 * not a power state, and leaving it behind makes the next
-		 * insmod fail with -EEXIST on its name - which is what F19b
-		 * did - and leaves a struct device owned by a module that has
-		 * been unloaded. A module that can only ever be loaded once
-		 * per boot is not a safer module.
+		 * Emphatically NOT ave_power_me1_off(): its first act is
+		 * pm_runtime_put_sync(), which gates venc_me1 synchronously,
+		 * here, under whatever is still running. The holder is
+		 * abandoned instead - see ave_power_me1_abandon() for why
+		 * that is the only thing that keeps the chain up at all.
 		 */
-		ave_power_me1_off(ave);
+		ave_power_me1_abandon(ave);
 		return;
 	}
 	ave_smmu_quiesce(ave);	/* before the reference goes: it reads the block */
@@ -1565,12 +1609,29 @@ static void ave_remove(struct platform_device *pdev)
 	 */
 	if (!clean_teardown) {
 		dev_warn(ave->dev,
-			 "remove: teardown was not clean; leaking every DMA region and leaving VENC powered. The next load can recover with core_reset=2 fw_restore_data=1; unloading further is not safe\n");
+			 "remove: teardown was not clean; leaking every DMA region, abandoning the venc_me1 holder to keep the encoder domains up, and skipping the power-off. REBOOT: the abandoned device outlives this module and only venc_me1's chain plus venc_sys stay powered\n");
 		ave_session_hide(ave);		/* the entries must not outlive us */
 		ave->session_bufs = NULL;
 		ave->keep_powered = true;	/* also stops the devres action */
 		return;
 	}
+
+	/*
+	 * Quiesce the interrupt BEFORE freeing anything, while still powered.
+	 * ave_irq_handler() computes its dispatch under ipc_lock and then
+	 * drops the lock before walking the rings, and ave_ipc_fini() frees
+	 * the FwIPC region outside that lock - so a handler already past
+	 * ave_chan() would walk memory dma_free_coherent() is unmapping. The
+	 * core is halted by here, so only a late or pending interrupt can do
+	 * it; the SVE ack below exists because exactly such a pending status
+	 * has been seen.
+	 */
+	if (ave->irq_enabled) {
+		disable_irq(ave->irq);
+		ave->irq_enabled = false;
+	}
+	synchronize_irq(ave->irq);
+	ave_smmu_quiesce(ave);
 
 	ave_session_release(ave);
 	ave_fw_unload(ave);

@@ -1,0 +1,17 @@
+/usr/src/kernels/7.1.13-401.asahi.vrr3.fc44.aarch64+16k/include/asm-generic/io.h:224:19:readl	0	static
+ave_dapf.c:316:13:ave_dart_dump_tcr	80	static
+/usr/src/kernels/7.1.13-401.asahi.vrr3.fc44.aarch64+16k/include/linux/of.h:1027:35:of_parse_phandle.constprop	128	static
+ave_dapf.c:228:12:ave_dapf_map	224	static
+ave_dapf.c:500:13:ave_dapf_slot_read.isra	0	static
+ave_dapf.c:518:21:ave_dapf_dump_entries.isra	256	static
+ave_dapf.c:641:5:ave_dapf_program.part.0	192	static
+ave_dapf.c:339:13:ave_dapf_dump_dart	128	static
+ave_dapf.c:193:5:ave_dapf_early	0	static
+ave_dapf.c:406:5:ave_dart_restore_datapath	96	static
+ave_dapf.c:470:5:ave_dart_datapath_check	48	static
+ave_dapf.c:594:5:ave_dapf_dump_now	192	static
+ave_dapf.c:620:5:ave_dapf_dump	48	static
+ave_dapf.c:641:5:ave_dapf_program	48	static
+ave_dapf.c:727:6:ave_dapf_program_requested	16	static
+ave_dapf.c:741:5:ave_dapf_write_probe	64	static
+ave_dapf.c:829:5:ave_dapf_program_selected	752	static

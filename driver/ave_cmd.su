@@ -1,0 +1,11 @@
+ave_cmd.c:149:12:ave_cmd_end	32	static
+ave_cmd.c:100:12:ave_cmd_begin	112	static
+ave_cmd.c:16:27:ave_cmd_abi_get	0	static
+ave_cmd.c:28:8:ave_cmd_size	32	static
+ave_cmd.c:158:5:ave_cmd_build_hdr	48	static
+ave_cmd.c:168:5:ave_cmd_build_simple	48	static
+ave_cmd.c:184:5:ave_cmd_build_config	64	static
+ave_cmd.c:253:5:ave_cmd_build_start_avc	256	static
+ave_cmd.c:566:5:ave_cmd_build_process_avc	192	static
+ave_cmd.c:747:5:ave_cmd_coded_length	112	static
+ave_cmd.c:815:5:ave_cmd_check_reply	64	static

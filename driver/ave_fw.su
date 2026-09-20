@@ -1,0 +1,17 @@
+/usr/src/kernels/7.1.13-401.asahi.vrr3.fc44.aarch64+16k/include/asm-generic/io.h:368:19:readq_relaxed	0	static
+ave_fw.c:848:12:ave_fw_diff_pristine	96	static
+ave_fw.c:1435:13:ave_scan_buf	160	static
+ave_fw.c:471:12:ave_fw_range_is_foreign	176	static
+ave_fw.c:738:12:ave_fw_load_pristine	112	static
+ave_fw.c:79:12:ave_fw_walk	128	static
+ave_fw.c:641:13:ave_fw_unmap_iboot	32	static
+ave_fw.c:585:12:ave_fw_map_one	112	static
+ave_fw.c:543:12:ave_fw_check_iboot_placement	48	static
+ave_fw.c:295:5:ave_fw_map_text_mode	0	static
+ave_fw.c:1043:5:ave_fw_load	144	static
+ave_fw.c:1234:6:ave_fw_unload	32	static
+ave_fw.c:1280:6:ave_fw_peek_phys	64	static
+ave_fw.c:1338:6:ave_fw_snapshot_phys	80	static
+ave_fw.c:890:5:ave_fw_restore_data	144	static
+ave_fw.c:1357:6:ave_fw_diff_phys	96	static
+ave_fw.c:1500:6:ave_fw_identify_phys	112	static

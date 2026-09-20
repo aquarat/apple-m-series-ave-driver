@@ -31,6 +31,12 @@ for v in "$@"; do
     if lsmod | grep -q '^apple_ave'; then
         echo "STOPPING: apple_ave is still loaded; the last unload did not finish" | tee -a "$SUM"; exit 1
     fi
+    # An unclean teardown unloads successfully while leaking its buffers and
+    # abandoning the me1 holder. Loading again on top of that would be
+    # measuring a machine that has already been told to reboot.
+    if [ -n "${LOG:-}" ] && grep -q "teardown was not clean" "$LOG"; then
+        echo "STOPPING: the previous unload was not clean; reboot before continuing" | tee -a "$SUM"; exit 1
+    fi
     # No recovery flags here on purpose. A load that finds a core halted by
     # an earlier load recovers by itself now (auto_recover, ave_core_reset);
     # passing core_reset=2 from the second sweep value onwards was this

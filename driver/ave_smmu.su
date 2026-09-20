@@ -1,0 +1,4 @@
+ave_smmu.c:52:13:ave_smmu_log	160	static
+ave_smmu.c:65:20:ave_smmu_irq	32	static
+ave_smmu.c:84:5:ave_smmu_init	48	static
+ave_smmu.c:131:6:ave_smmu_quiesce	32	static
