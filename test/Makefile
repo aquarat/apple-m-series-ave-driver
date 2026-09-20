@@ -10,7 +10,8 @@ KDIR ?= /lib/modules/$(shell uname -r)/build
 PWD  := $(shell pwd)
 
 all: ave_overlay_dtbo.h ave_overlay_noiommu_dtbo.h ave_overlay_e2_dtbo.h \
-     ave_overlay_e3_dtbo.h ave_overlay_e4_dtbo.h
+     ave_overlay_e3_dtbo.h ave_overlay_e4_dtbo.h \
+     ave_overlay_e5_dtbo.h
 	$(MAKE) -C $(KDIR) M=$(PWD) modules
 
 # Build from the no-DART overlay. Building from ave-overlay.dts silently
@@ -56,5 +57,12 @@ clean:
 	$(MAKE) -C $(KDIR) M=$(PWD) clean
 	rm -f ave_overlay_dtbo.h ave_overlay_noiommu_dtbo.h \
 	      ave_overlay_e2_dtbo.h ave_overlay_e3_dtbo.h ave_overlay_e4_dtbo.h \
+     ave_overlay_e5_dtbo.h \
 	      ave-overlay-nodart.dtbo ave-overlay-noiommu.dtbo ave-overlay.dtbo \
 	      ave-overlay-e2.dtbo ave-overlay-e3.dtbo ave-overlay-e4.dtbo
+
+ave_overlay_e5_dtbo.h: ave-overlay-e5.dtbo
+	python3 mkhdr.py $< ave_overlay_e5_dtbo $@
+
+ave-overlay-e5.dtbo: ave-overlay-e5.dts
+	dtc -I dts -O dtb -o $@ $< 2>/dev/null

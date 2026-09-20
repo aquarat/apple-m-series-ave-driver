@@ -26,6 +26,7 @@
 #include "ave_overlay_e2_dtbo.h"
 #include "ave_overlay_e3_dtbo.h"
 #include "ave_overlay_e4_dtbo.h"
+#include "ave_overlay_e5_dtbo.h"
 
 static int ovcs_id;
 
@@ -49,6 +50,10 @@ static int ovcs_id;
  * variant=3 (docs/44 E2 control, E3): variant=0 plus the same two appended
  *                      reg entries. The DART is bound and translating; the
  *                      driver may program the DAPF (dapf_set=).
+ *
+ * variant=5 (docs/69): variant=4 plus stream 15 on both DARTs. The ADT
+ *                      declares sids = 0x8001 - streams 0 and 15 - and
+ *                      nothing has ever attached 15.
  *
  * variant=4 (docs/56): variant=3 with both DART nodes in iommus, so the
  *                      encoder datapath's DART carries the same mappings as
@@ -95,8 +100,13 @@ static int __init ave_ov_init(void)
 		len = ave_overlay_e4_dtbo_len;
 		pr_warn("ave-overlay: variant=4 - variant=3 with both DARTs in iommus (docs/56)\n");
 		break;
+	case 5:
+		fdt = ave_overlay_e5_dtbo;
+		len = ave_overlay_e5_dtbo_len;
+		pr_warn("ave-overlay: variant=5 - variant=4 plus stream 15, which the ADT declares (sids 0x8001) and nothing has attached (docs/69)\n");
+		break;
 	default:
-		pr_err("ave-overlay: variant=%d is not 0-4; refusing\n", variant);
+		pr_err("ave-overlay: variant=%d is not 0-5; refusing\n", variant);
 		return -EINVAL;
 	}
 

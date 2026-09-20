@@ -423,15 +423,21 @@ static void ave_dapf_dump_dart(struct ave_device *ave, const char *tag)
  * gone.
  *
  * This copies the CPUDART's TTBR[sid][0..3] and then TCR[sid] into DART1 for
- * the SIDs the overlay attaches (0 and 1) - the order apple-dart uses when it
- * attaches a domain (TTBRs, then enable translation), and the per-instance
- * mirroring macOS does (docs/56). Every value is read back. No TLB flush: the
- * reset has just emptied it. Nothing is written when DART1 already matches.
+ * every stream the CPUDART actually translates - the order apple-dart uses
+ * when it attaches a domain (TTBRs, then enable translation), and the
+ * per-instance mirroring macOS does (docs/56). Every value is read back. No
+ * TLB flush: the reset has just emptied it. Nothing is written when DART1
+ * already matches.
+ *
+ * It used to mirror a hardcoded { 0, 1 }, which was the set the overlay
+ * attached. That silently became wrong the moment the overlay attached a
+ * third: the ADT declares this device's streams as sids = 0x8001, stream 0
+ * and stream 15, and nothing had ever attached 15 (docs/69). Deriving the
+ * set from the CPUDART cannot go stale that way.
  */
 int ave_dart_restore_datapath(struct ave_device *ave)
 {
-	static const unsigned int sids[] = { 0, 1 };
-	unsigned int i, k, bad = 0, wrote = 0;
+	unsigned int i, k, bad = 0, wrote = 0, mirrored = 0;
 	int ret;
 
 	ret = ave_dapf_check_power(ave);
@@ -443,11 +449,20 @@ int ave_dart_restore_datapath(struct ave_device *ave)
 	if (!ave->dart1)
 		return -ENODEV;
 
-	for (i = 0; i < ARRAY_SIZE(sids); i++) {
-		unsigned int sid = sids[i];
+	for (i = 0; i < DART_STREAM_COUNT; i++) {
+		unsigned int sid = i;
 		u32 ctcr = readl(ave->cpudart + DART_TCR(sid));
 		u32 dtcr = readl(ave->dart1 + DART_TCR(sid));
 		bool same = ctcr == dtcr;
+
+		/*
+		 * Only streams the CPUDART translates. A stream neither DART
+		 * translates is one nothing attached, and mirroring a zero
+		 * TCR would be a no-op anyway.
+		 */
+		if (!(ctcr & DART_TCR_TRANSLATE) && !(dtcr & DART_TCR_TRANSLATE))
+			continue;
+		mirrored++;
 
 		for (k = 0; k < 4; k++)
 			same &= readl(ave->cpudart + DART_TTBR(sid, k)) ==
@@ -474,9 +489,13 @@ int ave_dart_restore_datapath(struct ave_device *ave)
 		dev_err(ave->dev, "dart: DART1 restore did not read back (%u mismatches)\n", bad);
 		return -EIO;
 	}
-	dev_info(ave->dev, "dart: DART1 %s\n",
+	dev_info(ave->dev, "dart: DART1 %s (%u stream(s) mirrored)\n",
 		 wrote ? "translation restored from the CPUDART, read back OK"
-		       : "already matched the CPUDART; nothing written");
+		       : "already matched the CPUDART; nothing written",
+		 mirrored);
+	if (!mirrored)
+		dev_warn(ave->dev,
+			 "dart: no stream translates on either DART - the datapath has no mapping at all\n");
 	return 0;
 }
 
