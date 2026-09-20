@@ -25,6 +25,7 @@ typedef uint64_t __le64;
  * <linux/errno.h> back in. */
 #define EIO		5
 #define EINVAL		22
+#define E2BIG		7
 #define EPROTO		71
 
 #define __packed	__attribute__((__packed__))

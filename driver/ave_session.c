@@ -452,6 +452,8 @@ MODULE_PARM_DESC(session_frame_type,
  * rather than reusing a slot the fixed-slot commands own.
  */
 #define AVE_SESS_PROCESS_SLOT		21
+/* Config 1, Open 2, Start 3, Process 4+n; the teardown continues from here. */
+#define AVE_SESS_CNT_TEARDOWN		32
 
 /* ------------------------------------------------------------------------ */
 /* Reply capture (written from hard IRQ by the ipc_rx hook)                 */
@@ -603,6 +605,7 @@ struct ave_sess_bufs {
 		dma_addr_t	iova;
 		u32		size;
 		u32		len;	/* what the firmware coded into it */
+		u32		span;	/* bytes it touched, trims included */
 		u32		cabac_zero_words;
 		u32		n_slice;
 		struct ave_coded_slice slice[AVE_CODED_SLICE_MAX];
@@ -966,9 +969,12 @@ static int ave_session_open(struct ave_device *ave,
  */
 /*
  * AVE_CalcBufSizeOfCodedData, AVC 8-bit 4:2:0 default path (kext 0xea4d58):
- * twice the uncompressed frame, floored at 460800 bytes and never reduced
- * below the uncompressed frame itself. Comfortably above the firmware's own
- * "CodedBufSize > 3*W*H/4" check. docs/66 §5.
+ * one uncompressed frame (3*W*H/2), except for frames small enough that
+ * doubling still fits under 460800, which are rounded up towards that floor.
+ * So 720p gets 1382400 -> 1384448 after page alignment, not twice that; the
+ * values match docs/66 §5's table at 640x480, 1280x720, 1920x1088 and
+ * 3840x2160. Comfortably above the firmware's own CodedBufSize > 3*W*H/4
+ * check (fw 0x58358), and above CAVLC's 3200-bit/MB ceiling.
  */
 static size_t ave_session_coded_size(u32 cw, u32 ch)
 {
@@ -1794,8 +1800,13 @@ static void ave_session_publish(struct ave_device *ave,
 	for (i = 0; i < bufs->n_done; i++) {
 		char name[24];
 
+		/*
+		 * span, not len: the raw blob is for inspection, and with a
+		 * non-zero trim the last slice ends after len bytes.
+		 * frame.h264 is the assembled, trimmed stream.
+		 */
 		bufs->coded_blob[i].data = bufs->coded[i].cpu;
-		bufs->coded_blob[i].size = bufs->coded[i].len;
+		bufs->coded_blob[i].size = bufs->coded[i].span;
 		if (i)
 			scnprintf(name, sizeof(name), "coded%u.bin", i);
 		else
@@ -2517,6 +2528,7 @@ static int ave_session_process(struct ave_device *ave,
 		       false);
 
 	bufs->coded[n].len = info.bytes;
+	bufs->coded[n].span = info.span;
 	bufs->coded[n].cabac_zero_words = info.cabac_zero_words;
 	bufs->coded[n].n_slice = min_t(u32, info.n_slice, AVE_CODED_SLICE_MAX);
 	memcpy(bufs->coded[n].slice, info.slice,
@@ -2768,7 +2780,15 @@ int ave_session_close_client(struct ave_device *ave)
 	smp_store_release(&ave->ipc_rx, ave_session_ipc_rx);
 
 	for (i = 0; i < ARRAY_SIZE(seq); i++) {
-		struct ave_cmd_ctx ctx = { .count = i, .client_id = AVE_SESS_CLIENT_ID };
+		/*
+		 * Continue the session's CNT rather than restarting at 0. The
+		 * firmware does read it (fw 0xf060, 0xf5a0) and F19 worked
+		 * with 0 and 1, so monotonicity is not required - but it is
+		 * the one header field where we differed from macOS for no
+		 * reason.
+		 */
+		struct ave_cmd_ctx ctx = { .count = AVE_SESS_CNT_TEARDOWN + i,
+					   .client_id = AVE_SESS_CLIENT_ID };
 		size_t cmd_len = ave_cmd_size(abi, seq[i].op);
 		dma_addr_t cmd_iova;
 		u8 *cmd;

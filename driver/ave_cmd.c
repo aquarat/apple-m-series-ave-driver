@@ -445,8 +445,20 @@ int ave_cmd_build_start_avc(const struct ave_cmd_abi *abi, u8 *buf, size_t len,
 	wr32(&w, l->qp_i, s->qp_i);
 	wr32(&w, l->qp_p, s->qp_p);
 	wr32(&w, l->qp_b, s->qp_b);
-	wr32(&w, l->qp_min, s->qp_min);
-	wr32(&w, l->qp_max, s->qp_max ? s->qp_max : 51);
+	/*
+	 * Only under rate control. Writing these unconditionally changed the
+	 * default fixed-QP image (0xFF88 went from 0 to session_qp_min) while
+	 * two comments still claimed the default was byte-identical to what
+	 * F17 sent - which would quietly confuse any bisect against the older
+	 * runs.
+	 */
+	if (s->rc_enable) {
+		wr32(&w, l->qp_min, s->qp_min);
+		wr32(&w, l->qp_max, s->qp_max ? s->qp_max : 51);
+	} else {
+		wr32(&w, l->qp_min, 0);
+		wr32(&w, l->qp_max, 51);
+	}
 	wr32(&w, l->key_interval, s->key_interval);
 	wr32_opt(&w, l->key_interval_strict, s->key_interval);
 	wr32(&w, l->slice_num, 1);
@@ -782,14 +794,30 @@ int ave_cmd_coded_length(const struct ave_cmd_abi *abi, const void *hdr,
 		trim = (signed char)h[rec + c->slice_bytes_removed];
 		if (trim < 0)
 			return -EPROTO;	/* Apple bails here too (0xec5078) */
+		/*
+		 * Per record, not just in aggregate. A single record with
+		 * trim > written underflows this slice's length to nearly 4
+		 * GiB while the total still balances against another record,
+		 * and that length goes straight into a memcpy in
+		 * ave_session_publish().
+		 */
+		if ((u32)trim > n)
+			return -EPROTO;
 		/* A byte count larger than the whole buffer is nonsense. */
 		if (n > 0x40000000u || written > 0x40000000u - n)
 			return -EPROTO;
-		if (out->n_slice < AVE_CODED_SLICE_MAX) {
-			out->slice[out->n_slice].off = written;
-			out->slice[out->n_slice].len = n - (u32)trim;
-			out->n_slice++;
-		}
+		/*
+		 * Refuse rather than record a prefix: the caller assembles the
+		 * stream from slice[], so silently dropping records past the
+		 * cap would publish a frame that is short by however many were
+		 * left out, padded with whatever vmalloc handed us. We send
+		 * one slice, so this is a guard, not a limit we expect to hit.
+		 */
+		if (out->n_slice >= AVE_CODED_SLICE_MAX)
+			return -E2BIG;
+		out->slice[out->n_slice].off = written;
+		out->slice[out->n_slice].len = n - (u32)trim;
+		out->n_slice++;
 		written += n;
 		removed += (u32)trim;
 		out->slices++;

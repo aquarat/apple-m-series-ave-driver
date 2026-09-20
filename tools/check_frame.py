@@ -123,9 +123,12 @@ def main() -> int:
     ap.add_argument("dir")
     ap.add_argument("--width", type=int, default=1280)
     ap.add_argument("--height", type=int, default=720)
-    ap.add_argument("--src-stride", type=int, default=0, help="default: --width")
+    # input_luma.bin is ALIGN(coded width, 64) wide, which equals --width only
+    # when the width is already a multiple of 64. 1280 is; 1920 is not.
+    ap.add_argument("--src-stride", type=int, default=0,
+                    help="default: ALIGN(width, 64), which is how the driver allocates it")
     a = ap.parse_args()
-    stride = a.src_stride or a.width
+    stride = a.src_stride or ((a.width + 63) // 64) * 64
 
     src_path = os.path.join(a.dir, "input_luma.bin")
     if not os.path.exists(src_path):

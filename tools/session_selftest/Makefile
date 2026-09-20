@@ -15,6 +15,7 @@ CFLAGS  += -std=gnu11 -Wall -Wextra -Wno-unused-parameter -Werror \
            -Ishim -include kshim.h -I$(DRV) -fsanitize=address,undefined
 
 session_selftest: session_selftest.c $(DRV)/ave_cmd.c $(DRV)/ave_cmd.h $(DRV)/ave_abi.h kshim.h
+	rm -f $@
 	$(CC) $(CFLAGS) -o $@ session_selftest.c $(DRV)/ave_cmd.c
 
 check: session_selftest

@@ -201,10 +201,18 @@ struct ave_device {
 	 */
 	bool			client_open;
 	/*
-	 * Set when a teardown could not be proven clean. ave_power_off() then
-	 * refuses to gate, including from its devres action, and the module
-	 * unloads leaving VENC powered - recoverable by the next load, unlike
-	 * a machine reset. docs/63.
+	 * Set when a teardown could not be proven clean: nothing is unmapped,
+	 * nothing this driver holds is freed, and ave_power_off() skips the
+	 * runtime-PM put, including from its devres action.
+	 *
+	 * Skipping that put is NOT by itself enough to keep the block
+	 * powered, and the earlier version of this comment claimed it was.
+	 * The domains come from devm_pm_domain_attach_list(), so devres
+	 * detaches them when remove() returns and genpd gates every one that
+	 * has no other member - venc_me0, venc_pipe4, venc_pipe5, venc_dma.
+	 * What actually holds them up is the abandoned venc_me1 holder
+	 * (ave_power_me1_abandon), and venc_sys, which the two DARTs keep up
+	 * by living in it.
 	 */
 	bool			keep_powered;
 	/*

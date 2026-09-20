@@ -1,0 +1,2 @@
+ave_version.c:24:13:ave_fw_abi_name	0	static
+ave_version.c:48:5:ave_detect_fw_abi	64	static

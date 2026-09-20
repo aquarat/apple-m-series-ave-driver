@@ -12,6 +12,7 @@ CFLAGS  += -std=gnu11 -Wall -Wextra -Wno-unused-parameter -Werror \
            -Ishim -include kshim.h -I$(DRV) -fsanitize=address,undefined
 
 abi_selftest: abi_selftest.c $(DRV)/ave_cmd.c $(DRV)/ave_cmd.h $(DRV)/ave_abi.h kshim.h
+	rm -f $@
 	$(CC) $(CFLAGS) -o $@ abi_selftest.c $(DRV)/ave_cmd.c
 
 check: abi_selftest
