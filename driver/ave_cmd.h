@@ -254,13 +254,38 @@ struct ave_avc_frame {
 };
 
 /* What ave_cmd_coded_length() recovers from a completed frame's header. */
+/*
+ * Per-slice geometry. The slices are contiguous from byte 0 of the coded
+ * buffer, so a slice's offset is the prefix sum of ui32BytesWritten - of
+ * WRITTEN, not of the trimmed length, because the trim is a gap the encoder
+ * skipped for 64-byte alignment when resuming after a context switch
+ * (fw 0x58244) and is folded into the previous slice's count. With any trim
+ * non-zero the payload is discontiguous, so a single memcpy of the whole
+ * buffer is wrong. docs/67 §2 and §3.
+ */
+#define AVE_CODED_SLICE_MAX	16
+
+struct ave_coded_slice {
+	u32	off;			/* from the start of the coded buffer */
+	u32	len;			/* written - removed */
+};
+
 struct ave_coded_info {
 	u32	bytes;			/* the encoded frame length */
+	u32	span;			/* sum of written: what the fw touched */
 	u32	slices;			/* records with a non-zero byte count */
 	u32	bytes_removed;		/* sum of the per-slice tail trims */
 	u32	frame_type;		/* CODED_DATA_HDR FrameTypeReturned */
 	u32	frame_num;
 	u32	sps_pps_bits;		/* SPS+PPS length in bits, at Start */
+	/*
+	 * cabac_zero_words the firmware says the stream needs. It counts them
+	 * and does not write them: each is the three bytes 00 00 03, appended
+	 * after the last slice. 0 for CAVLC. docs/67 §2.
+	 */
+	u32	cabac_zero_words;
+	u32	n_slice;		/* entries filled in slice[] */
+	struct ave_coded_slice slice[AVE_CODED_SLICE_MAX];
 };
 
 size_t ave_cmd_size(const struct ave_cmd_abi *abi, enum ave_op op);
@@ -325,6 +350,7 @@ int ave_cmd_check_reply(const struct ave_cmd_abi *abi, enum ave_op op,
  * treats as a corrupt header).
  */
 int ave_cmd_coded_length(const struct ave_cmd_abi *abi, const void *hdr,
-			 size_t hdr_len, struct ave_coded_info *out);
+			 size_t hdr_len, u32 coded_size,
+			 struct ave_coded_info *out);
 
 #endif /* __AVE_CMD_H__ */

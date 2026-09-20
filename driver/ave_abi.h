@@ -118,6 +118,17 @@ enum ave135_reply {
 #define AVE135_STATUS_START_FAIL	0x00ee0001
 #define AVE135_STATUS_FAIL		0x00ee0002
 #define AVE135_STATUS_BAD_HEADER_CFG	0x00ee0005
+/*
+ * The two an encode can fail with, which we were reporting as a bare -EIO:
+ * 0xEE0003 the parameter-sets buffer is too small for the SPS+PPS the
+ * firmware wants to write (fw 0x5de44 - vacuous on the first Start_AVC of a
+ * session, live on the second), 0xEE0004 the bitstream overflowed the coded
+ * buffer (fw 0x5bf88, after checking [8312]+[8316]+[8356] <= [8360]), and
+ * 0xEE0007 a hardware transcode error (fw 0x5be88). docs/67 §5.
+ */
+#define AVE135_STATUS_PSETS_SMALL	0x00ee0003
+#define AVE135_STATUS_CODED_OVERFLOW	0x00ee0004
+#define AVE135_STATUS_TRANSCODE_ERR	0x00ee0007
 
 /*
  * Command struct sizes - macOS 26.6.2 ONLY, enforced by the firmware - it
@@ -650,6 +661,12 @@ static inline u32 ave_coded_data_size_max(u32 w, u32 h, bool hevc)
 #define AVE_FRAME_TYPE_P		1
 #define AVE_FRAME_TYPE_B		2
 #define AVE_FRAME_TYPE_IDR		3
+/*
+ * Only ever seen coming BACK, in CODED_DATA_HDR.FrameTypeReturned: the
+ * firmware dropped the frame (written at fw 0x13340 and 0x5c930, tested at
+ * 0x14bc0). docs/67 §5.
+ */
+#define AVE135_FRAME_TYPE_DROPPED	4
 
 /* Rate-control update sub-block (slice 1). Carries no QP. */
 #define AVE_PIC_FORCE_KEYFRAME		0x1738	/* int */
@@ -1197,6 +1214,16 @@ struct ave_coded_hdr_layout {
 	u32	slice_max;
 	u32	slice_bytes_written;	/* u32, offset from the record base */
 	u32	slice_bytes_removed;	/* s8, bytes to drop at the slice end */
+	/*
+	 * numCABACzeroWordInserted. The firmware computes H.264 7.4.2.10's
+	 * cabac_zero_word requirement (fw 0x5c134-0x5c1a0, k = excess/32 + 1),
+	 * writes the COUNT here (fw 0x5c200) and logs "insert %d CABAZ zero
+	 * words" - and does NOT write the bytes. Each one is three bytes,
+	 * 00 00 03, appended after the last slice, and frameBytes excludes
+	 * them. Always 0 for CAVLC; non-zero for CABAC at a low QP.
+	 * docs/67 §2.
+	 */
+	u32	cabac_zero_words;	/* u32; AVE_OFF_NONE = not located */
 	u32	min_bytes;		/* smallest buffer these offsets need */
 };
 
@@ -1689,6 +1716,7 @@ const struct ave_cmd_abi ave_cmd_abi_13_5 = {
 	.coded_hdr = {
 		/* kext AVE_PrintCodedHeader 0xfffffe0008eb6584, field offsets
 		 * taken from the loads next to each os_log format string. */
+		.cabac_zero_words	= 0xf0,	/* fw str w24,[x0,#240] 0x5c200 */
 		.i_mb_cnt		= 0x00,	/* ldr [x21,x28,lsl#2] 0xeb6728 */
 		.p_mb_cnt		= 0x10,	/* ldr [x26,#16]       0xeb681c */
 		.skip_mb_cnt		= 0x20,	/* ldr [x26,#32]       0xeb6918 */

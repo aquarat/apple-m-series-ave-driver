@@ -603,6 +603,9 @@ struct ave_sess_bufs {
 		dma_addr_t	iova;
 		u32		size;
 		u32		len;	/* what the firmware coded into it */
+		u32		cabac_zero_words;
+		u32		n_slice;
+		struct ave_coded_slice slice[AVE_CODED_SLICE_MAX];
 	}		coded[AVE_SESS_FRAMES_MAX], coded_hdr[AVE_SESS_FRAMES_MAX];
 	u32		n_coded;
 	u32		n_done;		/* frames actually encoded */
@@ -765,6 +768,26 @@ static void ave_sess_free_all(struct ave_sess_bufs *b)
  * for the global Config). Returns 0 on an accepted reply, or a negative errno
  * (-ETIMEDOUT, -EPROTO, -EIO, or the send error). Always logs what happened.
  */
+/*
+ * The status words the firmware actually returns, named. Reporting a bare
+ * -EIO for these threw away the diagnosis: 0xEE0004 in particular says the
+ * bitstream did not fit, which is a sizing bug and nothing like a rejection.
+ * docs/67 §5, docs/46 §2.1.
+ */
+static const char *ave_session_status_name(u32 status)
+{
+	switch (status) {
+	case AVE135_STATUS_OK:			return "OK";
+	case AVE135_STATUS_START_FAIL:		return "START failed";
+	case AVE135_STATUS_FAIL:		return "INIT/ENCODE failed";
+	case AVE135_STATUS_PSETS_SMALL:		return "the parameter-sets buffer is too small";
+	case AVE135_STATUS_CODED_OVERFLOW:	return "the bitstream OVERFLOWED the coded buffer";
+	case AVE135_STATUS_BAD_HEADER_CFG:	return "bFWCreatesHeader/SPS-PPS mismatch";
+	case AVE135_STATUS_TRANSCODE_ERR:	return "hardware transcode error";
+	default:				return "unknown";
+	}
+}
+
 static int ave_session_cmd(struct ave_device *ave, const struct ave_cmd_abi *abi,
 			   enum ave_op op, const char *name,
 			   dma_addr_t cmd_iova, size_t cmd_len, u64 client_id)
@@ -843,8 +866,9 @@ static int ave_session_cmd(struct ave_device *ave, const struct ave_cmd_abi *abi
 			name, status);
 	else if (ret == -EIO)
 		dev_err(ave->dev,
-			"session: %s: firmware REJECTED the command, status %#x (success would be %#x)\n",
-			name, status, abi->reply.status_ok);
+			"session: %s: firmware REJECTED the command, status %#x (%s; success would be %#x)\n",
+			name, status, ave_session_status_name(status),
+			abi->reply.status_ok);
 	else if (ret)
 		dev_err(ave->dev, "session: %s: reply check error %d\n", name, ret);
 	else
@@ -1703,7 +1727,7 @@ static void ave_session_publish(struct ave_device *ave,
 	u32 i;
 
 	for (i = 0; i < bufs->n_done; i++)
-		total += bufs->coded[i].len;
+		total += bufs->coded[i].len + 3 * bufs->coded[i].cabac_zero_words;
 
 	bufs->dbg_dir = debugfs_create_dir("apple_ave", NULL);
 	if (IS_ERR(bufs->dbg_dir)) {
@@ -1815,8 +1839,33 @@ static void ave_session_publish(struct ave_device *ave,
 			p += psets_len;
 		}
 		for (i = 0; i < bufs->n_done; i++) {
-			memcpy(p, bufs->coded[i].cpu, bufs->coded[i].len);
-			p += bufs->coded[i].len;
+			u32 sl;
+
+			/*
+			 * Per slice, not one memcpy of the buffer: a non-zero
+			 * trim is a 64-byte alignment gap the encoder skipped
+			 * when it resumed, so the payload is discontiguous
+			 * (docs/67 §2). With one slice and no trim this is
+			 * byte-identical to what it replaces.
+			 */
+			for (sl = 0; sl < bufs->coded[i].n_slice; sl++) {
+				const struct ave_coded_slice *e =
+					&bufs->coded[i].slice[sl];
+
+				memcpy(p, (u8 *)bufs->coded[i].cpu + e->off,
+				       e->len);
+				p += e->len;
+			}
+			/*
+			 * The firmware counts the cabac_zero_words the stream
+			 * needs and does not write them. Three bytes each.
+			 * Always 0 for CAVLC, which is all we emit today.
+			 */
+			for (sl = 0; sl < bufs->coded[i].cabac_zero_words; sl++) {
+				*p++ = 0x00;
+				*p++ = 0x00;
+				*p++ = 0x03;
+			}
 		}
 	}
 	bufs->h264_len = total;
@@ -2017,7 +2066,7 @@ static int ave_session_process(struct ave_device *ave,
 	dma_addr_t cmd_iova, luma_iova, chroma_iova;
 	dma_addr_t ry, ruv, ry_lsb, ruv_lsb, rmv;
 	u32 cw, ch, stride, luma_bytes, chroma_bytes, mb_w, mb_h;
-	size_t cmd_len, psets_len;
+	size_t cmd_len, psets_len, scan_len;
 	u8 *luma, *chroma;
 	void *cmd;
 	int ret;
@@ -2372,7 +2421,8 @@ static int ave_session_process(struct ave_device *ave,
 		       0x20, false);
 
 	ret = ave_cmd_coded_length(abi, bufs->coded_hdr[n].cpu,
-				   bufs->coded_hdr[n].size, &info);
+				   bufs->coded_hdr[n].size,
+				   bufs->coded[n].size, &info);
 	if (ret) {
 		dev_err(ave->dev,
 			"session: frame: cannot decode the coded header: %d\n",
@@ -2380,10 +2430,46 @@ static int ave_session_process(struct ave_device *ave,
 		return ret;
 	}
 	dev_info(ave->dev,
-		 "session: frame: %u bytes in %u slice(s) (written %u - trimmed %u), FrameTypeReturned %u, frame_num %u, SPS+PPS %u bits\n",
-		 info.bytes, info.slices, info.bytes + info.bytes_removed,
-		 info.bytes_removed, info.frame_type, info.frame_num,
-		 info.sps_pps_bits);
+		 "session: frame %u: %u bytes in %u slice(s) (written %u - trimmed %u), FrameTypeReturned %u, frame_num %u (sent %u), SPS+PPS %u bits, cabac_zero_words %u\n",
+		 n, info.bytes, info.slices, info.span, info.bytes_removed,
+		 info.frame_type, info.frame_num, n, info.sps_pps_bits,
+		 info.cabac_zero_words);
+
+	/*
+	 * FrameTypeReturned == 4 means the firmware DROPPED the frame
+	 * (fw 0x13340 / 0x5c930, tested at 0x14bc0). Without naming it, a
+	 * dropped frame and a dead pipe look identical from here. docs/67 §5.
+	 */
+	if (info.frame_type == AVE135_FRAME_TYPE_DROPPED) {
+		dev_err(ave->dev,
+			"session: frame %u: the firmware DROPPED this frame (FrameTypeReturned 4)\n",
+			n);
+		return -ENODATA;
+	}
+	if (info.frame_num != n)
+		dev_warn(ave->dev,
+			 "session: frame %u: the firmware echoed frameNumber %u, not %u - the field may not be reaching it\n",
+			 n, info.frame_num, n);
+	/*
+	 * Every macroblock must be accounted for by exactly one of the
+	 * counters. This is the direct test for F16 and F17's failure shape -
+	 * a frame that "completed" having encoded nothing - and it is cheap.
+	 */
+	{
+		u32 mbs = (cw / AVE_MB_SIZE) * (ch / AVE_MB_SIZE);
+		const u8 *h = bufs->coded_hdr[n].cpu;
+		u32 k, i_mb = 0, p_mb = 0, skip_mb = 0;
+
+		for (k = 0; k < 4; k++) {
+			i_mb += get_unaligned_le32(h + abi->coded_hdr.i_mb_cnt + 4 * k);
+			p_mb += get_unaligned_le32(h + abi->coded_hdr.p_mb_cnt + 4 * k);
+			skip_mb += get_unaligned_le32(h + abi->coded_hdr.skip_mb_cnt + 4 * k);
+		}
+		dev_info(ave->dev,
+			 "session: frame %u: MB counts I %u P %u skip %u = %u of %u expected%s\n",
+			 n, i_mb, p_mb, skip_mb, i_mb + p_mb + skip_mb, mbs,
+			 i_mb + p_mb + skip_mb == mbs ? "" : " - MISMATCH");
+	}
 
 	if (!info.bytes) {
 		dev_err(ave->dev,
@@ -2401,16 +2487,40 @@ static int ave_session_process(struct ave_device *ave,
 		       16, 1, bufs->coded[n].cpu, min_t(u32, info.bytes, 64),
 		       false);
 
-	psets_len = ave_session_psets_len(bufs->psets_cpu, bufs->psets_size);
+	/*
+	 * ui32_SPSPPSHeaderBits is exact: it is literally sps_bits + pps_bits,
+	 * the two memcpy lengths the firmware shifted back up (fw 0x5df48 /
+	 * 0x5df70 / 0x5df9c). Use it, and keep the back-scan only as a
+	 * cross-check - the scan is wrong by construction the moment a second,
+	 * shorter Start_AVC leaves a longer parameter set's tail behind.
+	 * docs/67 §4.
+	 */
+	scan_len = ave_session_psets_len(bufs->psets_cpu, bufs->psets_size);
+	if (info.sps_pps_bits % 8)
+		dev_warn(ave->dev,
+			 "session: frame: SPS+PPS is %u bits, not a whole number of bytes\n",
+			 info.sps_pps_bits);
+	psets_len = info.sps_pps_bits / 8;
+	if (!psets_len || psets_len > bufs->psets_size) {
+		dev_warn(ave->dev,
+			 "session: frame: SPS+PPS length %zu is unusable; falling back to the back-scan (%zu)\n",
+			 psets_len, scan_len);
+		psets_len = scan_len;
+	}
 	dev_info(ave->dev,
-		 "session: frame: parameter sets %zu bytes (firmware said %u bits = %u bytes), first NAL type %d\n",
-		 psets_len, info.sps_pps_bits, info.sps_pps_bits / 8,
+		 "session: frame: parameter sets %zu bytes (firmware said %u bits; back-scan says %zu%s), first NAL type %d\n",
+		 psets_len, info.sps_pps_bits, scan_len,
+		 scan_len == psets_len ? ", agrees" : " - DISAGREES",
 		 ave_session_nal_type(bufs->psets_cpu, psets_len));
 	print_hex_dump(KERN_INFO, "session: psets: ", DUMP_PREFIX_OFFSET,
 		       16, 1, bufs->psets_cpu, min_t(size_t, psets_len, 64),
 		       false);
 
 	bufs->coded[n].len = info.bytes;
+	bufs->coded[n].cabac_zero_words = info.cabac_zero_words;
+	bufs->coded[n].n_slice = min_t(u32, info.n_slice, AVE_CODED_SLICE_MAX);
+	memcpy(bufs->coded[n].slice, info.slice,
+	       bufs->coded[n].n_slice * sizeof(info.slice[0]));
 	bufs->psets_len = psets_len;
 	bufs->n_done = n + 1;
 	return 0;
