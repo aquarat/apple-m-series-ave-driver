@@ -340,6 +340,22 @@ MODULE_PARM_DESC(session_src_cfg,
 	"Start_AVC wire 0xFCE8 (u8): high byte of the source format word 0x40D12000C (0 = what every run so far sent)");
 
 /*
+ * The other two bytes that reach SRCDMAGO (docs/69). session_src_bit3 also
+ * gates whether ProcessPipeReset initialises the THIRD reader channel at
+ * 0x40D120100 - and the stage that never runs is IntraEst, which needs
+ * source pixels of its own (F21, F22).
+ */
+static unsigned int session_src_bit3;
+module_param(session_src_bit3, uint, 0444);
+MODULE_PARM_DESC(session_src_bit3,
+	"Start_AVC wire 0xFCE9 (u8): SRCDMAGO bit 3, and the gate on the third reader channel 0x40D120100");
+
+static unsigned int session_src_go;
+module_param(session_src_go, uint, 0444);
+MODULE_PARM_DESC(session_src_go,
+	"Start_AVC wire 0xFECC (u8): SRCDMAGO bits 4 and up");
+
+/*
  * Rate control. The default reproduces every run so far: ui32RCFlag = 2
  * (AVE_RC_FIXQP), session_qp on every frame type. session_bitrate switches
  * to the firmware's own controller (ui32RCFlag = 1) with that target in
@@ -1326,6 +1342,12 @@ static int ave_session_start_avc(struct ave_device *ave,
 	s.height = session_height;
 	s.src_mode = (u16)session_src_mode;
 	s.src_cfg_byte = (u8)session_src_cfg;
+	s.src_go_bit3 = (u8)session_src_bit3;
+	s.src_go_bits = (u8)session_src_go;
+	if (session_src_bit3 || session_src_go)
+		dev_info(ave->dev,
+			 "session: Start_AVC: SRCDMAGO inputs bit3 %#x bits4+ %#x (wire 0xFCE9 / 0xFECC); watch 0x40D110128 and the third reader channel 0x40D120100\n",
+			 session_src_bit3, session_src_go);
 	if (session_src_mode || session_src_cfg)
 		dev_info(ave->dev,
 			 "session: Start_AVC: source-path sweep src_mode %#x (expect 0x40D120050=%#x 0x40D1200D0=%#x) src_cfg %#x (expect 0x40D12000C=%#x)\n",
@@ -1995,7 +2017,14 @@ static void ave_session_diag_channels(struct ave_device *ave, const char *tag)
 				   * untouched - so where this channel points is
 				   * the question.
 				   */
-				  0x20000, 0x20040, 0x20080, 0x200c0 };
+				  0x20000, 0x20040, 0x20080, 0x200c0,
+				  /*
+				   * The third reader channel. ProcessPipeReset
+				   * only initialises it when wire 0xFCE9 is set
+				   * (fw 0x4edf0), and we have always sent 0 -
+				   * so this window has never been looked at.
+				   */
+				  0x20100, 0x20140 };
 	int i, k;
 
 	for (i = 0; i < ARRAY_SIZE(ch); i++) {
