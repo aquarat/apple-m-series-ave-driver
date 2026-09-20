@@ -2365,3 +2365,36 @@ the same register.
 up (fw `0x57da8`/`0x57db4`). One variable against F23. Watch `+0x118` for
 `0x2005` and `+0x12C` for macroblock progress; those two words say whether
 the channel started, independently of whether the picture changes.
+
+## F24 (2026-09-20): both SRCDMAGO bytes confirmed, neither starts the channel
+
+`session_src_bit3=1 session_src_go=1`, one variable against F23.
+
+```
+SRCDMAGO 0x40D110128 = 0x00000018      (bit 3 from 0xFCE9, bit 4 from 0xFECC)
+third channel 0x40D120100: ... +0x118 0x00000000  +0x12C 0x00000000
+IntraEst: curMB 0, all counters 0
+frame 0: 2709 bytes, MB counts I 3600 of 3600
+```
+
+Wire `0xFECC` reaches SRCDMAGO bits 4+ exactly as docs/69 traced, so both
+bytes are now confirmed wired on hardware. The third reader channel is
+byte-for-byte identical to F23: still configured, still never started.
+
+### Where four boots have got us
+
+F18, F22, F23 and F24 each confirmed a mapping and none changed the picture:
+
+| run | change | confirmed | picture |
+|---|---|---|---|
+| F18 | `session_flat_luma=200` | source register holds our IOVA | unchanged |
+| F22 | stream 15 attached | `TCR[15]` TRANSLATE on both DARTs | unchanged |
+| F23 | wire `0xFCE9` | SRCDMAGO bit 3; third channel programmed | unchanged |
+| F24 | wire `0xFECC` | SRCDMAGO bit 4 | unchanged |
+
+Everything the host controls on the source path is now confirmed to reach
+the hardware, and the intra estimator still never receives a macroblock.
+Flipping further single bits one boot at a time is not a strategy - each of
+these cost a reboot and returned a mapping we already believed. docs/70 is
+tracing the actual question instead: **what dispatches work to IntraEst, and
+what stops it.**
