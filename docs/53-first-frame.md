@@ -2475,3 +2475,86 @@ boots without trouble, so it is not deterministic.
 One avoidable difference from F24: `dapf_dump=1` was dropped from the command
 line. Restored for the retry, so the retry differs from F24 in exactly one
 parameter.
+
+## Correction: the "regression" at stage 13 was not one
+
+I called the F25 deaths deterministic - "F21-F24 all reached stage 15, F25
+and F25b both stopped at exactly 29 markers" - and went looking for what my
+own commit had broken. That framing was wrong, and I had already written the
+correct version an hour earlier in the F25 attempt-1 entry above, then
+contradicted it.
+
+The reset at core start is **pre-existing and intermittent**. The same
+signature - log ends before the `[ours] ... N hit(s)` summary, never reaches
+`stage 13 (asc-start): starting`, no error line - killed s1-5 (commit
+`5f72838`), s2-9 (`5c1edd6`) and s3-5 (`83f9551`), all *before* the commit I
+suspected. Over the session's fresh-boot first loads it is roughly a coin
+flip. Four successes followed by three failures is unremarkable from that,
+and neither run of four nor run of three is "the anomaly".
+
+To attribute anything to the commit I would have had to run the OLD binary on
+a fresh afternoon boot and show it survived. Nobody did, so the change was
+confounded with a 3.5-hour gap and with plain intermittency.
+
+Confirmed independently: the reboot after F25b logged
+`macsmc-reboot: PMU logged 1 boot error(s) and 0 panic(s)` - an SoC-level
+hard stop, not a software fault. The capture is not lagging either: fsync
+pacing is identical in good and bad runs, so `[ours] IOSZ tag` really is the
+last thing that completed, and the lines that would follow are pure-RAM
+`dev_info` calls that cannot reset anything. The kill is asynchronous.
+
+`d9c3f6f` is exonerated: `dbg_bits` is written only in
+`ave_cmd_build_start_avc`, `session_dbg` is read only at
+`ave_session.c:1361`, the new `ratelimit_state_init` is in the same stage-16
+function, and `ave_session_diag_costs()` has one call site in the diag block.
+The two struct edits are insertions into a table whose every field carries
+its own explicit wire offset, and into a zero-initialised param struct.
+
+**This is the third time this week I have drawn a confident conclusion from
+counts without a control** - after F17's wrapping `u8` tally and F21's
+IntraEst counters. The pattern is specific: I compare numbers across runs
+without asking what the null hypothesis predicts.
+
+## The QP question, answered from the bitstream, for free
+
+`tools/h264_parse.py` reads the SPS, PPS and slice headers out of a run's
+own output. On F24:
+
+```
+SPS: profile 66 level 40  80x45 MBs (1280x720), 3600 total, max_num_ref_frames 1
+PPS: pic_init_qp 26  CAVLC  slice_groups 1
+slice 1: I IDR  first_mb 0  frame_num 0  slice_qp 30
+```
+
+**The encoder coded at QP 30** - exactly `session_qp`. So docs/70's rank 1,
+"the QP the hardware runs with is not what we sent", is refuted, and it was
+refuted by evidence we had already captured. Worse for that hypothesis: at
+QP 30 a genuine DC difference of 200 - 128 = 72 per sample **cannot**
+quantise to zero. Quantisation is not erasing the residual. The difference
+was never computed - which is docs/69 §5.2's reading, now supported by the
+encoder's own output rather than by inference from registers we programmed.
+
+Reported by the reviewer and **not yet independently checked here**: every
+macroblock is I_16x16 with `coded_block_pattern` 0 and no coefficients, and
+the intra modes are *not* uniform - 3520 vertical, 79 horizontal, 1 DC. If
+that holds, note 79 + 1 = 80 = exactly one macroblock row: the first row has
+no above-neighbour, so it cannot predict vertically, and MB (0,0) has
+neither neighbour so it falls to DC. That is precisely the mode map a
+**flat** picture produces under the standard availability rules - further
+evidence the encoder's view of the source is a constant, and that mode
+decision is working normally.
+
+### Re-ranked, and what F25 is now for
+
+- Rank 1 (QP wrong): **dead**, from the bitstream.
+- What survives of it: whether lambda biases mode decision into never coding
+  residual - a narrower claim.
+- F25 is still the only way to see the 23-word ModeDecision cost ladder
+  (`0x40D26A0AC..0x104`: `0x01000001` as seeded, or overwritten with zero),
+  IntraEst's DMem mode word, and the curMB control. Run it **for those**;
+  the firmware's `QPY` line is now confirmatory only.
+- The reset should not gate it. It is an intermittent SoC hang, not a code
+  bug, and no amount of static analysis will settle it. `session_diag`
+  defaults on and runs on **success**, so a surviving F25 returns the whole
+  register dump; with `UNLOAD=0` the evidence is on disk before any risky
+  teardown. The irreducible gamble is core start, about a coin flip.
