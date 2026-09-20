@@ -1975,3 +1975,57 @@ dmabuf would have bypassed it.
 `dma-coherent`, so the DMA API treats AVE as non-coherent. Whether the
 datapath actually is has never been established, and it decides whether every
 imported source frame gets a cache clean.
+
+## F18 (2026-09-20): the source DMA is programmed with our buffer and still does not read it
+
+One variable changed from F17: `session_flat_luma=200`, a constant luma plane
+instead of the ramp.
+
+```
+session: source reader 0x40D120010 = 0xfd300000 (want 0xfd300000: OUR BUFFER)
+         stride +0x14 0x500 (want 0x500) chroma +0x90 0xfd280000 (want 0xfd280000)
+         fmt +0x0C 0x00001400 mode +0x50 0x0 +0xD0 0x0
+session: frame 0: 2709 bytes in 1 slice(s) (written 2709 - trimmed 0),
+         FrameTypeReturned 3, frame_num 0 (sent 0), SPS+PPS 168 bits, cabac_zero_words 0
+session: frame 0: MB counts I 3600 P 0 skip 0 = 3600 of 3600 expected
+```
+
+Everything the host controls is right, confirmed **on the hardware** rather
+than inferred:
+
+- the source-read register holds **our** luma IOVA, our stride, our chroma
+  IOVA and the expected format word;
+- every macroblock is accounted for - 3600 of 3600, all intra;
+- the firmware echoes the frameNumber we sent;
+- the bitstream is well formed and 168 bits of SPS+PPS come back.
+
+And the result is the same as F17's:
+
+| | F17 source | F18 source | coded bytes | decoded luma |
+|---|---|---|---:|---|
+| | ramp, 226 values | constant 200 | **2709** | **130** |
+
+**The same 2709 bytes for two completely different inputs.** That is the
+discriminator, and it says the encoder did not read either of them. The
+decoded value is 130 in F16, F17 and F18 alike, independent of what we put in
+the buffer.
+
+So the host side of the source path is now exhausted as an explanation: the
+address is published, the register is programmed, and the fetch produces the
+same thing whatever the memory holds. What remains is between that register
+and the pipe:
+
+1. the two unknown scalars - `mode +0x50` and `+0xD0` both read **0**, which
+   is what wire `0xFEC0` puts there. This is the only host input left, and it
+   is a sweep, not an analysis;
+2. the datapath DART returning zeros for that IOVA without faulting (no
+   SMMU/AXI faults were reported, which is also what a *successful* read with
+   no data would look like);
+3. a fetch that never starts - `SRCDMAGO 0x40D110128` reads 0 after the
+   frame, though it may simply self-clear.
+
+`tools/check_frame.py` needed a correction to grade this run: BLANK means
+"the decode is flat while the source was not", which is meaningless when the
+source is deliberately flat. With a flat source the question is only whether
+the decode is flat at the *right value*, which PSNR answers alone. It refused
+to grade until fixed, which is what it is for.
