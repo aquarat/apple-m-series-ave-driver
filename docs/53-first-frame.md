@@ -2460,3 +2460,18 @@ Outcomes, all informative:
 
 Unlike F18, F22, F23 and F24, this does not confirm a mapping we already
 believe. It makes the firmware answer.
+
+## F25 attempt 1 (2026-09-20): died at stage 13, before the variable mattered
+
+The log ends at `STEP DAPF step returned`, immediately before stage 13
+(`asc-start`), with no error line - an abrupt death, 29 step markers against
+F24's 37. `session_dbg` reaches the hardware in Start_AVC, four stages later,
+so **this run says nothing about the hypothesis**.
+
+It is the same intermittent death at or around core start that took s1-5,
+s2-9 and s3-5. Four runs (F21-F24) went through the same stage on fresh
+boots without trouble, so it is not deterministic.
+
+One avoidable difference from F24: `dapf_dump=1` was dropped from the command
+line. Restored for the retry, so the retry differs from F24 in exactly one
+parameter.
