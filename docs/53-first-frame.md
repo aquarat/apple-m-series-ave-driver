@@ -2216,3 +2216,64 @@ ModeDec entries 3845  ReconLuma granted 3845  CAVLC entries 3845
 macroblock rows - three more than the picture has. That is the most
 diagnostic number we have, and docs/69 is tracing it along with where the
 fetched pixels are actually delivered.
+
+## The answer, probably: IntraEst never ran, and stream 15 was never attached
+
+Two facts, one from our own log and one from our own device tree, that had
+both been sitting in front of us.
+
+**1. The intra estimator never processed a macroblock.** F21, already
+captured:
+
+| MCPU | `+0xc` | `+0x10` | `+0x14` |
+|---|---:|---:|---:|
+| ModeDec | `0x26` | `0x26` | `0x5` |
+| ReconLuma | `0x2b` | `0x2b` | `0xa` |
+| ReconChroma | `0x35` | `0x35` | `0x1` |
+| **IntraEst** | **0** | **0** | **0** |
+
+plus `IntraEst curMB = 0` after 3845 macroblocks, with its enable word
+`+0 = 0x2000` showing it was armed. **An I-frame whose intra estimator never
+ran is a frame of default I_16x16 DC macroblocks with no coefficients**:
+uniform 128 in both planes, independent of the source, and the same byte
+count for any input. That is F16, F17, F18 and F21 exactly - including why
+the ramp and a constant 200 both produced 2709 bytes.
+
+**2. The ADT declares two streams and we attach one.**
+`dts/t6001-ave.dtsi` records it in its own comment:
+
+```
+/* ADT: page-size 16384, sids 32769 */      32769 = 0x8001 = streams 0 and 15
+```
+
+Every overlay to date attaches SIDs 0 and 1; `ave_dart_restore_datapath()`
+mirrored a hardcoded `{ 0, 1 }`. **Nothing has ever attached stream 15**, and
+F21 measured `TCR[15] = 0` on both DARTs - enabled in `ENABLED_STREAMS`,
+translating nothing.
+
+The two fit together. A source reader issuing under stream 15 has its fetches
+dropped with no fault latched (a *disabled* stream need not fault, where a
+mistranslating one would - and no DART fault has ever been logged); the
+address generator still walks the picture, which is why `+0x2C` reaches row
+44 column 79 and why every stage counts macroblocks; and the estimator is
+never offered pixels, so nothing is subtracted and DC prediction stands.
+
+This also retires my own dismissal of the stream hypothesis after F21: I
+checked whether an *unconfigured stream had faulted*, found no fault, and
+concluded the streams were fine. The right question was which streams the
+device declares, and the answer was in our own dtsi.
+
+### F22 (proposed): overlay variant=5
+
+`variant=5` is `variant=4` plus stream 15 on both DARTs, and
+`ave_dart_restore_datapath()` now mirrors every stream the CPUDART
+translates rather than a hardcoded pair - a set derived from the hardware
+cannot go stale the way `{ 0, 1 }` did.
+
+One load, one variable, and it can say no:
+
+- **picture changes** -> that was it;
+- **picture unchanged, `TCR[15]` now reads TRANSLATE with the CPUDART's
+  TTBR** -> the hypothesis is dead rather than untested, and the next
+  candidates are wire `0xFECC` (SRCDMAGO bits 4+) and `0xFCE9` (bit 3),
+  which docs/69 newly traced and which we have always sent as zero.
