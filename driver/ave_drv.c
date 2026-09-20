@@ -871,7 +871,20 @@ static int ave_probe_stages(struct platform_device *pdev)
 	}
 
 	if (ave_stage(dev, AVE_STAGE_DMA_MASK)) {
-		ret = dma_set_mask_and_coherent(dev, DMA_BIT_MASK(42));
+		/*
+		 * 32, not the DART's 42. The firmware programs only the LOW
+		 * 32 BITS of the coded buffer address (SetTranscode, fw
+		 * 0x592fc) and of the source luma address (setPipe, fw
+		 * 0x54320), so an IOVA above 4 GiB is not a failure - it is a
+		 * silent write into someone else's mapping. ave_sess_dma_alloc()
+		 * checks for it at runtime, but a mask of 42 lets the DMA API
+		 * hand out such an IOVA in the first place, and any buffer
+		 * that did not come through that one allocator - an imported
+		 * dmabuf, once there is a uapi - would bypass the check
+		 * entirely. Ask the allocator for addresses the hardware can
+		 * actually express. docs/68.
+		 */
+		ret = dma_set_mask_and_coherent(dev, DMA_BIT_MASK(32));
 		if (ret)
 			return dev_err_probe(dev, ret, "no suitable DMA mask\n");
 		ave_stage_ok(dev, AVE_STAGE_DMA_MASK);
