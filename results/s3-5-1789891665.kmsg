@@ -1,0 +1,1 @@
+=== s3-5 2026-09-20T09:07:45+01:00 commit 83f9551: insmod driver/apple-ave.ko core_reset=2 fw_restore_data=1 stop_after=16 fw_map_data=1 fw_map_text=2 smmu_watch=1 session_selftest=1 session_frame=1 session_lsb=1 power_me1=1 dpe_tunables=1 session_coloc=1 session_entropy_size=1 session_flat_luma=200 session_src_mode=5 ===

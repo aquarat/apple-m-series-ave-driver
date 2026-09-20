@@ -2104,3 +2104,58 @@ this boot?" - which is the only source that actually knows.
 Both failures in this area came from the same reflex: inferring history from
 a register that does not record it. A cold core and a halted core look the
 same from stage 7, and the honest answer is that the driver cannot tell.
+
+## s3 (2026-09-20): src_mode reaches the registers and changes nothing
+
+First real sweep data. `session_src_mode=9` on a fresh boot:
+
+```
+mode +0x50 0x1 +0xD0 0x2      coded=2709      decoded luma: 1 distinct, first 130
+```
+
+The wire-to-register mapping docs/62 derived is **confirmed on hardware**:
+`0x40D120050 = v & 3` and `0x40D1200D0 = v >> 2`, exactly. And the output is
+unchanged - 2709 bytes, uniform 130, the same as `src_mode=0` in F18 and the
+same as the ramp in F17. So the field reaches the hardware and is not what
+gates the fetch, at least at this value.
+
+**The clean teardown is not proven safe.** The second load never started: the
+machine reset in the gap before it, roughly ten seconds after an unload that
+was completely clean -
+
+```
+halt: scratch 0 = 0x08042006 ... CPU_STATUS 0x0000002e STOPPED
+iboot: DATA unmapped ... me1: venc_me1 released ... powered off (remove)
+=== still alive 3 s after the unload ===
+=== still alive 8 s after the unload ===
+```
+
+F20a's surviving unload was one data point; this contradicts it, and the
+8-second check is too short to certify anything. Back to one load per boot
+with no unload until the delayed reset is understood.
+
+## The stream-id hypothesis
+
+Blind-sweeping a 16-bit field is not a plan, and there is a better question
+in the logs we already have.
+
+Both AVE DARTs report `ENABLED_STREAMS = 0x0000ffff` - sixteen streams - and
+this driver has only ever configured, restored or even *looked at* **two** of
+them, SIDs 0 and 1. `ave_dart_restore_datapath()` copies those two;
+`ave_dapf_dump()` printed those two.
+
+If the source-read DMA issues its transactions under any other stream id,
+its translation was never set up. A read that is dropped or returns zeros
+looks exactly like every run so far: the address programmed into
+`0x40D120010`, every macroblock walked, the correct MB counts, and no
+pixels. It also explains the absence of faults - **no DART fault was logged
+in F16, F17 or F18**, and Linux owns the datapath DART through the overlay,
+so a mistranslating stream should have produced one. A *disabled* stream
+need not.
+
+The datapath DART's own error register is non-zero in every run:
+`ERROR 0x0c0f0000`.
+
+Next run (read-only): dump TCR and TTBR for all sixteen streams on both
+DARTs, plus DART1's ERROR and ERROR_ADDR. One load, no unload. If some
+stream other than 0/1 is enabled but not translating, that is the answer.

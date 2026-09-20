@@ -54,6 +54,8 @@
  */
 #define DART_PARAMS1		0x00	/* apple-dart.c:45 */
 #define DART_PARAMS2		0x04	/* apple-dart.c:48, bit 0 bypass support */
+/* ENABLED_STREAMS reads 0x0000ffff on both AVE DARTs: sixteen of them. */
+#define DART_STREAM_COUNT	16
 #define DART_ERROR		0x40	/* apple-dart.c:59, dart8020.py ERROR */
 #define DART_ERROR_ADDR_LO	0x50	/* apple-dart.c:76 */
 #define DART_ERROR_ADDR_HI	0x54	/* apple-dart.c:75 */
@@ -338,6 +340,8 @@ static void ave_dapf_dump_tcr(struct ave_device *ave, unsigned int sid)
 
 static void ave_dapf_dump_dart(struct ave_device *ave, const char *tag)
 {
+	unsigned int sid;
+
 	u32 err = readl(ave->cpudart + DART_ERROR);
 	u64 eaddr = ((u64)readl(ave->cpudart + DART_ERROR_ADDR_HI) << 32) |
 		    readl(ave->cpudart + DART_ERROR_ADDR_LO);
@@ -373,7 +377,6 @@ static void ave_dapf_dump_dart(struct ave_device *ave, const char *tag)
 		 readl(ave->cpudart + DART_ENABLED_STREAMS));
 	ave_dapf_dump_tcr(ave, 0);
 	ave_dapf_dump_tcr(ave, 1);
-	ave_dapf_dump_tcr(ave, 15);
 	if (ave->dart1) {
 		u32 e1 = readl(ave->dart1 + DART_ERROR);
 
@@ -381,9 +384,31 @@ static void ave_dapf_dump_dart(struct ave_device *ave, const char *tag)
 			 tag, AVE_DART1_PHYS, e1,
 			 readl(ave->dart1 + DART_ENABLED_STREAMS),
 			 readl(ave->dart1 + DART_REMAP(0)));
-		ave_dart_dump_tcr(ave, ave->dart1, "DART1", 0);
-		ave_dart_dump_tcr(ave, ave->dart1, "DART1", 1);
+		/*
+		 * Every stream, not just 0 and 1.
+		 *
+		 * ENABLED_STREAMS reads 0x0000ffff - all sixteen - and this
+		 * driver has only ever configured, restored or even LOOKED at
+		 * two of them. If the source-read DMA issues under any other
+		 * stream id, its translation was never set up, and a read
+		 * that is dropped or returns zeros looks exactly like what
+		 * F16, F17 and F18 produced: the address programmed, every
+		 * macroblock walked, and no pixels. No DART fault was logged
+		 * in any of those runs either, which is consistent with a
+		 * stream that is disabled rather than mistranslating.
+		 *
+		 * Read-only, and cheap: 16 TCRs and 64 TTBRs per DART.
+		 */
+		for (sid = 0; sid < DART_STREAM_COUNT; sid++)
+			ave_dart_dump_tcr(ave, ave->dart1, "DART1", sid);
+		dev_info(ave->dev,
+			 "dapf: [%s] DART1 ERROR %#010x addr %#018llx\n", tag, e1,
+			 ((u64)readl(ave->dart1 + DART_ERROR_ADDR_HI) << 32) |
+			 readl(ave->dart1 + DART_ERROR_ADDR_LO));
 	}
+	/* The same question for the CPUDART: which streams does it translate? */
+	for (sid = 2; sid < DART_STREAM_COUNT; sid++)
+		ave_dapf_dump_tcr(ave, sid);
 }
 
 /*
