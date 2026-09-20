@@ -38,9 +38,16 @@ def psnr(a: bytes, b: bytes) -> float:
 
 
 def grade(ref: bytes, got: bytes) -> tuple[str, float]:
-    """MATCH / MISMATCH / BLANK, and the PSNR behind it."""
+    """MATCH / MISMATCH / BLANK, and the PSNR behind it.
+
+    BLANK means "the decode is flat while the source was not", so it is only
+    a meaningful verdict when the source itself has structure. With a flat
+    source - session_flat_luma, F18 - a flat decode is exactly what a correct
+    encode produces, and the question is only whether it is flat at the RIGHT
+    value, which PSNR answers on its own.
+    """
     p = psnr(ref, got)
-    if len(set(got)) <= 2:
+    if len(set(ref)) > 2 and len(set(got)) <= 2:
         return "BLANK", p
     return ("MATCH" if p >= PSNR_MATCH_DB else "MISMATCH"), p
 
@@ -97,10 +104,12 @@ def decode(h264: str, width: int, height: int) -> bytes:
 
 def selftest(ref: bytes) -> bool:
     ok = True
+    flat = len(set(ref)) <= 2
     for what, got, want in (
             ("planted positive", ref, "MATCH"),
             ("negative control", bytes((255 - b) for b in ref), "MISMATCH"),
-            ("blank control", bytes([128]) * len(ref), "BLANK")):
+            ("blank control", bytes([128]) * len(ref),
+             "MISMATCH" if flat else "BLANK")):
         verdict, p = grade(ref, got)
         good = verdict == want
         ok &= good
