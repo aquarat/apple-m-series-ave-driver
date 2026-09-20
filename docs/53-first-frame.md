@@ -2640,3 +2640,53 @@ explained away.
 To settle whether the diagnostics matter would take several runs per arm,
 not one - which is a lot of reboots for a question that is not the goal. The
 goal is three registers.
+
+## The step count was measuring the capture, not the driver
+
+`tools/kmsg_capture.py` reads **one record at a time** and `fsync`s each one,
+and on `BrokenPipeError` - which is precisely what the kernel raises when the
+kmsg ring overwrites records the reader has not consumed - it silently
+`continue`s. Under a burst (the `[ours]` image scan, `dapf_dump` printing 16
+TCRs and 64 TTBRs per DART) the reader falls behind, and when the machine
+dies everything still unread in the ring dies with it.
+
+So **"died at 29 step markers" never meant "died at stage 13"**. It meant
+the capture was eight markers behind at the moment of death. I built three
+rounds of analysis on that number - "the death is before stage 13", "nothing
+in the commit can run that early", "a correct control-flow argument and the
+A/B are in conflict" - and the conflict was an artefact of my own instrument.
+
+The A/B survives, because "reached ready" versus "did not" does not depend on
+where the log stops:
+
+| build | `ave_session_diag_costs()` runs? | outcome |
+|---|---|---|
+| pre-`d9c3f6f` (f21-f24, f27) | no | 5/5 alive |
+| pre-`d9c3f6f` + the dump only (f29) | **yes** | **dead** |
+| `d9c3f6f` (f25, f25b, f25c x2, f26) | yes | 5/5 dead |
+| `d9c3f6f` with `session_diag=0` (f28) | no | alive |
+
+Six and six, and now with a mechanism that fits: **one of the register reads
+I added hangs the fabric**, which is docs/24's founding hazard - a read in a
+gated block. The reads happen at stage 16, after the frame, which is exactly
+where the missing log tail would have been.
+
+f29 is the decisive one: the known-good tree plus 46 lines of `ave_read`,
+nothing else - no ABI change, no new module parameter - and it died.
+
+### The suspects, and how the next run names one
+
+`ave_session_diag_costs()` now logs an `ave_step()` marker before each group,
+which holds for `ave_step_ms` so the marker reaches disk *before* the access
+that may hang:
+
+1. IntraEst cfg `0x40D24A1C8..1D8`, `0x40D24A394`
+2. ModeDec cost ladder `0x40D26A0AC..0x104`
+3. curMB `0x40D243180` and `0x40D263180`
+4. **IntraEst DMem `0x40D348000`/`+0x764` and ME `0x40D190630`** - the prime
+   suspect: MCPU DMem and the ME block are not obviously powered here, where
+   the pipe registers above are.
+
+Run with `ave_step_ms=50` and **`dapf_dump=0`** - the stream question is
+settled, and dropping those hundreds of lines is what lets the capture keep
+up. The last marker on disk names the group.
