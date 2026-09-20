@@ -2690,3 +2690,29 @@ that may hang:
 Run with `ave_step_ms=50` and **`dapf_dump=0`** - the stream question is
 settled, and dropping those hundreds of lines is what lets the capture keep
 up. The last marker on disk names the group.
+
+### Tooling, so this costs fewer reboots
+
+Two changes, both aimed at the reboot bill rather than the encoder.
+
+**`tools/kmsg_capture.py` no longer loses records silently.** It reports
+every gap - `/dev/kmsg` numbers its records, so a gap is arithmetic - and
+records EPIPE in the log instead of swallowing it. A run whose log is
+incomplete now says so, at the point it happened. It also stops `fsync`ing
+every single line: records are written immediately, and synced when the line
+is a marker (`STEP`, `stage `, `===`), when 50 ms have passed, or when the
+reader has caught up with the kernel. That keeps durability where it matters
+- the marker before a dangerous access - without paying for it on every line
+of a register dump, which is what made it fall behind in the first place.
+
+**`ave_session_diag_costs()` is opt-in per group**, `session_costs` as a
+bitmask, default 0. It must not be possible to reach these reads by
+accident: the known-good driver plus exactly these reads and nothing else
+hung the machine. Each group announces itself with an `ave_step()` marker
+first.
+
+So the next run identifies the killer in **one** boot rather than four:
+`session_costs=0xf ave_step_ms=50 dapf_dump=0`. The last marker on disk
+names the group. The run after that sets `session_costs` to `0xf` minus that
+bit and collects the other three groups' registers - which is what F25 was
+for in the first place.
