@@ -207,6 +207,17 @@ struct ave_device {
 	 * a machine reset. docs/63.
 	 */
 	bool			keep_powered;
+	/*
+	 * CPU_STATUS read STOPPED at stage 7, so a previous load in this boot
+	 * halted this core and it is sitting in its wfi. That is a known,
+	 * recoverable state - block reset plus a DATA restore - and since the
+	 * driver now always halts at unload it is the NORMAL state for every
+	 * load after the first. Recovering from it automatically is what
+	 * makes more than one experiment per boot possible; without it the
+	 * second load fails at stage 13 with "ASC did not become idle
+	 * (status 0x2e)", which is what s1-9 did (docs/53).
+	 */
+	bool			recover_halted;
 };
 
 /*

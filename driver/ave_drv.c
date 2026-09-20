@@ -61,6 +61,17 @@ static int rvbar_probe;
 module_param(rvbar_probe, int, 0444);
 MODULE_PARM_DESC(rvbar_probe, "walk test values through the ASC RVBAR and report which bits move");
 
+/*
+ * Recover automatically from a core a previous load halted (see
+ * ave_core_reset). On by default: with the Halt at unload now unconditional,
+ * every load after the first in a boot finds a STOPPED core, and refusing to
+ * start it would make the teardown work pointless.
+ */
+static bool auto_recover = true;
+module_param(auto_recover, bool, 0444);
+MODULE_PARM_DESC(auto_recover,
+	"reset the block and restore DATA when CPU_STATUS reads STOPPED from a previous load (default on)");
+
 static int core_reset;
 module_param(core_reset, int, 0444);
 MODULE_PARM_DESC(core_reset,
@@ -550,11 +561,25 @@ static int ave_core_reset(struct ave_device *ave, bool *pulsed)
 	int ret;
 
 	*pulsed = false;
-	if (!core_reset)
-		return 0;
 
+	/*
+	 * Read the state before deciding anything. A core that reads STOPPED
+	 * was halted by a previous load of this module - the driver always
+	 * halts at unload now - and it will NOT start again: stage 13 polls
+	 * for (CPU_STATUS & 3) == 0 and STOPPED is bit 1, so the poll times
+	 * out and probe fails with -ETIMEDOUT. The recovery is a block reset
+	 * and a DATA restore, and since this is the ordinary state of every
+	 * load after the first, the driver does it itself rather than making
+	 * the operator remember two module parameters.
+	 */
 	st = ave_read(ave, AVE_BANK_ASC, AVE_ASC_CPU_STATUS);
-	if ((st & AVE_ASC_ST_STOPPED) && core_reset < 2) {
+	if ((st & AVE_ASC_ST_STOPPED) && auto_recover && !core_reset) {
+		ave->recover_halted = true;
+		dev_info(dev, "core reset: CPU_STATUS %#010x is STOPPED - a previous load halted this core; resetting the block and restoring DATA automatically (auto_recover=0 disables)\n",
+			 st);
+	} else if (!core_reset) {
+		return 0;
+	} else if ((st & AVE_ASC_ST_STOPPED) && core_reset < 2) {
 		dev_info(dev, "core reset: CPU_STATUS %#010x is STOPPED already, nothing to do\n",
 			 st);
 		return 0;

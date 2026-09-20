@@ -894,11 +894,25 @@ int ave_fw_restore_data(struct ave_device *ave)
 	void *p;
 	int ret;
 
-	if (!fw_restore_data)
+	/*
+	 * ave->recover_halted means stage 7 found a core a previous load had
+	 * halted and has just reset the block. A second start over drifted
+	 * DATA is silent (docs/51), so the restore is not optional there - it
+	 * is the other half of the recovery, and leaving it to a module
+	 * parameter is how s1-9 came to fail.
+	 */
+	int mode = fw_restore_data;
+
+	if (!mode && ave->recover_halted) {
+		dev_info(ave->dev,
+			 "restore: recovering a halted core, so DATA is restored whether or not fw_restore_data was given\n");
+		mode = 1;
+	}
+	if (!mode)
 		return 0;
-	if (fw_restore_data < 0 || fw_restore_data > 2) {
+	if (mode < 0 || mode > 2) {
 		dev_err(ave->dev, "fw_restore_data=%d: must be 0, 1 or 2\n",
-			fw_restore_data);
+			mode);
 		return -EINVAL;
 	}
 
@@ -973,7 +987,7 @@ int ave_fw_restore_data(struct ave_device *ave)
 		 get_unaligned_le64((u8 *)p + AVE_DATA_STKG_OFF),
 		 get_unaligned_le64(ave->iboot_data_pristine + AVE_DATA_STKG_OFF));
 
-	if (fw_restore_data == 2) {
+	if (mode == 2) {
 		dev_info(ave->dev,
 			 "  restore: DRY RUN (fw_restore_data=2) - nothing written\n");
 		memunmap(p);
