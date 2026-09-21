@@ -2798,3 +2798,46 @@ fell in a deterministic burst, not where execution stopped. Per-record
 `fsync` is restored as the default, which is affordable precisely because
 `probe_diag=0` removes the burst. `KMSG_FSYNC_EVERY` can trade it back, with
 a comment saying not to trust the last line if you do.
+
+## f31 x2: the overlay window is its own failure mode
+
+Both f31 attempts - `probe_diag=0`, the lean-probe configuration - died
+**before our driver was loaded**. Last line in each:
+
+```
+=== overlay applied, t=15s of 20s before insmod ===
+```
+
+So `probe_diag=0` has not yet been tested at all; the probe never started.
+
+Classifying every failure by *where* it stopped, from logs that are now
+trustworthy about their tail:
+
+| where it died | runs |
+|---|---|
+| overlay window, driver never loaded | **s2-9, f31, f31** |
+| probe, at the image scan (old heavy probe) | f25, f25b, f25c x2, f26, f29, f30 |
+| within 3 s of the run header | f17, s1-5, s3-5 |
+
+The first row is a distinct failure I had folded into the others. s2-9 in
+particular I blamed on `auto_recover` pulsing a block reset; it died in the
+overlay window, before our module was even inserted, so that explanation was
+wrong too.
+
+**The timing points somewhere specific.** In that window the only thing that
+has happened is `apple-dart` binding to the two AVE DARTs. The machine then
+sits idle, and dies 15-20 s later. Fifteen-plus seconds of idleness after a
+device binds is the shape of a runtime-PM autosuspend: the DARTs, or the
+`venc_sys` domain they live in, being powered down once nothing holds them.
+Our driver takes a runtime-PM reference at stage 6 - but only if it gets
+there before the timer does.
+
+**And the wait is ours.** `OVERLAY_WAIT=20` exists because F6 died about 10 s
+after an overlay was applied by hand, and the wait was added so heartbeats
+would catch a death in that phase. It was instrumentation. It may be causing
+the deaths it was meant to observe.
+
+Hypothesis, not a finding. The test is cheap and changes only the harness:
+`OVERLAY_WAIT=0`, so the driver loads immediately and takes its power
+reference before any idle timer can expire. That also, finally, puts
+`probe_diag=0` in front of the hardware.
