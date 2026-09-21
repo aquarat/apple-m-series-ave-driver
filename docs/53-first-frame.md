@@ -2882,3 +2882,38 @@ frame changes. The fix is to keep every IOVA below 2 GiB - DMA mask 31 bits -
 so that no address field of any width down to 31 bits can truncate one.
 
 Harness: `OVERLAY_WAIT` now defaults to 0.
+
+## f33: a reset before any AVE code ran
+
+f33 (the 31-bit DMA mask fix) has only its header line. The system journal
+for that boot ends at `15:35:34.754` with the harness's own opening
+`sudo dmesg` check - milliseconds after the run started. Nothing from the
+overlay, nothing from our driver: the "applying overlay" marker is written
+and synced *before* the overlay insmod, so its absence places the reset in
+the harness's first three seconds, with only the log capture running.
+
+**So the 31-bit mask fix is still untested.**
+
+More important is what this says about the reset rate generally. This is a
+machine hard-reset (`PMU logged 1 boot error(s)`) with no AVE code, no
+overlay and no DART binding in play. It joins s1-5, s3-5 and f17, which also
+died within seconds of their header - and those I attributed to the
+preceding unload, or did not attribute at all.
+
+I have spent much of two days attributing resets to things the driver did.
+Some of them - the image-scan window, the overlay window - look real. But at
+least one reset now provably happened with none of our code running, which
+means **some unknown fraction of today's resets are not ours**, and every
+comparison above was drawn from a population contaminated by them.
+
+The kernel is `7.1.13-401.asahi.vrr3`, which from its name looks like a
+variable-refresh-rate test build rather than a release kernel. That is
+worth ruling in or out before blaming AVE for anything else.
+
+### Proposed
+
+A baseline, with no AVE involvement at all: leave the machine running the
+harness's own capture loop, with no overlay and no driver, for a fixed
+period, and see whether it resets. If it does, the machine or kernel is the
+first thing to fix, and it would explain much of this week. If it survives,
+the resets are ours, and the overlay/probe/teardown findings stand.
