@@ -2917,3 +2917,30 @@ harness's own capture loop, with no overlay and no driver, for a fixed
 period, and see whether it resets. If it does, the machine or kernel is the
 first thing to fix, and it would explain much of this week. If it survives,
 the resets are ours, and the overlay/probe/teardown findings stand.
+
+### Correction: the resets are ours
+
+The machine's owner reports it is completely stable when AVE work is not
+running, over far more observation time than this file covers. That
+settles it: every reset is ours, including f33, and the "some resets are not
+ours" framing above is withdrawn.
+
+Which means f33's log must be misleading about where it died, and the likely
+reason generalises: **neither the journal nor our capture is durable up to
+the instant of a PMU hard reset.** journald batches, so its tail is routinely
+lost. `fsync` only guarantees the data reached the drive; if the NVMe
+controller is still holding it in a volatile write cache when power drops,
+it is gone as well. The last line on disk is therefore the last point the
+*storage* persisted, not the last point the *CPU* reached.
+
+That is consistent with f33 appearing to die before the overlay, and with
+death locations having been unreliable all week, even after per-line fsync
+was restored. It also means the location-based classification above is
+weaker than I presented it - "overlay window" versus "probe" rests on the
+same unreliable tail.
+
+The fix is to get the log off the machine before it can die: netconsole
+sends each kernel message over UDP the moment it is printed, with no local
+storage in the path. Until then, long `ave_step_ms` holds (on the order of a
+second) give the storage time to persist each marker before the step it
+names.
