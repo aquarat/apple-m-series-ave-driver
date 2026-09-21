@@ -1003,7 +1003,32 @@ static int ave_probe_stages(struct platform_device *pdev)
 		 * entirely. Ask the allocator for addresses the hardware can
 		 * actually express. docs/68.
 		 */
-		ret = dma_set_mask_and_coherent(dev, DMA_BIT_MASK(32));
+		/*
+		 * 31, not 32 (2026-09-21). Every run since F22 logged the same
+		 * three faults on the datapath DART:
+		 *
+		 *   translation fault: stream:15 code:0x2 (NO PMD FOR IOVA)
+		 *   at 0x7f100000
+		 *
+		 * 0x7f100000 with bit 31 set is 0xff100000, which is 64 KiB
+		 * into our fourth SrcNeighbor buffer (0xff0f0000, 80 KiB). So
+		 * the engine on stream 15 reads the source-neighbour pixels
+		 * through an address field that DROPS BIT 31, and the IOVA
+		 * allocator - which hands out addresses top-down from the mask
+		 * - gives every buffer bit 31. Before F22 stream 15 was not
+		 * attached at all and the reads were dropped silently; after,
+		 * they fault. Either way that engine never received its data,
+		 * in any run we have made.
+		 *
+		 * Source-neighbour pixels are what intra estimation works
+		 * from, and the symptom we have chased for a week is a frame
+		 * coded as if there were no source at all.
+		 *
+		 * Keeping every IOVA below 2 GiB means no field of any width
+		 * down to 31 bits can truncate one. ave_sess_dma_alloc()'s
+		 * 4 GiB check still stands as the backstop for the 32-bit ones.
+		 */
+		ret = dma_set_mask_and_coherent(dev, DMA_BIT_MASK(31));
 		if (ret)
 			return dev_err_probe(dev, ret, "no suitable DMA mask\n");
 		ave_stage_ok(dev, AVE_STAGE_DMA_MASK);

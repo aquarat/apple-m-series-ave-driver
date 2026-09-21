@@ -28,7 +28,13 @@ if [ -n "${OVERLAY:-}" ]; then
         sudo insmod test/ave-overlay.ko variant="$OVERLAY"; RCO=$?
         step "overlay insmod returned rc=$RCO"
         [ $RCO -eq 0 ] || { sudo kill $CAP 2>/dev/null; echo "$LOG"; exit 1; }
-        W=${OVERLAY_WAIT:-20}
+        # Default 0 since f32 (2026-09-21). The 20 s wait was added after F6
+        # so heartbeats would catch a death in this phase - and s2-9, f31 and
+        # f31 again then died in exactly this phase, 15-20 s after the
+        # overlay bound apple-dart to the DARTs, with our driver never
+        # loaded. f32 loaded immediately and got past it. Set OVERLAY_WAIT
+        # if you want to observe this window on purpose.
+        W=${OVERLAY_WAIT:-0}
         for ((t = 0; t < W; t += 5)); do
             step "overlay applied, t=${t}s of ${W}s before insmod"
             sleep 5
