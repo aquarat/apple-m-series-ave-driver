@@ -2841,3 +2841,44 @@ Hypothesis, not a finding. The test is cheap and changes only the harness:
 `OVERLAY_WAIT=0`, so the driver loads immediately and takes its power
 reference before any idle timer can expire. That also, finally, puts
 `probe_diag=0` in front of the hardware.
+
+## f32: past the probe for the first time today - and a truncated address
+
+`OVERLAY_WAIT=0`, so the driver loaded straight after the overlay. It got
+past the overlay window, past the probe with `probe_diag=0`, through
+Start_AVC, and sent Process. Then it died, logging:
+
+```
+apple-dart 40d030000.iommu: translation fault: status:0x8f0f0002 stream:15
+                           code:0x2 (NO PMD FOR IOVA) at 0x7f100000
+```
+
+**This fault is not new, and I missed it for a week.** Every run since F22,
+including every one that survived and encoded a frame, logged exactly this:
+
+| run | translation faults | on stream 15 | at |
+|---|---:|---:|---|
+| f22, f23, f24, f27, f28 | 3 | 3 | `0x7f100000` |
+| f32 | 2 | 2 | `0x7f100000` |
+
+I wrote above, more than once, that "no DART fault has ever been logged".
+That was true until F22 attached stream 15 and false in every run after it,
+and I never grepped for it again. The claim was an unexamined carry-over.
+
+**What the address is.** `0x7f100000 | 0x80000000 = 0xff100000`, which is
+64 KiB into our fourth SrcNeighbor buffer (`0xff0f0000`, 80 KiB). So the
+engine on stream 15 reads the **source-neighbour pixels** through an address
+field that **drops bit 31**, and the IOVA allocator, which hands out
+addresses top-down from the DMA mask, gives every buffer bit 31. Before F22
+stream 15 had `TCR = 0` and the reads were dropped silently; after, they
+fault. Either way the engine never received its data, in any run we have
+made.
+
+Source-neighbour pixels are what intra estimation works from. The symptom
+chased all week is a frame coded as though there were no source at all.
+
+This is the strongest lead in the file, and it is still a hypothesis until a
+frame changes. The fix is to keep every IOVA below 2 GiB - DMA mask 31 bits -
+so that no address field of any width down to 31 bits can truncate one.
+
+Harness: `OVERLAY_WAIT` now defaults to 0.
