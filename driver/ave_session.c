@@ -2185,6 +2185,7 @@ static void ave_session_diag_mcpu(struct ave_device *ave,
 		dma_rmb();
 		for (n = 0; n < bufs->coloc_size; n++)
 			changed += b[n] != 0x5a;
+		ave_step(ave, "diag: colocated scan (CPU read of %zu bytes)", bufs->coloc_size);
 		dev_info(ave->dev, "session: diag colocated slot 0: %zu of %zu bytes changed\n",
 			 changed, bufs->coloc_size);
 	}
@@ -2446,6 +2447,40 @@ static int ave_session_process(struct ave_device *ave,
 	}
 
 	/*
+	 * The headline result first, before any diagnostic touches the block.
+	 * f33 (2026-09-22) completed the frame and then hung the machine inside
+	 * the diagnostics below, and because the coded length was only logged
+	 * after them, the one number that run existed to produce - is the frame
+	 * still 2709 bytes now that the stream-15 reads succeed - was lost.
+	 * These are CPU reads of coherent memory the firmware has finished
+	 * with; they cannot hang anything.
+	 */
+	if (!ret) {
+		struct ave_coded_info early;
+		const u8 *h = bufs->coded_hdr[n].cpu;
+		u32 mbs = (cw / AVE_MB_SIZE) * (ch / AVE_MB_SIZE);
+		u32 k, i_mb = 0, p_mb = 0, skip_mb = 0;
+
+		dma_rmb();
+		for (k = 0; k < 4; k++) {
+			i_mb += get_unaligned_le32(h + abi->coded_hdr.i_mb_cnt + 4 * k);
+			p_mb += get_unaligned_le32(h + abi->coded_hdr.p_mb_cnt + 4 * k);
+			skip_mb += get_unaligned_le32(h + abi->coded_hdr.skip_mb_cnt + 4 * k);
+		}
+		if (!ave_cmd_coded_length(abi, h, bufs->coded_hdr[n].size,
+					  bufs->coded[n].size, &early))
+			dev_info(ave->dev,
+				 "session: RESULT frame %u: %u coded bytes, MB I %u P %u skip %u of %u, FrameTypeReturned %u (2709 has been the blank-frame signature)\n",
+				 n, early.bytes, i_mb, p_mb, skip_mb, mbs,
+				 early.frame_type);
+		else
+			dev_info(ave->dev,
+				 "session: RESULT frame %u: coded header undecodable; MB I %u P %u skip %u of %u\n",
+				 n, i_mb, p_mb, skip_mb, mbs);
+	}
+	ave_step(ave, "frame result logged; next: post-frame diagnostics");
+
+	/*
 	 * docs/57 #3 and #4, read-only, at the moment Process gave up:
 	 *  - PMGR power state of VENC_DMA, PIPE4, PIPE5, ME0, ME1 (bank 3 +0x00..
 	 *    +0x20, docs/27 7): is ME1 - which no DT domain powers - off?
@@ -2533,10 +2568,15 @@ static int ave_session_process(struct ave_device *ave,
 			 ave_read(ave, AVE_BANK_DPE, 0x68008),
 			 ave_read(ave, AVE_BANK_DPE, 0x142008),
 			 ave_read(ave, AVE_BANK_DPE, 0x1c8008));
+		ave_step(ave, "diag: row0");
 		ave_session_diag_row0(ave, bufs);
+		ave_step(ave, "diag: mcpu (f33 died between its last line and the colocated scan)");
 		ave_session_diag_mcpu(ave, bufs);
+		ave_step(ave, "diag: costs (session_costs gated)");
 		ave_session_diag_costs(ave);
+		ave_step(ave, "diag: channels");
 		ave_session_diag_channels(ave, "timeout");
+		ave_step(ave, "diag: done");
 	}
 
 	if (session_sve_ungate) {
