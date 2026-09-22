@@ -1004,31 +1004,28 @@ static int ave_probe_stages(struct platform_device *pdev)
 		 * actually express. docs/68.
 		 */
 		/*
-		 * 31, not 32 (2026-09-21). Every run since F22 logged the same
-		 * three faults on the datapath DART:
+		 * 32 bits: the firmware programs only the low 32 of the coded
+		 * and source addresses (SetTranscode fw 0x592fc, setPipe fw
+		 * 0x54320), so anything above 4 GiB would be silently
+		 * truncated. ave_sess_dma_alloc() checks that at runtime; the
+		 * mask is what keeps the allocator from handing such an IOVA
+		 * out in the first place. docs/68.
 		 *
-		 *   translation fault: stream:15 code:0x2 (NO PMD FOR IOVA)
-		 *   at 0x7f100000
-		 *
-		 * 0x7f100000 with bit 31 set is 0xff100000, which is 64 KiB
-		 * into our fourth SrcNeighbor buffer (0xff0f0000, 80 KiB). So
-		 * the engine on stream 15 reads the source-neighbour pixels
-		 * through an address field that DROPS BIT 31, and the IOVA
-		 * allocator - which hands out addresses top-down from the mask
-		 * - gives every buffer bit 31. Before F22 stream 15 was not
-		 * attached at all and the reads were dropped silently; after,
-		 * they fault. Either way that engine never received its data,
-		 * in any run we have made.
-		 *
-		 * Source-neighbour pixels are what intra estimation works
-		 * from, and the symptom we have chased for a week is a frame
-		 * coded as if there were no source at all.
-		 *
-		 * Keeping every IOVA below 2 GiB means no field of any width
-		 * down to 31 bits can truncate one. ave_sess_dma_alloc()'s
-		 * 4 GiB check still stands as the backstop for the 32-bit ones.
+		 * NOT 31 (2026-09-22). For a day this was 31, to keep every
+		 * IOVA below 2 GiB after the datapath DART logged
+		 * "stream:15 NO PMD at 0x7f100000" - our SrcNeighbor IOVA
+		 * with bit 31 dropped - in every run from F22. It did remove
+		 * the fault, and the frame did not change, and the machine
+		 * then hung 0.2 ms after every completed frame, three times,
+		 * inside a CPU read of coherent memory, including with
+		 * stream 15 detached. docs/71 then showed the master behind
+		 * that fault is not one the kext ever addresses, that every
+		 * neighbour-path register takes a full 32-bit IOVA, and that
+		 * macOS gives stream 15 no translation at all on this DART.
+		 * The fault was noise from a master we do not feed; the hang
+		 * was the cost of "fixing" it. docs/53 f33-f35, docs/71 §6.
 		 */
-		ret = dma_set_mask_and_coherent(dev, DMA_BIT_MASK(31));
+		ret = dma_set_mask_and_coherent(dev, DMA_BIT_MASK(32));
 		if (ret)
 			return dev_err_probe(dev, ret, "no suitable DMA mask\n");
 		ave_stage_ok(dev, AVE_STAGE_DMA_MASK);
