@@ -2970,3 +2970,46 @@ section is bracketed by a marker.
 
 Harness: `NETCONSOLE=ip[:mac]` brings the module up per run (it does not
 survive a reboot) and mirrors the step markers to the receiver.
+
+## f34 (2026-09-22): the frame is still 2709 bytes, and the hang is in a memory read
+
+With the RESULT line moved ahead of the diagnostics, netconsole delivered
+the number f33 lost:
+
+```
+RESULT frame 0: 2709 coded bytes, MB I 3600 P 0 skip 0 of 3600, FrameTypeReturned 3
+```
+
+Zero DART faults, stream-15 reads completing for the first time - and the
+frame is unchanged. **The truncated address was a real bug and is not the
+cause of the blank picture.** The 31-bit mask stays.
+
+Then the same hang as f33, at the same place, 2 of 2: the last line
+(`diag ModeDec ctx`) arrived complete at 280 bytes, so its MMIO reads had
+finished; Process was ACCEPTED 0.2 ms earlier; and the next code is the CPU
+scan of the colocated buffer - whose marker I had placed *after* the loop.
+So the machine dies while the CPU reads 462 848 bytes of coherent memory.
+The same scan ran fine in every run under the 32-bit mask.
+
+A CPU read of DRAM does not hang a fabric by itself. A bus master stuck
+mid-transaction does, and the first heavy CPU traffic then stalls behind it
+until the watchdog fires. The one master doing something new this run is
+the engine on stream 15, whose reads now succeed.
+
+**And the ADT already says stream 15 is not supposed to translate.** docs/56
+recorded `sids = 0x8001, bypass = 0x8000`: bit 15 of `bypass` is stream 15.
+Attaching it translating (F22 onward) was the wrong fix for the right
+observation, and lowering the mask made its transactions complete instead
+of fault. An engine issuing what it believes are physical addresses,
+resolved through a page table it was never meant to use, is a plausible
+wedge. docs/71 is tracing which engine that is and what macOS gives it.
+
+Layout note: every IOVA is the old one with bit 31 cleared; nothing moved
+relative to anything else.
+
+### Next run
+
+Stream 15 detached again (`variant=4`), 31-bit mask, `session_costs=0xf`,
+netconsole. The stream-15 transactions drop as they did in every surviving
+run, the mask fix is kept, and the cost-ladder / DMem / curMB registers the
+last three days were spent trying to read finally come out.
