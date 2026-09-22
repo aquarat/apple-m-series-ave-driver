@@ -1,0 +1,1 @@
+=== f35-v4-costs 2026-09-22T16:37:48+01:00 commit be050ae: insmod driver/apple-ave.ko stop_after=16 fw_map_data=1 fw_map_text=2 smmu_watch=1 session_selftest=1 session_frame=1 session_lsb=1 power_me1=1 dpe_tunables=1 session_coloc=1 session_entropy_size=1 session_flat_luma=200 session_costs=0xf ave_step_ms=200 ===

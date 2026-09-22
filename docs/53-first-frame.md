@@ -3013,3 +3013,39 @@ Stream 15 detached again (`variant=4`), 31-bit mask, `session_costs=0xf`,
 netconsole. The stream-15 transactions drop as they did in every surviving
 run, the mask fix is kept, and the cost-ladder / DMem / curMB registers the
 last three days were spent trying to read finally come out.
+
+## f35 (2026-09-22): stream 15 detached, and the same hang - so it is the mask, not stream 15
+
+`variant=4` (stream 15 not attached, its transactions dropped as in every
+run before F22), 31-bit DMA mask, `session_costs=0xf`, netconsole.
+
+```
+RESULT frame 0: 2709 coded bytes, MB I 3600 P 0 skip 0 of 3600
+STEP diag: colocated scan (CPU read of 462848 bytes) - f33/f34 hung here   <- last line
+```
+
+With the marker now *before* the loop, the last line on the receiver is the
+marker itself: **the machine dies inside the CPU scan of the colocated
+buffer**, 3 of 3 (f33, f34, f35), and now with stream 15 out of the picture.
+So the wedge is not stream 15's engine completing its reads. It correlates
+with the 31-bit mask alone: the identical scan ran in every 32-bit-mask run.
+
+Nothing else moved. Every buffer is at its old IOVA with bit 31 cleared
+(colocated `0xfd500000` -> `0x7d500000`, heap `0xff300000` -> `0x7f300000`),
+the firmware logged nothing after Process, no SHAREDMALLOC traffic, no
+faults.
+
+A CPU read of coherent DRAM does not hang a fabric on its own. What it can
+do is stall behind a bus master that is stuck, until the watchdog fires -
+and the only variable is where every device-visible address now sits. Why
+an IOVA below 2 GiB would leave a master stuck where the same IOVA with bit
+31 set did not is the open question; a device-side 31-bit field that
+*wraps* rather than truncates, or a firmware-side region it assumes free
+below 2 GiB, would both do it.
+
+Next hardware run, once the stream-15 trace has reported (a reset would
+kill it): the same configuration with `session_diag_coloc=0`. Skipping the
+one memory access known to coincide with the hang either lets the run
+finish - channel windows, cost ladder, curMB control, and the published
+frame all land - or moves the death to the next access, which says a master
+is wedged regardless of what the CPU touches.
