@@ -25,7 +25,14 @@
 		interrupt-parent = <&aic>;
 		interrupts = <AIC_IRQ 0 1028 IRQ_TYPE_LEVEL_HIGH>;
 		#iommu-cells = <1>;
-		/* ADT: page-size 16384, sids 32769 */
+		/*
+		 * ADT: page-size 16384, sids 32769 (0x8001: streams 0 and 15),
+		 * bypass 0x8000. Stream 15 is the platform's coprocessor bypass
+		 * stream - present on every coprocessor DART, given TCR 0x20000
+		 * by macOS on this instance (no translation, no bypass bit,
+		 * bypass-address 2 = the MMIO bus). Left unattached on purpose:
+		 * attaching it translating (F22-f34) faulted, then hung. docs/71.
+		 */
 	};
 
 	ave0: video-encoder@40d100000 {
