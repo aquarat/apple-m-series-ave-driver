@@ -2944,3 +2944,29 @@ sends each kernel message over UDP the moment it is printed, with no local
 storage in the path. Until then, long `ave_step_ms` holds (on the order of a
 second) give the storage time to persist each marker before the step it
 names.
+
+## f33 (retry, 2026-09-22): netconsole, and the first trustworthy death location
+
+Local capture for this run holds **one line** - the header. The netconsole
+receiver on the mini holds **307**. That settles the tooling question: a PMU
+hard reset discards whatever the NVMe still holds, `fsync` or not, and every
+"where it died" in this file that came from a local tail is void. This is
+the first location that can be trusted.
+
+**The 31-bit mask worked mechanically.** Zero translation faults - the first
+run since F22 without them. IOVAs `0x7d300000` / `0x7f000000`, and the
+source reader confirms `0x7d300000: OUR BUFFER`. Process **ACCEPTED**.
+
+**Then it died in the post-frame diagnostics**: after `diag ModeDec ctx`,
+before `diag colocated slot 0`, which F24 printed next. That is before
+`diag_costs` (its group-1 marker, held a full second, never appeared), so
+the dangerous-dump theory goes too. `IntraEst curMB` still 0.
+
+And because the coded length was logged *after* the diagnostics, the number
+this run existed for - is the frame still 2709 bytes now that the stream-15
+reads succeed for the first time ever - was lost with it. Fixed: the RESULT
+line now goes out before any diagnostic touches the block, and each diag
+section is bracketed by a marker.
+
+Harness: `NETCONSOLE=ip[:mac]` brings the module up per run (it does not
+survive a reboot) and mirrors the step markers to the receiver.

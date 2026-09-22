@@ -8,13 +8,30 @@ cd "$(dirname "$0")/.."
 NAME=$1; shift
 if sudo dmesg | grep -q "Disabling IRQ #"; then echo "REFUSING: IRQ disabled; reboot" >&2; exit 1; fi
 if lsmod | grep -q '^apple_ave'; then echo "REFUSING: apple_ave loaded" >&2; exit 1; fi
+# NETCONSOLE=ip[:mac] mirrors every kernel line to a UDP receiver as it is
+# printed. Local capture is worthless for the crash itself: f33 (2026-09-22)
+# left ONE line on local disk and 307 on the receiver, because a PMU hard
+# reset discards whatever the NVMe still holds, fsync or not. Receiver:
+#   socat -u UDP-RECV:6666 CREATE:ave-netconsole.log
+# The module does not survive a reboot, so this is re-done every run.
+if [ -n "${NETCONSOLE:-}" ]; then
+    NC_IP=${NETCONSOLE%%:*}
+    NC_MAC=${NETCONSOLE#*:}; [ "$NC_MAC" = "$NETCONSOLE" ] && NC_MAC=$(ip neigh show "$NC_IP" | awk '{print $5}')
+    NC_DEV=$(ip route get "$NC_IP" | awk '{for(i=1;i<=NF;i++) if($i=="dev") print $(i+1)}' | head -1)
+    NC_SRC=$(ip route get "$NC_IP" | awk '{for(i=1;i<=NF;i++) if($i=="src") print $(i+1)}' | head -1)
+    lsmod | grep -q '^netconsole' || sudo modprobe netconsole \
+        "netconsole=6666@$NC_SRC/$NC_DEV,6666@$NC_IP/$NC_MAC"
+    sudo dmesg -n 8
+    echo "=== $NAME netconsole up: $NC_SRC/$NC_DEV -> $NC_IP/$NC_MAC $(date -Is) ===" | sudo tee /dev/kmsg >/dev/null
+fi
+
 LOG=results/$NAME-$(date +%s).kmsg
 { echo "=== $NAME $(date -Is) commit $(git rev-parse --short HEAD): insmod driver/apple-ave.ko $* ==="; } > "$LOG"; sync
 sudo python3 tools/kmsg_capture.py "$LOG" &
 CAP=$!
 sleep 3	# let the header reach the disk before insmod (F6: lost otherwise)
 
-step() { echo "=== $* ===" | sudo tee -a "$LOG" >/dev/null; sync; }
+step() { echo "=== $* ===" | sudo tee -a "$LOG" /dev/kmsg >/dev/null; sync; }
 
 # OVERLAY=N applies test/ave-overlay.ko variant=N inside the captured window
 # and then waits, with heartbeats, before loading the driver. F6 reset the
