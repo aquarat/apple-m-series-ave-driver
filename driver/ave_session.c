@@ -437,6 +437,12 @@ MODULE_PARM_DESC(session_flat_luma,
  * Each group logs an ave_step() marker first, so with ave_step_ms set the
  * last marker on disk names the group that hung.
  */
+/* The post-frame CPU scan of the colocated buffer; f33/f34 hung in it. */
+static bool session_diag_coloc = true;
+module_param(session_diag_coloc, bool, 0444);
+MODULE_PARM_DESC(session_diag_coloc,
+	"after the frame, scan colocated slot 0 from the CPU to see what the writer changed (default on; f33/f34 hung here with stream 15 attached)");
+
 static unsigned int session_costs;
 module_param(session_costs, uint, 0444);
 MODULE_PARM_DESC(session_costs,
@@ -2178,14 +2184,23 @@ static void ave_session_diag_mcpu(struct ave_device *ave,
 		 ave_read(ave, AVE_BANK_DPE, 0x183228),
 		 ave_read(ave, AVE_BANK_DPE, 0x18a080));
 
-	if (bufs->coloc_size && bufs->coloc_cpu[0]) {
+	/*
+	 * f33 and f34 (2026-09-22) both hung the machine inside this loop -
+	 * a CPU read of coherent memory, 0.2 ms after the frame completed -
+	 * with stream 15 attached translating and every IOVA below 2 GiB.
+	 * The marker used to sit after the loop, which put the death one
+	 * line later than it was. It is before the loop now, and the loop
+	 * is behind session_diag_coloc so a run can skip the one memory
+	 * access known to coincide with the hang.
+	 */
+	if (session_diag_coloc && bufs->coloc_size && bufs->coloc_cpu[0]) {
 		const u8 *b = bufs->coloc_cpu[0];
 		size_t n, changed = 0;
 
+		ave_step(ave, "diag: colocated scan (CPU read of %zu bytes) - f33/f34 hung here", bufs->coloc_size);
 		dma_rmb();
 		for (n = 0; n < bufs->coloc_size; n++)
 			changed += b[n] != 0x5a;
-		ave_step(ave, "diag: colocated scan (CPU read of %zu bytes)", bufs->coloc_size);
 		dev_info(ave->dev, "session: diag colocated slot 0: %zu of %zu bytes changed\n",
 			 changed, bufs->coloc_size);
 	}
