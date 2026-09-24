@@ -762,13 +762,24 @@ static int ave_pmp_vote(struct ave_device *ave, u64 val)
 			iounmap(rd);
 		return -ENOMEM;
 	}
+	/*
+	 * f93 (VMax + FAB0) hung the machine within microseconds of the vote
+	 * and reset it. Each step below is held 200 ms so its line leaves the
+	 * machine before the next access: write, PMP reaction, read-back.
+	 */
+	dev_info(ave->dev, "pmp: writing AVE0 DVFS vote %#018llx\n", val);
+	msleep(200);
 	writeq(val, wr);
+	msleep(200);
+	dev_info(ave->dev, "pmp: vote written, alive 200 ms later; reading back\n");
+	msleep(200);
 	back = readq(rd);
 	st = readq(rd + 8);
 	iounmap(wr);
 	iounmap(rd);
 	dev_info(ave->dev, "pmp: AVE0 DVFS vote %#018llx, read back %#018llx (+8 %#018llx)%s\n",
 		 val, back, st, back == val ? "" : " - MISMATCH");
+	msleep(200);
 	return 0;
 }
 
