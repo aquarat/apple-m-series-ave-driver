@@ -3592,3 +3592,36 @@ and 1920x1080, 30 fps, which is the encoder's own input format.
   the camera's timestamps. Not investigated.
 - v4l2-compliance 54/54. `tools/v4l2-test.sh` ffmpeg mode now passes
   `-b:v 8M` (ffmpeg's own default is 200 kbit/s, which the VBR default honours).
+
+## f81 (2026-09-24): the speed ceiling is the PMP, which is not running
+
+docs/75 (static) traced macOS's "VMax". f73's registers are PMGR performance
+**counters**, disabled on macOS too, so their zeros meant nothing. The actual
+mechanism is a **vote to the PMP** (the power-management coprocessor). The
+AVE kext's IOP_Mid/Mid2/Max "gates" are virtual devices; enabling them makes
+the platform PMGR write one 64-bit request into the PMP's dashboard
+(`0x28e3d0888` for ave0: SOC level | FAB0 << 32 | 1 << 61), and powering
+VENC_SYS sets bit 16 of the PMP's PS-REQ. The PMP changes rails and clocks.
+The AP writes no voltage.
+
+**f81, read-only** (`perf_dump=1`, docs/75 R1a/R1b):
+- R1a: PMP and PMS_SRAM PS registers `0x1f0000ff` (actual `0xf`), passing.
+- R1b, `0x28e3c0000` window (already mapped by Linux's bound
+  `apple-pmp-report`): **PMP-STATUS = 0**. PS-REQ `0x60003000`: bits 12, 13,
+  29, 30, exactly the reports Asahi enables, so the read side is live (the
+  control). **PS-ACK = 0**, all DVFS-STATE 0, AVE0 DVFS 0, and AVD0 DVFS 0 too.
+
+**Reading.** The PMP coprocessor is not running under this kernel. The DT's
+`pmp@28e700000` is `status = "disabled"`, so the Asahi PMP driver never
+starts it, and nothing acknowledges PS requests. No block gets a DVFS vote,
+the in-tree AVD decoder included. The encoder runs at whatever clock the
+boot left it at: a constant ~150 Mpixel/s against a 4K60 rating of
+~500 Mpixel/s. The 1080p/4K timings (14.1 / 53.9 ms, ratio 3.83 for 3.98x
+the pixels) put the fixed per-frame overhead at ~0.6 ms, so pipelining
+submissions cannot close the gap either.
+
+Raising the encoder clock therefore needs the PMP running. That is a
+platform change (Asahi's PMP driver and DT) with effects on the whole
+machine, not an AVE driver change. It is left for a deliberate decision.
+docs/75 R2 (enable one PMGR clock counter to measure the VENC clock) and R4
+(the vote itself) remain proposals.
