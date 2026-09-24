@@ -2199,7 +2199,8 @@ static void ave_session_alloc_entropy(struct ave_device *ave,
 	size_t each;
 	u32 i;
 
-	if (!bufs->encode)
+	/* HEVC_INIT itself refuses without them (setPipe :14199), frame or not */
+	if (!bufs->encode && !session_codec)
 		return;
 	if (!session_entropy) {
 		dev_warn(ave->dev,
