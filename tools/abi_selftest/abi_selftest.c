@@ -23,7 +23,7 @@
 #include "kshim.h"
 #include "../../driver/ave_cmd.h"
 
-#define MAXCMD	0x20000
+#define MAXCMD	0x40000	/* HEVC_INIT is 0x32DC8 */
 
 static int failures, checks;
 static u8 covered[MAXCMD];
@@ -1079,6 +1079,645 @@ static void test_replies(void)
 		   "13.5 Halt has no known reply");
 }
 
+
+/* ------------------------------------------------------------------------ */
+/* HEVC (docs/77). Every expected wire offset below is typed in from docs/77 */
+/* §6 (and §2.3/§3.2 for the struct offsets), not computed from ave_abi.h.  */
+/* ------------------------------------------------------------------------ */
+
+static struct ave_recon_buf RECON_H[2] = {
+	{ 0x0000000200000000ull, 0, 0x0000000200300000ull },
+	{ 0x0000000200400000ull, 0, 0x0000000200700000ull },
+};
+static const struct ave_buf CODED_H[2] = {
+	{ 0x0000000300000000ull, 0x152000 },
+	{ 0x0000000300400000ull, 0x152000 },
+};
+
+/* A representative 1280x720 fixed-QP 30 HEVC_INIT, as ave_session.c builds it. */
+static struct ave_hevc_session hevc_720p(void)
+{
+	struct ave_hevc_session h = {
+		.vp = {
+			.width = 1280, .height = 720,
+			.frame_rate = 30,
+			.qp_i = 30, .qp_p = 30, .qp_b = 30,
+			.key_interval = 1,
+			.fw_client_addr = 0x0000000400000000ull, .fw_client_size = 0xb4000,
+			.fw_client_mem_addr = 0x0000000400200000ull,
+			.fw_client_mem_size = 0x100000,
+			.param_sets_addr = 0x0000000400300000ull, .param_sets_size = 0x1000,
+			.need_lsb_planes = true,
+			.recon = RECON_H, .n_recon = 2,
+			.coded = CODED_H, .coded_hdr = CODED_HDR_13, .n_coded = 2,
+			.n_low_res_ref = 2,
+			.low_res_ref = { 0x0000000210000000ull, 0x0000000210100000ull },
+			.n_low_res_result = 4,
+			.low_res_result = { 0x0000000220000000ull, 0x0000000220010000ull,
+					    0x0000000220020000ull, 0x0000000220030000ull },
+			.n_colocated = 2,
+			.colocated = { 0x0000000230000000ull, 0x0000000230010000ull },
+			.n_entropy = 2, .n_entropy_cols = 4, .entropy_size = 0x10e000,
+			.n_src_nbr = 4,
+		},
+		.level_idc = 120,
+		.input_format_word = 16,
+		.max_num_ref_frames = 1,
+		.log2_max_poc_lsb_minus4 = 4,
+		.sao = true, .wpp = true, .sps_tmvp = true,
+		.n_st_rps = 1,
+	};
+	u32 i, j;
+
+	for (i = 0; i < 2; i++)
+		for (j = 0; j < 4; j++)
+			h.vp.entropy[i][j] = 0x0000000800000000ull + 0x200000ull * (4 * i + j);
+	for (i = 0; i < 4; i++)
+		for (j = 0; j < 4; j++)
+			h.vp.src_nbr[i][j] = 0x0000000900000000ull + 0x80000ull * (4 * i + j);
+	return h;
+}
+
+static void expect_hdr_13_5_hevc(u16 id, u32 slot)
+{
+	E16(buf, 0x00, id, "13.5 id");
+	E64(buf, 0x08, 0x1122334455667788ull, "13.5 CNT");
+	E32(buf, 0x10, 0xa, "13.5 CID u32");
+	E32(buf, 0x18, 1, "13.5 codec HEVC = 1 (kext str w8,[x23,#24] 0xfffffe0008ea9fb0)");
+	E32(buf, 0x1c, slot, "13.5 slot");
+	E32(buf, 0x20, 200, "13.5 priority");
+	expect_timeout(0x28);
+}
+
+/* PTL for Main, tier 0 (docs/77 §2.3 PTL table, §6). */
+static void expect_ptl(u32 ptl, u32 level, const char *who)
+{
+	char n[80];
+
+	snprintf(n, sizeof(n), "%s PTL general_profile_idc = 1 Main (+8)", who);
+	E32(buf, ptl + 0x08, 1, n);
+	E32(buf, ptl + 0x00, 0, "PTL profile_space 0");
+	E8(buf, ptl + 0x04, 0, "PTL tier 0");
+	E8(buf, ptl + 0x0c, 0, "PTL compat[0]");
+	E8(buf, ptl + 0x0d, 1, "PTL compat[1] (Main)");
+	E8(buf, ptl + 0x0e, 1, "PTL compat[2] (Main 10)");
+	E8(buf, ptl + 0x2c, 1, "PTL progressive_source");
+	E8(buf, ptl + 0x2d, 0, "PTL interlaced_source");
+	E8(buf, ptl + 0x2e, 1, "PTL non_packed_constraint");
+	E8(buf, ptl + 0x2f, 1, "PTL frame_only_constraint");
+	E32(buf, ptl + 0x3c, level, "PTL general_level_idc = 30 x level");
+}
+
+static void test_start_hevc_13_5(void)
+{
+	const struct ave_cmd_abi *a = ave_cmd_abi_get(AVE_ABI_MACOS_13_5);
+	struct ave_hevc_session h = hevc_720p();
+	u32 i, j;
+	int ret;
+
+	begin("13.5 start_hevc");
+	memset(buf, 0, sizeof(buf));
+	ret = ave_cmd_build_start_hevc(a, buf, sizeof(buf), &CTX, &h);
+	expect_int(ret, 0x32dc8, "size (fw 0xd970-0xd97c: 0x32DB0 + 0x18)");
+	expect_hdr_13_5_hevc(5, 6);		/* HEVC_INIT, {6,200} */
+
+	/* client buffers, as AVC (docs/77 §2.1) */
+	E64(buf, 0x40, 0x0000000400000000ull, "FwClient IOVA");
+	E32(buf, 0x48, 0xb4000, "FwClient size");
+	E64(buf, 0x50, 0x0000000400200000ull, "FwClientMem IOVA");
+	E32(buf, 0x58, 0x100000, "FwClientMem size");
+	/* VP geometry */
+	E32(buf, 0x60, 1280, "VP width (fw -> ctrl+0xA8C 0x8310c)");
+	E32(buf, 0x64, 720, "VP height");
+	/* recon: BOTH u64 of each entry (fw 0x84228-0x84348) */
+	E64(buf, 0x88, RECON_H[0].addr, "recon[0] MSB");
+	E64(buf, 0x90, RECON_H[0].lsb_addr, "recon[0] LSB (mandatory for HEVC, :13921)");
+	E64(buf, 0x98, RECON_H[1].addr, "recon[1] MSB");
+	E64(buf, 0xa0, RECON_H[1].lsb_addr, "recon[1] LSB");
+	E8(buf, 0xfd7d, 1, "need_lsb_planes (fw 0x832f0)");
+	E64(buf, 0x2a8, h.vp.low_res_ref[0], "low-res ref[0] 0x2A8");
+	E64(buf, 0x2b0, h.vp.low_res_ref[1], "low-res ref[1]");
+	for (i = 0; i < 4; i++)
+		E64(buf, 0x3b8 + 8 * i, h.vp.low_res_result[i], "low-res result 0x3B8");
+	E64(buf, 0x4b8, CODED_H[0].addr, "coded addr[0] 0x4B8");
+	E64(buf, 0x4c0, CODED_H[1].addr, "coded addr[1]");
+	E32(buf, 0x558, 0x152000, "coded size[0] 0x558");
+	E32(buf, 0x55c, 0x152000, "coded size[1]");
+	E64(buf, 0x5c0, CODED_HDR_13[0].addr, "coded hdr[0] 0x5C0");
+	E64(buf, 0x5c8, CODED_HDR_13[1].addr, "coded hdr[1]");
+	E32(buf, 0x660, 0x23000, "coded hdr size[0]");
+	E32(buf, 0x664, 0x23000, "coded hdr size[1]");
+	E64(buf, 0xf6b0, h.vp.colocated[0], "colocated[0] 0xF6B0");
+	E64(buf, 0xf6b8, h.vp.colocated[1], "colocated[1]");
+	for (i = 0; i < 4; i++) {
+		E64(buf, 0xf7d0 + 8 * i, h.vp.src_nbr[0][i], "SrcNbr Info 0xF7D0");
+		E64(buf, 0xf7f0 + 8 * i, h.vp.src_nbr[1][i], "SrcNbr Pixel 0xF7F0");
+		E64(buf, 0xf810 + 8 * i, h.vp.src_nbr[2][i], "SrcNbr Data 0xF810");
+		E64(buf, 0xfed0 + 8 * i, h.vp.src_nbr[3][i], "SrcNbr FwData 0xFED0");
+	}
+	/* entropy: 2 rows (ctrl+3768 = 2, fw 0x835bc), all 4 columns, + sizes */
+	for (i = 0; i < 2; i++)
+		for (j = 0; j < 4; j++) {
+			E64(buf, 0xf830 + 32 * i + 8 * j, h.vp.entropy[i][j], "entropy 0xF830");
+			E32(buf, 0xfa30 + 16 * i + 4 * j, 0x10e000, "entropy size 0xFA30");
+		}
+	E64(buf, 0xfb30, 0x0000000400300000ull, "param sets addr 0xFB30 (fw 0x85228)");
+	E32(buf, 0xfb38, 0x1000, "param sets size 0xFB38");
+	/* VP scalars, docs/77 §6 */
+	E32(buf, 0xff24, 1, "iNumViews 0xFF24 (0 builds nothing)");
+	E32(buf, 0xff28, 1, "iNumViews[1] 0xFF28");
+	E32(buf, 0xfeb4, 16, "0xFEB4 = 16: input chroma 'as SPS' (:5118)");
+	E32(buf, 0xfda4, 1, "PPS count 0xFDA4");
+	E32(buf, 0xfdac, 1, "sSliceMap.iNum 0xFDAC");
+	E32(buf, 0xfdb0, 0, "0xFDB0 0");
+	E32(buf, 0xfdb4, 720, "0xFDB4 height");
+	E32(buf, 0xfd10, 0xffff, "sao_enb_config 0xFD10 (macOS)");
+	E32(buf, 0xfd1c, 0xffffffff, "sao_eo_bo 0xFD1C (firmware default)");
+	E32(buf, 0xfd20, 8, "input_bitdepth 0xFD20");
+	E32(buf, 0xfd2c, 1, "max_num_ref_frames 0xFD2C -> ctrl+0x120C (fw 0x832c8) = numRefs");
+	E16(buf, 0xfcf0, 0, "skip_mode 0 (macOS HEVC, 0x6d090)");
+	E32(buf, 0xfcf8, 0, "enable_tmvp 0 (macOS)");
+	E32(buf, 0xfcec, 0, "mode_8x8 not written for HEVC");
+	/* RC, as AVC fixed QP */
+	E32(buf, 0xff34, 1, "IDR period 0xFF34");
+	E32(buf, 0xff4c, 30, "frame rate 0xFF4C");
+	E32(buf, 0xff50, 2, "RCFlag 2 = FIXQP (0 skips DPB creation, 0x852e0)");
+	E32(buf, 0xff88, 0, "QP min");
+	E32(buf, 0xff8c, 51, "QP max");
+	E32(buf, 0xffb4, 30, "QP I");
+	E32(buf, 0xffb8, 30, "QP P");
+	E32(buf, 0xffbc, 30, "QP B");
+	/* tail */
+	E32(buf, 0x10de8, 0, "AVC sve_num offset is inside the VPS: untouched");
+	E32(buf, 0x32d9c, 1, "sSVEMap.iNum 0x32D9C (fw 0x82bc0)");
+	E32(buf, 0x32dc0, 0, "SVE map index 0x32DC0");
+	E8(buf, 0x32d98, 0, "bTranscodeOverlap 0");
+	/* VPS 0x105B0 */
+	E32(buf, 0x105b4, 0, "vps_id");
+	E8(buf, 0x105b8, 1, "vps_base_layer_internal");
+	E8(buf, 0x105b9, 1, "vps_base_layer_available");
+	E32(buf, 0x105bc, 0, "vps_max_layers_minus1");
+	E32(buf, 0x105c0, 0, "vps_max_sub_layers_minus1");
+	E8(buf, 0x105c4, 1, "vps_temporal_id_nesting");
+	expect_ptl(0x105c8, 120, "VPS");
+	E8(buf, 0x10c28, 1, "vps_sub_layer_ordering_info_present");
+	/* docs/77 §6 has 4 here (macOS); the driver sends max_num_ref_frames */
+	E32(buf, 0x10c2c, 1, "vps_max_dec_pic_buffering_minus1[0] = refs");
+	E32(buf, 0x10c90, 0, "vps_num_layer_sets_minus1");
+	E32(buf, 0x105b0 + 0x106f8, 0, "vps_num_hrd_parameters 0 (0x1d50c)");
+	/* SPS[0] 0x2468C */
+	E32(buf, 0x2469c, 0, "sps_max_sub_layers_minus1");
+	E8(buf, 0x246a0, 1, "sps_temporal_id_nesting (:756 spins on 0)");
+	expect_ptl(0x246a4, 120, "SPS");
+	E32(buf, 0x248c4, 0, "sps_seq_parameter_set_id");
+	E32(buf, 0x248c8, 1, "chroma_format_idc 4:2:0");
+	E32(buf, 0x248d0, 1280, "pic_width_in_luma_samples");
+	E32(buf, 0x248d4, 720, "pic_height_in_luma_samples");
+	E32(buf, 0x248d8, 40, "CTB cols (w+31)>>5");
+	E32(buf, 0x248dc, 23, "CTB rows (h+31)>>5");
+	E8(buf, 0x248e0, 0, "conformance_window_flag: 1280x720 is 16-aligned");
+	E32(buf, 0x248fc, 4, "log2_max_pic_order_cnt_lsb_minus4");
+	E8(buf, 0x24900, 1, "sps_sub_layer_ordering_info_present");
+	E32(buf, 0x24904, 1, "sps_max_dec_pic_buffering_minus1[0] = refs");
+	E32(buf, 0x24958, 0, "log2_min_luma_cb_minus3 (min CB 8)");
+	E32(buf, 0x2495c, 2, "log2_diff_max_min_cb (CTB 32)");
+	E32(buf, 0x24960, 0, "log2_min_tb_minus2 (TB 4)");
+	E32(buf, 0x24964, 3, "log2_diff_max_min_tb (TB 32)");
+	E32(buf, 0x24968, 1, "max_transform_hierarchy_depth_inter");
+	E32(buf, 0x2496c, 0, "max_transform_hierarchy_depth_intra");
+	E8(buf, 0x24970, 0, "scaling_list_enabled 0 (with PICMGMT+0x6F4 = 0, §2.5)");
+	E8(buf, 0x24971, 0, "sps_scaling_list_data_present 0");
+	E8(buf, 0x2621c, 0, "amp 0");
+	E8(buf, 0x2621d, 1, "SAO 1");
+	E8(buf, 0x2621e, 0, "pcm 0");
+	E8(buf, 0x262b8, 1, "sps_temporal_mvp 1 (macOS; slices send 0)");
+	E8(buf, 0x262b9, 0, "strong_intra_smoothing 0");
+	E8(buf, 0x262bc, 0, "vui 0");
+	E8(buf, 0x26364, 0, "sps_extension 0");
+	E8(buf, 0x26375, 1, "SPS bFWCreatesHeader (== PPS's, else 0xEE0005)");
+	E32(buf, 0x26378, 0, "SPS header_len 0");
+	E32(buf, 0x26580 + 0x14, 0, "SPS[1] untouched");
+	/* RPS 0x2CFBC, the IPPP set (docs/77 §2.4) */
+	E32(buf, 0x2cfbc, 1, "num_short_term_ref_pic_sets");
+	E8(buf, 0x2cfc0, 0, "entry 0 inter_ref_pic_set_prediction 0");
+	E32(buf, 0x2cff0, 1, "entry 0 num_negative_pics");
+	E32(buf, 0x2cff4, 0, "entry 0 num_positive_pics");
+	E16(buf, 0x2cff8, 0, "entry 0 delta_poc_s0_minus1[0] (u16)");
+	E8(buf, 0x2d018, 1, "entry 0 used_by_curr_pic_s0[0]");
+	E32(buf, 0x2d120, 1, "entry 0 NumDeltaPocs");
+	E8(buf, 0x32a24, 0, "long_term_ref_pics_present 0");
+	/* PPS[0] 0x28474 */
+	E32(buf, 0x28480, 0, "pps_pic_parameter_set_id (fw overwrites)");
+	E32(buf, 0x28484, 0, "pps_seq_parameter_set_id (fw overwrites)");
+	E32(buf, 0x2848c, 0, "num_extra_slice_header_bits (:945 spins)");
+	E8(buf, 0x28490, 0, "sign_data_hiding 0");
+	E8(buf, 0x28491, 0, "cabac_init_present 0");
+	E32(buf, 0x2849c, 0, "init_qp_minus26");
+	E8(buf, 0x284a2, 0, "cu_qp_delta_enabled 0 at fixed QP");
+	E32(buf, 0x284a4, 0, "diff_cu_qp_delta_depth 0");
+	E8(buf, 0x284ec, 0, "tiles 0");
+	E8(buf, 0x284ed, 1, "entropy_coding_sync (WPP) 1 (macOS)");
+	E8(buf, 0x28cfd, 0, "loop_filter_across_slices 0");
+	E8(buf, 0x28cfe, 1, "deblocking_control_present 1");
+	E8(buf, 0x28cff, 0, "deblocking_override_enabled 0");
+	E8(buf, 0x28d00, 0, "pps_deblocking_disabled 0");
+	E8(buf, 0x2a60c, 1, "PPS bFWCreatesHeader");
+	E32(buf, 0x2a610, 0, "PPS header_len 0 (accumulated, 0x1fa50)");
+	E32(buf, 0x2aa18 + 0x18, 0, "PPS[1] untouched");
+	expect_rest_zero(buf, 0x32dc8);
+	E8(buf, 0x32dc8, 0, "nothing past the command");
+
+	/*
+	 * The lambda block is the AVC one, byte for byte (docs/77 §2.6, §5:
+	 * macOS's HEVC tables are identical): compare against AVC_INIT.
+	 */
+	begin("13.5 start_hevc lambda block = AVC's");
+	{
+		static u8 avc[0x10e10];
+		struct ave_avc_session as = session_1080p(true);
+
+		h.vp.lambda_block = true;
+		as.lambda_block = true;
+		memset(buf, 0, sizeof(buf));
+		expect_int(ave_cmd_build_start_hevc(a, buf, sizeof(buf), &CTX, &h),
+			   0x32dc8, "size");
+		expect_int(ave_cmd_build_start_avc(a, avc, sizeof(avc), &CTX, &as),
+			   0x10e10, "AVC size");
+		checks++;
+		/* scales RC+0x68..0x7C; the QPs at 0xFFB4.. differ on purpose */
+		if (memcmp(buf + 0xff98, avc + 0xff98, 0xffb0 - 0xff98) ||
+		    memcmp(buf + 0xffc0, avc + 0xffc0, 0x10574 - 0xffc0))
+			FAIL("lambda block 0xFF98..0xFFAF / 0xFFC0..0x10573 differs from AVC_INIT's");
+		E32(buf, 0xff98, 0x400, "lambda scale 0x400");
+		E32(buf, 0x10570, get_unaligned_le32(avc + 0x10570), "last lambda word");
+		h.vp.lambda_block = false;
+	}
+
+	/* Cropped 1920x1080: coded 1088, conformance window bottom 4 (chroma units). */
+	begin("13.5 start_hevc 1080p crop");
+	h = hevc_720p();
+	h.vp.width = 1920; h.vp.height = 1088; h.vp.crop_height = 1080;
+	h.level_idc = 120;
+	memset(buf, 0, sizeof(buf));
+	expect_int(ave_cmd_build_start_hevc(a, buf, sizeof(buf), &CTX, &h), 0x32dc8, "size");
+	E32(buf, 0x60, 1920, "VP width");
+	E32(buf, 0x64, 1088, "VP height (MB-aligned)");
+	E32(buf, 0x248d0, 1920, "SPS width");
+	E32(buf, 0x248d4, 1088, "SPS height");
+	E32(buf, 0x248d8, 60, "CTB cols");
+	E32(buf, 0x248dc, 34, "CTB rows");
+	E8(buf, 0x248e0, 1, "conformance_window_flag");
+	E32(buf, 0x248e4, 0, "conf_win_left");
+	E32(buf, 0x248e8, 0, "conf_win_right");
+	E32(buf, 0x248ec, 0, "conf_win_top");
+	E32(buf, 0x248f0, 4, "conf_win_bottom = 8 rows / 2");
+	E32(buf, 0xfdb4, 1088, "slice map height");
+
+	/* Rate control: cu_qp_delta on, depth 2 (macOS non-FIXQP, docs/77 §5). */
+	begin("13.5 start_hevc rate control");
+	h = hevc_720p();
+	h.vp.rc_enable = true;
+	h.vp.bitrate = 2000000;
+	h.vp.qp_min = 10;
+	h.vp.qp_max = 51;
+	memset(buf, 0, sizeof(buf));
+	expect_int(ave_cmd_build_start_hevc(a, buf, sizeof(buf), &CTX, &h), 0x32dc8, "size");
+	E32(buf, 0xff50, 1, "RCFlag 1");
+	E32(buf, 0xff30, 2000000, "bitrate");
+	E8(buf, 0x284a2, 1, "cu_qp_delta_enabled 1");
+	E32(buf, 0x284a4, 2, "diff_cu_qp_delta_depth 2");
+
+	/* Intra-only / SAO-off / WPP-off variants. */
+	begin("13.5 start_hevc options off");
+	h = hevc_720p();
+	h.sao = false; h.wpp = false; h.sps_tmvp = false; h.n_st_rps = 0;
+	h.max_num_ref_frames = 0;
+	memset(buf, 0, sizeof(buf));
+	expect_int(ave_cmd_build_start_hevc(a, buf, sizeof(buf), &CTX, &h), 0x32dc8, "size");
+	E32(buf, 0xfd10, 0, "sao_enb_config 0 with SAO off");
+	E8(buf, 0x2621d, 0, "SPS SAO 0");
+	E8(buf, 0x284ed, 0, "WPP 0");
+	E8(buf, 0x262b8, 0, "SPS TMVP 0");
+	E32(buf, 0x2cfbc, 0, "no short-term set");
+	E32(buf, 0x2cff0, 0, "entry 0 untouched");
+	E32(buf, 0xfd2c, 0, "max_num_ref_frames 0");
+	E32(buf, 0x24904, 0, "sps_max_dec_pic_buffering_minus1 0");
+}
+
+/* The refusals docs/77 §8.1.2 asks for, and the post-build check. */
+static void test_start_hevc_refusals(void)
+{
+	const struct ave_cmd_abi *a = ave_cmd_abi_get(AVE_ABI_MACOS_13_5);
+	const struct ave_cmd_abi *a26 = ave_cmd_abi_get(AVE_ABI_MACOS_26_6);
+	static struct ave_cmd_abi x;
+	static struct ave_recon_buf rl[2];
+	struct ave_hevc_session h;
+	struct ave_cmd_ctx hctx = CTX;
+
+	begin("13.5 start_hevc refusals");
+#define REFUSE(what) do {						\
+		memset(buf, 0x5a, 0x40);					\
+		expect_int(ave_cmd_build_start_hevc(a, buf, sizeof(buf), &CTX, &h), \
+			   -EINVAL, what);					\
+		h = hevc_720p();						\
+	} while (0)
+	h = hevc_720p();
+	h.input_format_word = 0;	REFUSE("0xFEB4 = 0 (:5118)");
+	h.input_format_word = 0x20;	REFUSE("0xFEB4 bits [4:2] = 0");
+	h.input_format_word = 0x1c;	REFUSE("0xFEB4 bits [4:2] = 7 (meaning unknown)");
+	h.vp.need_lsb_planes = false;	REFUSE("no recon LSB planes (:13921)");
+	rl[0] = RECON_H[0]; rl[1] = RECON_H[1]; rl[1].lsb_addr = 0;
+	h.vp.recon = rl;		REFUSE("a zero recon LSB plane");
+	rl[1].lsb_addr = RECON_H[1].lsb_addr + 64;
+	h.vp.recon = rl;		REFUSE("recon LSB & 127");
+	h.vp.entropy[1][3] += 64;	REFUSE("entropy 64- but not 128-aligned (:7448)");
+	h.vp.n_entropy = 1;		REFUSE("1 entropy row, setPipe uses 2 (:14199)");
+	h.vp.entropy_size = 0;		REFUSE("no entropy size table (:14200)");
+	h.vp.src_nbr[1][2] += 64;	REFUSE("SrcNbr not 128-aligned (:14069)");
+	{
+		static struct ave_buf c2[2];
+
+		c2[0] = CODED_H[0]; c2[1] = CODED_H[1]; c2[1].addr += 64;
+		h.vp.coded = c2;	REFUSE("coded not 128-aligned (:7598)");
+	}
+	h.vp.profile_idc = 100;		REFUSE("an AVC profile in an HEVC session");
+	h.vp.cabac = true;		REFUSE("AVC CABAC flag set");
+	h.vp.scaling_flat = 16;		REFUSE("AVC scaling lists set");
+	h.level_idc = 121;		REFUSE("level_idc not in Table A.8");
+	h.vp.n_recon = 1;		REFUSE("1 DPB slot for 1 reference (numRefs copies 0..1)");
+	h.max_num_ref_frames = 0;	REFUSE("an IPPP set with no reference");
+	h.log2_max_poc_lsb_minus4 = 13;	REFUSE("log2_max_poc_lsb_minus4 > 12");
+	h.vp.param_sets_addr = 0;	REFUSE("no param-sets buffer");
+	h.vp.width = 176;		REFUSE("below 192 wide");
+	h.vp.qp_i = 52;			REFUSE("QP 52");
+	expect_int(ave_cmd_build_start_hevc(a, buf, 0x32dc7, &CTX, &h), -EINVAL,
+		   "len short by 1");
+	expect_int(ave_cmd_build_start_hevc(a26, buf, sizeof(buf), &CTX, &h), -EINVAL,
+		   "26.6.2: HEVC layout never read");
+	h.input_format_word = 4;
+	expect_int(ave_cmd_build_start_hevc(a, buf, sizeof(buf), &CTX, &h), 0x32dc8,
+		   "0xFEB4 = 4 (bits [4:2] = 1 = 4:2:0) passes :5118");
+	h = hevc_720p();
+	expect_int(ave_cmd_build_start_avc(a, buf, sizeof(buf), &hctx, &(struct ave_avc_session){0}),
+		   -EINVAL, "an empty AVC session");
+	hctx.hevc = true;
+	{
+		struct ave_avc_session as = session_1080p(true);
+
+		expect_int(ave_cmd_build_start_avc(a, buf, sizeof(buf), &hctx, &as),
+			   -EINVAL, "AVC_INIT with an HEVC ctx");
+	}
+#undef REFUSE
+
+	/*
+	 * Layout gaps: iNumViews not located (0 at 0xFF24 builds nothing),
+	 * 0xFEB4 not located.
+	 */
+	begin("13.5 start_hevc layout refusals");
+	x = *a;
+	x.start_avc.num_views[0] = AVE_OFF_NONE;
+	expect_int(ave_cmd_build_start_hevc(&x, buf, sizeof(buf), &CTX, &h), -EINVAL,
+		   "0xFF24 not located: iNumViews would be 0");
+	x = *a;
+	x.start_hevc.input_format_word = AVE_OFF_NONE;
+	expect_int(ave_cmd_build_start_hevc(&x, buf, sizeof(buf), &CTX, &h), -EINVAL,
+		   "0xFEB4 not located");
+
+	/*
+	 * The post-build re-read catches a layout whose writes clobber a field
+	 * the firmware spins on. Each case aliases one table entry so that a
+	 * LATER write lands on the field; the command must come back refused
+	 * and zeroed.
+	 */
+	begin("13.5 start_hevc post-build check");
+	x = *a;
+	x.hps.sps_temporal_nesting = x.hps.sps_header_len;	/* cleared by header_len */
+	memset(buf, 0x5a, sizeof(buf));
+	expect_int(ave_cmd_build_start_hevc(&x, buf, sizeof(buf), &CTX, &h), -EINVAL,
+		   "SPS temporal nesting clobbered to 0 (:756)");
+	E32(buf, 0, 0, "refused command zeroed");
+	covered[0] = covered[1] = covered[2] = covered[3] = 0;
+	x = *a;
+	x.hps.extra_sh_bits = x.hps.pps_fw_creates_header;	/* reads back 1 */
+	expect_int(ave_cmd_build_start_hevc(&x, buf, sizeof(buf), &CTX, &h), -EINVAL,
+		   "num_extra_slice_header_bits != 0 (:945)");
+	x = *a;
+	x.hps.sps_header_len = x.hps.sps_fw_creates_header - 1;	/* clears the flag */
+	expect_int(ave_cmd_build_start_hevc(&x, buf, sizeof(buf), &CTX, &h), -EINVAL,
+		   "bFWCreatesHeader mismatch (0xEE0005)");
+	x = *a;
+	x.start_hevc.sao_eo_bo = x.start_hevc.input_format_word;	/* 0xFFFFFFFF over 16 */
+	x.start_hevc.sao_enb_config = 0xfd18;			/* keep 0xFD1C's slot busy */
+	expect_int(ave_cmd_build_start_hevc(&x, buf, sizeof(buf), &CTX, &h), 0x32dc8,
+		   "control: 0xFEB4 = 0xFFFFFFFF has bits [4:2] = 7 >= 1, passes");
+	x = *a;
+	x.start_hevc.max_num_ref_frames = x.start_hevc.sve_num;	/* 1 -> refs */
+	h.max_num_ref_frames = 0; h.n_st_rps = 0;
+	expect_int(ave_cmd_build_start_hevc(&x, buf, sizeof(buf), &CTX, &h), -EINVAL,
+		   "sSVEMap.iNum clobbered to 0");
+	h = hevc_720p();
+}
+
+static void test_process_hevc_13_5(void)
+{
+	const struct ave_cmd_abi *a = ave_cmd_abi_get(AVE_ABI_MACOS_13_5);
+	const struct ave_cmd_abi *a26 = ave_cmd_abi_get(AVE_ABI_MACOS_26_6);
+	const u32 P = 0x55b0;	/* PICMGMT, fw SendCommandToQueue 0x145a8 */
+	const u32 SH = 0x40;	/* S, kext 0xfffffe0008eace38 */
+	const u64 SLOTS = 0x0000000a00000000ull;
+	struct ave_hevc_frame f = {
+		.pic = frame_idr(),
+		.poc_lsb = 3,
+		.sao = true,
+		.hdr_slot_base = SLOTS,
+		.hdr_slot_size = 0x40000,
+	};
+	u32 i;
+	int ret;
+
+	f.pic.frame_type = AVE_FRAME_TYPE_P;
+	f.pic.recon_luma_lsb_addr = 0x0000000200300000ull;
+	f.pic.recon_chroma_lsb_addr = 0x0000000200380000ull;
+
+	begin("13.5 process_hevc");
+	memset(buf, 0, sizeof(buf));
+	ret = ave_cmd_build_process_hevc(a, buf, sizeof(buf), &CTX, 22, &f);
+	expect_int(ret, 0x6838, "size (fw 0xdb30)");
+	expect_hdr_13_5_hevc(8, 22);		/* HEVC_ENCODE, caller's slot */
+	/* S at 0x40 (docs/77 §3.2) */
+	E32(buf, SH + 0x0, 0x5570, "S size word");
+	E8(buf, SH + 0xc, 1, "first_slice_segment_in_pic");
+	E32(buf, SH + 0x10, 0, "slice_pic_parameter_set_id");
+	E32(buf, SH + 0x28, 3, "slice_pic_order_cnt_lsb");
+	E8(buf, SH + 0x11c, 0, "slice_temporal_mvp 0");
+	E8(buf, SH + 0x11d, 1, "slice_sao_luma = SPS");
+	E8(buf, SH + 0x11e, 1, "slice_sao_chroma = SPS");
+	E8(buf, SH + 0x1aa, 1, "collocated_from_l0");
+	E32(buf, SH + 0x3d4, 3, "five_minus_max_num_merge_cand");
+	E8(buf, SH + 0x43c, 0, "slice_loop_filter_across_slices 0");
+	for (i = 0; i < 256; i++)
+		E64(buf, SH + 0x568 + 8 * i, SLOTS + 0x400ull * i,
+		    "SliceHeader slot i = base + i*0x400 (S+0x568)");
+	checks++;
+	if (SH + 0x568 + 8 * 256 > SH + 0xd6c)
+		FAIL("slot table past the firmware's 0xD6C copy");
+	/* PICMGMT at 0x55B0 - the AVC offsets (docs/77 §3.3) */
+	E32(buf, P + 0x000, 0xf68, "PICMGMT size word");
+	E32(buf, P + 0xca8, 7, "frameNumber (fw 0xfc24 reads cmd+0x6258)");
+	E32(buf, P + 0xcac, 1, "FrameType P");
+	E64(buf, P + 0x8c0, 0x0000000500000000ull, "sInput.Y (setPipe 0x71fa4)");
+	E32(buf, P + 0x8c8, 1920, "luma stride");
+	E64(buf, P + 0x8d0, 0x0000000500200000ull, "sInput.UV");
+	E32(buf, P + 0x8d8, 1920, "chroma stride");
+	E8(buf, P + 0xc00, 0, "sOutput mode");
+	E32(buf, P + 0xc04, 1, "sOutput index");
+	E64(buf, P + 0xc08, 0x0000000300400000ull, "sOutput.Coded");
+	E64(buf, P + 0xc10, 0x0000000310100000ull, "coded header");
+	E32(buf, P + 0xc18, 0x2f8000, "coded size");
+	E64(buf, P + 0x898, 0x0000000200000000ull, "recon Y MSB");
+	E64(buf, P + 0x8a0, 0x0000000200300000ull, "recon Y LSB");
+	E64(buf, P + 0x8a8, 0x00000002001fe000ull, "recon UV MSB");
+	E64(buf, P + 0x8b0, 0x0000000200380000ull, "recon UV LSB");
+	E64(buf, P + 0x8b8, 0x0000000600000000ull, "recon MV");
+	E32(buf, 0x5ca4, 0, "PICMGMT+0x6F4 scaling mode 0 = flat 16 (wire 0x5CA4)");
+	/* slice short-term RPS at 0x6524: SPS set 0 */
+	E8(buf, 0x6524, 1, "short_term_ref_pic_set_sps_flag");
+	E32(buf, 0x6528, 0, "short_term_ref_pic_set_idx");
+	E32(buf, 0x6518, 0, "0x6518 block zero (as the kext)");
+	expect_rest_zero(buf, 0x6838);
+
+	begin("13.5 process_hevc IDR");
+	f.pic.frame_type = AVE_FRAME_TYPE_IDR;
+	f.pic.force_key_frame = true;
+	f.poc_lsb = 0;
+	memset(buf, 0, sizeof(buf));
+	expect_int(ave_cmd_build_process_hevc(a, buf, sizeof(buf), &CTX, 21, &f),
+		   0x6838, "size");
+	E32(buf, P + 0xcac, 3, "FrameType IDR");
+	E32(buf, P + 0x38, 1, "forceKeyFrame");
+	E8(buf, 0x6524, 0, "no slice RPS on an IDR");
+	E32(buf, SH + 0x28, 0, "POC lsb 0");
+
+	begin("13.5 process_hevc refusals");
+	f.poc_lsb = 5;
+	expect_int(ave_cmd_build_process_hevc(a, buf, sizeof(buf), &CTX, 21, &f),
+		   -EINVAL, "IDR with POC lsb != 0");
+	f.poc_lsb = 0;
+	f.pic.coded_addr += 64;
+	expect_int(ave_cmd_build_process_hevc(a, buf, sizeof(buf), &CTX, 21, &f),
+		   -EINVAL, "coded not 128-aligned (:7598)");
+	f.pic.coded_addr -= 64;
+	f.hdr_slot_size = 0x3ffff;
+	expect_int(ave_cmd_build_process_hevc(a, buf, sizeof(buf), &CTX, 21, &f),
+		   -EINVAL, "SliceHeader surface < 256 x 0x400");
+	f.hdr_slot_size = 0x40000;
+	f.hdr_slot_base = 0;
+	expect_int(ave_cmd_build_process_hevc(a, buf, sizeof(buf), &CTX, 21, &f),
+		   -EINVAL, "no SliceHeader surface");
+	f.hdr_slot_base = SLOTS;
+	f.pic.n_entropy = 2;
+	f.pic.entropy[0][0] = 0x0000000800000000ull;
+	f.pic.entropy[1][0] = 0x0000000800100040ull;
+	expect_int(ave_cmd_build_process_hevc(a, buf, sizeof(buf), &CTX, 21, &f),
+		   -EINVAL, "per-frame entropy not 128-aligned");
+	f.pic.entropy[1][0] = 0x0000000800100000ull;
+	expect_int(ave_cmd_build_process_hevc(a, buf, sizeof(buf), &CTX, 41, &f),
+		   -EINVAL, "slot 41");
+	expect_int(ave_cmd_build_process_hevc(a, buf, 0x6837, &CTX, 21, &f),
+		   -EINVAL, "len short by 1");
+	expect_int(ave_cmd_build_process_hevc(a26, buf, sizeof(buf), &CTX, 21, &f),
+		   -EINVAL, "26.6.2: HEVC layout never read");
+	f.pic.frame_type = AVE_FRAME_TYPE_B;
+	expect_int(ave_cmd_build_process_hevc(a, buf, sizeof(buf), &CTX, 21, &f),
+		   -EINVAL, "B refused");
+	{
+		struct ave_cmd_ctx hctx = CTX;
+		struct ave_avc_frame af = frame_idr();
+
+		hctx.hevc = true;
+		expect_int(ave_cmd_build_process_avc(a, buf, sizeof(buf), &hctx, 21, &af),
+			   -EINVAL, "AVC_ENCODE with an HEVC ctx");
+	}
+}
+
+/* Open/Stop/Close of an HEVC session carry codec 1 (docs/77 §1.2). */
+static void test_hevc_simple(void)
+{
+	const struct ave_cmd_abi *a = ave_cmd_abi_get(AVE_ABI_MACOS_13_5);
+	static const struct { enum ave_op op; u16 id; u32 sz, slot; } t[] = {
+		{ AVE_OP_OPEN, 2, 0x40, 3 },
+		{ AVE_OP_STOP, 6, 0x40, 7 },
+		{ AVE_OP_CLOSE, 12, 0x48, 4 },
+	};
+	struct ave_cmd_ctx hctx = CTX;
+	u32 i;
+
+	hctx.hevc = true;
+	for (i = 0; i < 3; i++) {
+		begin("13.5 HEVC session simple command");
+		memset(buf, 0, sizeof(buf));
+		expect_int(ave_cmd_build_simple(a, t[i].op, buf, sizeof(buf), &hctx),
+			   t[i].sz, "size unchanged");
+		expect_hdr_13_5_hevc(t[i].id, t[i].slot);
+		expect_rest_zero(buf, t[i].sz);
+	}
+	begin("13.5 HEVC ctx: Config/Halt carry no codec");
+	memset(buf, 0, sizeof(buf));
+	expect_int(ave_cmd_build_simple(a, AVE_OP_HALT, buf, sizeof(buf), &hctx), 0x40, "halt");
+	E32(buf, 0x18, 0, "Halt codec 0 (global)");
+}
+
+/* HEVC coded length: + record+0x218 header bytes, no cabac_zero_words. */
+static void test_coded_length_hevc(void)
+{
+	const struct ave_cmd_abi *a = ave_cmd_abi_get(AVE_ABI_MACOS_13_5);
+	static u8 h[0x23000];
+	struct ave_coded_info ci;
+
+	begin("13.5 coded length HEVC");
+	memset(h, 0, sizeof(h));
+	put_unaligned_le32(1000, h + 0x180);		/* slice 0 written */
+	h[0x38c] = 8;					/* removed */
+	put_unaligned_le64(0x0000000a00000000ull, h + 0x390);	/* header slot 0 */
+	put_unaligned_le32(17, h + 0x398);		/* header bytes */
+	put_unaligned_le32(500, h + 0x180 + 0x220);	/* slice 1 */
+	put_unaligned_le64(0x0000000a00000400ull, h + 0x390 + 0x220);
+	put_unaligned_le32(12, h + 0x398 + 0x220);
+	put_unaligned_le32(7, h + 0xf0);		/* cabac_zero_words: stale */
+	put_unaligned_le32(1234, h + 0x98);
+
+	expect_int(ave_cmd_coded_length_codec(a, h, sizeof(h), 0x100000, true, 0x400, &ci),
+		   0, "HEVC decodes");
+	expect_int(ci.bytes, 1000 - 8 + 17 + 500 + 12, "bytes = sum(written + hdrlen - removed)");
+	expect_int(ci.hdr_bytes, 29, "header bytes");
+	expect_int(ci.span, 1500, "span = sum(written)");
+	expect_int(ci.n_slice, 2, "two slices");
+	expect_int(ci.slice[0].off, 0, "slice 0 off");
+	expect_int(ci.slice[0].len, 992, "slice 0 coded len");
+	expect_int(ci.slice[0].hdr_len, 17, "slice 0 header len");
+	expect_int(ci.slice[0].hdr_iova == 0x0000000a00000000ull, 1, "slice 0 header IOVA");
+	expect_int(ci.slice[1].off, 1000, "slice 1 off");
+	expect_int(ci.slice[1].hdr_iova == 0x0000000a00000400ull, 1, "slice 1 header IOVA");
+	expect_int(ci.cabac_zero_words, 0, "cabac_zero_words ignored for HEVC");
+	expect_int(ci.sps_pps_bits, 1234, "param-set bits +0x98");
+
+	expect_int(ave_cmd_coded_length(a, h, sizeof(h), 0x100000, &ci), 0, "AVC view");
+	expect_int(ci.bytes, 1492, "AVC: no header bytes");
+	expect_int(ci.cabac_zero_words, 7, "AVC: cabac_zero_words read");
+	expect_int(ci.slice[0].hdr_len, 0, "AVC: no header");
+
+	put_unaligned_le32(0x401, h + 0x398);
+	expect_int(ave_cmd_coded_length_codec(a, h, sizeof(h), 0x100000, true, 0x400, &ci),
+		   -EPROTO, "header longer than its slot");
+	put_unaligned_le32(17, h + 0x398);
+	put_unaligned_le64(0, h + 0x390);
+	expect_int(ave_cmd_coded_length_codec(a, h, sizeof(h), 0x100000, true, 0x400, &ci),
+		   -EPROTO, "header length with no slot IOVA");
+	expect_int(ave_cmd_coded_length_codec(ave_cmd_abi_get(AVE_ABI_MACOS_26_6), h,
+					      sizeof(h), 0, true, 0x400, &ci),
+		   -EINVAL, "26.6.2: coded header layout unread");
+}
+
 /* The stray-byte scan must actually catch a stray byte. */
 static void test_negative_control(void)
 {
@@ -1118,6 +1757,11 @@ int main(void)
 	test_process_26_6();
 	test_replies();
 	test_negative_control();
+	test_start_hevc_13_5();
+	test_start_hevc_refusals();
+	test_process_hevc_13_5();
+	test_hevc_simple();
+	test_coded_length_hevc();
 
 	printf("%s: %d checks, %d failures\n", failures ? "FAIL" : "PASS",
 	       checks, failures);

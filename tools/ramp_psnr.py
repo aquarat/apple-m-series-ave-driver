@@ -46,8 +46,12 @@ def main():
     w, h = a.width, a.height
     fs = w * h * 3 // 2
     with tempfile.NamedTemporaryFile(suffix=".yuv") as t:
-        r = subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "h264", "-i",
-                            os.path.join(a.dir, "frame.h264"), "-pix_fmt",
+        # An HEVC self-test (session_codec=1) publishes frame.h265 instead.
+        hevc = os.path.exists(os.path.join(a.dir, "frame.h265"))
+        r = subprocess.run(["ffmpeg", "-v", "error", "-y", "-f",
+                            "hevc" if hevc else "h264", "-i",
+                            os.path.join(a.dir, "frame.h265" if hevc else "frame.h264"),
+                            "-pix_fmt",
                             "yuv420p", "-f", "rawvideo", t.name],
                            capture_output=True, text=True)
         if r.returncode:

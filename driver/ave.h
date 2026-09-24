@@ -205,6 +205,13 @@ struct ave_device {
 	 */
 	bool			client_open;
 	/*
+	 * The open client's codec, 0 = AVC, 1 = HEVC: its Stop and Close
+	 * carry it in the header too (docs/77 §1.2). Kept here, not in the
+	 * session buffers, because remove() closes the client after those
+	 * may be gone.
+	 */
+	u8			client_codec;
+	/*
 	 * Set when a teardown could not be proven clean: nothing is unmapped,
 	 * nothing this driver holds is freed, and ave_power_off() skips the
 	 * runtime-PM put, including from its devres action.

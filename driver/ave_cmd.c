@@ -118,7 +118,15 @@ static int ave_cmd_begin(const struct ave_cmd_abi *abi, enum ave_op op,
 		return -EINVAL;
 
 	global = d->slot == AVE_SLOT_GLOBAL;
-	hevc = op == AVE_OP_START_HEVC || op == AVE_OP_PROCESS_HEVC;
+	/*
+	 * The HEVC commands always carry the HEVC codec; the rest of an HEVC
+	 * session's client commands (Open, Stop, Close, ...) carry it when
+	 * the caller says the session is HEVC (docs/77 §1.2). An AVC command
+	 * in an HEVC session is a caller bug.
+	 */
+	if (ctx->hevc && (op == AVE_OP_START_AVC || op == AVE_OP_PROCESS_AVC))
+		return -EINVAL;
+	hevc = op == AVE_OP_START_HEVC || op == AVE_OP_PROCESS_HEVC || ctx->hevc;
 	if (!global && h->client_id_bytes == 4 && ctx->client_id > 0xffffffffull)
 		return -EINVAL;
 
@@ -250,22 +258,22 @@ static int ave_avc_profile_enum(u8 profile_idc)
 #define AVE_AVC_MIN_H	96	/* table-driven on 26.6.2 (docs/47 §5)       */
 #define AVE_AVC_MAX_WH	4096
 
-int ave_cmd_build_start_avc(const struct ave_cmd_abi *abi, u8 *buf, size_t len,
-			    const struct ave_cmd_ctx *ctx,
-			    const struct ave_avc_session *s)
+/*
+ * The half of AVC_INIT and HEVC_INIT that is the same on the wire: the
+ * AVE_VIDEO_PARAMS scalars, AVEFWRCSettings and the buffer tables at
+ * .start_avc's offsets (docs/77 §2.2, §2.7). Checked and written by the same
+ * code for both codecs, so what AVC has proven on hardware is exactly what
+ * HEVC sends. @align is the address alignment the controller asserts on the
+ * SrcNbr and entropy buffers: AVE_STRIDE_ALIGN (64) for AVC - the only value
+ * before HEVC - and 128 for HEVC (:14062, :7447).
+ *
+ * Moved verbatim out of ave_cmd_build_start_avc(); the AVC-only checks
+ * (profile, level, CABAC, scaling lists) stayed there.
+ */
+static int ave_vp_check(const struct ave_start_avc_layout *l,
+			const struct ave_avc_session *s, u32 align)
 {
-	const struct ave_start_avc_layout *l;
-	const struct ave_sps_layout *sps;
-	const struct ave_pps_layout *pps;
-	u32 cw, ch, dw, dh, i;
-	int prof, lvl, ret;
-	struct ave_wr w;
-
-	if (!abi || !s)
-		return -EINVAL;
-	l = &abi->start_avc;
-	sps = &abi->sps;
-	pps = &abi->pps;
+	u32 i;
 
 	/* ---- parameter validation, before touching the buffer ---- */
 	if (s->width < AVE_AVC_MIN_W || s->width > AVE_AVC_MAX_WH ||
@@ -281,10 +289,6 @@ int ave_cmd_build_start_avc(const struct ave_cmd_abi *abi, u8 *buf, size_t len,
 		return -EINVAL;
 	/* The firmware's controller needs a target and an ABI that has it. */
 	if (s->rc_enable && (!s->bitrate || l->rc_mode_on == AVE_OFF_NONE))
-		return -EINVAL;
-	prof = ave_avc_profile_enum(s->profile_idc);
-	lvl = ave_avc_level_enum(s->level_idc);
-	if (prof < 0 || lvl < 0 || (s->profile_idc == 66 && s->cabac))
 		return -EINVAL;
 	if (!s->fw_client_addr || !s->fw_client_size ||
 	    !s->fw_client_mem_addr || !s->fw_client_mem_size)
@@ -338,7 +342,6 @@ int ave_cmd_build_start_avc(const struct ave_cmd_abi *abi, u8 *buf, size_t len,
 	    (s->dbg_bits && l->dbg_bits == AVE_OFF_NONE) ||
 	    (s->ipcm_islice && l->ipcm_islice == AVE_OFF_NONE) ||
 	    (s->lambda_block && l->lambda_scales == AVE_OFF_NONE) ||
-	    (s->scaling_flat && abi->sps.scaling_4x4 == AVE_OFF_NONE) ||
 	    (s->skip_mode && l->skip_mode == AVE_OFF_NONE))
 		return -EINVAL;
 	if (s->n_entropy) {
@@ -353,7 +356,7 @@ int ave_cmd_build_start_avc(const struct ave_cmd_abi *abi, u8 *buf, size_t len,
 		for (i = 0; i < s->n_entropy; i++)
 			for (j = 0; j < cols; j++)
 				if (!s->entropy[i][j] ||
-				    (s->entropy[i][j] & (AVE_STRIDE_ALIGN - 1)))
+				    (s->entropy[i][j] & (align - 1)))
 					return -EINVAL;
 	}
 	if (s->n_colocated) {
@@ -398,60 +401,68 @@ int ave_cmd_build_start_avc(const struct ave_cmd_abi *abi, u8 *buf, size_t len,
 				continue;
 			for (i = 0; i < s->n_src_nbr; i++)
 				if (!s->src_nbr[g][i] ||
-				    (s->src_nbr[g][i] & (AVE_STRIDE_ALIGN - 1)))
+				    (s->src_nbr[g][i] & (align - 1)))
 					return -EINVAL;
 		}
 	}
+	return 0;
+}
 
-	ret = ave_cmd_begin(abi, AVE_OP_START_AVC, buf, len, ctx, 0, &w);
-	if (ret < 0)
-		return ret;
-
-	cw = ave_mb_align(s->width);
-	ch = ave_mb_align(s->height);
+/*
+ * Write the shared half. @sve_num is where this command keeps sSVEMap.iNum:
+ * AVC_INIT's tail (0x10DE8) lies inside HEVC_INIT's VPS block, so the
+ * caller names it. Moved verbatim out of ave_cmd_build_start_avc(), less the
+ * profile-dependent mode_8x8 write, which stayed there.
+ */
+static void ave_vp_fill(struct ave_wr *w, const struct ave_start_avc_layout *l,
+			const struct ave_avc_session *s, u32 sve_num)
+{
+	u32 cw = ave_mb_align(s->width);
+	u32 ch = ave_mb_align(s->height);
+	u32 i;
 
 	/* ---- per-client firmware buffers ---- */
-	wr64(&w, l->fw_client_addr, s->fw_client_addr);
-	wr32(&w, l->fw_client_size, s->fw_client_size);
-	wr64(&w, l->fw_client_mem_addr, s->fw_client_mem_addr);
+	wr64(w, l->fw_client_addr, s->fw_client_addr);
+	wr32(w, l->fw_client_size, s->fw_client_size);
+	wr64(w, l->fw_client_mem_addr, s->fw_client_mem_addr);
 	/* 13.5 only: 26.6.2's counterpart has not been located (docs/52). */
 	/*
 	 * sSVEMap.iNum: we always run a single SVE core. Writing it also keeps
 	 * the firmware off iFwClientMemAddr, whose carve is behind iNum > 1
 	 * (fw 0x5cb50). docs/54.
 	 */
-	wr32_opt(&w, l->sve_num, 1);
+	wr32_opt(w, sve_num, 1);
 	if (l->param_sets_addr != AVE_OFF_NONE) {
-		wr64(&w, l->param_sets_addr, s->param_sets_addr);
-		wr32_opt(&w, l->param_sets_size, s->param_sets_size);
+		wr64(w, l->param_sets_addr, s->param_sets_addr);
+		wr32_opt(w, l->param_sets_size, s->param_sets_size);
 	}
-	wr32(&w, l->fw_client_mem_size, s->fw_client_mem_size);
+	wr32(w, l->fw_client_mem_size, s->fw_client_mem_size);
 
 	/* ---- geometry: MB-aligned, display size via SPS cropping (docs/38) */
-	wr32(&w, l->width, cw);
-	wr32(&w, l->height, ch);
+	wr32(w, l->width, cw);
+	wr32(w, l->height, ch);
 
 	/* ---- fixed-QP rate control ---- */
-	wr32(&w, l->frame_rate, s->frame_rate);
-	wr32(&w, l->bitrate, s->bitrate);
+	wr32(w, l->frame_rate, s->frame_rate);
+	wr32(w, l->bitrate, s->bitrate);
 	if (s->rc_enable) {
-		wr32(&w, l->rc_mode, l->rc_mode_on);
+		wr32(w, l->rc_mode, l->rc_mode_on);
 		/*
 		 * bitrate_sel picks which bitrate field the controller reads;
 		 * 0 keeps the plain ui32BitRate above. The DRL block's layout
 		 * is unknown, so it stays disabled.
 		 */
-		wr32_opt(&w, l->bitrate_sel, 0);
-		wr32_opt(&w, l->frame_rate_div, s->frame_rate_div ?
+		wr32_opt(w, l->bitrate_sel, 0);
+		wr32_opt(w, l->frame_rate_div, s->frame_rate_div ?
 						s->frame_rate_div : 1);
 	} else {
-		wr32(&w, l->rc_mode, l->rc_mode_fixed_qp);
+		wr32(w, l->rc_mode, l->rc_mode_fixed_qp);
 		if (l->rc_feature != AVE_OFF_NONE)
-			wr64(&w, l->rc_feature, l->rc_feature_fixed_qp);
+			wr64(w, l->rc_feature, l->rc_feature_fixed_qp);
 	}
-	wr32(&w, l->qp_i, s->qp_i);
-	wr32(&w, l->qp_p, s->qp_p);
-	wr32(&w, l->qp_b, s->qp_b);
+	wr32(w, l->qp_i, s->qp_i);
+	wr32(w, l->qp_p, s->qp_p);
+	wr32(w, l->qp_b, s->qp_b);
 	/*
 	 * Only under rate control. Writing these unconditionally changed the
 	 * default fixed-QP image (0xFF88 went from 0 to session_qp_min) while
@@ -460,15 +471,15 @@ int ave_cmd_build_start_avc(const struct ave_cmd_abi *abi, u8 *buf, size_t len,
 	 * runs.
 	 */
 	if (s->rc_enable) {
-		wr32(&w, l->qp_min, s->qp_min);
-		wr32(&w, l->qp_max, s->qp_max ? s->qp_max : 51);
+		wr32(w, l->qp_min, s->qp_min);
+		wr32(w, l->qp_max, s->qp_max ? s->qp_max : 51);
 	} else {
-		wr32(&w, l->qp_min, 0);
-		wr32(&w, l->qp_max, 51);
+		wr32(w, l->qp_min, 0);
+		wr32(w, l->qp_max, 51);
 	}
-	wr32(&w, l->key_interval, s->key_interval);
-	wr32_opt(&w, l->key_interval_strict, s->key_interval);
-	wr32(&w, l->slice_num, 1);
+	wr32(w, l->key_interval, s->key_interval);
+	wr32_opt(w, l->key_interval_strict, s->key_interval);
+	wr32(w, l->slice_num, 1);
 	/*
 	 * iNumViews: Apple's kext refuses to send the command with these zero
 	 * (0 < iNumViews <= 2, kext 0xec9078), and we have been sending zero.
@@ -476,32 +487,30 @@ int ave_cmd_build_start_avc(const struct ave_cmd_abi *abi, u8 *buf, size_t len,
 	 * were failing rather than changing what the hardware does. docs/62 §6.
 	 */
 	for (i = 0; i < ARRAY_SIZE(l->num_views); i++)
-		wr32_opt(&w, l->num_views[i], 1);
+		wr32_opt(w, l->num_views[i], 1);
 	/*
 	 * The source-read scalars. Both default to zero, which is exactly what
 	 * every run up to F17 sent; a non-zero value here is an experiment.
 	 */
 	if (s->src_mode)
-		wr16(&w, l->src_mode, s->src_mode);
+		wr16(w, l->src_mode, s->src_mode);
 	if (s->src_cfg_byte)
-		wr8(&w, l->src_cfg_byte, s->src_cfg_byte);
+		wr8(w, l->src_cfg_byte, s->src_cfg_byte);
 	if (s->src_go_bit3)
-		wr8(&w, l->src_go_bit3, s->src_go_bit3);
+		wr8(w, l->src_go_bit3, s->src_go_bit3);
 	if (s->src_go_bits)
-		wr8(&w, l->src_go_bits, s->src_go_bits);
+		wr8(w, l->src_go_bits, s->src_go_bits);
 	if (s->dbg_bits)
-		wr32(&w, l->dbg_bits, s->dbg_bits);
+		wr32(w, l->dbg_bits, s->dbg_bits);
 	if (s->ipcm_islice)
-		wr8(&w, l->ipcm_islice, s->ipcm_islice);
+		wr8(w, l->ipcm_islice, s->ipcm_islice);
 	if (s->skip_mode)
-		wr16(&w, l->skip_mode, s->skip_mode);
-	/* High: the 8x8 transform, matching PPS transform_8x8_mode_flag. */
-	if (s->profile_idc >= 100)
-		wr32_opt(&w, l->mode_8x8, 2);
+		wr16(w, l->skip_mode, s->skip_mode);
 	if (s->lambda_block) {
 		/*
 		 * max(1, round(2^((QP - 12) / 6))) for QP 0..51: the sqrt-lambda
-		 * curve, and exactly macOS's table (docs/72 §5.2).
+		 * curve, and exactly macOS's table (docs/72 §5.2). macOS's HEVC
+		 * tables are byte-identical (docs/77 §5).
 		 */
 		static const u8 lam[52] = {
 			1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
@@ -512,18 +521,18 @@ int ave_cmd_build_start_avc(const struct ave_cmd_abi *abi, u8 *buf, size_t len,
 		u32 q, k, j, idx = 0;
 
 		for (k = 0; k < 5; k++)
-			wr32(&w, l->lambda_scales + 4 * k, 0x400);
+			wr32(w, l->lambda_scales + 4 * k, 0x400);
 		for (q = 0; q < 52; q++) {
 			if (q && lam[q] != lam[q - 1])
 				idx++;
-			wr32(&w, l->lambda_qp_tab + 4 * q, lam[q]);
+			wr32(w, l->lambda_qp_tab + 4 * q, lam[q]);
 			/* index of lam[q] among the distinct values */
-			wr32(&w, l->lambda_idx_tab + 4 * q, idx);
+			wr32(w, l->lambda_idx_tab + 4 * q, idx);
 			if (!q || lam[q] != lam[q - 1]) {
 				/* record idx: { lambda, 8 x 16 * lambda } */
-				wr32(&w, l->lambda_rec_tab + 36 * idx, lam[q]);
+				wr32(w, l->lambda_rec_tab + 36 * idx, lam[q]);
 				for (j = 1; j < 9; j++)
-					wr32(&w, l->lambda_rec_tab + 36 * idx + 4 * j,
+					wr32(w, l->lambda_rec_tab + 36 * idx + 4 * j,
 					     16 * lam[q]);
 			}
 		}
@@ -533,48 +542,48 @@ int ave_cmd_build_start_avc(const struct ave_cmd_abi *abi, u8 *buf, size_t len,
 	for (i = 0; i < s->n_recon; i++) {
 		u32 e = l->recon_set + i * l->recon_stride;
 
-		wr64(&w, e + l->recon_addr, s->recon[i].addr);
+		wr64(w, e + l->recon_addr, s->recon[i].addr);
 		if (l->recon_size != AVE_OFF_NONE)
-			wr32(&w, e + l->recon_size, s->recon[i].luma_size);
+			wr32(w, e + l->recon_size, s->recon[i].luma_size);
 		/* 26.6.2 uncompressed entry is {base, luma, base, 0}, docs/21 §3.2 */
 		if (l->recon_meta_addr != AVE_OFF_NONE)
-			wr64(&w, e + l->recon_meta_addr, s->recon[i].addr);
+			wr64(w, e + l->recon_meta_addr, s->recon[i].addr);
 		if (s->need_lsb_planes)
-			wr64(&w, e + l->recon_lsb_addr, s->recon[i].lsb_addr);
+			wr64(w, e + l->recon_lsb_addr, s->recon[i].lsb_addr);
 	}
 	if (s->need_lsb_planes)
-		wr8(&w, l->need_lsb_planes, 1);
+		wr8(w, l->need_lsb_planes, 1);
 	for (i = 0; i < s->n_low_res_ref; i++)
-		wr64(&w, l->low_res_ref_set + i * l->low_res_ref_stride,
+		wr64(w, l->low_res_ref_set + i * l->low_res_ref_stride,
 		     s->low_res_ref[i]);
 	/* The low-res search's output surfaces; read from the first P frame. */
 	for (i = 0; i < s->n_low_res_result; i++)
-		wr64(&w, l->low_res_result_set + i * l->low_res_result_stride,
+		wr64(w, l->low_res_result_set + i * l->low_res_result_stride,
 		     s->low_res_result[i]);
 	for (i = 0; i < s->n_colocated; i++)
-		wr64(&w, l->colocated_set + i * l->colocated_stride,
+		wr64(w, l->colocated_set + i * l->colocated_stride,
 		     s->colocated[i]);
 	/* The SEB write buffers the pipe's drain channels are programmed from. */
 	for (i = 0; i < s->n_entropy; i++) {
 		u32 j, cols = s->n_entropy_cols ? s->n_entropy_cols : 1;
 
 		for (j = 0; j < cols; j++) {
-			wr64(&w, l->entropy_set + i * l->entropy_stride_i +
+			wr64(w, l->entropy_set + i * l->entropy_stride_i +
 			     j * l->entropy_stride_j, s->entropy[i][j]);
 			/* Matching size, at an inferred offset (see ave_abi.h). */
 			if (s->entropy_size && l->entropy_size_set != AVE_OFF_NONE)
-				wr32(&w, l->entropy_size_set +
+				wr32(w, l->entropy_size_set +
 				     i * l->entropy_size_stride_i +
 				     j * l->entropy_size_stride_j,
 				     s->entropy_size);
 		}
 	}
 	for (i = 0; i < s->n_coded; i++) {
-		wr64(&w, l->coded_addr + i * l->coded_addr_stride, s->coded[i].addr);
-		wr32(&w, l->coded_size + i * l->coded_size_stride, s->coded[i].size);
-		wr64(&w, l->coded_hdr_addr + i * l->coded_hdr_addr_stride,
+		wr64(w, l->coded_addr + i * l->coded_addr_stride, s->coded[i].addr);
+		wr32(w, l->coded_size + i * l->coded_size_stride, s->coded[i].size);
+		wr64(w, l->coded_hdr_addr + i * l->coded_hdr_addr_stride,
 		     s->coded_hdr[i].addr);
-		wr32(&w, l->coded_hdr_size + i * l->coded_hdr_size_stride,
+		wr32(w, l->coded_hdr_size + i * l->coded_hdr_size_stride,
 		     s->coded_hdr[i].size);
 	}
 	for (i = 0; i < s->n_src_nbr; i++) {
@@ -582,9 +591,50 @@ int ave_cmd_build_start_avc(const struct ave_cmd_abi *abi, u8 *buf, size_t len,
 
 		for (g = 0; g < AVE_SRC_NBR_GROUPS; g++)
 			if (l->src_nbr_set[g] != AVE_OFF_NONE)
-				wr64(&w, l->src_nbr_set[g] + i * 8,
+				wr64(w, l->src_nbr_set[g] + i * 8,
 				     s->src_nbr[g][i]);
 	}
+}
+
+int ave_cmd_build_start_avc(const struct ave_cmd_abi *abi, u8 *buf, size_t len,
+			    const struct ave_cmd_ctx *ctx,
+			    const struct ave_avc_session *s)
+{
+	const struct ave_start_avc_layout *l;
+	const struct ave_sps_layout *sps;
+	const struct ave_pps_layout *pps;
+	u32 cw, ch, dw, dh;
+	int prof, lvl, ret;
+	struct ave_wr w;
+
+	if (!abi || !s)
+		return -EINVAL;
+	l = &abi->start_avc;
+	sps = &abi->sps;
+	pps = &abi->pps;
+
+	/* ---- parameter validation, before touching the buffer ---- */
+	ret = ave_vp_check(l, s, AVE_STRIDE_ALIGN);
+	if (ret)
+		return ret;
+	prof = ave_avc_profile_enum(s->profile_idc);
+	lvl = ave_avc_level_enum(s->level_idc);
+	if (prof < 0 || lvl < 0 || (s->profile_idc == 66 && s->cabac))
+		return -EINVAL;
+	if (s->scaling_flat && abi->sps.scaling_4x4 == AVE_OFF_NONE)
+		return -EINVAL;
+
+	ret = ave_cmd_begin(abi, AVE_OP_START_AVC, buf, len, ctx, 0, &w);
+	if (ret < 0)
+		return ret;
+
+	cw = ave_mb_align(s->width);
+	ch = ave_mb_align(s->height);
+
+	ave_vp_fill(&w, l, s, l->sve_num);
+	/* High: the 8x8 transform, matching PPS transform_8x8_mode_flag. */
+	if (s->profile_idc >= 100)
+		wr32_opt(&w, l->mode_8x8, 2);
 
 	/* ---- SPS ---- */
 	wr32(&w, sps->profile, sps->enum_profile_level ? (u32)prof : s->profile_idc);
@@ -640,18 +690,270 @@ int ave_cmd_build_start_avc(const struct ave_cmd_abi *abi, u8 *buf, size_t len,
 	return ave_cmd_end(&w);
 }
 
-int ave_cmd_build_process_avc(const struct ave_cmd_abi *abi, u8 *buf,
-			      size_t len, const struct ave_cmd_ctx *ctx,
-			      u32 slot, const struct ave_avc_frame *f)
+/* ------------------------------------------------------------------------ */
+/* HEVC (docs/77)                                                           */
+/* ------------------------------------------------------------------------ */
+
+#define AVE_HEVC_PROFILE_MAIN	1	/* general_profile_idc */
+
+/* general_level_idc values of Table A.8 (30 x level). */
+static bool ave_hevc_level_ok(u8 idc)
 {
-	const struct ave_process_avc_layout *l;
+	static const u8 ok[] = {
+		30, 60, 63, 90, 93, 120, 123, 150, 153, 156, 180, 183, 186,
+	};
+	u32 i;
+
+	for (i = 0; i < sizeof(ok); i++)
+		if (ok[i] == idc)
+			return true;
+	return false;
+}
+
+/* profile_tier_level() for Main, general_tier 0 (docs/77 §2.3, §5). */
+static void ave_hevc_ptl(struct ave_wr *w, const struct ave_hevc_ps_layout *p,
+			 u32 ptl, u8 level_idc)
+{
+	wr32(w, ptl + p->ptl_profile_idc, AVE_HEVC_PROFILE_MAIN);
+	/* Main is also Main 10 compatible: compat[1] and compat[2]. */
+	wr8(w, ptl + p->ptl_compat + 1, 1);
+	wr8(w, ptl + p->ptl_compat + 2, 1);
+	wr8(w, ptl + p->ptl_progressive, 1);
+	wr8(w, ptl + p->ptl_non_packed, 1);
+	wr8(w, ptl + p->ptl_frame_only, 1);
+	wr32(w, ptl + p->ptl_level_idc, level_idc);
+}
+
+/*
+ * Re-read what was written at the fields whose wrong value the firmware
+ * answers with an assert that spins (docs/77 §7), so a layout whose writes
+ * overlap - a later block clobbering an earlier field - is refused on the
+ * host instead of hanging the firmware.
+ */
+static bool ave_hevc_verify(const u8 *b, const struct ave_cmd_abi *abi,
+			    const struct ave_hevc_session *h)
+{
+	const struct ave_start_avc_layout *l = &abi->start_avc;
+	const struct ave_start_hevc_layout *hl = &abi->start_hevc;
+	const struct ave_hevc_ps_layout *p = &abi->hps;
+	u32 vps = hl->vps_block, sps = hl->sps_block[0], pps = hl->pps_block[0];
+	u32 fmt, i;
+
+	/* Hevc_headers.cpp:756: nesting must be 1 with no sub-layers. */
+	if (!get_unaligned_le32(b + sps + p->sps_max_sub_layers_m1) &&
+	    b[sps + p->sps_temporal_nesting] != 1)
+		return false;
+	if (!get_unaligned_le32(b + vps + p->vps_max_sub_layers_m1) &&
+	    b[vps + p->vps_temporal_nesting] != 1)
+		return false;
+	/* Hevc_headers.cpp:945 */
+	if (get_unaligned_le32(b + pps + p->extra_sh_bits))
+		return false;
+	/* The PPS writer ADDS to this (0x1fa50). */
+	if (get_unaligned_le32(b + pps + p->pps_header_len) ||
+	    get_unaligned_le32(b + sps + p->sps_header_len))
+		return false;
+	/* 0xEE0005 on a mismatch (0x84f8c); we want both set. */
+	if (b[sps + p->sps_fw_creates_header] != 1 ||
+	    b[pps + p->pps_fw_creates_header] != 1)
+		return false;
+	/* CHEVCController_H13C.cpp:5118 (0x83658-0x83680). */
+	fmt = (get_unaligned_le32(b + hl->input_format_word) >> 2) & 7;
+	if (fmt != 4 &&
+	    fmt < get_unaligned_le32(b + sps + p->chroma_format_idc))
+		return false;
+	/* iNumViews 0 silently builds no recon, SPS/PPS or RC (docs/77 §2.2). */
+	if (!get_unaligned_le32(b + l->num_views[0]))
+		return false;
+	if (get_unaligned_le32(b + hl->sve_num) != 1)
+		return false;
+	/* ui32RCFlag 0 skips DPB creation (0x852e0). */
+	if (!get_unaligned_le32(b + l->rc_mode))
+		return false;
+	/* setPipe :13921..:13969: every recon plane pair, incl. the LSB. */
+	if (b[l->need_lsb_planes] != 1)
+		return false;
+	for (i = 0; i < h->vp.n_recon; i++) {
+		u32 e = l->recon_set + i * l->recon_stride;
+		u64 msb = get_unaligned_le64(b + e + l->recon_addr);
+		u64 lsb = get_unaligned_le64(b + e + l->recon_lsb_addr);
+
+		if (!msb || !lsb || ((msb | lsb) & 127))
+			return false;
+	}
+	return true;
+}
+
+int ave_cmd_build_start_hevc(const struct ave_cmd_abi *abi, u8 *buf,
+			     size_t len, const struct ave_cmd_ctx *ctx,
+			     const struct ave_hevc_session *h)
+{
+	const struct ave_start_avc_layout *l;
+	const struct ave_start_hevc_layout *hl;
+	const struct ave_hevc_ps_layout *p;
+	const struct ave_avc_session *s;
+	u32 vps, sps, pps, rps, cw, ch, dw, dh, align, fmt, i;
+	bool rc;
 	struct ave_wr w;
-	u32 base, i;
 	int ret;
 
-	if (!abi || !f)
+	if (!abi || !h)
 		return -EINVAL;
-	l = &abi->process_avc;
+	l = &abi->start_avc;
+	hl = &abi->start_hevc;
+	p = &abi->hps;
+	s = &h->vp;
+
+	/* An ABI whose HEVC layout was never read (26.6.2): refuse. */
+	if (hl->vps_block == AVE_OFF_NONE || !hl->shares_avc_vp ||
+	    !hl->sps_block[0] || !hl->pps_block[0] || !hl->rps_block ||
+	    !hl->sve_num || !hl->input_format_word || !hl->pps_count ||
+	    !hl->sao_enb_config || !hl->sao_eo_bo || !hl->input_bitdepth ||
+	    !hl->max_num_ref_frames || !hl->slice_map_height ||
+	    !hl->entropy_rows)
+		return -EINVAL;
+	/* The shared fields HEVC cannot do without (docs/77 §2.2, §7). */
+	if (l->num_views[0] == AVE_OFF_NONE || l->need_lsb_planes == AVE_OFF_NONE ||
+	    l->entropy_size_set == AVE_OFF_NONE || l->param_sets_addr == AVE_OFF_NONE)
+		return -EINVAL;
+	align = hl->buf_align ? hl->buf_align : AVE_STRIDE_ALIGN;
+
+	ret = ave_vp_check(l, s, align);
+	if (ret)
+		return ret;
+	/* AVC-only members: meaningless here, so a set one is a caller bug. */
+	if (s->profile_idc || s->level_idc || s->cabac || s->scaling_flat)
+		return -EINVAL;
+	if (!ave_hevc_level_ok(h->level_idc))
+		return -EINVAL;
+	/* :5118 - bits [4:2] 0 fails it for 4:2:0; >4 means nothing known. */
+	fmt = (h->input_format_word >> 2) & 7;
+	if (!fmt || fmt > 4)
+		return -EINVAL;
+	/* setPipe asserts all four recon planes (:13921..:13969). */
+	if (!s->need_lsb_planes)
+		return -EINVAL;
+	if (h->log2_max_poc_lsb_minus4 > 12 || h->n_st_rps > 1 ||
+	    (h->n_st_rps && !h->max_num_ref_frames) ||
+	    h->max_num_ref_frames > 15 ||
+	    s->n_recon < h->max_num_ref_frames + 1)
+		return -EINVAL;
+	/* setPipe :14199/:14200 and SetTranscodeCommon :7447/:7448. */
+	if (s->n_entropy < hl->entropy_rows || !s->entropy_size)
+		return -EINVAL;
+	/* SetTranscode :7597/:7598: the coded buffer, 128-aligned. */
+	for (i = 0; i < s->n_coded; i++)
+		if (s->coded[i].addr & (align - 1))
+			return -EINVAL;
+
+	ret = ave_cmd_begin(abi, AVE_OP_START_HEVC, buf, len, ctx, 0, &w);
+	if (ret < 0)
+		return ret;
+
+	cw = ave_mb_align(s->width);
+	ch = ave_mb_align(s->height);
+	rc = s->rc_enable;
+
+	/* ---- AVE_VIDEO_PARAMS / RC / buffer tables, as AVC_INIT ---- */
+	ave_vp_fill(&w, l, s, hl->sve_num);
+
+	/* ---- HEVC-only AVE_VIDEO_PARAMS (docs/77 §2.2, §6) ---- */
+	wr32(&w, hl->input_format_word, h->input_format_word);
+	wr32(&w, hl->pps_count, 1);
+	/* SAO: hardware and syntax together (docs/77 §2.6). */
+	wr32(&w, hl->sao_enb_config, h->sao ? 0xffff : 0);
+	wr32(&w, hl->sao_eo_bo, 0xffffffff);		/* firmware default */
+	wr32(&w, hl->input_bitdepth, 8);
+	wr32(&w, hl->max_num_ref_frames, h->max_num_ref_frames);
+	wr32(&w, hl->slice_map_height, ch);
+
+	/* ---- VPS (video_header_parameter_set_rbsp 0x1d294) ---- */
+	vps = hl->vps_block;
+	wr8(&w, vps + p->vps_base_internal, 1);
+	wr8(&w, vps + p->vps_base_available, 1);
+	wr8(&w, vps + p->vps_temporal_nesting, 1);
+	ave_hevc_ptl(&w, p, vps + p->ptl, h->level_idc);
+	wr8(&w, vps + p->vps_sublayer_info, 1);
+	wr32(&w, vps + p->vps_max_dec_pic_buf_m1, h->max_num_ref_frames);
+	/* num_hrd_parameters, timing, extension: all 0 (0x1d50c) */
+
+	/* ---- SPS[0] (seq_parameter_set_rbsp 0x1e380) ---- */
+	sps = hl->sps_block[0];
+	wr8(&w, sps + p->sps_temporal_nesting, 1);	/* :756 */
+	ave_hevc_ptl(&w, p, sps + p->ptl, h->level_idc);
+	wr32(&w, sps + p->chroma_format_idc, 1);
+	wr32(&w, sps + p->pic_width, cw);
+	wr32(&w, sps + p->pic_height, ch);
+	wr32(&w, sps + p->ctb_cols, (cw + 31) >> 5);
+	wr32(&w, sps + p->ctb_rows, (ch + 31) >> 5);
+	/* Conformance window in chroma units (SubWidthC = SubHeightC = 2). */
+	dw = s->crop_width ? s->crop_width : s->width;
+	dh = s->crop_height ? s->crop_height : s->height;
+	wr8(&w, sps + p->conf_win_flag, cw != dw || ch != dh);
+	wr32(&w, sps + p->conf_win_right, (cw - dw) / 2);
+	wr32(&w, sps + p->conf_win_bottom, (ch - dh) / 2);
+	wr32(&w, sps + p->log2_max_poc_lsb_m4, h->log2_max_poc_lsb_minus4);
+	wr8(&w, sps + p->sps_sublayer_info, 1);
+	wr32(&w, sps + p->sps_max_dec_pic_buf_m1, h->max_num_ref_frames);
+	/* CTB 32, min CB 8, TB 4..32, depth 1/0: what the pipe does (§0 #6). */
+	wr32(&w, sps + p->log2_min_cb_m3, 0);
+	wr32(&w, sps + p->log2_diff_cb, 2);
+	wr32(&w, sps + p->log2_min_tb_m2, 0);
+	wr32(&w, sps + p->log2_diff_tb, 3);
+	wr32(&w, sps + p->tb_depth_inter, 1);
+	wr32(&w, sps + p->tb_depth_intra, 0);
+	/* scaling_list_enabled 0 = flat, matching PICMGMT+0x6F4 = 0 (§2.5). */
+	wr8(&w, sps + p->scaling_enabled, 0);
+	wr8(&w, sps + p->sao, h->sao);
+	wr8(&w, sps + p->sps_tmvp, h->sps_tmvp);
+	wr8(&w, sps + p->sps_fw_creates_header, 1);	/* == PPS's */
+	wr32(&w, sps + p->sps_header_len, 0);
+
+	/* ---- RPS (docs/77 §2.4) ---- */
+	rps = hl->rps_block;
+	wr32(&w, rps + p->rps_num_st, h->n_st_rps);
+	if (h->n_st_rps) {
+		u32 e = rps + p->rps_entry0;
+
+		wr8(&w, e + p->rps_inter_pred, 0);
+		wr32(&w, e + p->rps_num_neg, 1);
+		wr32(&w, e + p->rps_num_pos, 0);
+		wr16(&w, e + p->rps_dpoc_s0_m1, 0);	/* delta POC -1 */
+		wr8(&w, e + p->rps_used_s0, 1);
+		wr32(&w, e + p->rps_num_delta_pocs, 1);
+	}
+
+	/* ---- PPS[0] (pic_parameter_set_rbsp 0x1f50c) ---- */
+	pps = hl->pps_block[0];
+	/* ids: the firmware overwrites both (0x850c8-0x850e8) */
+	wr32(&w, pps + p->extra_sh_bits, 0);		/* :945 */
+	wr32(&w, pps + p->init_qp_m26, 0);
+	/*
+	 * cu_qp_delta: macOS clears it for FIXQP (0x869e0) and sends 1 / depth
+	 * 2 otherwise (docs/77 §5), which the firmware's controller needs to
+	 * steer QP per CU.
+	 */
+	wr8(&w, pps + p->cu_qp_delta, rc);
+	wr32(&w, pps + p->cu_qp_delta_depth, rc ? 2 : 0);
+	wr8(&w, pps + p->wpp, h->wpp);
+	wr8(&w, pps + p->deblock_ctrl_present, 1);
+	wr8(&w, pps + p->pps_fw_creates_header, 1);
+	wr32(&w, pps + p->pps_header_len, 0);		/* accumulated: 0 in */
+
+	if (!w.err && !ave_hevc_verify(buf, abi, h))
+		w.err = -EINVAL;
+	return ave_cmd_end(&w);
+}
+
+/*
+ * Per-frame checks shared by AVC_ENCODE and HEVC_ENCODE: PICMGMT is one
+ * struct (docs/77 §3.3). @align as for ave_vp_check(). Moved verbatim out
+ * of ave_cmd_build_process_avc().
+ */
+static int ave_pic_check(const struct ave_cmd_abi *abi,
+			 const struct ave_avc_frame *f, u32 align)
+{
+	const struct ave_process_avc_layout *l = &abi->process_avc;
 
 	/*
 	 * I, P and IDR. B is left out deliberately: it needs a reference list
@@ -703,7 +1005,7 @@ int ave_cmd_build_process_avc(const struct ave_cmd_abi *abi, u8 *buf,
 		for (i = 0; i < f->n_entropy; i++)
 			for (j = 0; j < cols; j++)
 				if (!f->entropy[i][j] ||
-				    (f->entropy[i][j] & (AVE_STRIDE_ALIGN - 1)))
+				    (f->entropy[i][j] & (align - 1)))
 					return -EINVAL;
 	}
 	if (f->n_src_nbr) {
@@ -716,80 +1018,87 @@ int ave_cmd_build_process_avc(const struct ave_cmd_abi *abi, u8 *buf,
 				continue;
 			for (i = 0; i < f->n_src_nbr; i++)
 				if (!f->src_nbr[g][i] ||
-				    (f->src_nbr[g][i] & (AVE_STRIDE_ALIGN - 1)))
+				    (f->src_nbr[g][i] & (align - 1)))
 					return -EINVAL;
 		}
 	}
 	if (f->n_scratch > l->scratch_n)
 		return -EINVAL;
+	return 0;
+}
 
-	ret = ave_cmd_begin(abi, AVE_OP_PROCESS_AVC, buf, len, ctx, slot, &w);
-	if (ret < 0)
-		return ret;
+/*
+ * Fill PICMGMT at @base. Moved verbatim out of ave_cmd_build_process_avc(),
+ * which passes l->picmgmt; HEVC passes process_hevc.picmgmt.
+ */
+static int ave_pic_fill(struct ave_wr *w, const struct ave_process_avc_layout *l,
+			u32 base, const struct ave_avc_frame *f)
+{
+	u32 i;
 
-	base = l->picmgmt;
-	if (!ave_wr_ok(&w, base, l->picmgmt_size))
-		return ave_cmd_end(&w);
+	if (!ave_wr_ok(w, base, l->picmgmt_size))
+		return w->err;
 	if (l->picmgmt_size_word)
-		wr32(&w, base, l->picmgmt_size);
+		wr32(w, base, l->picmgmt_size);
 
-	wr32(&w, base + l->frame_type, f->frame_type);
+	wr32(w, base + l->frame_type, f->frame_type);
 	if (l->frame_num != AVE_OFF_NONE) {
 		if (l->frame_num_u32)
-			wr32(&w, base + l->frame_num, (u32)f->frame_num);
+			wr32(w, base + l->frame_num, (u32)f->frame_num);
 		else
-			wr64(&w, base + l->frame_num, f->frame_num);
+			wr64(w, base + l->frame_num, f->frame_num);
 	}
 	if (l->poc != AVE_OFF_NONE)
-		wr32(&w, base + l->poc, f->poc);
+		wr32(w, base + l->poc, f->poc);
 	if (l->frame_rate_f64 != AVE_OFF_NONE && f->frame_rate)
-		wr64(&w, base + l->frame_rate_f64,
+		wr64(w, base + l->frame_rate_f64,
 		     ave_u32_to_f64_bits(f->frame_rate));
-	wr8(&w, base + l->input_compressed, 0);
+	wr8(w, base + l->input_compressed, 0);
 
-	wr64(&w, base + l->in_luma_addr, f->in_luma_addr);
-	wr32(&w, base + l->in_luma_stride, f->in_luma_stride);
-	wr64(&w, base + l->in_chroma_addr, f->in_chroma_addr);
-	wr32(&w, base + l->in_chroma_stride, f->in_chroma_stride);
+	wr64(w, base + l->in_luma_addr, f->in_luma_addr);
+	wr32(w, base + l->in_luma_stride, f->in_luma_stride);
+	wr64(w, base + l->in_chroma_addr, f->in_chroma_addr);
+	wr32(w, base + l->in_chroma_stride, f->in_chroma_stride);
 	if (l->in_luma_size != AVE_OFF_NONE)
-		wr32(&w, base + l->in_luma_size, f->in_luma_size);
+		wr32(w, base + l->in_luma_size, f->in_luma_size);
 	if (l->in_chroma_size != AVE_OFF_NONE)
-		wr32(&w, base + l->in_chroma_size, f->in_chroma_size);
+		wr32(w, base + l->in_chroma_size, f->in_chroma_size);
 
-	wr8(&w, base + l->out_mode, 0);		/* Coded == CodedData[index] arm */
-	wr32(&w, base + l->out_index, f->coded_index);
-	wr64(&w, base + l->out_coded, f->coded_addr);
-	wr64(&w, base + l->out_coded_hdr, f->coded_hdr_addr);
-	wr32(&w, base + l->out_coded_size, f->coded_size);
+	wr8(w, base + l->out_mode, 0);		/* Coded == CodedData[index] arm */
+	wr32(w, base + l->out_index, f->coded_index);
+	wr64(w, base + l->out_coded, f->coded_addr);
+	wr64(w, base + l->out_coded_hdr, f->coded_hdr_addr);
+	wr32(w, base + l->out_coded_size, f->coded_size);
 
 	if (f->recon_luma_addr)
-		wr64(&w, base + l->recon_y, f->recon_luma_addr);
+		wr64(w, base + l->recon_y, f->recon_luma_addr);
 	if (f->recon_chroma_addr)
-		wr64(&w, base + l->recon_uv, f->recon_chroma_addr);
+		wr64(w, base + l->recon_uv, f->recon_chroma_addr);
 	if (f->recon_mv_addr)
-		wr64(&w, base + l->recon_mv, f->recon_mv_addr);
+		wr64(w, base + l->recon_mv, f->recon_mv_addr);
 	if (f->recon_luma_lsb_addr && l->recon_y_lsb != AVE_OFF_NONE)
-		wr64(&w, base + l->recon_y_lsb, f->recon_luma_lsb_addr);
+		wr64(w, base + l->recon_y_lsb, f->recon_luma_lsb_addr);
 	if (f->recon_chroma_lsb_addr && l->recon_uv_lsb != AVE_OFF_NONE)
-		wr64(&w, base + l->recon_uv_lsb, f->recon_chroma_lsb_addr);
+		wr64(w, base + l->recon_uv_lsb, f->recon_chroma_lsb_addr);
 
-	wr32_opt(&w, base + l->ctx_index, f->ctx_index);
+	wr32_opt(w, base + l->ctx_index, f->ctx_index);
 	/*
 	 * forceKeyFrame is an int the firmware reads in GetFrameType; the host
 	 * writes 0 for its own "3" sentinel (kext 0xfffffe0008eab8d8-8e4), so
 	 * only 0 and 1 are ever sent. It has no effect when the frame type is
 	 * given explicitly (anything but 5 skips GetFrameType, fw 0x145d4).
 	 */
-	wr32_opt(&w, base + l->force_key_frame, f->force_key_frame);
+	wr32_opt(w, base + l->force_key_frame, f->force_key_frame);
 	/* Feeds nal_ref_idc through the rate controller (docs/64 §1.3). */
 	if (l->force_non_ref != AVE_OFF_NONE)
-		wr8(&w, base + l->force_non_ref, f->force_non_ref);
+		wr8(w, base + l->force_non_ref, f->force_non_ref);
 	if (l->update_param_sets != AVE_OFF_NONE)
-		wr8(&w, base + l->update_param_sets, f->update_param_sets);
-	wr32_opt(&w, base + l->scaling_matrix_mode, 0);
+		wr8(w, base + l->update_param_sets, f->update_param_sets);
+	/* HEVC: mode 0 = flat 16 in every quantiser scale register (docs/77 §2.5). */
+	wr32_opt(w, base + l->scaling_matrix_mode, 0);
 
 	if (f->low_res_src_addr && l->low_res_src != AVE_OFF_NONE)
-		wr64(&w, base + l->low_res_src, f->low_res_src_addr);
+		wr64(w, base + l->low_res_src, f->low_res_src_addr);
 	/*
 	 * encoder_addr_entropy[i][j] in the per-frame block: column 0 is what
 	 * SetTranscode asserts (docs/54). The pipe's drain channels do NOT come
@@ -801,7 +1110,7 @@ int ave_cmd_build_process_avc(const struct ave_cmd_abi *abi, u8 *buf,
 		u32 j, cols = f->n_entropy_cols ? f->n_entropy_cols : 1;
 
 		for (j = 0; j < cols; j++)
-			wr64(&w, base + l->entropy_set +
+			wr64(w, base + l->entropy_set +
 			     l->entropy_stride_i * i + l->entropy_stride_j * j,
 			     f->entropy[i][j]);
 	}
@@ -811,23 +1120,113 @@ int ave_cmd_build_process_avc(const struct ave_cmd_abi *abi, u8 *buf,
 
 		for (g = 0; g < AVE_SRC_NBR_GROUPS; g++)
 			if (l->src_nbr_set[g] != AVE_OFF_NONE)
-				wr64(&w, base + l->src_nbr_set[g] + i * 8,
+				wr64(w, base + l->src_nbr_set[g] + i * 8,
 				     f->src_nbr[g][i]);
 	}
 	for (i = 0; i < f->n_scratch; i++)
 		if (f->scratch[i] && l->scratch[i] != AVE_OFF_NONE)
-			wr64(&w, base + l->scratch[i], f->scratch[i]);
+			wr64(w, base + l->scratch[i], f->scratch[i]);
+	return w->err;
+}
 
+int ave_cmd_build_process_avc(const struct ave_cmd_abi *abi, u8 *buf,
+			      size_t len, const struct ave_cmd_ctx *ctx,
+			      u32 slot, const struct ave_avc_frame *f)
+{
+	struct ave_wr w;
+	int ret;
+
+	if (!abi || !f)
+		return -EINVAL;
+	ret = ave_pic_check(abi, f, AVE_STRIDE_ALIGN);
+	if (ret)
+		return ret;
+
+	ret = ave_cmd_begin(abi, AVE_OP_PROCESS_AVC, buf, len, ctx, slot, &w);
+	if (ret < 0)
+		return ret;
+	ave_pic_fill(&w, &abi->process_avc, abi->process_avc.picmgmt, f);
 	return ave_cmd_end(&w);
 }
 
-int ave_cmd_coded_length(const struct ave_cmd_abi *abi, const void *hdr,
-			 size_t hdr_len, u32 coded_size,
-			 struct ave_coded_info *out)
+int ave_cmd_build_process_hevc(const struct ave_cmd_abi *abi, u8 *buf,
+			       size_t len, const struct ave_cmd_ctx *ctx,
+			       u32 slot, const struct ave_hevc_frame *hf)
+{
+	const struct ave_process_hevc_layout *hp;
+	const struct ave_start_hevc_layout *hl;
+	u32 sh, align, i;
+	struct ave_wr w;
+	int ret;
+
+	if (!abi || !hf)
+		return -EINVAL;
+	hp = &abi->process_hevc;
+	hl = &abi->start_hevc;
+	if (hl->vps_block == AVE_OFF_NONE || !hp->slice || !hp->picmgmt ||
+	    !hp->st_rps || !hp->hdr_slots || !hp->hdr_slot_bytes ||
+	    hp->sh_hdr_slots + 8 * hp->hdr_slots > hp->slice_fw_copy ||
+	    hp->slice_fw_copy > hp->slice_size)
+		return -EINVAL;
+	align = hl->buf_align ? hl->buf_align : AVE_STRIDE_ALIGN;
+
+	ret = ave_pic_check(abi, &hf->pic, align);
+	if (ret)
+		return ret;
+	/* SetTranscode :7597/:7598 */
+	if (hf->pic.coded_addr & (align - 1))
+		return -EINVAL;
+	if (!hf->hdr_slot_base ||
+	    hf->hdr_slot_size < hp->hdr_slots * hp->hdr_slot_bytes)
+		return -EINVAL;
+	/* The firmware sets POC 0 on an IDR itself (0x215bc); say the same. */
+	if (hf->pic.frame_type == AVE_FRAME_TYPE_IDR && hf->poc_lsb)
+		return -EINVAL;
+
+	ret = ave_cmd_begin(abi, AVE_OP_PROCESS_HEVC, buf, len, ctx, slot, &w);
+	if (ret < 0)
+		return ret;
+
+	/* PICMGMT: the AVC fill at HEVC's base (docs/77 §3.3). */
+	ave_pic_fill(&w, &abi->process_avc, hp->picmgmt, &hf->pic);
+
+	/*
+	 * S, the slice-header parameters (docs/77 §3.2). The firmware fills
+	 * nal_unit_type, slice_type, the reference counts and slice_qp_delta
+	 * itself (AVE_HEVC_PrepareSliceHeader 0x21278); these it does not.
+	 * macOS's defaults, user space 0x6d360-0x6d3b8 (delegated).
+	 */
+	sh = hp->slice;
+	wr32(&w, sh + hp->sh_size_word, hp->slice_size);
+	wr8(&w, sh + hp->sh_first_slice, 1);
+	wr32(&w, sh + hp->sh_pps_id, 0);	/* among wire 0xFD80.. (all 0) */
+	wr32(&w, sh + hp->sh_poc_lsb, hf->poc_lsb);
+	wr8(&w, sh + hp->sh_tmvp, 0);
+	wr8(&w, sh + hp->sh_sao_luma, hf->sao);
+	wr8(&w, sh + hp->sh_sao_chroma, hf->sao);
+	wr8(&w, sh + hp->sh_col_from_l0, 1);
+	wr32(&w, sh + hp->sh_five_minus_merge, 3);
+	wr8(&w, sh + hp->sh_lf_across, 0);
+	/* sh_map stays zero: one slice (kext GenerateMap, docs/77 §3.2). */
+	for (i = 0; i < hp->hdr_slots; i++)
+		wr64(&w, sh + hp->sh_hdr_slots + 8 * i,
+		     hf->hdr_slot_base + (u64)i * hp->hdr_slot_bytes);
+
+	/* P: the SPS short-term set 0 (docs/77 §3.2); I/IDR carry none. */
+	if (hf->pic.frame_type == AVE_FRAME_TYPE_P) {
+		wr8(&w, hp->st_rps + hp->st_rps_sps_flag, 1);
+		wr32(&w, hp->st_rps + hp->st_rps_idx, 0);
+	}
+	return ave_cmd_end(&w);
+}
+
+int ave_cmd_coded_length_codec(const struct ave_cmd_abi *abi, const void *hdr,
+			       size_t hdr_len, u32 coded_size, bool hevc,
+			       u32 hdr_slot_max, struct ave_coded_info *out)
 {
 	const struct ave_coded_hdr_layout *c;
 	const u8 *h = hdr;
-	u32 i, written = 0, removed = 0;
+	u32 i, written = 0, removed = 0, hdr_total = 0;
 
 	if (!abi || !hdr || !out)
 		return -EINVAL;
@@ -836,22 +1235,30 @@ int ave_cmd_coded_length(const struct ave_cmd_abi *abi, const void *hdr,
 		return -EINVAL;		/* layout not read for this ABI */
 	if (hdr_len < c->min_bytes)
 		return -EINVAL;
+	if (hevc && (c->slice_hdr_len == AVE_OFF_NONE ||
+		     c->slice_hdr_iova == AVE_OFF_NONE))
+		return -EINVAL;
 
 	memset(out, 0, sizeof(*out));
 	out->frame_type = get_unaligned_le32(h + c->frame_type);
 	out->frame_num = get_unaligned_le32(h + c->frame_num);
 	out->sps_pps_bits = get_unaligned_le32(h + c->sps_pps_bits);
-	if (c->cabac_zero_words != AVE_OFF_NONE &&
+	/* Never written for HEVC (docs/77 §4): whatever is there is not ours. */
+	if (!hevc && c->cabac_zero_words != AVE_OFF_NONE &&
 	    c->cabac_zero_words + 4u <= hdr_len)
 		out->cabac_zero_words =
 			get_unaligned_le32(h + c->cabac_zero_words);
 
 	for (i = 0; i < c->slice_max; i++) {
 		u32 rec = i * c->slice_stride;
-		u32 n;
+		u32 n, hl = 0;
+		u64 hiova = 0;
 		int trim;
 
 		if ((u64)rec + c->slice_bytes_removed + 1 > hdr_len)
+			break;
+		if (hevc && ((u64)rec + c->slice_hdr_len + 4 > hdr_len ||
+			     (u64)rec + c->slice_hdr_iova + 8 > hdr_len))
 			break;
 		n = get_unaligned_le32(h + rec + c->slice_bytes_written);
 		if (!n)
@@ -871,6 +1278,18 @@ int ave_cmd_coded_length(const struct ave_cmd_abi *abi, const void *hdr,
 		/* A byte count larger than the whole buffer is nonsense. */
 		if (n > 0x40000000u || written > 0x40000000u - n)
 			return -EPROTO;
+		if (hevc) {
+			/*
+			 * The header lives in the slot the host gave for this
+			 * slice; a length past the slot, or a length with no
+			 * slot, is a header we cannot have read correctly.
+			 */
+			hl = get_unaligned_le32(h + rec + c->slice_hdr_len);
+			hiova = get_unaligned_le64(h + rec + c->slice_hdr_iova);
+			if ((hdr_slot_max && hl > hdr_slot_max) ||
+			    (hl && !hiova) || hl > 0x100000u)
+				return -EPROTO;
+		}
 		/*
 		 * Refuse rather than record a prefix: the caller assembles the
 		 * stream from slice[], so silently dropping records past the
@@ -882,9 +1301,12 @@ int ave_cmd_coded_length(const struct ave_cmd_abi *abi, const void *hdr,
 			return -E2BIG;
 		out->slice[out->n_slice].off = written;
 		out->slice[out->n_slice].len = n - (u32)trim;
+		out->slice[out->n_slice].hdr_iova = hiova;
+		out->slice[out->n_slice].hdr_len = hl;
 		out->n_slice++;
 		written += n;
 		removed += (u32)trim;
+		hdr_total += hl;
 		out->slices++;
 	}
 	if (removed > written)
@@ -901,8 +1323,18 @@ int ave_cmd_coded_length(const struct ave_cmd_abi *abi, const void *hdr,
 
 	out->span = written;
 	out->bytes_removed = removed;
-	out->bytes = written - removed;
+	out->hdr_bytes = hdr_total;
+	/* HEVC: Σ(written + hdrlen − removed), kext 0xfffffe0008ec4ed8. */
+	out->bytes = written - removed + hdr_total;
 	return 0;
+}
+
+int ave_cmd_coded_length(const struct ave_cmd_abi *abi, const void *hdr,
+			 size_t hdr_len, u32 coded_size,
+			 struct ave_coded_info *out)
+{
+	return ave_cmd_coded_length_codec(abi, hdr, hdr_len, coded_size, false,
+					  0, out);
 }
 
 int ave_cmd_check_reply(const struct ave_cmd_abi *abi, enum ave_op op,

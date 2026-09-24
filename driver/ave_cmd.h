@@ -22,6 +22,16 @@ struct ave_cmd_ctx {
 	u64	count;		/* CNT, the host's sequence number */
 	u64	client_id;	/* CID; must fit in u32 on 13.5 */
 	u8	timeout[16];	/* _S_AVE_TimeOut, copied verbatim */
+	/*
+	 * The session is HEVC: header codec = abi->hdr.codec_hevc in the
+	 * client commands that do not name a codec themselves (Open, Stop,
+	 * Close, Complete, Flush). The kext copies client[220] into +0x18 of
+	 * every command of the session (docs/77 §1.2; what the firmware does
+	 * with it on Open is [U]). The HEVC_* commands always carry codec 1;
+	 * the AVC_* builders refuse a ctx with this set. false = every
+	 * command built before HEVC, unchanged.
+	 */
+	bool	hevc;
 };
 
 struct ave_config_params {
@@ -279,6 +289,67 @@ struct ave_avc_frame {
 	u32	n_scratch;
 };
 
+/*
+ * An HEVC Main (8-bit 4:2:0), single-layer, single-slice session: HEVC_INIT.
+ * docs/77 §6.
+ */
+struct ave_hevc_session {
+	/*
+	 * The AVE_VIDEO_PARAMS / RC / buffer-table half, which HEVC_INIT
+	 * shares with AVC_INIT at the same wire offsets (docs/77 §2.2) and
+	 * which is validated and written by the same code as AVC's. Rules
+	 * on top of AVC's:
+	 *  - the AVC-only members profile_idc, level_idc, cabac and
+	 *    scaling_flat must be 0 (HEVC has no scaling-list trap, §2.5);
+	 *  - need_lsb_planes must be set: setPipe asserts all four recon
+	 *    planes non-zero and 128-aligned (:13921..:13969);
+	 *  - SrcNbr, entropy and coded buffers must be 128-aligned
+	 *    (:14062, :7447, :7597), and there must be at least
+	 *    abi->start_hevc.entropy_rows entropy rows with a size table;
+	 *  - crop_width/crop_height become the SPS conformance window;
+	 *  - skip_mode: macOS HEVC sends 0 (docs/77 §2.6).
+	 */
+	struct ave_avc_session	vp;
+	u8	level_idc;		/* general_level_idc = 30 x level */
+	/* Wire 0xFEB4. Bits [4:2] are the input chroma format; 4 = "as the
+	 * SPS". 0 fails CHEVCController_H13C.cpp:5118. macOS: 16. */
+	u32	input_format_word;
+	/*
+	 * References: wire 0xFD2C (numRefs of the firmware's HEVC
+	 * ProvideReferenceFrames - DPB slots 0..this are copied, so n_recon
+	 * must exceed it) and the VPS/SPS max_dec_pic_buffering_minus1.
+	 * 1 for IPPP; 0 for an intra-only session.
+	 */
+	u32	max_num_ref_frames;
+	u32	log2_max_poc_lsb_minus4;	/* 0..12 */
+	/* SPS SAO flag, with wire 0xFD10/0xFD1C to match; each frame's slice
+	 * SAO flags must say the same (ave_hevc_frame.sao). macOS: on. */
+	bool	sao;
+	bool	wpp;			/* PPS entropy_coding_sync; macOS: on */
+	/* SPS sps_temporal_mvp_enabled_flag only; the hardware switch (wire
+	 * 0xFCF8) and every slice's flag stay 0, as macOS sends. */
+	bool	sps_tmvp;
+	/* 1 = the IPPP short-term set (one reference, delta POC -1) in the
+	 * SPS (docs/77 §2.4); 0 = none (intra only). */
+	u32	n_st_rps;
+};
+
+struct ave_hevc_frame {
+	/* The PICMGMT fill, exactly as AVC's (docs/77 §3.3); frame_type
+	 * I, P or IDR. P uses the SPS short-term set 0. */
+	struct ave_avc_frame	pic;
+	u32	poc_lsb;		/* slice_pic_order_cnt_lsb; 0 on an IDR */
+	bool	sao;			/* slice SAO luma/chroma = the SPS's */
+	/*
+	 * The SliceHeader surface of this frame's coded slot: slot i at
+	 * base + i * hdr_slot_bytes for all hdr_slots of them (kext
+	 * HEVC_Slice::UpdateBuffer publishes all 256). The firmware copies
+	 * slice i's header there (fw 0x7f1bc-0x7f1e8).
+	 */
+	u64	hdr_slot_base;
+	u32	hdr_slot_size;		/* >= hdr_slots * hdr_slot_bytes */
+};
+
 /* What ave_cmd_coded_length() recovers from a completed frame's header. */
 /*
  * Per-slice geometry. The slices are contiguous from byte 0 of the coded
@@ -294,6 +365,15 @@ struct ave_avc_frame {
 struct ave_coded_slice {
 	u32	off;			/* from the start of the coded buffer */
 	u32	len;			/* written - removed */
+	/*
+	 * HEVC only (0 for AVC): the firmware-written slice header, which is
+	 * NOT in the coded buffer. hdr_len bytes (start code and NAL header
+	 * included) at hdr_iova, a SliceHeader slot the host published in
+	 * HEVC_ENCODE. The slice is hdr_len header bytes, then len coded
+	 * bytes. docs/77 §4.
+	 */
+	u64	hdr_iova;
+	u32	hdr_len;
 };
 
 struct ave_coded_info {
@@ -310,6 +390,8 @@ struct ave_coded_info {
 	 * after the last slice. 0 for CAVLC. docs/67 §2.
 	 */
 	u32	cabac_zero_words;
+	/* HEVC: sum of the slice-header bytes, already included in bytes. */
+	u32	hdr_bytes;
 	u32	n_slice;		/* entries filled in slice[] */
 	struct ave_coded_slice slice[AVE_CODED_SLICE_MAX];
 };
@@ -349,6 +431,24 @@ int ave_cmd_build_process_avc(const struct ave_cmd_abi *abi, u8 *buf,
 			      u32 slot, const struct ave_avc_frame *f);
 
 /*
+ * HEVC_INIT (docs/77 §6). 13.5 only: -EINVAL on an ABI whose HEVC layout
+ * was not read. Besides the parameter checks, the finished command is
+ * re-read at the fields whose wrong value makes the firmware assert and
+ * spin (temporal-id nesting, num_extra_slice_header_bits, the PPS header
+ * length, the two bFWCreatesHeader bytes, 0xFEB4, iNumViews, sSVEMap.iNum,
+ * the recon LSB planes) and refused - zeroed, -EINVAL - if any is wrong,
+ * which catches a layout whose writes overlap.
+ */
+int ave_cmd_build_start_hevc(const struct ave_cmd_abi *abi, u8 *buf,
+			     size_t len, const struct ave_cmd_ctx *ctx,
+			     const struct ave_hevc_session *s);
+
+/* HEVC_ENCODE (docs/77 §3): S at 0x40, PICMGMT at 0x55B0, slice RPS. */
+int ave_cmd_build_process_hevc(const struct ave_cmd_abi *abi, u8 *buf,
+			       size_t len, const struct ave_cmd_ctx *ctx,
+			       u32 slot, const struct ave_hevc_frame *f);
+
+/*
  * Validate a firmware completion message for @op. Returns 0 if the id, length
  * and client id match and the status is this ABI's success value; -EPROTO if
  * the message is not the reply to @op; -EIO if it is but reports failure.
@@ -378,5 +478,18 @@ int ave_cmd_check_reply(const struct ave_cmd_abi *abi, enum ave_op op,
 int ave_cmd_coded_length(const struct ave_cmd_abi *abi, const void *hdr,
 			 size_t hdr_len, u32 coded_size,
 			 struct ave_coded_info *out);
+
+/*
+ * The same for either codec. With @hevc the byte count also adds each
+ * slice record's header length (+0x398; kext AVE_RetrieveRCStats does this
+ * only for codec 1, 0xfffffe0008ec4ed8), each slice[] entry carries the
+ * header's IOVA and length, and cabac_zero_words is reported 0 (the
+ * firmware never writes it for HEVC). A header length larger than
+ * @hdr_slot_max is -EPROTO. ave_cmd_coded_length() is this with
+ * @hevc = false.
+ */
+int ave_cmd_coded_length_codec(const struct ave_cmd_abi *abi, const void *hdr,
+			       size_t hdr_len, u32 coded_size, bool hevc,
+			       u32 hdr_slot_max, struct ave_coded_info *out);
 
 #endif /* __AVE_CMD_H__ */

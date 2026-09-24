@@ -1293,6 +1293,23 @@ struct ave_coded_hdr_layout {
 	 * docs/67 §2.
 	 */
 	u32	cabac_zero_words;	/* u32; AVE_OFF_NONE = not located */
+	/*
+	 * HEVC only (docs/77 §4). The firmware writes each slice's header
+	 * itself, into the host's SliceHeader slot for that slice, and
+	 * records the slot IOVA (u64) and the header's BYTE length (u32,
+	 * start code and NAL header included) in the slice record.
+	 * Header-relative, like slice_bytes_written: record base + 0x210 /
+	 * + 0x218 in docs/77's per-record numbering (the record starts at
+	 * +0x180). fw WriteSliceHeadersHevc str x26,[x20,#528] 0x7f1cc /
+	 * str w2,[x20,#536] 0x7f1ac; kext AVE_RetrieveRCStats adds
+	 * [x25,#920] only for codec 1 (0xfffffe0008ec4ed8).
+	 * cabac_zero_words above is never written for HEVC.
+	 */
+	u32	slice_hdr_iova;		/* u64; AVE_OFF_NONE = not located */
+	u32	slice_hdr_len;		/* u32 bytes */
+	/* _S_AVE_PSInfo {count, 5 x {type, layer, bitoff, bits}}, HEVC only
+	 * (fw 0x7d620, 0x773b8 - docs/77 §4, delegated). Logged, not used. */
+	u32	ps_info;
 	u32	min_bytes;		/* smallest buffer these offsets need */
 };
 
@@ -1444,6 +1461,176 @@ struct ave_process_avc_layout {
 	u32	scratch_n;
 };
 
+/*
+ * ---------------------------------------------------------------------------
+ * HEVC (docs/77). 13.5 only: HEVC_INIT (id 5, 0x32DC8) and HEVC_ENCODE
+ * (id 8, 0x6838). On 26.6.2 every offset below is AVE_OFF_NONE and the HEVC
+ * builders refuse (its 0x13F28 / 0xB1C0 layouts were never read).
+ *
+ * What is NOT here, on purpose: HEVC_INIT carries the same AVE_VIDEO_PARAMS
+ * (0xFED0 at wire 0x60) and the same AVEFWRCSettings (0x680 at 0xFF30) as
+ * AVC_INIT, and the firmware reads almost every one of those fields at the
+ * same wire offset (docs/77 §2.2; ProcessInitStage2 reads VP through
+ * cmd+0xFCE9 for both codecs, fw 0x13e48-0x13e50). So the HEVC builder takes
+ * the shared VP/RC/buffer-table offsets from .start_avc - but only where
+ * .start_hevc.shares_avc_vp says that is true - and this block holds only
+ * what differs. The AVC-only members of .start_avc (sve_num at 0x10DE8 and
+ * the SPS/PPS blocks) sit inside the HEVC VPS block and are never used for
+ * HEVC.
+ * ---------------------------------------------------------------------------
+ */
+struct ave_start_hevc_layout {
+	bool	shares_avc_vp;		/* .start_avc's VP/RC/buffer offsets hold */
+	/* Parameter-set blocks: fw IEP memcpy's (docs/77 §2.1). */
+	u32	vps_block, vps_block_size;
+	u32	sps_block[2], sps_block_size;	/* [1] = second layer, unused */
+	u32	pps_block[2], pps_block_size;
+	u32	rps_block, rps_block_size;
+	/* Tail (the AVC tail's counterparts). */
+	u32	transcode_overlap;	/* u8 bTranscodeOverlap; left 0 */
+	u32	sve_num;		/* u32 sSVEMap.iNum; 1 = one core */
+	u32	sve_index;		/* u32 CHM index; 0 */
+	/* HEVC-only AVE_VIDEO_PARAMS scalars (docs/77 §2.2, second table). */
+	u32	input_format_word;	/* u32; bits [4:2] input chroma fmt */
+	u32	pps_count;		/* u32 i32PPSsCount */
+	u32	pps_ids;		/* 9 x u32; left 0 */
+	u32	enable_tmvp;		/* u32 hardware TMVP; left 0 */
+	u32	sao_enb_config;		/* u32 -> MMIO 0x1390264 */
+	u32	sao_eo_bo;		/* u32; 0xFFFFFFFF = firmware default */
+	u32	input_bitdepth;		/* u32 */
+	/*
+	 * VP+0xFCCC "max_num_ref_frames" (the field after long_term_ref in the
+	 * firmware's VideoParams dumper, fw 0x3a078; dumper base x24 = wire
+	 * 0xFCD8 since input_bitdepth +72 = 0xFD20 and ui32Bitrate +600 =
+	 * 0xFF30). NOT in docs/77: HEVC IEP loads the u32 pair at wire
+	 * 0xFD28 (ldr d0,[x26,#1368] 0x832bc, x26 = VP+0xF770), swaps it
+	 * (rev64) and stores wire 0xFD2C to ctrl+0x120C (0x832c8); that is
+	 * the numRefs argument of both ProvideReferenceFrames calls
+	 * (ldr w1,[x28,#1920] 0x85f74, x28 = ctrl+0xA8C; ldr w1,[x19,#4620]
+	 * 0x85ff8), which copies DPB slots 0..numRefs - the AVC SPS
+	 * max_num_ref_frames role (docs/53 §13.3). docs/77 §2.2 maps
+	 * 0xFD28 -> +0x120C; the rev64 makes it 0xFD2C.
+	 */
+	u32	max_num_ref_frames;
+	/*
+	 * sSliceMap's first entry after iNum (.start_avc.slice_num = wire
+	 * 0xFDAC): [x26,#1508] at 0x85d6c, >>5 = CTB rows. Read only in
+	 * bSliceEncodingMode (ldrb [x8,#11] cbz 0x85d5c-0x85d60), which we
+	 * leave off; written with the coded height as docs/77 §6 lists.
+	 */
+	u32	slice_map_height;
+	u32	entropy_rows;		/* rows setPipe uses (ctrl+3768) */
+	u32	buf_align;		/* SrcNbr/entropy/coded alignment */
+};
+
+/*
+ * Offsets INSIDE the HEVC parameter-set structs - so, unlike everywhere else
+ * in this file, 0 is a real offset here; whether the layout exists at all is
+ * .start_hevc.vps_block != AVE_OFF_NONE. Add the block base
+ * (.start_hevc.vps_block / sps_block[0] / pps_block[0] / rps_block). From
+ * the firmware's bitstream writers (docs/77 §2.3; VPS 0x1d294, SPS
+ * 0x1e380, PPS 0x1f50c, PTL 0x1a870).
+ */
+struct ave_hevc_ps_layout {
+	/* profile_tier_level(), at +ptl of both the VPS and the SPS */
+	u32	ptl;
+	u32	ptl_profile_idc;	/* u32 u(5) */
+	u32	ptl_tier;		/* u8 */
+	u32	ptl_compat;		/* u8[32] */
+	u32	ptl_progressive;	/* u8 */
+	u32	ptl_interlaced;		/* u8 */
+	u32	ptl_non_packed;		/* u8 */
+	u32	ptl_frame_only;		/* u8 */
+	u32	ptl_level_idc;		/* u32 u(8) */
+	/* VPS */
+	u32	vps_id;
+	u32	vps_base_internal, vps_base_available;	/* u8 */
+	u32	vps_max_layers_m1, vps_max_sub_layers_m1;
+	u32	vps_temporal_nesting;			/* u8 */
+	u32	vps_sublayer_info;			/* u8 */
+	u32	vps_max_dec_pic_buf_m1;			/* u32[8] */
+	u32	vps_num_reorder, vps_max_latency;	/* u32[8] */
+	u32	vps_num_layer_sets_m1;
+	u32	vps_timing_present, vps_num_hrd, vps_ext;
+	/* SPS */
+	u32	sps_layer_id, sps_gate7, sps_vps_id, sps_max_sub_layers_m1;
+	u32	sps_temporal_nesting;			/* u8 */
+	u32	sps_id, chroma_format_idc;
+	u32	pic_width, pic_height;			/* luma samples */
+	u32	ctb_cols, ctb_rows;			/* 32-px CTBs, not syntax */
+	u32	conf_win_flag;				/* u8 */
+	u32	conf_win_left, conf_win_right, conf_win_top, conf_win_bottom;
+	u32	bit_depth_luma_m8, bit_depth_chroma_m8;
+	u32	log2_max_poc_lsb_m4;
+	u32	sps_sublayer_info;			/* u8 */
+	u32	sps_max_dec_pic_buf_m1, sps_num_reorder, sps_max_latency;
+	u32	log2_min_cb_m3, log2_diff_cb, log2_min_tb_m2, log2_diff_tb;
+	u32	tb_depth_inter, tb_depth_intra;
+	u32	scaling_enabled, scaling_present;	/* u8 */
+	u32	amp, sao, pcm, sps_tmvp, strong_intra, vui_present, sps_ext; /* u8 */
+	u32	sps_fw_creates_header;			/* u8 */
+	u32	sps_header_len;				/* u32 bits */
+	/* PPS */
+	u32	pps_layer_id, pps_id, pps_sps_id;
+	u32	dependent_slices, output_flag_present;	/* u8 */
+	u32	extra_sh_bits;				/* u32; must be 0 */
+	u32	sign_hiding, cabac_init_present;	/* u8 */
+	u32	num_ref_l0_m1, num_ref_l1_m1;
+	u32	init_qp_m26;				/* s32 */
+	u32	constrained_intra, transform_skip, cu_qp_delta;	/* u8 */
+	u32	cu_qp_delta_depth;
+	u32	cb_qp_offset, cr_qp_offset;
+	u32	chroma_qp_offsets_present, weighted_pred, weighted_bipred,
+		transquant_bypass, tiles, wpp;		/* u8 */
+	u32	lf_across_slices;			/* u8 */
+	u32	deblock_ctrl_present, deblock_override, deblock_disable; /* u8 */
+	u32	beta_offset_div2, tc_offset_div2;
+	u32	pps_scaling_present;			/* u8 */
+	u32	lists_mod, par_merge_m2, sh_ext_present, pps_ext; /* u8 */
+	u32	pps_fw_creates_header;			/* u8 */
+	u32	pps_header_len;				/* u32, ACCUMULATED: 0 in */
+	/* RPS block */
+	u32	rps_num_st;				/* s32 */
+	u32	rps_entry0, rps_entry_stride;
+	/* inside one short-term set entry */
+	u32	rps_inter_pred;				/* u8; keep 0 */
+	u32	rps_num_neg, rps_num_pos;
+	u32	rps_dpoc_s0_m1;				/* u16[] */
+	u32	rps_used_s0;				/* u8[] */
+	u32	rps_num_delta_pocs;
+	u32	rps_lt_present;				/* u8 */
+};
+
+/*
+ * HEVC_ENCODE (id 8, 0x6838). Offsets inside st_rps and S are relative (0 is
+ * real there too). PICMGMT is the AVC struct at a different
+ * base: every .process_avc offset is relative to PICMGMT and is read by
+ * HEVC at the same place (docs/77 §3.3).
+ */
+struct ave_process_hevc_layout {
+	u32	slice, slice_size;	/* S = HEVC_SLICE_HEADER_PARAMS */
+	u32	slice_fw_copy;		/* bytes of S the firmware copies */
+	u32	picmgmt;		/* PICMGMT base; size as .process_avc */
+	u32	pic_extra;		/* 12 bytes; the kext leaves it 0 */
+	u32	st_rps, lt_rps;		/* slice short-/long-term RPS */
+	/* inside st_rps */
+	u32	st_rps_sps_flag;	/* u8 short_term_ref_pic_set_sps_flag */
+	u32	st_rps_idx;		/* u32 short_term_ref_pic_set_idx */
+	/* inside S (all < slice_fw_copy) */
+	u32	sh_size_word;
+	u32	sh_first_slice;		/* u8 */
+	u32	sh_pps_id;
+	u32	sh_poc_lsb;
+	u32	sh_tmvp, sh_sao_luma, sh_sao_chroma;	/* u8 */
+	u32	sh_col_from_l0;		/* u8 */
+	u32	sh_five_minus_merge;
+	u32	sh_lf_across;		/* u8 */
+	u32	sh_map;			/* 0x100 bytes, zero for one slice */
+	u32	sh_hdr_slots;		/* u64[hdr_slots] SliceHeader IOVAs */
+	u32	hdr_slots;		/* 256 */
+	u32	hdr_slot_bytes;		/* 0x400 per slot */
+};
+
 struct ave_cmd_abi {
 	enum ave_fw_abi			abi;
 	const char			*name;
@@ -1456,6 +1643,9 @@ struct ave_cmd_abi {
 	struct ave_pps_layout		pps;
 	struct ave_process_avc_layout	process_avc;
 	struct ave_coded_hdr_layout	coded_hdr;
+	struct ave_start_hevc_layout	start_hevc;	/* 13.5 only */
+	struct ave_hevc_ps_layout	hps;		/* 13.5 only */
+	struct ave_process_hevc_layout	process_hevc;	/* 13.5 only */
 };
 
 extern const struct ave_cmd_abi ave_cmd_abi_13_5;
@@ -1642,8 +1832,11 @@ const struct ave_cmd_abi ave_cmd_abi_13_5 = {
 		 * 0xF7D0) -> encoder_addr_src_nbr_info (fw 0x5d88c),
 		 * [x23,#48] (= 0xF7F0) -> _src_nbr_pixels (0x5d89c), and
 		 * VP+0xF7B0+8*idx (= 0xF810) -> _src_nbr_data (0x5d8bc).
-		 * The fourth (wire 0xF830) is a 4x16 table with a size array
-		 * at 0xFA30; not read on any path found - left out.
+		 * The fourth (wire 0xF830) is NOT a SrcNbr group: it is the
+		 * encoder_addr_entropy[16][4] table (.entropy_set), with its
+		 * u32[16][4] size array at 0xFA30, which both controllers'
+		 * InitEncodingParameters read (AVC fw 0x5d744, HEVC fw
+		 * 0x84368; docs/62 §0, docs/77 §11.3).
 		 */
 		/*
 		 * docs/61 10: group 3 (FwData) is at wire 0xFED0, not adjacent to
@@ -1741,7 +1934,10 @@ const struct ave_cmd_abi ave_cmd_abi_13_5 = {
 		.out_coded	= 0xc08,	/* kext 0xfffffe0008eb0548; fw 0x58384 */
 		.out_coded_hdr	= 0xc10,	/* kext 0xfffffe0008eb05a0 */
 		.out_coded_size	= 0xc18,	/* kext 0xfffffe0008eb0554; fw 0x58364 */
-		.recon_y	= 0x898,	/* fw dumper 0x3c0c4; setRefPointers 0x2c338 */
+		.recon_y	= 0x898,	/* setRefPointers 0x2c338; fw 0x3c0c4 is
+						 * CHEVCController::DebugEncode, right
+						 * only because PICMGMT is shared
+						 * (docs/77 §11.4) */
 		.recon_uv	= 0x8a8,	/* fw dumper 0x3c0d0 */
 		.recon_mv	= 0x8b8,	/* fw setRefPointers 0x2c4b0 */
 		/* setPipe asserts on these two only when the 10-bit LSB gate
@@ -1821,9 +2017,193 @@ const struct ave_cmd_abi ave_cmd_abi_13_5 = {
 		.slice_max		= 0x100,
 		.slice_bytes_written	= 0x180,/* ldr w9,[x25,#384]  0xec4ec0 */
 		.slice_bytes_removed	= 0x38c,/* ldrsb  [x25,#908]  0xec4ee8 */
+		/* HEVC: record+0x210/+0x218 with the record at +0x180
+		 * (fw 0x7f1cc / 0x7f1ac; kext ldr w9,[x25,#920] 0xec4ed8). */
+		.slice_hdr_iova		= 0x390,
+		.slice_hdr_len		= 0x398,
+		.ps_info		= 0x9c,	/* fw 0x7d620, delegated */
 		/* The firmware maps 0x22c60 of it (fw 0x59f50/0x5bde4) and
 		 * RetrieveRCStats reads up to +0x221ac. */
 		.min_bytes		= 0x22c60,
+	},
+	/*
+	 * HEVC, docs/77. Block bases and sizes: kext AVE_CHM_MakeFwCmd_Start_HEVC
+	 * 0xfffffe0008ea9ec4 and fw IEP copies 0x8303c-0x830d8 (both re-read in
+	 * docs/77 §12). Scalars: HEVC IEP 0x82b10 reads, docs/77 §2.2.
+	 */
+	.start_hevc = {
+		.shares_avc_vp	= true,		/* ProcessInitStage2 x23 = cmd+0xFCE9
+						 * for both codecs, fw 0x13e48 */
+		.vps_block	= 0x105b0,	/* fw memcpy -> ctrl+0x2C770 0x8303c */
+		.vps_block_size	= 0x140dc,
+		.sps_block	= { 0x2468c, 0x26580 },	/* 0x83058 / 0x83090 */
+		.sps_block_size	= 0x1ef4,
+		.pps_block	= { 0x28474, 0x2aa18 },	/* 0x83074 / 0x830ac */
+		.pps_block_size	= 0x25a4,
+		.rps_block	= 0x2cfbc,	/* -> ctrl+0x49190 0x830d8 */
+		.rps_block_size	= 0x5dd8,
+		.transcode_overlap = 0x32d98,	/* kext 0xfffffe0008eaa2c8 */
+		.sve_num	= 0x32d9c,	/* fw 0x82bc0; kext 0xeaa2dc */
+		.sve_index	= 0x32dc0,	/* fw 0x82bd8, 0x13eb8 */
+		.input_format_word = 0xfeb4,	/* fw 0x83324 -> [x27,#380];
+						 * ubfx #2,#3 then :5118 0x83658-0x83680 */
+		.pps_count	= 0xfda4,	/* fw 0x83434 */
+		.pps_ids	= 0xfd80,	/* fw 0x833dc; 0xFD80 -> PPS id 0x850dc */
+		.enable_tmvp	= 0xfcf8,	/* ldr [x26,#1320] 0x83224 */
+		.sao_enb_config	= 0xfd10,	/* fw 0x83294; MMIO 0x8ce9c */
+		.sao_eo_bo	= 0xfd1c,	/* fw 0x8cf78 */
+		.input_bitdepth	= 0xfd20,	/* ldr [x26,#1360] 0x832b4 */
+		.max_num_ref_frames = 0xfd2c,	/* 0x832bc-0x832c8, see the layout */
+		.slice_map_height = 0xfdb4,	/* 0x85d6c, slice mode only */
+		.entropy_rows	= 2,		/* ctrl+3768, fw 0x835bc-0x83600 */
+		.buf_align	= 128,		/* :14062/:7447/:7597 (docs/77 §7) */
+	},
+	.hps = {
+		/* PTL writer 0x1a870: [x] +0 u(2), ldrb +4, ldr +8 u(5),
+		 * ldrb +0xC.. (32 compat flags) */
+		.ptl			= 0x18,
+		.ptl_profile_idc	= 0x08,
+		.ptl_tier		= 0x04,
+		.ptl_compat		= 0x0c,
+		.ptl_progressive	= 0x2c,
+		.ptl_interlaced		= 0x2d,
+		.ptl_non_packed		= 0x2e,
+		.ptl_frame_only		= 0x2f,
+		.ptl_level_idc		= 0x3c,
+		/* VPS writer 0x1d294 (delegated) */
+		.vps_id			= 0x04,
+		.vps_base_internal	= 0x08,
+		.vps_base_available	= 0x09,
+		.vps_max_layers_m1	= 0x0c,
+		.vps_max_sub_layers_m1	= 0x10,
+		.vps_temporal_nesting	= 0x14,
+		.vps_sublayer_info	= 0x678,
+		.vps_max_dec_pic_buf_m1	= 0x67c,
+		.vps_num_reorder	= 0x69c,
+		.vps_max_latency	= 0x6bc,
+		.vps_num_layer_sets_m1	= 0x6e0,
+		.vps_timing_present	= 0x106e4,
+		.vps_num_hrd		= 0x106f8,	/* keep 0 (0x1d50c) */
+		.vps_ext		= 0x11afc,
+		/* SPS writer 0x1e380: ldr [x8,#12] vps id, [x8,#16] max
+		 * sub-layers, ldrb [x8,#20] nesting (checked 0x1e490), PTL
+		 * 0x1e4c8, [x8,#568] id, #572 chroma, #580/#584 size,
+		 * ldrb #596 conf, #600..#612 window, #616/#620 depth, #624
+		 * poc, ldrb #628, #632/#660/#688, #716.. CB/TB (re-read) */
+		.sps_layer_id		= 0x04,
+		.sps_gate7		= 0x07,
+		.sps_vps_id		= 0x0c,
+		.sps_max_sub_layers_m1	= 0x10,
+		.sps_temporal_nesting	= 0x14,	/* :756 assert + spin 0x1e49c */
+		.sps_id			= 0x238,
+		.chroma_format_idc	= 0x23c,
+		.pic_width		= 0x244,
+		.pic_height		= 0x248,
+		.ctb_cols		= 0x24c,
+		.ctb_rows		= 0x250,
+		.conf_win_flag		= 0x254,
+		.conf_win_left		= 0x258,
+		.conf_win_right		= 0x25c,
+		.conf_win_top		= 0x260,
+		.conf_win_bottom	= 0x264,
+		.bit_depth_luma_m8	= 0x268,
+		.bit_depth_chroma_m8	= 0x26c,
+		.log2_max_poc_lsb_m4	= 0x270,
+		.sps_sublayer_info	= 0x274,
+		.sps_max_dec_pic_buf_m1	= 0x278,
+		.sps_num_reorder	= 0x294,
+		.sps_max_latency	= 0x2b0,
+		.log2_min_cb_m3		= 0x2cc,
+		.log2_diff_cb		= 0x2d0,
+		.log2_min_tb_m2		= 0x2d4,
+		.log2_diff_tb		= 0x2d8,
+		.tb_depth_inter		= 0x2dc,
+		.tb_depth_intra		= 0x2e0,
+		.scaling_enabled	= 0x2e4,
+		.scaling_present	= 0x2e5,
+		.amp			= 0x1b90,
+		.sao			= 0x1b91,
+		.pcm			= 0x1b92,
+		.sps_tmvp		= 0x1c2c,
+		.strong_intra		= 0x1c2d,
+		.vui_present		= 0x1c30,
+		.sps_ext		= 0x1cd8,
+		.sps_fw_creates_header	= 0x1ce9,	/* fw 0x84f4c-0x84f90 */
+		.sps_header_len		= 0x1cec,
+		/* PPS writer 0x1f50c (delegated; WPP 0x79 re-read at 0x75b84) */
+		.pps_layer_id		= 0x04,
+		.pps_id			= 0x0c,
+		.pps_sps_id		= 0x10,
+		.dependent_slices	= 0x14,
+		.output_flag_present	= 0x15,
+		.extra_sh_bits		= 0x18,	/* :945 assert + spin 0x1f5a0 */
+		.sign_hiding		= 0x1c,
+		.cabac_init_present	= 0x1d,
+		.num_ref_l0_m1		= 0x20,
+		.num_ref_l1_m1		= 0x24,
+		.init_qp_m26		= 0x28,
+		.constrained_intra	= 0x2c,
+		.transform_skip		= 0x2d,
+		.cu_qp_delta		= 0x2e,
+		.cu_qp_delta_depth	= 0x30,
+		.cb_qp_offset		= 0x34,
+		.cr_qp_offset		= 0x54,
+		.chroma_qp_offsets_present = 0x74,
+		.weighted_pred		= 0x75,
+		.weighted_bipred	= 0x76,
+		.transquant_bypass	= 0x77,
+		.tiles			= 0x78,
+		.wpp			= 0x79,
+		.lf_across_slices	= 0x889,
+		.deblock_ctrl_present	= 0x88a,
+		.deblock_override	= 0x88b,
+		.deblock_disable	= 0x88c,
+		.beta_offset_div2	= 0x890,
+		.tc_offset_div2		= 0x894,
+		.pps_scaling_present	= 0x898,	/* forced 0 for PPS[0], 0x850e0 */
+		.lists_mod		= 0x2144,
+		.par_merge_m2		= 0x2145,
+		.sh_ext_present		= 0x2146,
+		.pps_ext		= 0x2147,
+		.pps_fw_creates_header	= 0x2198,
+		.pps_header_len		= 0x219c,	/* new = old + bits, 0x1fa50 */
+		/* RPS, SPS writer via ctrl+0x49190 (0x85014, 0x8507c) */
+		.rps_num_st		= 0x0,
+		.rps_entry0		= 0x4,
+		.rps_entry_stride	= 0x164,
+		.rps_inter_pred		= 0x0,
+		.rps_num_neg		= 0x30,
+		.rps_num_pos		= 0x34,
+		.rps_dpoc_s0_m1		= 0x38,
+		.rps_used_s0		= 0x58,
+		.rps_num_delta_pocs	= 0x160,
+		.rps_lt_present		= 0x5a68,
+	},
+	.process_hevc = {
+		.slice		= 0x40,		/* kext 0xfffffe0008eace38; fw copies
+						 * 0xD6C bytes 0xfcc4-0xfcd0 */
+		.slice_size	= 0x5570,
+		.slice_fw_copy	= 0xd6c,
+		.picmgmt	= 0x55b0,	/* fw SendCommandToQueue 0x145a8 */
+		.pic_extra	= 0x6518,	/* fw 0xfce8; PipePrepareParam 0x665b4 */
+		.st_rps		= 0x6524,	/* HEVC_RPS+0x5AC0, kext 0xeace48 */
+		.lt_rps		= 0x6690,	/* HEVC_RPS+0x5C2C, kext 0xeace64 */
+		.st_rps_sps_flag = 0x0,		/* fw 0x7eec0-0x7eef8 (delegated) */
+		.st_rps_idx	= 0x4,
+		.sh_size_word	= 0x0,
+		.sh_first_slice	= 0xc,
+		.sh_pps_id	= 0x10,		/* PPSIdIdx loop 0x72aa8-0x72b54 */
+		.sh_poc_lsb	= 0x28,		/* kext Setup_P_Frame 0xf4e7dc */
+		.sh_tmvp	= 0x11c,
+		.sh_sao_luma	= 0x11d,
+		.sh_sao_chroma	= 0x11e,
+		.sh_col_from_l0	= 0x1aa,
+		.sh_five_minus_merge = 0x3d4,
+		.sh_lf_across	= 0x43c,
+		.sh_map		= 0x44c,
+		.sh_hdr_slots	= 0x568,	/* fw ldr x26,[x9,#1384] 0x7f1bc */
+		.hdr_slots	= 256,
+		.hdr_slot_bytes	= 0x400,	/* kext HEVC_Slice::UpdateBuffer 0xf4e318 */
 	},
 };
 
@@ -2082,6 +2462,11 @@ const struct ave_cmd_abi ave_cmd_abi_26_6 = {
 	 * = 0 makes ave_cmd_coded_length() refuse rather than guess.
 	 */
 	.coded_hdr = { .slice_stride = 0 },
+	/*
+	 * HEVC on 26.6.2: not read. vps_block = AVE_OFF_NONE makes both HEVC
+	 * builders refuse (docs/77 §8.1).
+	 */
+	.start_hevc = { .shares_avc_vp = false, .vps_block = AVE_OFF_NONE },
 };
 #endif /* AVE_CMD_ABI_DEFINE_TABLES */
 

@@ -115,10 +115,11 @@ spending a reboot**: the QP was in the bitstream all along.
 | `tools/nc-receiver.py` | the netconsole receiver: raw log and an arrival-timestamped log |
 | `tools/check_frame.py <results dir>` | decode the frame, grade it against the source, with controls |
 | `tools/h264_parse.py <frame.h264>` | SPS/PPS/slice headers: geometry, QP, slice type |
+| `tools/hevc_parse.py [--check --size WxH --qp N] <file>` | VPS/SPS/PPS/slice headers of an HEVC stream or `paramsets.bin`; `--check` grades docs/77's H1/H2 expectations |
 | `tools/disas.py` | `AVE_MACOS=13.5 python3 tools/disas.py --kext\|--fw ...`. **The env var is mandatory** |
 | `tools/modedec_costs.py` | models the ModeDec/IntraEst configuration registers from the blob (docs/73) |
 | `tools/fetch_userspace.py` | range-reads macOS 13.5's user-space encoder out of the IPSW (docs/72) |
-| `tools/abi_selftest/`, `tools/session_selftest/` | `make && ./abi_selftest`: 856 and 209 checks. Both Makefiles delete the binary before rebuilding, because a stale binary once passed three times in one day |
+| `tools/abi_selftest/`, `tools/session_selftest/` | `make && ./abi_selftest`: 1543 and 240 checks (AVC and HEVC). Both Makefiles delete the binary before rebuilding, because a stale binary once passed three times in one day |
 
 Module parameters worth knowing: defaults are the working configuration
 (since f68) and `v4l2` is on; `session_selftest=1` runs the probe-time
