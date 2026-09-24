@@ -390,21 +390,31 @@ MODULE_PARM_DESC(session_ipcm,
  * per-QP lambda tables in the RC block; we have sent zeros, so ModeDec's
  * lambda registers 0x40D26A09C/0A0 read 0 (f42).
  */
-static bool session_lambda;
+static bool session_lambda = true;
 module_param(session_lambda, bool, 0444);
 MODULE_PARM_DESC(session_lambda,
-	"Start_AVC: send macOS's lambda block (RC+0x68..0x78 = 0x400, per-QP tables at wire 0xFFC0..0x10573); docs/72. 0 = zeros, every run before f45");
+	"Start_AVC: send macOS's lambda block (RC+0x68..0x78 = 0x400, per-QP tables at wire 0xFFC0..0x10573); docs/72. Default on since f54 (f53: P frame 47 KB -> 2.5 KB); 0 = zeros");
 
 /*
- * docs/74 R2: every SPS scaling list has gone out as zero, and the firmware
- * turns each list weight w into a quantiser scale register as
- * (0x10000 / w) << 16 | w - so every one of them has been 0. macOS sends
- * flat 16.
+ * The SPS scaling lists. The firmware turns each list weight w into a
+ * quantiser scale register as (0x10000 / w) << 16 | w (docs/74), so zero
+ * lists - every run before f47 - zero every coefficient at any QP: the blank
+ * frame. macOS sends flat 16, and so do we by default since f49.
  */
-static unsigned int session_scaling;
+static unsigned int session_scaling = 16;
 module_param(session_scaling, uint, 0444);
 MODULE_PARM_DESC(session_scaling,
-	"flat weight for every SPS 4x4/8x8 scaling list (16 = what macOS sends, docs/74); 0 = zeros, every run before f47");
+	"flat weight for every SPS 4x4/8x8 scaling list (default 16, what macOS sends, docs/74); 0 = zeros, the pre-f47 blank frame");
+
+/*
+ * docs/74 R3: wire 0xFCF0 (u16) -> RECONL/RECONC SKIPMODE (bits 0/1,
+ * fw 0x5e12c-0x5e138 -> 0x40D28A08C / 0x40D2AA08C). macOS sends 3. Meaning
+ * [U]; expected to matter for P frames.
+ */
+static unsigned int session_skipmode = 3;
+module_param(session_skipmode, uint, 0444);
+MODULE_PARM_DESC(session_skipmode,
+	"Start_AVC wire 0xFCF0 (u16) skip_mode -> RECONL/RECONC SKIPMODE; default 3, what macOS sends (docs/74 R3), since f54. 0 = every run before f51");
 
 /*
  * Rate control. The default reproduces every run so far: ui32RCFlag = 2
@@ -1427,6 +1437,7 @@ static int ave_session_start_avc(struct ave_device *ave,
 	s.ipcm_islice = (u8)session_ipcm;
 	s.lambda_block = session_lambda;
 	s.scaling_flat = (u16)session_scaling;
+	s.skip_mode = (u16)session_skipmode;
 	if (session_scaling)
 		dev_info(ave->dev,
 			 "session: Start_AVC: flat scaling lists %u (docs/74); expect quantiser scale registers %#010x\n",

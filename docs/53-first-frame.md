@@ -3339,3 +3339,26 @@ bypasses the quantiser), and 2709 bytes for any source. The source path,
 the ModeDec configuration, λ and the IntraEst mode words were all red
 herrings. ReconLuma's `0x088` (8x8) and SKIPMODE `0x08C` still read 0. macOS
 sends SKIPMODE 3 (wire `0xFCF0`, docs/74 R3), which matters for P frames.
+
+## f49-f54 (2026-09-24): macOS's defaults, and P frames work
+
+The base configuration from here on is the ramp source, overlay 4,
+`session_costs=0x1f`, `session_coded_kb=2048`. `tools/ramp_psnr.py` grades
+every decoded frame against the driver's own source formula, full frame and
+all planes. (Control: F24's blank frame scores 11 dB and fails.)
+
+| run | change | result |
+|---|---|---|
+| f49 | `session_scaling` now defaults to 16 | byte-identical to f48: the default works, and the encode is deterministic |
+| f50 | + `session_lambda=1` | ModeDec λ `0x80`/`0x80`; frame byte-identical to f49 (I frame) |
+| f51 | + `session_skipmode=3` (wire `0xFCF0`, new) | ReconLuma SKIPMODE reads **1**, as docs/74 predicted; I frame unchanged |
+| f52 | + `session_frames=2`, neither of the above | frame 1: **P**, 3512 P + 88 I MBs, **47 097 B**, Y 54.1 dB |
+| f53 | f52 + λ block + skipmode 3 | frame 1: **2509 B**, 2196 skip, 1048 I, Y 49.1 dB |
+| f54 | defaults now λ on + skipmode 3; `session_frames=4` | IDR + 3 P: 4351 / 2509 / 2448 / 2333 B, Y 48.6 / 49.1 / 49.3 / 49.7 dB |
+
+Multi-frame and P-frame encoding (docs/64-65), implemented earlier and never
+before exercised beyond frame 0, work. Each P frame's source is the ramp
+shifted 8 px. Without macOS's λ and skip mode, the P frame codes correctly
+but at 19x the size. With them, it is what an encoder should produce.
+Which of the two carries the saving was not separated. Both are what macOS
+sends, and both are now defaults.

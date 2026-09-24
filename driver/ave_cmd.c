@@ -338,7 +338,8 @@ int ave_cmd_build_start_avc(const struct ave_cmd_abi *abi, u8 *buf, size_t len,
 	    (s->dbg_bits && l->dbg_bits == AVE_OFF_NONE) ||
 	    (s->ipcm_islice && l->ipcm_islice == AVE_OFF_NONE) ||
 	    (s->lambda_block && l->lambda_scales == AVE_OFF_NONE) ||
-	    (s->scaling_flat && abi->sps.scaling_4x4 == AVE_OFF_NONE))
+	    (s->scaling_flat && abi->sps.scaling_4x4 == AVE_OFF_NONE) ||
+	    (s->skip_mode && l->skip_mode == AVE_OFF_NONE))
 		return -EINVAL;
 	if (s->n_entropy) {
 		u32 j, cols = s->n_entropy_cols ? s->n_entropy_cols : 1;
@@ -492,6 +493,8 @@ int ave_cmd_build_start_avc(const struct ave_cmd_abi *abi, u8 *buf, size_t len,
 		wr32(&w, l->dbg_bits, s->dbg_bits);
 	if (s->ipcm_islice)
 		wr8(&w, l->ipcm_islice, s->ipcm_islice);
+	if (s->skip_mode)
+		wr16(&w, l->skip_mode, s->skip_mode);
 	if (s->lambda_block) {
 		/*
 		 * max(1, round(2^((QP - 12) / 6))) for QP 0..51: the sqrt-lambda
