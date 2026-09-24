@@ -11,7 +11,7 @@ PWD  := $(shell pwd)
 
 all: ave_overlay_dtbo.h ave_overlay_noiommu_dtbo.h ave_overlay_e2_dtbo.h \
      ave_overlay_e3_dtbo.h ave_overlay_e4_dtbo.h \
-     ave_overlay_e5_dtbo.h
+     ave_overlay_e5_dtbo.h ave_overlay_pmp_venc_dtbo.h
 	$(MAKE) -C $(KDIR) M=$(PWD) modules
 
 # Build from the no-DART overlay. Building from ave-overlay.dts silently
@@ -65,4 +65,10 @@ ave_overlay_e5_dtbo.h: ave-overlay-e5.dtbo
 	python3 mkhdr.py $< ave_overlay_e5_dtbo $@
 
 ave-overlay-e5.dtbo: ave-overlay-e5.dts
+	dtc -I dts -O dtb -o $@ $< 2>/dev/null
+
+ave_overlay_pmp_venc_dtbo.h: ave-overlay-pmp-venc.dtbo
+	python3 mkhdr.py $< ave_overlay_pmp_venc_dtbo $@
+
+ave-overlay-pmp-venc.dtbo: ave-overlay-pmp-venc.dts
 	dtc -I dts -O dtb -o $@ $< 2>/dev/null

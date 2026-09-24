@@ -28,8 +28,14 @@
 #include "ave_overlay_e3_dtbo.h"
 #include "ave_overlay_e4_dtbo.h"
 #include "ave_overlay_e5_dtbo.h"
+#include "ave_overlay_pmp_venc_dtbo.h"
 
-static int ovcs_id;
+static int ovcs_id, pmp_ovcs_id;
+
+static bool pmp_venc;
+module_param(pmp_venc, bool, 0444);
+MODULE_PARM_DESC(pmp_venc,
+		 "also enable the PMP report entry pmp-venc-sys (report@10) for apple-ave pmp_report=1 (docs/75 R3, docs/78); needs a DT with the PMP running");
 
 /*
  * The dtbos carry literal phandles because the base tree has no
@@ -230,6 +236,27 @@ static int __init ave_ov_init(void)
 	default:
 		pr_err("ave-overlay: variant=%d is not 0-5; refusing\n", variant);
 		return -EINVAL;
+	}
+
+	if (pmp_venc) {
+		struct device_node *np =
+			of_find_node_by_path("/soc/pmp@28e700000");
+		bool pmp_up = np && of_device_is_available(np);
+
+		of_node_put(np);
+		if (!pmp_up) {
+			pr_err("ave-overlay: pmp_venc=1 but the PMP node is not enabled (docs/78); refusing\n");
+			return -ENODEV;
+		}
+		ret = of_overlay_fdt_apply((void *)ave_overlay_pmp_venc_dtbo,
+					   ave_overlay_pmp_venc_dtbo_len,
+					   &pmp_ovcs_id, NULL);
+		if (ret) {
+			pr_err("ave-overlay: pmp-venc-sys apply failed: %d\n", ret);
+			return ret;
+		}
+		pr_info("ave-overlay: pmp-venc-sys (report@10) enabled, ovcs_id=%d\n",
+			pmp_ovcs_id);
 	}
 
 	fixed = ave_ov_fixup(fdt, len);

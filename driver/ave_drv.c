@@ -135,6 +135,20 @@ MODULE_PARM_DESC(power_me1,
 #define AVE_ME1_NODE	"/soc/power-management@28e580000/power-controller@8020"
 
 /*
+ * docs/75 R3, docs/78: hold the PMP's report entry for VENC_SYS, so the PMP
+ * is told the encoder is powered: PS-REQ bit 16 (AVE0), acknowledged in
+ * PS-ACK. macOS sets it when VENC_SYS powers up and clears it before
+ * VENC_SYS gates; the entry's genpd is a subdomain of venc_sys, so genpd
+ * keeps that order. Needs the PMP running (docs/78) and ave-overlay
+ * pmp_venc=1, which enables the entry. Held like venc_me1: a holder device.
+ */
+static bool pmp_report;
+module_param(pmp_report, bool, 0444);
+MODULE_PARM_DESC(pmp_report,
+		 "report VENC_SYS power to the PMP through pmp-venc-sys (needs ave-overlay pmp_venc=1; docs/75 R3)");
+#define AVE_PMP_REPORT_NODE	"/soc/pmp_report@28e3c0000/report@10"
+
+/*
  * docs/58 5.1 / 7.1: macOS programs AVE_DPE (0x40D1DC000) on every power-on -
  * AVE_HwC::PowerOn -> ResetDPE -> AVE_DPE::Reset applies the Castor_6000 CAT and
  * CAC Default tables, then CAC 8-bit and AVE_DPE::Enable. The firmware never
@@ -653,6 +667,93 @@ static void ave_power_me1_abandon(struct ave_device *ave)
 		 dev_name(vdev));
 }
 
+static int ave_pmp_report_on(struct ave_device *ave)
+{
+	struct of_phandle_args args = {};
+	struct device *vdev;
+	const char *label;
+	int ret;
+
+	if (!pmp_report || ave->pmp_dev)
+		return 0;
+
+	args.np = of_find_node_by_path(AVE_PMP_REPORT_NODE);
+	if (!args.np)
+		return dev_err_probe(ave->dev, -ENODEV, "pmp: no %s\n",
+				     AVE_PMP_REPORT_NODE);
+	if (of_property_read_string(args.np, "label", &label) ||
+	    strcmp(label, "pmp-venc-sys") || !of_device_is_available(args.np)) {
+		of_node_put(args.np);
+		return dev_err_probe(ave->dev, -ENODEV,
+				     "pmp: %s is not an enabled pmp-venc-sys (ave-overlay pmp_venc=1?)\n",
+				     AVE_PMP_REPORT_NODE);
+	}
+
+	vdev = kzalloc(sizeof(*vdev), GFP_KERNEL);
+	if (!vdev) {
+		of_node_put(args.np);
+		return -ENOMEM;
+	}
+	device_initialize(vdev);
+	vdev->parent = ave->dev;
+	vdev->release = ave_me1_holder_release;
+	dev_set_name(vdev, "%s-pmp_venc.%llu", dev_name(ave->dev),
+		     (unsigned long long)ktime_get_boottime_seconds());
+	ret = device_add(vdev);
+	if (ret) {
+		of_node_put(args.np);
+		put_device(vdev);
+		return dev_err_probe(ave->dev, ret, "pmp: holder device\n");
+	}
+
+	/* -EPROBE_DEFER here means the entry has not probed: no provider yet */
+	ret = of_genpd_add_device(&args, vdev);
+	of_node_put(args.np);
+	if (ret) {
+		device_unregister(vdev);
+		return dev_err_probe(ave->dev, ret, "pmp: attach to pmp-venc-sys\n");
+	}
+	pm_runtime_enable(vdev);
+	/* Sets PS-REQ bit 16 and polls PS-ACK for up to 50 ms */
+	ret = pm_runtime_resume_and_get(vdev);
+	if (ret) {
+		pm_runtime_disable(vdev);
+		pm_genpd_remove_device(vdev);
+		device_unregister(vdev);
+		return dev_err_probe(ave->dev, ret,
+				     "pmp: pmp-venc-sys power-on (no PS-ACK?)\n");
+	}
+	ave->pmp_dev = vdev;
+	dev_info(ave->dev, "pmp: pmp-venc-sys on, VENC_SYS reported to the PMP\n");
+	if (perf_dump)
+		ave_pmp_dump(ave->dev);
+	return 0;
+}
+
+static void ave_pmp_report_off(struct ave_device *ave)
+{
+	struct device *vdev = ave->pmp_dev;
+
+	if (!vdev)
+		return;
+	ave->pmp_dev = NULL;
+	pm_runtime_put_sync(vdev);
+	pm_runtime_disable(vdev);
+	pm_genpd_remove_device(vdev);
+	device_unregister(vdev);
+	dev_info(ave->dev, "pmp: pmp-venc-sys released\n");
+}
+
+/* Unclean teardown: keep the report up with everything else (see me1). */
+static void ave_pmp_report_abandon(struct ave_device *ave)
+{
+	if (!ave->pmp_dev)
+		return;
+	dev_warn(ave->dev, "pmp: ABANDONING %s with the PMP report still set\n",
+		 dev_name(ave->pmp_dev));
+	ave->pmp_dev = NULL;
+}
+
 static void ave_power_off(struct ave_device *ave, const char *why)
 {
 	if (!ave->powered)
@@ -668,6 +769,7 @@ static void ave_power_off(struct ave_device *ave, const char *why)
 		 * abandoned instead - see ave_power_me1_abandon() for why
 		 * that is the only thing that keeps the chain up at all.
 		 */
+		ave_pmp_report_abandon(ave);
 		ave_power_me1_abandon(ave);
 		return;
 	}
@@ -693,6 +795,8 @@ static void ave_power_off(struct ave_device *ave, const char *why)
 				 pend);
 		}
 	}
+	/* Clears PS-REQ bit 16 while VENC_SYS is still up (macOS's order) */
+	ave_pmp_report_off(ave);
 	/* Child of venc_me0, and the last thing holding a reference. */
 	ave_power_me1_off(ave);
 	ave->powered = false;
@@ -1214,6 +1318,9 @@ static int ave_probe_stages(struct platform_device *pdev)
 
 		/* docs/57 #3: venc_me1, which no DT reference powers. */
 		ret = ave_power_me1_on(ave);
+		if (ret)
+			return ret;
+		ret = ave_pmp_report_on(ave);
 		if (ret)
 			return ret;
 

@@ -154,6 +154,7 @@ struct ave_device {
 	/* Power domains, in ADT power-gates order. */
 	struct dev_pm_domain_list *pd_list;
 	struct device		*me1_dev;	/* venc_me1 holder, power_me1=1 */
+	struct device		*pmp_dev;	/* pmp-venc-sys holder, pmp_report=1 */
 
 	/*
 	 * Firmware. We load it ourselves rather than adopting an iBoot

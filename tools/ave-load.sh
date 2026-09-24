@@ -5,6 +5,7 @@
 #
 #   sudo tools/ave-load.sh [params] # load, optionally with module parameters
 #   sudo tools/ave-load.sh unload   # rmmod apple-ave (Stop + Close any stream)
+#   sudo OVERLAY_ARGS=pmp_venc=1 tools/ave-load.sh pmp_report=1   # docs/78 R3
 #
 # Once per boot: the driver unloads cleanly, but loading it a second time in
 # the same boot does not work yet (docs/53 f56/f58). Reboot to reload.
@@ -25,7 +26,7 @@ fi
 [ -f test/ave-overlay.ko ] || { echo "build the overlay first: make -C test" >&2; exit 1; }
 
 modprobe -a videodev v4l2-mem2mem videobuf2-common videobuf2-v4l2 videobuf2-dma-contig
-lsmod | grep -q '^ave_overlay' || insmod test/ave-overlay.ko variant=4
+lsmod | grep -q '^ave_overlay' || insmod test/ave-overlay.ko variant=4 ${OVERLAY_ARGS:-}
 insmod driver/apple-ave.ko "$@"	# module parameters, e.g. rc_nondrop=1
 
 for i in $(seq 1 50); do

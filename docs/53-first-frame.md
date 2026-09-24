@@ -3726,3 +3726,11 @@ plus the me1 holder, the stock-era set. `tools/v4l2-test.sh 60 ctl`:
 
 **Reading.** The domains made no difference. The slowdown is the running
 PMP's. R1b as in f89 (PMP-STATUS 1, PS-ACK `0x60003000`, AVE0 DVFS 0).
+
+## f91 (2026-09-24): AVC regression after the HEVC refactor
+
+Module from `fa6999c` (the HEVC host side, with the AVC builders split into
+shared helpers), same PMP boot DT and overlay as f90. `v4l2-test.sh 60 ctl`:
+720p 9.07 ms, 1080p 17.14 / 17.39 ms, 4K 63.91 / 63.72 ms. PSNR identical
+to f89/f90 to six decimals (44.255294 / 44.686854 / 44.701624). ffmpeg
+`-b:v 2M` 300 frames: 1.86 Mbit/s, High, as f88. **No AVC regression.**
