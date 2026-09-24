@@ -123,6 +123,8 @@ struct ave_avc_session {
 	bool	lambda_block;
 	/* Flat scaling-list weight for every 4x4/8x8 list (docs/74 R2); 0 = zeros. */
 	u16	scaling_flat;
+	/* wire 0xFCF0: skip_mode -> RECONL/RECONC SKIPMODE (docs/74 R3). */
+	u16	skip_mode;
 	u64	param_sets_addr;
 	u32	param_sets_size;
 

@@ -1225,6 +1225,9 @@ struct ave_start_avc_layout {
 	 * (fw 0x612e4, docs/70 §8). 0 in every run before f43.
 	 */
 	u32	ipcm_islice;
+	/* u16 at wire 0xFCF0 -> ctrl+0x142C/0x1430 -> RECONL/RECONC SKIPMODE
+	 * (fw 0x5e12c-0x5e138, 0x5783c, 0x57874; docs/74). macOS: 3. */
+	u32	skip_mode;
 	/*
 	 * The lambda block macOS 13.5 always sends, fixed-QP included
 	 * (docs/72 §5.2, AppleVideoEncoder.bundle AVE_SetEncoderDefault):
@@ -1654,6 +1657,7 @@ const struct ave_cmd_abi ave_cmd_abi_13_5 = {
 		.src_go_bits	= 0xfecc,	/* fw 0x5cfe4 -> SRCDMAGO bits 4+, docs/69 */
 		.dbg_bits	= 0xfcd8,	/* fw 0x5cedc -> ctrl+0xA7C, docs/70 */
 		.ipcm_islice	= 0xfce4,	/* fw 0x5cf58 -> ctrl+0x23FDE, docs/73 */
+		.skip_mode	= 0xfcf0,	/* fw 0x5e12c -> ctrl+0x142C, docs/74 */
 		.lambda_scales	= 0xff98,	/* RC+0x68, fw 0x5d3d8, docs/72 */
 		.lambda_qp_tab	= 0xffc0,	/* RC+0x90, fw memcpy 0x5d3a0 */
 		.lambda_idx_tab	= 0x10090,	/* RC+0x160 */
@@ -1962,6 +1966,7 @@ const struct ave_cmd_abi ave_cmd_abi_26_6 = {
 		.src_go_bits	= AVE_OFF_NONE,
 		.dbg_bits	= AVE_OFF_NONE,
 		.ipcm_islice	= AVE_OFF_NONE,
+		.skip_mode	= AVE_OFF_NONE,
 		.lambda_scales	= AVE_OFF_NONE,
 		.lambda_qp_tab	= AVE_OFF_NONE,
 		.lambda_idx_tab	= AVE_OFF_NONE,
