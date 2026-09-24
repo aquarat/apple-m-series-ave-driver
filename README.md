@@ -18,11 +18,13 @@ firmware, completes the command handshake, and encodes a frame: Config, Open,
 Start_AVC, Process, and a valid H.264 Baseline 1280x720 frame that ffmpeg
 decodes, with every macroblock accounted for and no faults.
 
-The picture is blank - every sample decodes to 128, and the frame is 2709
-bytes whatever the source holds, at any QP. That is the open problem. It is
-not the source path: with I_PCM switched on, the same pipe codes the source
-sample for sample (f43). The loss is in prediction/residual. The run log is
-[docs/53-first-frame.md](docs/53-first-frame.md); how to operate the
+**It encodes correctly (2026-09-24, f48):** a 1280x720 ramp comes back at
+48.6 dB PSNR against the source. The long-standing blank frame (every sample
+128, 2709 bytes whatever the source) was the SPS scaling lists: the driver
+sent them as zero, and the firmware derives every quantiser scale register
+from them. `session_scaling=16` sends what macOS sends. The run log is
+[docs/53-first-frame.md](docs/53-first-frame.md); the cause is in
+[docs/74-residual-path.md](docs/74-residual-path.md); how to operate the
 hardware, and the rules for doing so, are in [AGENTS.md](AGENTS.md). Start
 there.
 

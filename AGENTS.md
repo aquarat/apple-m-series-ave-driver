@@ -122,7 +122,8 @@ Module parameters worth knowing: `session_costs` (post-frame register
 groups, default 0, each behind a step marker), `session_flat_luma`,
 `session_qp`, `session_frames`, `session_coded_kb`, `session_dbg`
 (firmware print gate, wire `0xFCD8`), `session_ipcm` (I_PCM in I slices,
-wire `0xFCE4`), `session_lambda` (macOS's λ block), `step_ms`, and
+wire `0xFCE4`), `session_lambda` (macOS's λ block), `session_scaling` (SPS scaling-list
+weight; **16 or the encoder produces no coefficients**, f47), `step_ms`, and
 `core_reset=2 fw_restore_data=1` (recover a halted core; **never**
 automatic, because a cold core reads STOPPED too, s2-9).
 

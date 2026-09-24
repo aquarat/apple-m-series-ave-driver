@@ -3306,3 +3306,36 @@ diag ModeDec 0x40D26A09C: 00000080 00000080 01000181 01000000 0100ff80 01000000 
 - **`frame.h264` is byte-identical to F24's.** λ = 0 was a real divergence
   from macOS, but it is not the blank frame. docs/72 said as much in
   advance: λ steers mode choice, and QP/nQuant were already right.
+
+## f46-f48 (2026-09-24): the scaling lists were zero. The encoder works
+
+docs/74 (static) found the cause. The firmware copies the host's SPS block
+(wire `0x105B0`, `0x6AC` bytes, fw `0x5ce68`-`0x5ce90`) and, in
+`InitScalingListRegs` (fw `0x5fb64`), turns each scaling-list weight `w` at
+SPS+`0x5A` (4x4, 6 x 16 u16) and SPS+`0x11A` (8x8, 6 x 64 u16) into a
+quantiser scale register `((0x10000 / w) << 16 | w) & 0x3FFF00FF`
+(`udiv w3, w15, w2` at `0x5fbb4`; arm64 `udiv` by 0 is 0). A Baseline SPS
+never codes these lists, and our driver had always left them zero. So every
+scale register was 0 and every coefficient quantised to nothing, at any QP.
+macOS fills every list with 16 (`AVE_PrepareSequenceHeader`, docs/74).
+`session_scaling=16` sends that. `session_costs` bit 4 reads IntraEst's and
+ReconLuma's scale registers.
+
+| run | change | scale registers | frame |
+|---|---|---|---|
+| f46 | f42 + `session_costs=0x1f` (read-only) | IntraEst `0x088/08C/0C8` = 0; ReconLuma `0x0A0/0A4/0E0/120` = 0; controls `0x090` = 30, `0x094` = `0x80` | 2709 B, blank |
+| f47 | f46 + `session_scaling=16` | all **`0x10000010`**, as predicted | **2949 B**; Y = 200 in 920 832 of 921 600 samples (199/198 in the top-left MBs only), Cb exact, Cr within ±1 |
+| f48 | f47 with the ramp source (`session_flat_luma` unset) | as f47 | **4351 B, 219 distinct luma values** |
+
+**f48 against the full source**, rebuilt from `ave_session_fill_input()`'s
+formula: **Y 48.6 dB PSNR, max error 5; Cb exact; Cr 50.6 dB.** A picture of
+the source above the decode is indistinguishable by eye. `check_frame.py`
+says MATCH at 27.7 dB. Its lower figure comes from its comparison window (the
+256 KiB `input_luma` dump), not the encode.
+
+**The blank frame is solved.** Every observation since F16 follows from one
+cause: no coefficients at any QP (f44), I_PCM exact (f43, since I_PCM
+bypasses the quantiser), and 2709 bytes for any source. The source path,
+the ModeDec configuration, λ and the IntraEst mode words were all red
+herrings. ReconLuma's `0x088` (8x8) and SKIPMODE `0x08C` still read 0. macOS
+sends SKIPMODE 3 (wire `0xFCF0`, docs/74 R3), which matters for P frames.

@@ -1309,6 +1309,13 @@ struct ave_sps_layout {
 	u32	vui_parameters_present_flag;	/* u8 */
 	u32	frame_cropping_flag;		/* u8 */
 	u32	crop_left, crop_right, crop_top, crop_bottom;
+	/*
+	 * Scaling lists: 6 x 16 u16 (4x4) and 6 x 64 u16 (8x8). Not coded
+	 * in a Baseline SPS, but InitScalingListRegs (fw 0x5fb64) turns them
+	 * into every quantiser scale register, (0x10000/w) << 16 | w, and a
+	 * zero list gives a zero register (docs/74).
+	 */
+	u32	scaling_4x4, scaling_8x8;
 	u32	fw_creates_header;		/* u8 */
 	u32	header_len;			/* u32, bits */
 };
@@ -1679,6 +1686,8 @@ const struct ave_cmd_abi ave_cmd_abi_13_5 = {
 		.crop_right			= 0x10a48,	/* [x8,#1176] 0x198fc */
 		.crop_top			= 0x10a4c,	/* [x8,#1180] 0x19908 */
 		.crop_bottom			= 0x10a50,	/* [x8,#1184] 0x19914 */
+		.scaling_4x4			= 0x1060a,	/* SPS+0x5A  fw 0x196b0, 0x5fba8 */
+		.scaling_8x8			= 0x106ca,	/* SPS+0x11A fw 0x1973c */
 		.fw_creates_header		= 0x10a54,	/* ldrb [x24,#1192] 0x5dd64,
 								 * x24 = SPS copy - 4 (0x5caac) */
 		.header_len			= 0x10a58,	/* fw str [x8,#1192] 0x19974 */
@@ -1985,6 +1994,8 @@ const struct ave_cmd_abi ave_cmd_abi_26_6 = {
 		.crop_right			= AVE_SPS_CROP_RIGHT,
 		.crop_top			= AVE_SPS_CROP_TOP,
 		.crop_bottom			= AVE_SPS_CROP_BOTTOM,
+		.scaling_4x4			= AVE_OFF_NONE,	/* laid out differently, docs/74 */
+		.scaling_8x8			= AVE_OFF_NONE,
 		.fw_creates_header		= AVE_SPS_FW_CREATES_HDR,
 		.header_len			= AVE_SPS_HEADER_LEN,
 	},
