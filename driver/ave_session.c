@@ -1005,6 +1005,9 @@ static int ave_session_cmd(struct ave_device *ave, const struct ave_cmd_abi *abi
 			   enum ave_op op, const char *name,
 			   dma_addr_t cmd_iova, size_t cmd_len, u64 client_id)
 {
+	/* Streaming (V4L2): the per-command lines would be ~4 per frame. */
+	const bool quiet = ave->session_bufs &&
+		((struct ave_sess_bufs *)ave->session_bufs)->quiet;
 	struct ave_sess_rx *rx = &ave_sess_rx;
 	unsigned long left;
 	u32 status = 0;
@@ -1020,7 +1023,8 @@ static int ave_session_cmd(struct ave_device *ave, const struct ave_cmd_abi *abi
 	rx->other_count = 0;
 	rx->want_id = abi->cmd[op].reply_id;
 
-	dev_info(ave->dev, "session: %s: sending %zu bytes at IOVA %pad on IO\n",
+	if (!quiet)
+		dev_info(ave->dev, "session: %s: sending %zu bytes at IOVA %pad on IO\n",
 		 name, cmd_len, &cmd_iova);
 
 	ret = ave_ipc_send(ave, AVE_CH_IO, cmd_iova, cmd_len, 0);
@@ -1049,11 +1053,13 @@ static int ave_session_cmd(struct ave_device *ave, const struct ave_cmd_abi *abi
 	 * this point. Logged at info for that reason.
 	 */
 	if (rx->other_count)
-		dev_info(ave->dev,
+		if (!quiet)
+			dev_info(ave->dev,
 			 "session: %s: skipped %u other completion(s), last id %#06x, while waiting for %#06x\n",
 			 name, rx->other_count, rx->other_id, rx->want_id);
 	if (!rx->ack_seen)
-		dev_info(ave->dev,
+		if (!quiet)
+			dev_info(ave->dev,
 			 "session: %s: completion arrived before the IO ack echo (expected ordering)\n",
 			 name);
 	if (!rx->size)
@@ -1062,14 +1068,16 @@ static int ave_session_cmd(struct ave_device *ave, const struct ave_cmd_abi *abi
 			 name);
 
 	/* The reply words. print4() would be nicer; keep it explicit. */
-	dev_info(ave->dev,
+	if (!quiet)
+		dev_info(ave->dev,
 		 "session: %s: reply %u bytes flags %#x%s: id=%#06x cid=%#x slot=%#x status=%#x\n",
 		 name, rx->size, rx->flags, rx->overflow ? " (TRUNCATED)" : "",
 		 rx->size >= 2 ? get_unaligned_le16(rx->buf) : 0,
 		 rx->size >= 0x14 ? get_unaligned_le32(rx->buf + 0x10) : 0,
 		 rx->size >= 0x20 ? get_unaligned_le32(rx->buf + 0x1c) : 0,
 		 rx->size >= 0x3c ? get_unaligned_le32(rx->buf + 0x38) : 0);
-	print_hex_dump(KERN_INFO, "session: reply: ", DUMP_PREFIX_OFFSET, 16, 1,
+	if (!quiet)
+		print_hex_dump(KERN_INFO, "session: reply: ", DUMP_PREFIX_OFFSET, 16, 1,
 		       rx->buf, rx->size, false);
 
 	ret = ave_cmd_check_reply(abi, op, rx->buf, rx->size, client_id, &status);
@@ -1085,7 +1093,8 @@ static int ave_session_cmd(struct ave_device *ave, const struct ave_cmd_abi *abi
 	else if (ret)
 		dev_err(ave->dev, "session: %s: reply check error %d\n", name, ret);
 	else
-		dev_info(ave->dev, "session: %s: ACCEPTED, status %#x\n",
+		if (!quiet)
+			dev_info(ave->dev, "session: %s: ACCEPTED, status %#x\n",
 			 name, status);
 	return ret;
 }
@@ -1740,8 +1749,10 @@ static int ave_session_start_avc(struct ave_device *ave,
 		return ret;
 	}
 	dev_info(ave->dev,
-		 "session: Start_AVC: %ux%u (coded %ux%u) QP %u I-only, profile 66 level 40\n",
-		 bufs->width, bufs->height, cw, ch, bufs->qp);
+		 "session: Start_AVC: %ux%u (coded %ux%u) QP %u, profile %u level %u %s, %s\n",
+		 bufs->width, bufs->height, cw, ch, bufs->qp, s.profile_idc,
+		 s.level_idc, s.cabac ? "CABAC" : "CAVLC",
+		 s.rc_enable ? "rate control" : "fixed QP");
 	dev_info(ave->dev,
 		 "session: Start_AVC: fw_client %pad/%#x mem %pad/%#x coded[0] %pad/%#x hdr[0] %pad/%#x psets %pad/%#x (%u coded buffer(s), slots %u..%u)\n",
 		 &fwc_iova, fwc_size, &fwcm_iova, (u32)AVE_SESS_FWCLIENTMEM_SIZE,
@@ -3673,6 +3684,7 @@ int ave_enc_start(struct ave_device *ave, const struct ave_enc_cfg *cfg)
 	bufs->fps_den = cfg->fps_den;
 	bufs->req_slots = cfg->slots;
 	bufs->quiet = true;
+	ave->dart_check_quiet = true;
 	bufs->encode = true;
 	bufs->n_done = 0;
 	bufs->stream_len = 0;
@@ -3761,5 +3773,6 @@ int ave_enc_stop(struct ave_device *ave)
 	memset(&bufs->pic_recon, 0, sizeof(bufs->pic_recon));
 	bufs->stream_len = 0;
 	bufs->n_done = 0;
+	ave->dart_check_quiet = false;
 	return 0;
 }

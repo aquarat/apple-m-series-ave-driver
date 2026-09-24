@@ -3,7 +3,7 @@
 # the V4L2 core modules, the device-tree overlay (the Asahi DT has no AVE
 # node yet), then apple-ave with its defaults, which register /dev/videoN.
 #
-#   sudo tools/ave-load.sh          # load
+#   sudo tools/ave-load.sh [params] # load, optionally with module parameters
 #   sudo tools/ave-load.sh unload   # rmmod apple-ave (Stop + Close any stream)
 #
 # Once per boot: the driver unloads cleanly, but loading it a second time in
@@ -26,7 +26,7 @@ fi
 
 modprobe -a videodev v4l2-mem2mem videobuf2-common videobuf2-v4l2 videobuf2-dma-contig
 lsmod | grep -q '^ave_overlay' || insmod test/ave-overlay.ko variant=4
-insmod driver/apple-ave.ko
+insmod driver/apple-ave.ko "$@"	# module parameters, e.g. rc_nondrop=1
 
 for i in $(seq 1 50); do
     for n in /sys/class/video4linux/video*/name; do

@@ -389,6 +389,16 @@ static void ave_ipc_terminal_line(struct ave_device *ave, u64 fw, u32 len, u32 l
 		line[--n] = 0;
 
 	ave->fwlog_lines++;
+	/*
+	 * While a V4L2 stream runs the firmware's per-frame chatter (the RC's
+	 * "MiniGOP" line, f87) goes to debug; anything that asserts or says it
+	 * failed is still shown.
+	 */
+	if (ave->dart_check_quiet && !strstr(line, "ASSERT") &&
+	    !strstr(line, "rror") && !strstr(line, "ail")) {
+		dev_dbg(ave->dev, "fw[%u]| %s\n", level, line);
+		return;
+	}
 	if (__ratelimit(&ave->fwlog_rs))
 		dev_info(ave->dev, "fw[%u]| %s\n", level, line);
 }
