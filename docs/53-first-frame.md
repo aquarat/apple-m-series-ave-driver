@@ -3818,3 +3818,16 @@ docs/77 §8.1 lists as H2's fallback, which is not implemented. The source
 reader had our buffer, and MbInput ran to row 45 (currMbRow 45, "produced
 1441829"), so the front end ran before the transcode stage refused.
 Process timed out after 2000 ms, as the assert predicts.
+
+## h2b (2026-09-24): past 7605; firmware data abort after the transcoders ran
+
+`9460092` (TranscodedData pair, `session_hevc_xc=2` default), otherwise as
+h2. TranscodedData 2 x 0xa9000 at `fc400000`/`fc300000`. The firmware logged
+both `tmp_bitstream_addr_dst[0]` and `[1]` as ours, two `SetTranscode`s and
+`XC SourceGo.all 3`. **The 7605 assert is gone.** 6 ms later the firmware
+took a **data abort**: pc `0x7F578`, lr `0x7EF40`, far `0x220000`, esr
+`0x96000007` (translation fault, level 3, read). Backtrace `7F578 7D9D4
+68108 A5AC 96D3C 96B8C 12F28 A1B14 A19AC B3448`. Process timed out. The
+fault address is firmware-virtual and small, so it is probably a
+pointer or offset the firmware derived from a field we left zero or
+unexpected, in the post-transcode path.
