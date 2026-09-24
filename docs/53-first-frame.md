@@ -3804,3 +3804,17 @@ parameter sets, NAL types 32@0, 33@27 and 34@61. `tools/hevc_parse.py
 --check`: **PASS**, 12/12. Main, level 4.0, CTB 32 (40x23), min CB 8, TB
 4..32, flat scaling, 8-bit 4:2:0, 1280x720 with no conformance window,
 SAO 1, TMVP 1, WPP 1, st_rps[0] = {-1 used}, max_dec_pic_buffering_minus1 1.
+
+## h2 (2026-09-24): HEVC_ENCODE reaches SetTranscode and asserts 7605
+
+h1b's parameters plus `session_frame=1`. INIT was accepted again (the same
+72-byte parameter sets), then HEVC_ENCODE (26680 bytes, slot 21, POC lsb 0,
+frame_type 3). The firmware logged `HEVC_XCCONFIG0_PICSIZE 2d0050` (45x80
+rows/cols of 16) and `SetTranscode, 0 1`, then `HEVC::
+curr_bitstream_addr_dst: fc600000` (our coded buffer), then
+`tmp_bitstream_addr_dst[0]: 0` and **ASSERT CHEVCController_H13C.cpp:7605
+tmp_bitstream_addr_dst[xc_index] != 0**. That is the TranscodedData surface
+docs/77 §8.1 lists as H2's fallback, which is not implemented. The source
+reader had our buffer, and MbInput ran to row 45 (currMbRow 45, "produced
+1441829"), so the front end ran before the transcode stage refused.
+Process timed out after 2000 ms, as the assert predicts.
