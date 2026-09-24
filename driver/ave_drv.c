@@ -132,7 +132,7 @@ static bool power_me1 = true;
 module_param(power_me1, bool, 0444);
 MODULE_PARM_DESC(power_me1,
 		 "also power the venc_me1 domain, which no DT reference reaches (docs/57 #3, F8)");
-#define AVE_ME1_NODE	"/soc/power-management@28e580000/power-controller@8020"
+/* venc_me1's node path is per SoC: ave->soc->me1_node */
 
 /*
  * docs/75 R3, docs/78: hold the PMP's report entry for VENC_SYS, so the PMP
@@ -146,7 +146,7 @@ static bool pmp_report;
 module_param(pmp_report, bool, 0444);
 MODULE_PARM_DESC(pmp_report,
 		 "report VENC_SYS power to the PMP through pmp-venc-sys (needs ave-overlay pmp_venc=1; docs/75 R3)");
-#define AVE_PMP_REPORT_NODE	"/soc/pmp_report@28e3c0000/report@10"
+/* ave->soc->pmp_report_node */
 
 /*
  * docs/75 R4: the VENC DVFS vote. macOS's AVE_DPM gates 457/600/459/602 are
@@ -161,8 +161,7 @@ static unsigned long pmp_vote;
 module_param(pmp_vote, ulong, 0444);
 MODULE_PARM_DESC(pmp_vote,
 		 "VENC DVFS vote written to the PMP dashboard, e.g. 0x2000000300000003 = VMax + FAB0 VMax (needs pmp_report=1; docs/75 R4). 0 = none");
-#define AVE_PTD_AVE0_DVFS_WR	0x28e3d0888ULL
-#define AVE_PTD_AVE0_DVFS_RD	0x28e3c1110ULL
+/* The entry's addresses are per SoC: ave->soc->pmp_dvfs_wr / _rd */
 #define AVE_PTD_DVFS_VALID	BIT_ULL(61)
 #define AVE_PTD_DVFS_MASK	(AVE_PTD_DVFS_VALID | GENMASK_ULL(33, 32) | GENMASK_ULL(1, 0))
 
@@ -207,8 +206,10 @@ MODULE_PARM_DESC(perf_dump, "log the VENC PMGR perf-domain registers at probe (r
  * the AVE0/AVD0 DVFS read-backs. Controls: PS-REQ bits 12/13 (disp0,
  * dispext0) set; AVD0 (report@11 okay) for comparison.
  */
-static void ave_pmp_dump(struct device *dev)
+static void ave_pmp_dump(struct ave_device *ave)
 {
+	const struct ave_soc *soc = ave->soc;
+	struct device *dev = ave->dev;
 	static const struct { u32 off; const char *what; } q[] = {
 		{ 0x0010, "PMP-STATUS" },
 		{ 0x0080, "DVFS-STATE 0" }, { 0x0088, "DVFS-STATE 0+8" },
@@ -220,11 +221,15 @@ static void ave_pmp_dump(struct device *dev)
 		{ 0x1110, "AVE0 DVFS" }, { 0x1118, "AVE0 DVFS+8" },
 		{ 0x1120, "AVD0 DVFS (control)" },
 	};
-	void __iomem *ps = ioremap(0x28e0802d8ULL, 0x10);
-	void __iomem *w;
+	void __iomem *ps, *w;
 	u32 pmp, sram;
 	unsigned int i;
 
+	if (!soc->pmp_ps_reg || !soc->pmp_report_base) {
+		dev_info(dev, "pmp_dump: no PMP addresses for %s\n", soc->name);
+		return;
+	}
+	ps = ioremap(soc->pmp_ps_reg, 0x10);
 	if (!ps)
 		return;
 	pmp = readl(ps);
@@ -236,20 +241,26 @@ static void ave_pmp_dump(struct device *dev)
 		dev_info(dev, "pmp_dump: R1a failed; not reading the PMP window (docs/75)\n");
 		return;
 	}
-	w = ioremap(0x28e3c0000ULL, 0x2000);
+	w = ioremap(soc->pmp_report_base, 0x2000);
 	if (!w)
 		return;
 	for (i = 0; i < ARRAY_SIZE(q); i++)
 		dev_info(dev, "pmp_dump: R1b %#x %-20s %#018llx\n",
-			 (u32)(0x28e3c0000 + q[i].off), q[i].what, readq(w + q[i].off));
+			 (u32)(soc->pmp_report_base + q[i].off), q[i].what, readq(w + q[i].off));
 	iounmap(w);
 }
 
-static void ave_perf_dump(struct device *dev)
+static void ave_perf_dump(struct ave_device *ave)
 {
-	void __iomem *p = ioremap(0x28e580000ULL + 0x58000, 0x700);
+	struct device *dev = ave->dev;
+	void __iomem *p;
 	unsigned int i;
 
+	if (!ave->soc->pmgr_perf_blk) {
+		dev_info(dev, "perf_dump: no PMGR perf block for %s\n", ave->soc->name);
+		return;
+	}
+	p = ioremap(ave->soc->pmgr_perf_blk, 0x700);
 	if (!p) {
 		dev_warn(dev, "perf_dump: ioremap failed\n");
 		return;
@@ -267,7 +278,7 @@ static void ave_perf_dump(struct device *dev)
 			 i == 36 ? "  <- VENC_SYS" : i == 33 ? "  <- MSR0" : "");
 	}
 	iounmap(p);
-	ave_pmp_dump(dev);
+	ave_pmp_dump(ave);
 }
 
 static bool core_reset_only;
@@ -580,14 +591,14 @@ static int ave_power_me1_on(struct ave_device *ave)
 	if (!power_me1 || ave->me1_dev)
 		return 0;
 
-	args.np = of_find_node_by_path(AVE_ME1_NODE);
+	args.np = of_find_node_by_path(ave->soc->me1_node);
 	if (!args.np)
-		return dev_err_probe(ave->dev, -ENODEV, "me1: no %s\n", AVE_ME1_NODE);
+		return dev_err_probe(ave->dev, -ENODEV, "me1: no %s\n", ave->soc->me1_node);
 	if (of_property_read_string(args.np, "label", &label) ||
 	    strcmp(label, "venc_me1")) {
 		of_node_put(args.np);
 		return dev_err_probe(ave->dev, -ENODEV,
-				     "me1: %s is not venc_me1; refusing\n", AVE_ME1_NODE);
+				     "me1: %s is not venc_me1; refusing\n", ave->soc->me1_node);
 	}
 
 	vdev = kzalloc(sizeof(*vdev), GFP_KERNEL);
@@ -694,17 +705,20 @@ static int ave_pmp_report_on(struct ave_device *ave)
 
 	if (!pmp_report || ave->pmp_dev)
 		return 0;
+	if (!ave->soc->pmp_report_node)
+		return dev_err_probe(ave->dev, -ENODEV,
+				     "pmp: no pmp-venc-sys node known for %s\n", ave->soc->name);
 
-	args.np = of_find_node_by_path(AVE_PMP_REPORT_NODE);
+	args.np = of_find_node_by_path(ave->soc->pmp_report_node);
 	if (!args.np)
 		return dev_err_probe(ave->dev, -ENODEV, "pmp: no %s\n",
-				     AVE_PMP_REPORT_NODE);
+				     ave->soc->pmp_report_node);
 	if (of_property_read_string(args.np, "label", &label) ||
 	    strcmp(label, "pmp-venc-sys") || !of_device_is_available(args.np)) {
 		of_node_put(args.np);
 		return dev_err_probe(ave->dev, -ENODEV,
 				     "pmp: %s is not an enabled pmp-venc-sys (ave-overlay pmp_venc=1?)\n",
-				     AVE_PMP_REPORT_NODE);
+				     ave->soc->pmp_report_node);
 	}
 
 	vdev = kzalloc(sizeof(*vdev), GFP_KERNEL);
@@ -744,7 +758,7 @@ static int ave_pmp_report_on(struct ave_device *ave)
 	ave->pmp_dev = vdev;
 	dev_info(ave->dev, "pmp: pmp-venc-sys on, VENC_SYS reported to the PMP\n");
 	if (perf_dump)
-		ave_pmp_dump(ave->dev);
+		ave_pmp_dump(ave);
 	return 0;
 }
 
@@ -758,8 +772,8 @@ static int ave_pmp_vote(struct ave_device *ave, u64 val)
 	 * mapping there (pmp-report's PS-REQ writes to this same block). f94:
 	 * a posted (plain ioremap) store here raised SError 0xbe000000.
 	 */
-	wr = ioremap_np(AVE_PTD_AVE0_DVFS_WR, 8);
-	rd = ioremap_np(AVE_PTD_AVE0_DVFS_RD, 16);
+	wr = ioremap_np(ave->soc->pmp_dvfs_wr, 8);
+	rd = ioremap_np(ave->soc->pmp_dvfs_rd, 16);
 	if (!wr || !rd) {
 		if (wr)
 			iounmap(wr);
@@ -794,6 +808,9 @@ static int ave_pmp_vote_on(struct ave_device *ave)
 
 	if (!v || ave->pmp_voted)
 		return 0;
+	if (!ave->soc->pmp_dvfs_wr || !ave->soc->pmp_dvfs_rd)
+		return dev_err_probe(ave->dev, -ENODEV,
+				     "pmp: no AVE0 DVFS entry known for %s\n", ave->soc->name);
 	if (!ave->pmp_dev)
 		return dev_err_probe(ave->dev, -EINVAL,
 				     "pmp: pmp_vote needs pmp_report=1 (R3 before R4)\n");
@@ -1236,6 +1253,11 @@ static int ave_probe_stages(struct platform_device *pdev)
 		return -ENOMEM;
 
 	ave->dev = dev;
+	ave->soc = of_device_get_match_data(dev);
+	if (!ave->soc)
+		return dev_err_probe(dev, -ENODEV,
+				     "no SoC table for %pOF: its compatible needs a row in ave_soc.c (docs/79)\n",
+				     dev->of_node);
 	platform_set_drvdata(pdev, ave);
 	dev_info(dev, "probe: staged bring-up, stop_after=%d (max %d)\n",
 		 stop_after, AVE_STAGE_MAX);
@@ -1850,7 +1872,7 @@ iop_config_done:
 		 * session_selftest=1.
 		 */
 		if (perf_dump)
-			ave_perf_dump(dev);
+			ave_perf_dump(ave);
 		if (!ave_session_selftest_requested() && v4l2) {
 			ret = ave_enc_init(ave);
 			if (!ret)
@@ -2026,7 +2048,12 @@ static void ave_remove(struct platform_device *pdev)
 	ave_power_off(ave, "remove");
 }
 
+/*
+ * The SoC compatible selects the table row. "apple,ave" alone matches too,
+ * so the refusal in probe can say what is missing (no data = no row).
+ */
 static const struct of_device_id ave_of_match[] = {
+	{ .compatible = "apple,t6001-ave", .data = &ave_soc_t6001 },
 	{ .compatible = "apple,ave" },
 	{}
 };

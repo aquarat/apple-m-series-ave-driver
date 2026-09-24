@@ -608,7 +608,7 @@ int ave_boot_config(struct ave_device *ave)
 		cfg = ave->fwcfg.cpu;
 		memset(cfg, 0, sizeof(*cfg));
 		cfg->dev_index         = cpu_to_le32(a->instance);
-		cfg->dev_id            = cpu_to_le32(a->dev_id);
+		cfg->dev_id            = cpu_to_le32(ave->soc->dev[a->abi].dev_id);
 		cfg->dev_num           = cpu_to_le32(a->dev_num);
 		cfg->dev_num_per_group = cpu_to_le32(a->dev_num_per_group);
 		cfg->dev_subid_flag    = cpu_to_le64(0);	/* UNVERIFIED */
@@ -624,7 +624,7 @@ int ave_boot_config(struct ave_device *ave)
 			 &ave->fwlog.iova);
 	} else {
 		s1 = a->instance;
-		s2 = a->dev_id;
+		s2 = ave->soc->dev[a->abi].dev_id;
 		dev_info(ave->dev, "  %s: no boot cfg block; instance %u, DevID %u\n",
 			 a->name, s1, s2);
 	}
@@ -914,14 +914,15 @@ int ave_ipc_handshake(struct ave_device *ave)
 		put_unaligned_le32(ave->fwheap.size,
 				   (u8 *)ave->ipcinfo + AVE_BOOT_INFO_HEAP_SIZE);
 	}
-	put_unaligned_le32(a->dev_type, (u8 *)ave->ipcinfo + AVE_BOOT_INFO_DEV_TYPE);
+	put_unaligned_le32(ave->soc->dev[a->abi].dev_type,
+			   (u8 *)ave->ipcinfo + AVE_BOOT_INFO_DEV_TYPE);
 	/* +0x4c stays 0: the firmware copies that many trailing words. */
 	dma_wmb();
 
 	info_fw = ave_ipc_cpu_to_fw(ave, ave->ipcinfo);
 	ave_send_iop_msg(ave, lower_32_bits(info_fw), upper_32_bits(info_fw), 0, 0);
 	dev_info(ave->dev, "  msg4: info fw %#llx, chanmem fw %#llx (%#x bytes), dev_type %u\n",
-		 info_fw, ave_ipc_cpu_to_fw(ave, ave->chanmem), chsz, a->dev_type);
+		 info_fw, ave_ipc_cpu_to_fw(ave, ave->chanmem), chsz, ave->soc->dev[a->abi].dev_type);
 
 	/* --- message 5: where the descriptors went -------------------------- */
 	ret = ave_recv_iop_msg(ave, m, AVE_BOOT_RECV_TIMEOUT_MS);

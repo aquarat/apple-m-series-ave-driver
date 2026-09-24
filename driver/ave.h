@@ -20,6 +20,7 @@
 #include "ave_hw.h"
 #include "ave_abi.h"
 #include "ave_version.h"
+#include "ave_soc.h"
 
 /* One mapped MMIO bank; index matches the ADT reg index. */
 struct ave_bank {
@@ -61,6 +62,7 @@ struct ave_v4l2;
 
 struct ave_device {
 	struct device		*dev;
+	const struct ave_soc	*soc;		/* from the compatible; ave_soc.c */
 	struct ave_bank		bank[AVE_NUM_BANKS];
 	enum ave_fw_abi		fw_abi;		/* chosen before any command */
 

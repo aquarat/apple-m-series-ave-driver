@@ -131,25 +131,34 @@
  * ADT value verbatim would fail the readback check, so the values here are
  * already masked.
  */
-static const struct ave_dapf_entry ave_dapf_window = {
-	.start = 0x1f000000000ULL, .end = 0x1f0fffffffcULL,
-	.r0 = 0x33, .r4 = 1,
-	.what = "0x1f0 window (dart-ave0[0], dart-ave1[0], dart-isp0[0])",
-};
+/* The fixed entries, from the SoC table (addresses) and docs/49 (flags). */
+static struct ave_dapf_entry ave_dapf_mk(const struct ave_soc_range *r,
+					 u32 r0, const char *what)
+{
+	return (struct ave_dapf_entry){
+		.start = r->start, .end = r->end, .r0 = r0, .r4 = 1, .what = what,
+	};
+}
+
+static struct ave_dapf_entry ave_dapf_window(struct ave_device *ave)
+{
+	return ave_dapf_mk(&ave->soc->dapf_window, 0x33,
+			   "0x1f0 window (dart-ave0[0], dart-ave1[0], dart-isp0[0])");
+}
 
 /* ave0's own SVE..ASC span, listed under dart-ave1 (docs/44 addendum). */
-static const struct ave_dapf_entry ave_dapf_mmio_ave0 = {
-	.start = 0x40d050000ULL, .end = 0x40dc69000ULL,
-	.r0 = 0x31, .r4 = 1,
-	.what = "MMIO ave0-own (listed as dart-ave1[1])",
-};
+static struct ave_dapf_entry ave_dapf_mmio_ave0(struct ave_device *ave)
+{
+	return ave_dapf_mk(&ave->soc->dapf_mmio_own, 0x31,
+			   "MMIO ave0-own (listed as dart-ave1[1])");
+}
 
 /* What the ADT lists under dart-ave0: ave1's fabric..ASC. */
-static const struct ave_dapf_entry ave_dapf_mmio_adt = {
-	.start = 0x506000000ULL, .end = 0x507c6c000ULL,
-	.r0 = 0x31, .r4 = 1,
-	.what = "MMIO as listed (dart-ave0[1], ave1's span)",
-};
+static struct ave_dapf_entry ave_dapf_mmio_adt(struct ave_device *ave)
+{
+	return ave_dapf_mk(&ave->soc->dapf_mmio_adt, 0x31,
+			   "MMIO as listed (dart-ave0[1], ave1's span)");
+}
 
 /*
  * iBoot's TEXT, physical, as the bootstrap addresses it (docs/44 §2.4).
@@ -161,12 +170,15 @@ static const struct ave_dapf_entry ave_dapf_mmio_adt = {
  * unknown, but 0x11 is what a working ASC on this machine uses for the same
  * job. (This entry first copied the window's 0x33.)
  */
-static const struct ave_dapf_entry ave_dapf_text = {
-	.start = AVE_IBOOT_TEXT_PHYS,
-	.end = AVE_IBOOT_TEXT_PHYS + AVE_IBOOT_TEXT_SIZE - 4,	/* 0x10000c13ffc */
-	.r0 = 0x11, .r4 = 1,
-	.what = "iBoot TEXT, physical",
-};
+static struct ave_dapf_entry ave_dapf_text(struct ave_device *ave)
+{
+	const struct ave_soc_range r = {
+		.start = ave->soc->iboot.text_phys,
+		.end = ave->soc->iboot.text_phys + ave->soc->iboot.text_size - 4,
+	};
+
+	return ave_dapf_mk(&r, 0x11, "iBoot TEXT, physical");
+}
 
 static const struct ave_dapf_entry ave_dapf_cleared = {
 	.what = "cleared",
@@ -245,11 +257,12 @@ static int ave_dapf_map(struct ave_device *ave)
 		return -ENODEV;
 	}
 
-	if (rd->start != AVE_CPUDART_PHYS || rf->start != AVE_DAPF_PHYS ||
+	if (rd->start != ave->soc->cpudart_phys || rf->start != ave->soc->dapf_phys ||
 	    rf->start != rd->start + AVE_DAPF_OFFSET) {
 		dev_err(ave->dev,
 			"dapf: REFUSING - cpudart %pR / dapf %pR, expected %#llx / %#llx (DAPF = CPUDART + %#x)\n",
-			rd, rf, AVE_CPUDART_PHYS, AVE_DAPF_PHYS, AVE_DAPF_OFFSET);
+			rd, rf, (u64)ave->soc->cpudart_phys, (u64)ave->soc->dapf_phys,
+			AVE_DAPF_OFFSET);
 		return -EINVAL;
 	}
 	if (resource_size(rd) < DART_MAP_SIZE || resource_size(rf) < DAPF_MAP_SIZE) {
@@ -304,11 +317,11 @@ static int ave_dapf_map(struct ave_device *ave)
 			break;
 		ret = of_address_to_resource(args.np, 0, &ri);
 		of_node_put(args.np);
-		if (!ret && ri.start == AVE_DART1_PHYS) {
+		if (!ret && ri.start == ave->soc->dart1_phys) {
 			ave->dart1 = devm_ioremap(ave->dev, ri.start, DART_MAP_SIZE);
 			if (ave->dart1)
 				dev_info(ave->dev, "dapf: mapped datapath DART %#llx (not requested)\n",
-					 AVE_DART1_PHYS);
+					 (u64)ave->soc->dart1_phys);
 			break;
 		}
 	}
@@ -381,7 +394,7 @@ static void ave_dapf_dump_dart(struct ave_device *ave, const char *tag)
 		u32 e1 = readl(ave->dart1 + DART_ERROR);
 
 		dev_info(ave->dev, "dapf: [%s] datapath DART %#llx: ERROR %#010x ENABLED_STREAMS %#010x REMAP[0] %#010x\n",
-			 tag, AVE_DART1_PHYS, e1,
+			 tag, (u64)ave->soc->dart1_phys, e1,
 			 readl(ave->dart1 + DART_ENABLED_STREAMS),
 			 readl(ave->dart1 + DART_REMAP(0)));
 		/*
@@ -563,11 +576,11 @@ static bool ave_dapf_covers(const struct ave_dapf_entry *e, u64 addr)
 static unsigned int ave_dapf_dump_entries(struct ave_device *ave, const char *tag)
 {
 	/* The addresses the questions in docs/44 E2 are about. */
-	static const u64 probe_addr[] = {
-		AVE_IBOOT_TEXT_PHYS + 0x200,	/* the faulting fetch */
-		0x1f0000ec000ULL,		/* DATA through the window */
-		0x40d050000ULL,			/* ave0 SVE */
-		0x506000000ULL,			/* ave1 fabric */
+	const u64 probe_addr[] = {
+		ave->soc->iboot.text_phys + 0x200,	/* the faulting fetch */
+		ave->soc->iboot.data_literal,		/* DATA through the window */
+		ave->soc->dapf_mmio_own.start,		/* ave0 SVE */
+		ave->soc->dapf_mmio_adt.start,		/* ave1 fabric */
 	};
 	unsigned int i, j, used = 0;
 
@@ -624,7 +637,7 @@ static u64 ave_dapf_fingerprint(struct ave_device *ave, bool *admits_fetch)
 		unsigned int k, b;
 
 		if (ave_dapf_slot_read(ave, i, &e) &&
-		    ave_dapf_covers(&e, AVE_IBOOT_TEXT_PHYS + 0x200))
+		    ave_dapf_covers(&e, ave->soc->iboot.text_phys + 0x200))
 			*admits_fetch = true;
 		f[0] = e.r0; f[1] = e.r4; f[2] = e.start; f[3] = e.end;
 		for (k = 0; k < ARRAY_SIZE(f); k++)
@@ -965,13 +978,13 @@ int ave_dapf_program_selected(struct ave_device *ave)
 		 */
 		for (i = 0; i < AVE_DAPF_MAX_ENTRIES; i++)
 			set[i] = ave_dapf_cleared;
-		set[0] = want_text ? ave_dapf_text : ave_dapf_cleared;
+		set[0] = want_text ? ave_dapf_text(ave) : ave_dapf_cleared;
 		n = 1;
-		set[n++] = ave_dapf_window;
+		set[n++] = ave_dapf_window(ave);
 		if (mmio_ave0)
-			set[n++] = ave_dapf_mmio_ave0;
+			set[n++] = ave_dapf_mmio_ave0(ave);
 		if (mmio_adt)
-			set[n++] = ave_dapf_mmio_adt;
+			set[n++] = ave_dapf_mmio_adt(ave);
 		nwrite = AVE_DAPF_MAX_ENTRIES;
 	} else {
 		/*
@@ -983,13 +996,13 @@ int ave_dapf_program_selected(struct ave_device *ave)
 		 * dapf_set=control run in this mode is NOT a clean negative
 		 * control. Use it to learn whether the writes are survivable.
 		 */
-		set[n++] = ave_dapf_window;
+		set[n++] = ave_dapf_window(ave);
 		if (mmio_ave0)
-			set[n++] = ave_dapf_mmio_ave0;
+			set[n++] = ave_dapf_mmio_ave0(ave);
 		if (mmio_adt)
-			set[n++] = ave_dapf_mmio_adt;
+			set[n++] = ave_dapf_mmio_adt(ave);
 		if (want_text)
-			set[n++] = ave_dapf_text;
+			set[n++] = ave_dapf_text(ave);
 		nwrite = n;
 		for (i = n; i < AVE_DAPF_MAX_ENTRIES; i++) {
 			struct ave_dapf_entry e;
