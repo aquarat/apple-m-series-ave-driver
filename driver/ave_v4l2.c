@@ -72,6 +72,10 @@ struct ave_ctx {
 	u32			qp;
 	u32			profile_idc;	/* 66, 77 or 100 */
 	bool			cabac;
+	u32			bitrate;
+	bool			rc_enable;
+	u32			bitrate_mode;
+	u32			qp_min, qp_max;
 	u32			gop;
 	bool			force_key;
 	u32			frame_n;	/* frames sent this stream */
@@ -372,6 +376,21 @@ static int ave_s_ctrl(struct v4l2_ctrl *c)
 			c->val == V4L2_MPEG_VIDEO_H264_PROFILE_HIGH ? 100 :
 			c->val == V4L2_MPEG_VIDEO_H264_PROFILE_MAIN ? 77 : 66;
 		break;
+	case V4L2_CID_MPEG_VIDEO_BITRATE:
+		ctx->bitrate = c->val;
+		break;
+	case V4L2_CID_MPEG_VIDEO_FRAME_RC_ENABLE:
+		ctx->rc_enable = c->val;
+		break;
+	case V4L2_CID_MPEG_VIDEO_BITRATE_MODE:
+		ctx->bitrate_mode = c->val;
+		break;
+	case V4L2_CID_MPEG_VIDEO_H264_MIN_QP:
+		ctx->qp_min = c->val;
+		break;
+	case V4L2_CID_MPEG_VIDEO_H264_MAX_QP:
+		ctx->qp_max = c->val;
+		break;
 	case V4L2_CID_MPEG_VIDEO_H264_ENTROPY_MODE:
 		ctx->cabac = c->val == V4L2_MPEG_VIDEO_H264_ENTROPY_MODE_CABAC;
 		break;
@@ -410,10 +429,16 @@ static int ave_init_ctrls(struct ave_ctx *ctx)
 	v4l2_ctrl_new_std(h, o, V4L2_CID_MPEG_VIDEO_BITRATE, 1, 400000000, 1,
 			  10000000);
 	v4l2_ctrl_new_std(h, o, V4L2_CID_MPEG_VIDEO_FRAME_RC_ENABLE, 0, 1, 1, 0);
+	/*
+	 * VBR by default, so a client that turns FRAME_RC_ENABLE on - ffmpeg
+	 * always does, with its -b:v - gets the firmware's controller (f78:
+	 * 2 Mbit/s asked, 1.98 got). With RC off it is fixed QP regardless.
+	 */
 	v4l2_ctrl_new_std_menu(h, o, V4L2_CID_MPEG_VIDEO_BITRATE_MODE,
 			       V4L2_MPEG_VIDEO_BITRATE_MODE_CQ,
-			       ~BIT(V4L2_MPEG_VIDEO_BITRATE_MODE_CQ),
-			       V4L2_MPEG_VIDEO_BITRATE_MODE_CQ);
+			       ~(BIT(V4L2_MPEG_VIDEO_BITRATE_MODE_CQ) |
+				 BIT(V4L2_MPEG_VIDEO_BITRATE_MODE_VBR)),
+			       V4L2_MPEG_VIDEO_BITRATE_MODE_VBR);
 	/*
 	 * High + CABAC by default: the best compression, and what any decoder
 	 * made this century handles (f74/f75). Baseline is always CAVLC.
@@ -550,10 +575,27 @@ static int ave_start_streaming(struct vb2_queue *q, unsigned int count)
 		ret = -EBUSY;
 	} else {
 		/* The firmware gets the MB-aligned size; the crop is SPS-only. */
-		ret = ave_enc_start(av->ave, ctx->width, ctx->height,
-				    ctx->crop.width, ctx->crop.height,
-				    ctx->qp, AVE_CODED_SLOTS,
-				    ctx->profile_idc, ctx->cabac);
+		struct ave_enc_cfg cfg = {
+			.width = ctx->width, .height = ctx->height,
+			.crop_w = ctx->crop.width, .crop_h = ctx->crop.height,
+			.qp = ctx->qp,
+			.qp_min = ctx->qp_min, .qp_max = ctx->qp_max,
+			/*
+			 * The firmware's bits-per-pixel controller (docs/66,
+			 * docs/76) only in VBR mode; CQ, the default, is
+			 * fixed QP whatever ffmpeg sets FRAME_RC_ENABLE to.
+			 */
+			.bitrate = ctx->bitrate_mode ==
+					V4L2_MPEG_VIDEO_BITRATE_MODE_VBR &&
+				   ctx->rc_enable ? ctx->bitrate : 0,
+			.fps_num = ctx->timeperframe.denominator,
+			.fps_den = ctx->timeperframe.numerator,
+			.slots = AVE_CODED_SLOTS,
+			.profile_idc = ctx->profile_idc,
+			.cabac = ctx->cabac,
+		};
+
+		ret = ave_enc_start(av->ave, &cfg);
 		if (!ret) {
 			av->owner = ctx;
 			ctx->session = true;

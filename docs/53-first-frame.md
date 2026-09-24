@@ -3543,3 +3543,33 @@ supported both). CABAC also needs the host to append the firmware's
   725 KB (CAVLC 819 KB), 1080p crop and 4K (level 5.1) at 44.3-44.4 dB.
   ffmpeg `-profile:v 66` gives Baseline byte-identical to f67, 77 gives
   Main (761 KB), the default High (763 KB). v4l2-compliance 54/54.
+
+## f77-f79 (2026-09-24): bitrate control works above ~1 Mbit/s
+
+docs/66 expected two untraced firmware gates to block the controller.
+**f77** (self-test, ramp, `session_bitrate=300000`, ui32RCFlag 1): the slice
+QP varies per frame (39..46), so the controller is built with what we send.
+It undershoots badly on content this easy (~2x the per-frame budget). docs/76
+(static, in progress) is tracing the gates and what else macOS sends.
+
+`ave_enc_start()` now takes a `struct ave_enc_cfg`: bitrate, frame rate (from
+`S_PARM`) and QP clamp come from V4L2 (`BITRATE`, `FRAME_RC_ENABLE`,
+`BITRATE_MODE`, `H264_MIN/MAX_QP`). The controller runs when RC is enabled
+and the mode is VBR, which is the default, because ffmpeg always enables RC
+with its `-b:v` and never sets the mode. With RC off it is fixed QP.
+
+**f78/f79**, 300 frames of `testsrc2` 720p30 (10 s):
+
+| request | achieved | PSNR |
+|---|---|---|
+| `v4l2-ctl` VBR 2 Mbit/s | **1.98 Mbit/s** | 40.8 dB |
+| `v4l2-ctl` VBR 500 kbit/s | 689 kbit/s | 34.0 dB |
+| ffmpeg `-b:v 4M` | **3.79 Mbit/s** | 45.7 dB |
+| ffmpeg `-b:v 1M` | 0.93 Mbit/s | 35.2 dB |
+| ffmpeg default (200 kbit/s) | 729 kbit/s | 31.7 dB |
+
+The slice-header QP stays at its start value; the rate is steered per
+macroblock. Accurate to a few percent from ~1 Mbit/s up; below that it
+overshoots, probably a floor from the QP clamp or the controller's
+start-up, for docs/76 to explain. Fixed-QP output is unchanged, and
+v4l2-compliance is 54/54.
