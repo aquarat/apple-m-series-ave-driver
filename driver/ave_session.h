@@ -55,9 +55,19 @@ int ave_session_close_client(struct ave_device *ave);
 
 /* The encoder API the V4L2 layer drives (ave_v4l2.c, docs/68). */
 int ave_enc_init(struct ave_device *ave);
-int ave_enc_start(struct ave_device *ave, u32 width, u32 height,
-		  u32 crop_w, u32 crop_h, u32 qp, u32 slots,
-		  u32 profile_idc, bool cabac);
+/* One stream's parameters (docs/68 step 4). Zero means "the default". */
+struct ave_enc_cfg {
+	u32	width, height;		/* the buffer, MB-aligned */
+	u32	crop_w, crop_h;		/* SPS crop; 0 = none */
+	u32	qp;			/* fixed QP, or the RC's starting QP */
+	u32	qp_min, qp_max;		/* RC clamp; 0,0 = 10..51 */
+	u32	bitrate;		/* bit/s; 0 = fixed QP */
+	u32	fps_num, fps_den;	/* 0 = 30/1 */
+	u32	slots;			/* coded slots */
+	u32	profile_idc;		/* 66, 77, 100 */
+	bool	cabac;
+};
+int ave_enc_start(struct ave_device *ave, const struct ave_enc_cfg *cfg);
 int ave_enc_encode(struct ave_device *ave, u32 n, bool idr,
 		   dma_addr_t luma, dma_addr_t chroma, u32 stride,
 		   void *out, size_t out_size, size_t *out_len, bool *keyframe);

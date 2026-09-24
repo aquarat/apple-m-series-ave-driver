@@ -772,6 +772,9 @@ struct ave_sess_bufs {
 	u32		crop_w, crop_h;	/* SPS-only crop; 0 = none */
 	u32		profile;	/* profile_idc; 0 = 66 */
 	bool		cabac;
+	u32		bitrate;	/* 0 = fixed QP */
+	u32		fps_num, fps_den;
+	u32		qp_min, qp_max;	/* 0,0 = the module parameters */
 	u32		req_slots;	/* coded slots to publish at Start_AVC */
 	bool		quiet;		/* streaming: no per-frame chatter or diag */
 	/*
@@ -1597,13 +1600,14 @@ static int ave_session_start_avc(struct ave_device *ave,
 			 "session: Start_AVC: source-path sweep src_mode %#x (expect 0x40D120050=%#x 0x40D1200D0=%#x) src_cfg %#x (expect 0x40D12000C=%#x)\n",
 			 s.src_mode, s.src_mode & 3, s.src_mode >> 2,
 			 s.src_cfg_byte, (s.src_cfg_byte << 16) | (20 << 8));
-	s.frame_rate = session_fps ? session_fps : 30;
-	s.frame_rate_div = session_fps_div ? session_fps_div : 1;
-	s.bitrate = session_bitrate;
-	s.rc_enable = session_bitrate != 0;
+	s.frame_rate = bufs->fps_num ? bufs->fps_num : 30;
+	s.frame_rate_div = bufs->fps_den ? bufs->fps_den : 1;
+	s.bitrate = bufs->bitrate;
+	s.rc_enable = bufs->bitrate != 0;
 	s.qp_i = s.qp_p = s.qp_b = bufs->qp;
-	s.qp_min = min_t(u32, session_qp_min, 51);
-	s.qp_max = clamp_t(u32, session_qp_max, s.qp_min, 51);
+	s.qp_min = min_t(u32, bufs->qp_max ? bufs->qp_min : session_qp_min, 51);
+	s.qp_max = clamp_t(u32, bufs->qp_max ? bufs->qp_max : session_qp_max,
+			   s.qp_min, 51);
 	s.key_interval = session_idr_period ? session_idr_period : 1;
 	if (s.rc_enable)
 		dev_info(ave->dev,
@@ -3135,6 +3139,9 @@ int ave_session_selftest(struct ave_device *ave)
 	bufs->encode = session_frame;
 	bufs->profile = session_profile;
 	bufs->cabac = session_cabac;
+	bufs->bitrate = session_bitrate;
+	bufs->fps_num = session_fps;
+	bufs->fps_den = session_fps_div;
 	ave_session_release(ave);	/* a previous run's, if any */
 	ave->session_bufs = bufs;
 
@@ -3634,9 +3641,7 @@ int ave_enc_init(struct ave_device *ave)
 }
 
 /* Open + Start_AVC for one stream; one at a time (the caller serialises). */
-int ave_enc_start(struct ave_device *ave, u32 width, u32 height,
-		  u32 crop_w, u32 crop_h, u32 qp, u32 slots,
-		  u32 profile_idc, bool cabac)
+int ave_enc_start(struct ave_device *ave, const struct ave_enc_cfg *cfg)
 {
 	const struct ave_cmd_abi *abi = ave_cmd_abi_get(ave->fw_abi);
 	struct ave_sess_bufs *bufs = ave->session_bufs;
@@ -3646,18 +3651,24 @@ int ave_enc_start(struct ave_device *ave, u32 width, u32 height,
 		return -ENODEV;
 	if (ave->client_open)
 		return -EBUSY;
-	if (width < 192 || width > 4096 || height < 96 || height > 4096 ||
-	    (width & 1) || (height & 1) || qp > 51)
+	if (cfg->width < 192 || cfg->width > 4096 || cfg->height < 96 ||
+	    cfg->height > 4096 || (cfg->width & 1) || (cfg->height & 1) ||
+	    cfg->qp > 51 || cfg->qp_min > 51 || cfg->qp_max > 51)
 		return -EINVAL;
 
-	bufs->width = width;
-	bufs->height = height;
-	bufs->crop_w = crop_w;
-	bufs->crop_h = crop_h;
-	bufs->profile = profile_idc;
-	bufs->cabac = cabac && profile_idc != 66;
-	bufs->qp = qp;
-	bufs->req_slots = slots;
+	bufs->width = cfg->width;
+	bufs->height = cfg->height;
+	bufs->crop_w = cfg->crop_w;
+	bufs->crop_h = cfg->crop_h;
+	bufs->profile = cfg->profile_idc;
+	bufs->cabac = cfg->cabac && cfg->profile_idc != 66;
+	bufs->qp = cfg->qp;
+	bufs->qp_min = cfg->qp_min;
+	bufs->qp_max = cfg->qp_max;
+	bufs->bitrate = cfg->bitrate;
+	bufs->fps_num = cfg->fps_num;
+	bufs->fps_den = cfg->fps_den;
+	bufs->req_slots = cfg->slots;
 	bufs->quiet = true;
 	bufs->encode = true;
 	bufs->n_done = 0;
