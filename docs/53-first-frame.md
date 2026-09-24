@@ -3999,3 +3999,27 @@ set's *derived* fields (NumNegativePics, UsedByCurrPicS0), which the kext
 computes and we had left zero. It also picks set 0-3 by frames since the
 IDR, and we sent only one set. HEVC IPPP works on the hardware; H4 (V4L2)
 is next.
+
+## h4 (2026-09-24): HEVC through V4L2
+
+`1615e57` (CAPTURE format HEVC, HEVC controls, docs/77 §19), plain
+`ave-load.sh`, PMP boot DT with no vote. The node lists `H264` and `HEVC`.
+Fedora's ffmpeg has no HEVC decoder, so the streams are graded on the host
+(ffmpeg psnr against the same `testsrc2` NV12 source). `v4l2-test.sh ctl`
+(fixed QP):
+
+| size | frames | result |
+|---|---|---|
+| 1280x720 | 60 | HEVC Main, 1 I + 59 P, **Y 44.27 dB** (H.264 on the same test: 44.26) |
+| 1920x1088, crop 1080 | 60 | decodes as **1920x1080** (conformance window), Y 44.83 dB |
+| 3840x2160 | 30 | Y 44.82 dB |
+| 1280x720 | 300 | 1 I + 299 P, past the 256-frame POC wrap, Y 44.27 (worst frame 43.33); no firmware-inserted IDRs |
+
+`v4l2-compliance -s`: **54/54**. H.264 regression on the same boot: ctl
+44.255294 (identical), ffmpeg `-b:v 8M` High.
+
+**Rate control fails.** `CODEC=hevc … ffmpeg` (RC on) times out on frame
+0. The self-test reproduces it (h4a: h3h plus `session_bitrate=8000000
+session_fps=30`): `Controller Heart Beat ERROR: XCODE HANG: 1, 1`, `Idle
+1-1-1-0`. The pipe finished and the transcoder did not. Suspect: PPS
+cu_qp_delta (depth 2) under RC. Being traced.
