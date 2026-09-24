@@ -51,6 +51,15 @@ void ave_session_hide(struct ave_device *ave);
  */
 int ave_session_close_client(struct ave_device *ave);
 
+/* The encoder API the V4L2 layer drives (ave_v4l2.c, docs/68). */
+int ave_enc_init(struct ave_device *ave);
+int ave_enc_start(struct ave_device *ave, u32 width, u32 height, u32 qp,
+		  u32 slots);
+int ave_enc_encode(struct ave_device *ave, u32 n, bool idr,
+		   dma_addr_t luma, dma_addr_t chroma, u32 stride,
+		   void *out, size_t out_size, size_t *out_len, bool *keyframe);
+int ave_enc_stop(struct ave_device *ave);
+
 /*
  * Ask the firmware to halt itself (command 14) so that the next load can
  * start it again without rebooting the machine. Sends on IO and waits for SVE

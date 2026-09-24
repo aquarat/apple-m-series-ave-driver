@@ -18,6 +18,12 @@ firmware, completes the command handshake, and encodes a frame: Config, Open,
 Start_AVC, Process, and a valid H.264 Baseline 1280x720 frame that ffmpeg
 decodes, with every macroblock accounted for and no faults.
 
+**It is a V4L2 encoder (2026-09-24, f67):** with `v4l2=1` the driver
+registers a stateful mem2mem H.264 encoder, and
+`ffmpeg -f rawvideo -pix_fmt nv12 -s 1280x720 -i in.nv12 -c:v h264_v4l2m2m out.mp4`
+encodes through it: 60 frames of `testsrc2` at 43.8 dB PSNR, P frames and
+periodic IDRs included.
+
 **It encodes correctly (2026-09-24, f48):** a 1280x720 ramp comes back at
 48.6 dB PSNR against the source. The long-standing blank frame (every sample
 128, 2709 bytes whatever the source) was the SPS scaling lists: the driver

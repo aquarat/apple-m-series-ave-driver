@@ -748,6 +748,26 @@ struct ave_sess_bufs {
 	 */
 	struct { void *cpu; dma_addr_t iova; } proc_cmd[AVE_SESS_FRAMES_MAX];
 	u32		n_frames;	/* frames to encode this session */
+	/*
+	 * Session parameters (docs/68 step 4): what used to be read from module
+	 * parameters inside the build functions. The self-test fills them from
+	 * the module parameters; the V4L2 layer from its format and controls.
+	 */
+	u32		width, height, qp;
+	u32		req_slots;	/* coded slots to publish at Start_AVC */
+	bool		quiet;		/* streaming: no per-frame chatter or diag */
+	/*
+	 * This session will Process frames, so Start_AVC must publish the
+	 * SrcNeighbor and entropy tables (setPipe asserts at 6990 without
+	 * them, f64). The self-test takes it from session_frame.
+	 */
+	bool		encode;
+	/* An external source for the next Process (V4L2 OUTPUT buffer). */
+	bool		ext_src;
+	dma_addr_t	ext_luma, ext_chroma;
+	u32		ext_stride;
+	bool		force_idr;	/* next Process is an IDR (n > 0) */
+	unsigned int	mark_dma, mark_ipc;	/* end of the Config allocations */
 	/* Every completed frame's Annex-B bytes, appended as it completes. */
 	u8		*stream;
 	size_t		stream_len, stream_cap;
@@ -804,6 +824,13 @@ struct ave_sess_bufs {
 
 /* DART-addressable data buffer in the device DMA domain (the coprocessor's
  * DART - same domain the firmware and FwIPC live in). */
+/* Per-frame chatter, silenced while streaming (bufs->quiet). */
+#define sess_info(b, dev, ...)					\
+	do {							\
+		if (!(b)->quiet)				\
+			dev_info(dev, __VA_ARGS__);		\
+	} while (0)
+
 static void *ave_sess_dma_alloc(struct ave_sess_bufs *b, size_t size,
 				dma_addr_t *iova)
 {
@@ -1220,8 +1247,8 @@ static void ave_session_alloc_dpb(struct ave_device *ave,
 	u32 cw, ch, lr_stride = 0;
 	unsigned int i, n;
 
-	cw = ave_mb_align(session_width);
-	ch = ave_mb_align(session_height);
+	cw = ave_mb_align(bufs->width);
+	ch = ave_mb_align(bufs->height);
 
 	n = session_dpb;
 	if (!n || n > AVE_SESS_DPB_MAX) {
@@ -1400,8 +1427,8 @@ static int ave_session_start_avc(struct ave_device *ave,
 		return -ENOMEM;
 
 	/* MB-aligned coded geometry, for the reconstruction buffer sizing. */
-	cw = ave_mb_align(session_width);
-	ch = ave_mb_align(session_height);
+	cw = ave_mb_align(bufs->width);
+	ch = ave_mb_align(bufs->height);
 
 	/* ave_session_alloc_dpb() must already have run: the recon and
 	 * LowResRef tables are published in this command. */
@@ -1420,7 +1447,7 @@ static int ave_session_start_avc(struct ave_device *ave,
 	 * session that encodes N frames must publish N of them at Start.
 	 */
 	coded_size = ave_session_coded_size(cw, ch);
-	n = clamp_t(u32, session_frames, 1, AVE_SESS_FRAMES_MAX);
+	n = clamp_t(u32, bufs->req_slots, 1, AVE_SESS_FRAMES_MAX);
 	if (n > abi->start_avc.coded_max)
 		n = abi->start_avc.coded_max;
 	bufs->n_coded = n;
@@ -1481,8 +1508,8 @@ static int ave_session_start_avc(struct ave_device *ave,
 		coded_hdr[i].size = bufs->coded_hdr[i].size;
 	}
 
-	s.width = session_width;
-	s.height = session_height;
+	s.width = bufs->width;
+	s.height = bufs->height;
 	s.src_mode = (u16)session_src_mode;
 	s.src_cfg_byte = (u8)session_src_cfg;
 	s.src_go_bit3 = (u8)session_src_bit3;
@@ -1529,7 +1556,7 @@ static int ave_session_start_avc(struct ave_device *ave,
 	s.frame_rate_div = session_fps_div ? session_fps_div : 1;
 	s.bitrate = session_bitrate;
 	s.rc_enable = session_bitrate != 0;
-	s.qp_i = s.qp_p = s.qp_b = session_qp;
+	s.qp_i = s.qp_p = s.qp_b = bufs->qp;
 	s.qp_min = min_t(u32, session_qp_min, 51);
 	s.qp_max = clamp_t(u32, session_qp_max, s.qp_min, 51);
 	s.key_interval = session_idr_period ? session_idr_period : 1;
@@ -1537,7 +1564,7 @@ static int ave_session_start_avc(struct ave_device *ave,
 		dev_info(ave->dev,
 			 "session: Start_AVC: rate control ON (ui32RCFlag %u), target %u bit/s at %u/%u fps, QP %u..%u starting at %u - watch the slice QP, which under fixed QP cannot vary\n",
 			 abi->start_avc.rc_mode_on, s.bitrate, s.frame_rate,
-			 s.frame_rate_div, s.qp_min, s.qp_max, session_qp);
+			 s.frame_rate_div, s.qp_min, s.qp_max, bufs->qp);
 	s.profile_idc = 66;			/* Baseline */
 	s.level_idc = 40;			/* 4.0 - covers 1080p */
 	s.cabac = false;			/* CAVLC (required with Baseline) */
@@ -1663,7 +1690,7 @@ static int ave_session_start_avc(struct ave_device *ave,
 	}
 	dev_info(ave->dev,
 		 "session: Start_AVC: %ux%u (coded %ux%u) QP %u I-only, profile 66 level 40\n",
-		 session_width, session_height, cw, ch, session_qp);
+		 bufs->width, bufs->height, cw, ch, bufs->qp);
 	dev_info(ave->dev,
 		 "session: Start_AVC: fw_client %pad/%#x mem %pad/%#x coded[0] %pad/%#x hdr[0] %pad/%#x psets %pad/%#x (%u coded buffer(s), slots %u..%u)\n",
 		 &fwc_iova, fwc_size, &fwcm_iova, (u32)AVE_SESS_FWCLIENTMEM_SIZE,
@@ -1715,11 +1742,11 @@ static void ave_session_alloc_nbr(struct ave_device *ave,
 		256, 1024, 56, 64,	/* Info, Pixel, Data, FwData - docs/47 */
 	};
 	struct ave_sess_arena a = {};
-	unsigned int mb_cols = ave_mb_align(session_width) / 16;
+	unsigned int mb_cols = ave_mb_align(bufs->width) / 16;
 	size_t slot = (size_t)session_nbr_kb << 10;
 	unsigned int g, i;
 
-	if (!session_nbr || !session_frame)
+	if (!session_nbr || !bufs->encode)
 		return;
 	if (!slot) {
 		/* Largest group's requirement, so one slot size fits all four. */
@@ -1781,13 +1808,13 @@ static void ave_session_alloc_entropy(struct ave_device *ave,
 				      struct ave_sess_bufs *bufs)
 {
 	struct ave_sess_arena a = {};
-	u32 cw = ave_mb_align(session_width);
-	u32 ch = ave_mb_align(session_height);
+	u32 cw = ave_mb_align(bufs->width);
+	u32 ch = ave_mb_align(bufs->height);
 	u32 n = abi->process_avc.entropy_max, cols;
 	size_t each;
 	u32 i;
 
-	if (!session_frame)
+	if (!bufs->encode)
 		return;
 	if (!session_entropy) {
 		dev_warn(ave->dev,
@@ -2424,8 +2451,8 @@ static int ave_session_process(struct ave_device *ave,
 	if (!bufs->n_coded || !bufs->coded[idx].cpu)
 		return -EINVAL;
 
-	cw = ave_mb_align(session_width);
-	ch = ave_mb_align(session_height);
+	cw = ave_mb_align(bufs->width);
+	ch = ave_mb_align(bufs->height);
 	mb_w = cw / AVE_MB_SIZE;
 	mb_h = ch / AVE_MB_SIZE;
 
@@ -2438,7 +2465,16 @@ static int ave_session_process(struct ave_device *ave,
 	luma_bytes = stride * ave_src_luma_rows(ch);
 	chroma_bytes = stride * ave_src_chroma_rows(ch);
 
-	if (bufs->src[idx].luma) {
+	if (bufs->ext_src) {
+		/* A V4L2 OUTPUT buffer: the caller owns and filled it. */
+		luma = NULL;
+		chroma = NULL;
+		luma_iova = bufs->ext_luma;
+		chroma_iova = bufs->ext_chroma;
+		stride = bufs->ext_stride;
+		luma_bytes = stride * ave_src_luma_rows(ch);
+		chroma_bytes = stride * ave_src_chroma_rows(ch);
+	} else if (bufs->src[idx].luma) {
 		/* This index's planes; the frame that last used them is done. */
 		luma = bufs->src[idx].luma;
 		luma_iova = bufs->src[idx].luma_iova;
@@ -2461,9 +2497,10 @@ static int ave_session_process(struct ave_device *ave,
 	 * read its own source is indistinguishable from one that did - which
 	 * is exactly the ambiguity F16 and F17 left us in.
 	 */
-	ave_session_fill_input(luma, chroma, stride, cw, ch, n * 8);
+	if (luma)
+		ave_session_fill_input(luma, chroma, stride, cw, ch, n * 8);
 	if (session_flat_luma)
-		dev_info(ave->dev,
+		sess_info(bufs, ave->dev,
 			 "session: source luma is a CONSTANT %u, not the ramp: a decoded picture at %u means the source DMA read our buffer, one at ~130 means it did not (docs/62 §6)\n",
 			 session_flat_luma, session_flat_luma);
 	bufs->src[idx].luma = luma;
@@ -2527,7 +2564,8 @@ static int ave_session_process(struct ave_device *ave,
 	 * (jump table fw 0xcef80: 1 = P). session_frame_type still chooses
 	 * what frame 0 is, so the I-vs-IDR bisect it exists for still works.
 	 */
-	f.frame_type = n ? AVE_FRAME_TYPE_P : session_frame_type;
+	f.frame_type = bufs->force_idr ? AVE_FRAME_TYPE_IDR :
+		       n ? AVE_FRAME_TYPE_P : session_frame_type;
 	/*
 	 * frameInfo.frameNumber - monotone, and the word the firmware's queue
 	 * keys Complete and Dequeue on. ManageDPBBuffer asserts it is not
@@ -2563,7 +2601,7 @@ static int ave_session_process(struct ave_device *ave,
 	f.recon_mv_addr = rmv;
 
 	f.ctx_index = 0;
-	f.force_key_frame = !n && session_frame_type == AVE_FRAME_TYPE_IDR;
+	f.force_key_frame = f.frame_type == AVE_FRAME_TYPE_IDR;
 	f.update_param_sets = false;
 
 	/*
@@ -2596,16 +2634,16 @@ static int ave_session_process(struct ave_device *ave,
 		return ret;
 	}
 
-	dev_info(ave->dev,
+	sess_info(bufs, ave->dev,
 		 "session: Process: %ux%u coded, stride %u, luma %pad/%#x chroma %pad/%#x, frame_type %u, slot %u\n",
 		 cw, ch, stride, &luma_iova, luma_bytes, &chroma_iova,
 		 chroma_bytes, f.frame_type, slot);
-	dev_info(ave->dev,
+	sess_info(bufs, ave->dev,
 		 "session: Process: coded %pad/%#x hdr %pad/%#x recon Y %pad UV %pad MV %pad\n",
 		 &bufs->coded[idx].iova, bufs->coded[idx].size,
 		 &bufs->coded_hdr[idx].iova, bufs->coded_hdr[idx].size,
 		 &ry, &ruv, &rmv);
-	dev_info(ave->dev,
+	sess_info(bufs, ave->dev,
 		 "session: Process: LowResSrcLumaScaled %#llx at PICMGMT+%#x - INERT, setRefPointers overwrites it from DPB slot 0 (fw 0x2c320); LowResResults left zero\n",
 		 f.low_res_src_addr, abi->process_avc.low_res_src);
 
@@ -2627,7 +2665,7 @@ static int ave_session_process(struct ave_device *ave,
 
 	if (session_sve_ungate) {
 		ave_write(ave, AVE_BANK_SVE, AVE_SVE_IDLE, 0);
-		dev_info(ave->dev, "session: SVE +0x%x <- 0 (clock gating off) for Process\n",
+		sess_info(bufs, ave->dev, "session: SVE +0x%x <- 0 (clock gating off) for Process\n",
 			 AVE_SVE_IDLE);
 	}
 
@@ -2641,7 +2679,7 @@ static int ave_session_process(struct ave_device *ave,
 	 * Configuration registers the firmware writes; read-only here, and
 	 * deliberately not the interrupt-status registers (docs/57 #4).
 	 */
-	dev_info(ave->dev,
+	sess_info(bufs, ave->dev,
 		 "session: recon writer 0x40D130240 = %#010x (want 0x800314b1 when programmed); +0x24c %#010x +0x25c %#010x +0x31c %#010x\n",
 		 ave_read(ave, AVE_BANK_DPE, 0x30240),
 		 ave_read(ave, AVE_BANK_DPE, 0x3024c),
@@ -2659,7 +2697,7 @@ static int ave_session_process(struct ave_device *ave,
 		u32 got = ave_read(ave, AVE_BANK_DPE, 0x20010);
 		u32 want = lower_32_bits(luma_iova);
 
-		dev_info(ave->dev,
+		sess_info(bufs, ave->dev,
 			 "session: source reader 0x40D120010 = %#010x (want %#010x: %s) stride +0x14 %#x (want %#x) chroma +0x90 %#010x (want %#010x) fmt +0x0C %#010x mode +0x50 %#x +0xD0 %#x\n",
 			 got, want,
 			 got == want ? "OUR BUFFER" :
@@ -2695,16 +2733,17 @@ static int ave_session_process(struct ave_device *ave,
 		}
 		if (!ave_cmd_coded_length(abi, h, bufs->coded_hdr[idx].size,
 					  bufs->coded[idx].size, &early))
-			dev_info(ave->dev,
+			sess_info(bufs, ave->dev,
 				 "session: RESULT frame %u: %u coded bytes, MB I %u P %u skip %u of %u, FrameTypeReturned %u (2709 has been the blank-frame signature)\n",
 				 n, early.bytes, i_mb, p_mb, skip_mb, mbs,
 				 early.frame_type);
 		else
-			dev_info(ave->dev,
+			sess_info(bufs, ave->dev,
 				 "session: RESULT frame %u: coded header undecodable; MB I %u P %u skip %u of %u\n",
 				 n, i_mb, p_mb, skip_mb, mbs);
 	}
-	ave_step(ave, "frame result logged; next: post-frame diagnostics");
+	if (!bufs->quiet)
+		ave_step(ave, "frame result logged; next: post-frame diagnostics");
 
 	/*
 	 * docs/57 #3 and #4, read-only, at the moment Process gave up:
@@ -2722,8 +2761,8 @@ static int ave_session_process(struct ave_device *ave,
 	 * whether the source reader actually walked the frame - F16 completed
 	 * a frame whose picture was flat, so "it finished" is not evidence.
 	 */
-	if (session_diag) {
-		dev_info(ave->dev,
+	if ((session_diag && !bufs->quiet)) {
+		sess_info(bufs, ave->dev,
 			 "session: diag PS DMA %#010x PIPE4 %#010x PIPE5 %#010x ME0 %#010x ME1 %#010x\n",
 			 ave_read(ave, AVE_BANK_PMGR_PS, 0x00),
 			 ave_read(ave, AVE_BANK_PMGR_PS, 0x08),
@@ -2736,7 +2775,7 @@ static int ave_session_process(struct ave_device *ave,
 		 * registers are 0x40D124000/4, 0x40D12C000, 0x40D134000 (fw
 		 * 0x38b20). 0x40D110128 bit 0 is SRCDMAGO.
 		 */
-		dev_info(ave->dev,
+		sess_info(bufs, ave->dev,
 			 "session: diag 0x40D110140 %#010x (pipe done = bit 2) enable 0x40D11013C %#010x (want bit 2) SRCDMAGO 0x40D110128 %#010x srcdma cfg 0x40D120000 %#010x +4 %#010x scratch7 %#010x\n",
 			 ave_read(ave, AVE_BANK_DPE, 0x10140),
 			 ave_read(ave, AVE_BANK_DPE, 0x1013c),
@@ -2748,7 +2787,7 @@ static int ave_session_process(struct ave_device *ave,
 			u32 prog = ave_read(ave, AVE_BANK_DPE, 0x2002c);
 
 			/* docs/58 7.0: currMbRow = 0x40D12002C >> 16; 44 = last of 45 rows */
-			dev_info(ave->dev,
+			sess_info(bufs, ave->dev,
 				 "session: diag srcdma 0x40D12002C %#010x -> currMbRow %u; AXI err 0x40D124000 %#010x 0x40D124004 %#010x 0x40D12C000 %#010x 0x40D134000 %#010x\n",
 				 prog, prog >> 16,
 				 ave_read(ave, AVE_BANK_DPE, 0x24000),
@@ -2756,7 +2795,7 @@ static int ave_session_process(struct ave_device *ave,
 				 ave_read(ave, AVE_BANK_DPE, 0x2c000),
 				 ave_read(ave, AVE_BANK_DPE, 0x34000));
 		}
-		dev_info(ave->dev,
+		sess_info(bufs, ave->dev,
 			 "session: diag DPE DC000 %#010x DC004 %#010x DC400 %#010x DC4A4 %#010x DC5B0 %#010x\n",
 			 ave_read(ave, AVE_BANK_DPE, 0xdc000),
 			 ave_read(ave, AVE_BANK_DPE, 0xdc004),
@@ -2775,15 +2814,15 @@ static int ave_session_process(struct ave_device *ave,
 					       0x40D100000ULL + mcpu[i],
 					       ave_read(ave, AVE_BANK_DPE, mcpu[i] + 8),
 					       ave_read(ave, AVE_BANK_DPE, mcpu[i] + 4));
-			dev_info(ave->dev, "session: diag MCPU run/id%s\n", line);
+			sess_info(bufs, ave->dev, "session: diag MCPU run/id%s\n", line);
 		}
-		dev_info(ave->dev,
+		sess_info(bufs, ave->dev,
 			 "session: diag MCPU IMem[0] MbInput %#010x (want 0x10004000) IntraEst %#010x (0x10001000) CAVLC %#010x (0x10001800)\n",
 			 ave_read(ave, AVE_BANK_DPE, 0x300000),
 			 ave_read(ave, AVE_BANK_DPE, 0x340000),
 			 ave_read(ave, AVE_BANK_DPE, 0x3c0000));
 		/* host interfaces: +0/+4 first; +8 (irq status, side effect U) last */
-		dev_info(ave->dev,
+		sess_info(bufs, ave->dev,
 			 "session: diag MCPU if MbInput %#x %#x IntraEst %#x %#x CAVLC %#x %#x | +8: %#x %#x %#x\n",
 			 ave_read(ave, AVE_BANK_DPE, 0x68000),
 			 ave_read(ave, AVE_BANK_DPE, 0x68004),
@@ -2807,7 +2846,7 @@ static int ave_session_process(struct ave_device *ave,
 
 	if (session_sve_ungate) {
 		ave_write(ave, AVE_BANK_SVE, AVE_SVE_IDLE, 1);
-		dev_info(ave->dev, "session: SVE +0x%x <- 1 after Process\n", AVE_SVE_IDLE);
+		sess_info(bufs, ave->dev, "session: SVE +0x%x <- 1 after Process\n", AVE_SVE_IDLE);
 	}
 	if (ret)
 		return ret;
@@ -2817,9 +2856,11 @@ static int ave_session_process(struct ave_device *ave,
 	 * of the coded-header buffer (docs/53 §3).
 	 */
 	dma_rmb();
-	print_hex_dump(KERN_INFO, "session: coded_hdr: ", DUMP_PREFIX_OFFSET,
+	if (!bufs->quiet)
+		print_hex_dump(KERN_INFO, "session: coded_hdr: ", DUMP_PREFIX_OFFSET,
 		       16, 4, bufs->coded_hdr[idx].cpu, 0x40, false);
-	print_hex_dump(KERN_INFO, "session: slice0: ", DUMP_PREFIX_OFFSET,
+	if (!bufs->quiet)
+		print_hex_dump(KERN_INFO, "session: slice0: ", DUMP_PREFIX_OFFSET,
 		       16, 4,
 		       (u8 *)bufs->coded_hdr[idx].cpu + abi->coded_hdr.slice_bytes_written,
 		       0x20, false);
@@ -2833,7 +2874,7 @@ static int ave_session_process(struct ave_device *ave,
 			ret);
 		return ret;
 	}
-	dev_info(ave->dev,
+	sess_info(bufs, ave->dev,
 		 "session: frame %u: %u bytes in %u slice(s) (written %u - trimmed %u), FrameTypeReturned %u, frame_num %u (sent %u), SPS+PPS %u bits, cabac_zero_words %u\n",
 		 n, info.bytes, info.slices, info.span, info.bytes_removed,
 		 info.frame_type, info.frame_num, n, info.sps_pps_bits,
@@ -2869,7 +2910,7 @@ static int ave_session_process(struct ave_device *ave,
 			p_mb += get_unaligned_le32(h + abi->coded_hdr.p_mb_cnt + 4 * k);
 			skip_mb += get_unaligned_le32(h + abi->coded_hdr.skip_mb_cnt + 4 * k);
 		}
-		dev_info(ave->dev,
+		sess_info(bufs, ave->dev,
 			 "session: frame %u: MB counts I %u P %u skip %u = %u of %u expected%s\n",
 			 n, i_mb, p_mb, skip_mb, i_mb + p_mb + skip_mb, mbs,
 			 i_mb + p_mb + skip_mb == mbs ? "" : " - MISMATCH");
@@ -2887,7 +2928,8 @@ static int ave_session_process(struct ave_device *ave,
 		return -EPROTO;
 	}
 
-	print_hex_dump(KERN_INFO, "session: coded: ", DUMP_PREFIX_OFFSET,
+	if (!bufs->quiet)
+		print_hex_dump(KERN_INFO, "session: coded: ", DUMP_PREFIX_OFFSET,
 		       16, 1, bufs->coded[idx].cpu, min_t(u32, info.bytes, 64),
 		       false);
 
@@ -2911,12 +2953,13 @@ static int ave_session_process(struct ave_device *ave,
 			 psets_len, scan_len);
 		psets_len = scan_len;
 	}
-	dev_info(ave->dev,
+	sess_info(bufs, ave->dev,
 		 "session: frame: parameter sets %zu bytes (firmware said %u bits; back-scan says %zu%s), first NAL type %d\n",
 		 psets_len, info.sps_pps_bits, scan_len,
 		 scan_len == psets_len ? ", agrees" : " - DISAGREES",
 		 ave_session_nal_type(bufs->psets_cpu, psets_len));
-	print_hex_dump(KERN_INFO, "session: psets: ", DUMP_PREFIX_OFFSET,
+	if (!bufs->quiet)
+		print_hex_dump(KERN_INFO, "session: psets: ", DUMP_PREFIX_OFFSET,
 		       16, 1, bufs->psets_cpu, min_t(size_t, psets_len, 64),
 		       false);
 
@@ -2928,7 +2971,8 @@ static int ave_session_process(struct ave_device *ave,
 	       bufs->coded[idx].n_slice * sizeof(info.slice[0]));
 	bufs->psets_len = psets_len;
 	bufs->n_done = n + 1;
-	return ave_sess_stream_append(bufs, idx, !n);
+	return ave_sess_stream_append(bufs, idx,
+				      f.frame_type == AVE_FRAME_TYPE_IDR);
 }
 
 /* ------------------------------------------------------------------------ */
@@ -3022,6 +3066,11 @@ int ave_session_selftest(struct ave_device *ave)
 	if (!bufs)
 		return -ENOMEM;
 	bufs->ave = ave;
+	bufs->width = session_width;
+	bufs->height = session_height;
+	bufs->qp = session_qp;
+	bufs->req_slots = session_frames;
+	bufs->encode = session_frame;
 	ave_session_release(ave);	/* a previous run's, if any */
 	ave->session_bufs = bufs;
 
@@ -3482,4 +3531,139 @@ out_free:
 	/* Safe only now: a halted core cannot read the command any more. */
 	ave_ipc_free(ave, cmd, cmd_len);
 	return ret;
+}
+
+/* ------------------------------------------------------------------------ */
+/* The encoder API the V4L2 layer drives (docs/68 steps 4-5)               */
+/* ------------------------------------------------------------------------ */
+
+/*
+ * Config once, at probe: the shared-memory region it hands the firmware is
+ * the firmware's for the life of the core (docs/68 §1.5). The reply hook is
+ * installed for good - every later command, Stop and Close included, waits
+ * on it.
+ */
+int ave_enc_init(struct ave_device *ave)
+{
+	const struct ave_cmd_abi *abi = ave_cmd_abi_get(ave->fw_abi);
+	struct ave_sess_bufs *bufs;
+	int ret;
+
+	if (!abi || !ave->running)
+		return -ENODEV;
+	bufs = kzalloc(sizeof(*bufs), GFP_KERNEL);
+	if (!bufs)
+		return -ENOMEM;
+	bufs->ave = ave;
+	ave_session_release(ave);
+	ave->session_bufs = bufs;
+
+	init_completion(&ave_sess_rx.done);
+	smp_store_release(&ave->ipc_rx, ave_session_ipc_rx);
+
+	ret = ave_session_config(ave, abi, bufs);
+	if (ret)
+		return ret;
+	bufs->mark_dma = bufs->ndma;
+	bufs->mark_ipc = bufs->nipc;
+	return 0;
+}
+
+/* Open + Start_AVC for one stream; one at a time (the caller serialises). */
+int ave_enc_start(struct ave_device *ave, u32 width, u32 height, u32 qp,
+		  u32 slots)
+{
+	const struct ave_cmd_abi *abi = ave_cmd_abi_get(ave->fw_abi);
+	struct ave_sess_bufs *bufs = ave->session_bufs;
+	int ret;
+
+	if (!abi || !bufs)
+		return -ENODEV;
+	if (ave->client_open)
+		return -EBUSY;
+	if (width < 192 || width > 4096 || height < 96 || height > 4096 ||
+	    (width & 1) || (height & 1) || qp > 51)
+		return -EINVAL;
+
+	bufs->width = width;
+	bufs->height = height;
+	bufs->qp = qp;
+	bufs->req_slots = slots;
+	bufs->quiet = true;
+	bufs->encode = true;
+	bufs->n_done = 0;
+	bufs->stream_len = 0;
+
+	ret = ave_session_open(ave, abi, bufs, AVE_SESS_CLIENT_ID);
+	if (ret)
+		return ret;
+	ave->client_open = true;
+	ave_session_alloc_nbr(ave, bufs);
+	ave_session_alloc_entropy(ave, abi, bufs);
+	ave_session_alloc_dpb(ave, bufs);
+	ret = ave_session_start_avc(ave, abi, bufs, AVE_SESS_CLIENT_ID);
+	if (ret)
+		ave_enc_stop(ave);
+	return ret;
+}
+
+/*
+ * Encode frame @n of the stream from an NV12 source the caller owns (both
+ * planes 64-aligned, @stride a multiple of 64, AVE_MB-aligned rows), and
+ * copy its Annex-B bytes - SPS+PPS first on an IDR - into @out.
+ */
+int ave_enc_encode(struct ave_device *ave, u32 n, bool idr,
+		   dma_addr_t luma, dma_addr_t chroma, u32 stride,
+		   void *out, size_t out_size, size_t *out_len, bool *keyframe)
+{
+	const struct ave_cmd_abi *abi = ave_cmd_abi_get(ave->fw_abi);
+	struct ave_sess_bufs *bufs = ave->session_bufs;
+	int ret;
+
+	if (!abi || !bufs || !ave->client_open)
+		return -EINVAL;
+	if (!stride || (stride & (AVE_STRIDE_ALIGN - 1)))
+		return -EINVAL;
+
+	bufs->ext_src = true;
+	bufs->ext_luma = luma;
+	bufs->ext_chroma = chroma;
+	bufs->ext_stride = stride;
+	bufs->force_idr = idr && n;
+	bufs->stream_len = 0;
+	ret = ave_session_process(ave, abi, bufs, AVE_SESS_CLIENT_ID, n);
+	bufs->ext_src = false;
+	bufs->force_idr = false;
+	if (ret)
+		return ret;
+	if (bufs->stream_len > out_size)
+		return -ENOSPC;
+	memcpy(out, bufs->stream, bufs->stream_len);
+	*out_len = bufs->stream_len;
+	*keyframe = !n || idr;
+	return 0;
+}
+
+/*
+ * Stop + Close, then free the stream's buffers - the firmware has let go
+ * of them once both replies are in (docs/63). On failure nothing is freed:
+ * the firmware may still be using it, and remove() leaks it all.
+ */
+int ave_enc_stop(struct ave_device *ave)
+{
+	struct ave_sess_bufs *bufs = ave->session_bufs;
+	int ret;
+
+	if (!bufs || !ave->client_open)
+		return 0;
+	ret = ave_session_close_client(ave);
+	if (ret)
+		return ret;
+	ave_sess_free_to(bufs, bufs->mark_dma, bufs->mark_ipc);
+	memset(bufs->src, 0, sizeof(bufs->src));
+	memset(bufs->proc_cmd, 0, sizeof(bufs->proc_cmd));
+	memset(&bufs->pic_recon, 0, sizeof(bufs->pic_recon));
+	bufs->stream_len = 0;
+	bufs->n_done = 0;
+	return 0;
 }

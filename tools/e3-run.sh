@@ -65,6 +65,10 @@ if [ -n "${OVERLAY:-}" ]; then
     fi
 fi
 
+# apple-ave links against the V4L2 core since ave_v4l2.c; insmod does not
+# resolve dependencies, so load them first. They are stock modules.
+sudo modprobe -a videodev v4l2-mem2mem videobuf2-common videobuf2-v4l2 \
+    videobuf2-dma-contig 2>/dev/null
 step "insmod driver/apple-ave.ko $*"
 sudo insmod driver/apple-ave.ko "$@"
 RC=$?
