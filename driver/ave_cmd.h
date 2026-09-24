@@ -348,6 +348,16 @@ struct ave_hevc_session {
 	u64	transcoded[2];
 	u32	n_transcoded;		/* 0 or abi->start_hevc.transcoded_max */
 	u32	transcoded_size;
+	/*
+	 * Rate control only (vp.rc_enable): RC+0x40 bEnableQPMod = 1 and PPS
+	 * cu_qp_delta_enabled 1 / diff_cu_qp_delta_depth 2 together, as
+	 * macOS's HEVC defaults (docs/77 §20). Off, the PPS says no
+	 * cu_qp_delta under RC either: the firmware's transcoder context
+	 * assumes cu_qp_delta exactly when QP modulation (or MB input
+	 * control) is on, and h4a hung the transcoder with cu_qp_delta 1
+	 * and bEnableQPMod 0.
+	 */
+	bool	qp_mod;
 };
 
 struct ave_hevc_frame {

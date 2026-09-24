@@ -1538,6 +1538,16 @@ struct ave_start_hevc_layout {
 	u32	transcoded_stride;
 	u32	transcoded_max;
 	u32	transcoded_size;	/* u32, one for all */
+	/*
+	 * RC+0x40 bEnableQPMod (u8, docs/72 §5.2). HEVC IEP copies it to
+	 * ctrl+0x23FC5/0x23FC6 (ldrb [x26,#1952] 0x83444-0x8344c, x26 =
+	 * VP+0xF770), and InitEncodingParameters builds the transcoder
+	 * context's cu_qp_delta bit (XC+0x214 bit 18, ctrl+0x55B4C) as
+	 * this || bEnableMBInputCtrl (VP+0xD) (0x85634, 0x856ac-0x856bc).
+	 * The live register takes PPS cu_qp_delta_enabled instead
+	 * (SetTranscode 0x75b54); the two must agree (docs/77 §20).
+	 */
+	u32	qp_mod;
 };
 
 /*
@@ -2117,6 +2127,7 @@ const struct ave_cmd_abi ave_cmd_abi_13_5 = {
 		.transcoded_stride = 0x08,	/* VP+0x550, 0x84550 */
 		.transcoded_max	   = 2,		/* tmp_bitstream_addr_dst[0..1] */
 		.transcoded_size   = 0x5b8,	/* VP+0x558 u32, 0x84558 */
+		.qp_mod		   = 0xff70,	/* RC+0x40, fw 0x83444 */
 	},
 	.hps = {
 		/* PTL writer 0x1a870: [x] +0 u(2), ldrb +4, ldr +8 u(5),

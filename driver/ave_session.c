@@ -590,6 +590,19 @@ MODULE_PARM_DESC(session_hevc_xc,
 	"HEVC transcoders: 2 = two, into TranscodedData surfaces (default); 1 = one, straight into the coded buffer (PICMGMT+0xF65 = 1)");
 
 /*
+ * HEVC under rate control (docs/77 §20). h4a hung the transcoder on its
+ * first frame with PPS cu_qp_delta_enabled 1 and bEnableQPMod 0: the
+ * firmware's transcoder context assumes cu_qp_delta iff QP modulation.
+ * Off (default): no cu_qp_delta, no QP modulation - what the firmware's own
+ * context says for what we send. On: bEnableQPMod (wire 0xFF70) 1 with
+ * cu_qp_delta 1 / depth 2, macOS's HEVC defaults. Fixed QP ignores it.
+ */
+static bool session_hevc_qpmod;
+module_param(session_hevc_qpmod, bool, 0444);
+MODULE_PARM_DESC(session_hevc_qpmod,
+	"HEVC with rate control: 1 = bEnableQPMod (wire 0xFF70) and PPS cu_qp_delta 1/depth 2, as macOS; 0 = neither (default; docs/77 §20)");
+
+/*
  * HEVC fixed choices (docs/77 §6): 0xFEB4 = 16 is macOS's value (bits [4:2]
  * = 4, "input chroma as the SPS"); POC lsb in 8 bits.
  */
@@ -2088,6 +2101,8 @@ static int ave_session_start_hevc(struct ave_device *ave,
 	h->sao = session_hevc_sao;
 	h->wpp = session_hevc_wpp;
 	h->sps_tmvp = session_hevc_tmvp;
+	/* Rate control only; the builder refuses it under fixed QP. */
+	h->qp_mod = session_hevc_qpmod && h->vp.rc_enable;
 	/* the firmware picks set 0..3 per frame itself (docs/77 §18) */
 	h->n_st_rps = bufs->hevc_refs ? 4 : 0;
 	/*
@@ -2127,6 +2142,10 @@ static int ave_session_start_hevc(struct ave_device *ave,
 		 h->max_num_ref_frames, h->sao, h->wpp, h->sps_tmvp,
 		 h->input_format_word,
 		 h->vp.rc_enable ? "rate control" : "fixed QP");
+	if (h->vp.rc_enable)
+		dev_info(ave->dev,
+			 "session: HEVC_INIT: rate control with bEnableQPMod %u and PPS cu_qp_delta %u (depth %u) - the two agree, as the firmware's transcoder context assumes (docs/77 §20)\n",
+			 h->qp_mod, h->qp_mod, h->qp_mod ? 2 : 0);
 	for (i = 0; i < st.n; i++)
 		dev_info(ave->dev,
 			 "session: HEVC_INIT: SliceHeader surface %u: %pad +%#x (%u x %#x)\n",
