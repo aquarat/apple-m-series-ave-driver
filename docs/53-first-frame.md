@@ -3985,3 +3985,17 @@ pmp_vote=0x2000000300000003` **without** `OVERLAY_ARGS=pmp_venc=1`, so
 report@10 stays disabled, as on a DT without the PMP. Probe warned
 ("report@10 is disabled … encoding at the boot clock"; "pmp_vote ignored")
 and carried on. 1080p encodes at 18.5 ms (unvoted), with the same PSNR.
+
+## h3h (2026-09-24): HEVC P frames
+
+`a7839d6` (four short-term RPS sets with their derived fields, docs/77
+§18), h3b's parameters. **All four frames encode:** frame 0 IDR (NAL 20,
+1207 bytes), frames 1-3 **P** (NAL 1, TRAIL_R): 456 / 554 / 471 bytes,
+FrameTypeReturned 1, mostly skip (e.g. frame 1: I 3493, P 97, skip 10590
+in the firmware's units). `ramp_psnr.py`: 4 frames decode, Y 50.96 /
+50.13 / 49.98 / 50.09 dB, U exact, V 60.6 / 59.4 / 57.1 / 52.6 dB. The
+cause of h3-h3g: the firmware counts a P frame's references from the SPS
+set's *derived* fields (NumNegativePics, UsedByCurrPicS0), which the kext
+computes and we had left zero. It also picks set 0-3 by frames since the
+IDR, and we sent only one set. HEVC IPPP works on the hardware; H4 (V4L2)
+is next.
