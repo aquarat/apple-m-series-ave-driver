@@ -329,8 +329,14 @@ struct ave_hevc_session {
 	/* SPS sps_temporal_mvp_enabled_flag only; the hardware switch (wire
 	 * 0xFCF8) and every slice's flag stay 0, as macOS sends. */
 	bool	sps_tmvp;
-	/* 1 = the IPPP short-term set (one reference, delta POC -1) in the
-	 * SPS (docs/77 §2.4); 0 = none (intra only). */
+	/*
+	 * Short-term sets in the SPS, each the IPPP set (one reference, delta
+	 * POC -1, syntax and derived fields; docs/77 §2.4, §18). 0 = none
+	 * (intra only). A P session needs 4: the firmware chooses set
+	 * min(frames since IDR, 0 after 3) itself (fw 0x6c7d4/0x6c974), as
+	 * macOS's HEVC_RPS::program_sps_rps_IPPP provides sets 0..3
+	 * (0xfffffe0008f50c54, with 4/1/2/3 references).
+	 */
 	u32	n_st_rps;
 	/*
 	 * TranscodedData (docs/77 §14): the two transcoders' output buffers,

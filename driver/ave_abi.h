@@ -1615,6 +1615,20 @@ struct ave_hevc_ps_layout {
 	u32	rps_dpoc_s0_m1;				/* u16[] */
 	u32	rps_used_s0;				/* u8[] */
 	u32	rps_num_delta_pocs;
+	/*
+	 * The derived half of each entry (H.265 7.4.8: NumNegativePics,
+	 * NumPositivePics, UsedByCurrPicS0/S1, DeltaPocS0/S1), which the
+	 * firmware's reference-list code reads instead of the syntax fields
+	 * (count loop fw 0x6ce24-0x6cf04 on [entry+184]/[entry+192+k]) and
+	 * derives itself only for sets it builds (0x6de64). For SPS sets the
+	 * kext computes them on the host (HEVC_RPS::update_sps_rps_internal_
+	 * variables 0xfffffe0008f50470, same stores). Left 0: no reference, the
+	 * reference readers are never programmed and the first P frame hangs
+	 * the pipe (h3g, docs/77 §18).
+	 */
+	u32	rps_d_num_neg, rps_d_num_pos;		/* u32 */
+	u32	rps_d_used_s0, rps_d_used_s1;		/* u8[16] */
+	u32	rps_d_delta_poc_s0, rps_d_delta_poc_s1;	/* s32[16] */
 	u32	rps_lt_present;				/* u8 */
 };
 
@@ -2223,6 +2237,14 @@ const struct ave_cmd_abi ave_cmd_abi_13_5 = {
 		.rps_dpoc_s0_m1		= 0x38,
 		.rps_used_s0		= 0x58,
 		.rps_num_delta_pocs	= 0x160,
+		/* derived: fw 0x6de64 stp w8,w9,[x1,#184]; strb [x1,#192]/[#208];
+		 * stp [x1,#224] (S0) / str [x1,#288] (S1); kext 0xf504a4 */
+		.rps_d_num_neg		= 0xb8,
+		.rps_d_num_pos		= 0xbc,
+		.rps_d_used_s0		= 0xc0,
+		.rps_d_used_s1		= 0xd0,
+		.rps_d_delta_poc_s0	= 0xe0,
+		.rps_d_delta_poc_s1	= 0x120,
 		.rps_lt_present		= 0x5a68,
 	},
 	.process_hevc = {

@@ -747,7 +747,7 @@ static void test_hevc(void)
 	h.max_num_ref_frames = 1;
 	h.log2_max_poc_lsb_minus4 = 4;
 	h.sao = h.wpp = h.sps_tmvp = true;
-	h.n_st_rps = 1;
+	h.n_st_rps = 4;	/* the firmware picks set 0..3 per frame (docs/77 §18) */
 	/* session_hevc_xc=2 (default): two TranscodedData surfaces of
 	 * align4K(coded / 2), docs/77 §14 */
 	h.transcoded[0] = 0xc0000000ull;
@@ -773,6 +773,15 @@ static void test_hevc(void)
 				  SESS_CLIENT_ID, NULL) == 0,
 	      "INIT_DONE (0xE04) refused for HEVC_INIT");
 	CHECK(abi->cmd[AVE_OP_START_HEVC].reply_id == 0xe04, "HEVC_INIT reply id");
+	{
+		/* docs/77 §18: the derived RPS fields the firmware's ref lists read */
+		u32 e = abi->start_hevc.rps_block + abi->hps.rps_entry0;
+
+		CHECK(get_unaligned_le32(hbuf + e + abi->hps.rps_d_num_neg) == 1 &&
+		      hbuf[e + abi->hps.rps_d_used_s0] == 1 &&
+		      get_unaligned_le32(hbuf + e + abi->hps.rps_d_delta_poc_s0) == 0xffffffffu,
+		      "RPS entry 0 derived NumNegativePics/UsedByCurrPicS0/DeltaPocS0 not set");
+	}
 	CHECK(ave_cmd_build_start_hevc(a26, hbuf, sizeof(hbuf), &c, &h) == -EINVAL,
 	      "26.6.2 must refuse HEVC_INIT");
 

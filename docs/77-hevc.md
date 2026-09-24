@@ -1392,3 +1392,106 @@ $D --fw --addr 0x718a4 -n 0xc0          # reference luma reader 0x1128000 + w22
 $D --fw --addr 0x2ece4 -n 0x18          # H265 DPB: refinfo+296 = ctx+4512+64*set
 $D --fw --addr 0x2e400 -n 0x9c          # H265VideoEncoderDPB ctor: plane sizes
 ```
+
+---
+
+## 18. After h3g: the P frame had no reference because our SPS RPS was incomplete
+
+h3g's reader dump showed the low-res result readers programmed for P frame
+1, but the luma/chroma **reference** readers exactly as after frame 0: never
+programmed. Traced back from there, all **[C]** on the 13.5 firmware and
+kext:
+
+**The gate.** HEVC setPipe programs the reference readers in two loops.
+The L0 loop starts at `0x710ac`; `cbz w10` at `0x710a8` skips it straight to
+`0x71554`. The L0+L1 loop runs from `0x71554` and exits at `0x71a58`. Their
+bounds are the bytes ctrl+`0x1230` (L0) and ctrl+`0x1231` (L1), read as
+`[sp,#152]`+5/+6 with `[sp,#152]` = ctrl+`0x122B` (`0x708ac`–`0x708b8`,
+`0x71558`–`0x71578`).
+PipePrepareParam sets those bytes to `S+0x120 + 1` / `S+0x124 + 1`
+(`num_ref_idx_l0/l1_active_minus1`, `0x65474`–`0x65498`, and the same stores
+at `0x662f8`/`0x66304` on the second path). The firmware's own `AVE_HEVC_PrepareSliceHeader`
+computes S+`0x120`/`0x124` as (non-zero ref entries − 1) from its reference
+arrays (`0x213e4`–`0x21464`). So "no reference" makes L0 = 0 and the
+readers are skipped.
+
+**Why there was no reference.** PipePrepareParam calls the set selector
+`0x6c6e0` (`0x660bc`/`0x661e4`) and then `0x6cd5c` (`0x660f8`/`0x6621c`),
+which builds the frame's reference set:
+
+- With ctrl+`0x58554`, ctrl+`0x2414C` and ctrl+`0x2C470` all 0 (our case;
+  gate `0x6cdf4`–`0x6ce08`), it takes **SPS set `ctrl[0x2C414]`** (`0x6cdc0`–
+  `0x6cdc8`): entry = RPS + 4 + 0x164·idx (`0x6cf08`–`0x6cf14`).
+- If ctrl+`0x2C468` is set, the firmware instead builds a one-reference set
+  on the stack and derives it itself (`0x6cf18`–`0x6cf5c`, `bl 0x6de64`).
+  That flag is 0 for us.
+- It counts references from the entry's **derived** fields:
+  `NumNegativePics` at +`0xB8` and `UsedByCurrPicS0[k]` at +`0xC0+k`
+  (`0x6cf68` → `0x6ce34`–`0x6cf04`), then the S1 pair at +`0xBC`/+`0xD0`
+  (from `0x6cf7c`).
+- Those derived fields (H.265 7.4.8) sit after the syntax fields of each
+  0x164-byte entry. The firmware fills them itself only for sets it builds
+  (`0x6de64`):
+  - +`0xB8`/+`0xBC` = num_negative / num_positive;
+  - +`0xC0`/+`0xD0` = used flags;
+  - +`0xE0` + 4j = DeltaPocS0[j] = −Σ(delta_poc_s0_minus1 + 1);
+  - +`0x120` + 4j = DeltaPocS1;
+  - +`0x160` = NumDeltaPocs.
+- For SPS sets, the **kext** computes the derived fields on the host
+  (`HEVC_RPS::update_sps_rps_internal_variables` `0xfffffe0008f50470`,
+  identical stores). §2.4/§6 wrote only the syntax fields, so the count was 0.
+
+**And which set.** The per-frame index is not the slice RPS we send (wire
+`0x6524` is overwritten). `0x6c6e0` computes it from the GOP type ctrl+`0x1218`
+= VP+`0x18` + 1 (`0x84e30`–`0x84e38`; wire `0x78`, 0 from us and from macOS,
+user space `0x6ce1c`). For IPPP (`0x6c7d4`–`0x6c7e0`) the index is:
+
+- **0** if byte ctrl+`0x23FD1` (wire `0xFF77`, IEP `0x83468`/`0x8346c`) is set;
+- otherwise, if the 7th argument (`w6`) is 0, **frames since the IDR while
+  that is ≤ 3, else 0** (`0x6c974`–`0x6c984`);
+- else 4 (`0x6c7e0`).
+
+macOS's `HEVC_RPS::program_sps_rps_IPPP` (`0xfffffe0008f50c54`) provides
+exactly those sets:
+
+| set | references | constant |
+|---:|---:|---|
+| 0 | 4 | `0xfffffe000723e7a8` = {4, 0} |
+| 1 | 1 | `…7a0` = {1, 0} |
+| 2 | 2 | `…7b0` = {2, 0} |
+| 3 | 3 | `…7b8` = {3, 0} |
+
+All delta_poc_s0_minus1 are 0 and every reference is used. A fifth set {0, 0}
+exists only when an object field is > 1. Our single set would have failed
+from frame 2 even with the derived fields filled.
+
+**Fix** (`ave_cmd_build_start_hevc`, `ave_session_start_hevc`):
+
+- `num_short_term_ref_pic_sets` = **4**, and every set is the one-reference
+  IPPP set: syntax plus derived fields, NumNegativePics 1,
+  UsedByCurrPicS0[0] 1, DeltaPocS0[0] = −1, NumDeltaPocs 1.
+- Whichever set the firmware picks, the frame has one reference, which our
+  2-slot DPB and numRefs 1 (wire `0xFD2C`) hold.
+- The SPS still parses: four explicit, non-predicted sets; the slice codes a
+  2-bit `short_term_ref_pic_set_idx`.
+- macOS's 4-reference IPPP would need a 5-slot DPB and numRefs 4. That
+  stays a later option.
+- `abi_selftest` pins all four entries, syntax and derived; `session_selftest`
+  pins entry 0's derived fields.
+
+Open: the `idx = 4` arm (`0x6c7e0`, taken when the 7th argument of `0x6c6e0` is
+non-zero) would find no set 4. If a later P frame hangs the same way,
+that is the first thing to check.
+
+**Reproduce** (13.5 blobs: `D="python3 tools/disas.py --macos 13.5"`)
+
+```sh
+$D --fw   --addr 0x708ac -n 0x10        # [sp,#152] = ctrl+0x122B; L0/L1 counts at +5/+6
+$D --fw   --addr 0x65474 -n 0x28        # counts = S+0x120/0x124 + 1
+$D --fw   --addr 0x6cdc0 -n 0x4c        # set idx ctrl[0x2C414]; gate 0x58554/0x2414C/0x2C470
+$D --fw   --addr 0x6cf08 -n 0x80        # entry = RPS+4+0x164*idx; count from entry+0xB8 / +0xC0..
+$D --fw   --addr 0x6de64 -n 0x120       # the derived fields, firmware-built sets
+$D --fw   --addr 0x6c7d4 -n 0x20        # IPPP: set = frames since IDR (<= 3) else 0
+$D --kext --addr 0xfffffe0008f50c54 -n 0x1f4   # program_sps_rps_IPPP: sets 0..3
+$D --kext --addr 0xfffffe0008f50470 -n 0x60    # update_sps_rps_internal_variables
+```
