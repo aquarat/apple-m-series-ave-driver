@@ -467,6 +467,19 @@ MODULE_PARM_DESC(session_coded_kb,
  * every run so far sent. docs/64.
  */
 static unsigned int session_frames = 1;
+
+/*
+ * docs/68 §6 item 9: sessions per module load. After the first session's
+ * frames, N-1 more rounds of Stop + Close, then Open + Start_AVC + Process
+ * on freshly allocated buffers, with the firmware left running and Config
+ * sent once. Every open()/close() of a V4L2 node does exactly this. The
+ * previous session's buffers stay mapped until remove (the firmware has
+ * released them after Close, but freeing them is not what is under test).
+ */
+static unsigned int session_repeat = 1;
+module_param(session_repeat, uint, 0444);
+MODULE_PARM_DESC(session_repeat,
+	"sessions per load: after the first, Stop+Close then Open+Start_AVC+frames again (default 1); docs/68 §6.9");
 module_param(session_frames, uint, 0444);
 MODULE_PARM_DESC(session_frames,
 	"frames to encode in one load: 1 = a single IDR (default), N = IDR followed by N-1 P frames");
@@ -821,8 +834,13 @@ static void *ave_sess_ipc_alloc(struct ave_sess_bufs *b, size_t size,
 {
 	void *cpu;
 
-	if (b->nipc >= AVE_SESS_MAX_IPC)
+	if (b->nipc >= AVE_SESS_MAX_IPC) {
+		/* f59 lost a second session to this returning NULL silently. */
+		dev_err(b->ave->dev,
+			"session: out of IPC command slots (%u); raise AVE_SESS_MAX_IPC\n",
+			AVE_SESS_MAX_IPC);
 		return NULL;
+	}
 	cpu = ave_ipc_alloc(b->ave, size, iova);
 	if (!cpu)
 		return NULL;
@@ -864,6 +882,27 @@ static void ave_sess_free_all(struct ave_sess_bufs *b)
 		ave_ipc_free(b->ave, b->ipc[i].cpu, b->ipc[i].size);
 	b->ndma = 0;
 	b->nipc = 0;
+}
+
+/*
+ * Free everything allocated after the first @ndma DMA buffers and @nipc IPC
+ * commands, newest first. Only for use after the firmware has let go of
+ * them: after Close has completed (STOP_DONE, docs/63). The Config-time
+ * allocations before the marks stay - the firmware keeps those for the life
+ * of the core.
+ */
+static void ave_sess_free_to(struct ave_sess_bufs *b, unsigned int ndma,
+			     unsigned int nipc)
+{
+	while (b->ndma > ndma) {
+		b->ndma--;
+		dma_free_coherent(b->ave->dev, b->dma[b->ndma].size,
+				  b->dma[b->ndma].cpu, b->dma[b->ndma].iova);
+	}
+	while (b->nipc > nipc) {
+		b->nipc--;
+		ave_ipc_free(b->ave, b->ipc[b->nipc].cpu, b->ipc[b->nipc].size);
+	}
 }
 
 /* ------------------------------------------------------------------------ */
@@ -2897,6 +2936,7 @@ int ave_session_selftest(struct ave_device *ave)
 	const struct ave_cmd_abi *abi;
 	struct ave_sess_bufs *bufs;
 	void (*prev_rx)(struct ave_device *, u32, void *, u32, u32);
+	unsigned int mark_dma = 0, mark_ipc = 0;
 	u32 frame;
 	int ret;
 
@@ -2962,6 +3002,9 @@ int ave_session_selftest(struct ave_device *ave)
 	ret = ave_session_config(ave, abi, bufs);
 	if (ret || session_config_only)
 		goto out;
+	/* Everything after these marks belongs to a session, not the device. */
+	mark_dma = bufs->ndma;
+	mark_ipc = bufs->nipc;
 
 	ret = ave_session_open(ave, abi, bufs, AVE_SESS_CLIENT_ID);
 	if (ret)
@@ -3013,6 +3056,42 @@ int ave_session_selftest(struct ave_device *ave)
 				"session: frame %u of %u failed: %d\n",
 				frame, bufs->n_coded, ret);
 			break;
+		}
+	}
+	{
+		u32 k, nrep = clamp_t(u32, session_repeat, 1, 8);
+
+		for (k = 1; k < nrep && !ret; k++) {
+			ave_step(ave, "session repeat: Stop + Close before the next session");
+			ret = ave_session_close_client(ave);
+			if (ret) {
+				dev_err(ave->dev, "session %u: close failed: %d\n", k, ret);
+				break;
+			}
+			dev_info(ave->dev, "session %u of %u: Open + Start_AVC on the running firmware; freeing the previous session's %u DMA buffers and %u commands\n",
+				 k + 1, nrep, bufs->ndma - mark_dma,
+				 bufs->nipc - mark_ipc);
+			ave_sess_free_to(bufs, mark_dma, mark_ipc);
+			bufs->n_done = 0;
+			ret = ave_session_open(ave, abi, bufs, AVE_SESS_CLIENT_ID);
+			if (ret)
+				break;
+			ave->client_open = true;
+			ave_session_alloc_nbr(ave, bufs);
+			ave_session_alloc_entropy(ave, abi, bufs);
+			ave_session_alloc_dpb(ave, bufs);
+			ret = ave_session_start_avc(ave, abi, bufs, AVE_SESS_CLIENT_ID);
+			if (ret)
+				break;
+			for (frame = 0; frame < bufs->n_coded; frame++) {
+				ret = ave_session_process(ave, abi, bufs,
+							  AVE_SESS_CLIENT_ID, frame);
+				if (ret) {
+					dev_err(ave->dev, "session %u: frame %u of %u failed: %d\n",
+						k + 1, frame, bufs->n_coded, ret);
+					break;
+				}
+			}
 		}
 	}
 	if (bufs->n_done)

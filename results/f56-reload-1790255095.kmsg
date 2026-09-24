@@ -1,0 +1,1 @@
+=== f56-reload 2026-09-24T14:04:55+01:00 commit b5d0df3: insmod driver/apple-ave.ko stop_after=16 fw_map_data=1 fw_map_text=2 smmu_watch=1 session_selftest=1 session_frame=1 session_lsb=1 power_me1=1 dpe_tunables=1 session_coloc=1 session_entropy_size=1 session_nbr_fill=1 session_costs=0x1f session_coded_kb=2048 session_frames=4 core_reset=2 fw_restore_data=1 ===

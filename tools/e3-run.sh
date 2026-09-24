@@ -107,5 +107,6 @@ if [ "${UNLOAD:-0}" = "1" ]; then
     step "still alive 8 s after the unload"
 fi
 
+step "e3-run done: $NAME"
 sudo kill $CAP 2>/dev/null
 echo "$LOG"
