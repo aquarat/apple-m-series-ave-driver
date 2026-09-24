@@ -3747,3 +3747,21 @@ stays 0, and DVFS-STATE is unchanged.
 Timing, as docs/75 predicted: unchanged. 720p 8.98 ms, 1080p 17.37 /
 17.37 ms, 4K 63.87 / 63.96 ms, PSNR identical. The report alone raises
 nothing; the vote (R4) is next.
+
+## f93 (2026-09-24): R4 VMax + FAB0 vote: hang, then reset
+
+`09e0dcb`, as f92 plus `pmp_vote=0x2000000300000003` (macOS's VMax with
+FAB0 VMax). The receiver's last line is the R3 dump's PS-ACK read
+(`[18.342583]`, `0x60013000`, as f92). The four dump lines after it,
+printed microseconds later, never arrived, and neither did the vote's
+read-back line. The next boot's marker (12 s into that boot) came 67 s
+later, so the machine **hung for tens of seconds and was then reset**,
+with no panic output. The same dump reads completed in f89-f92, so the
+suspects are the vote write, its read-back, or the PMP's reaction to it.
+The FAB0 half is the most plausible: a fabric DVFS change that macOS
+coordinates with agents Linux does not run. A stalled fabric also stalls
+the USB adapter's DMA, which is why the tail was lost.
+
+Next: `ave_pmp_vote()` now logs before the write, 200 ms after it, and
+after the read-back, holding 200 ms after each line. Then R4′: VNOM only
+(`0x2000000000000001`, no FAB0).
