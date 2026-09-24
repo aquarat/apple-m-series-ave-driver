@@ -3855,3 +3855,13 @@ of f93/f94 are withdrawn. The vote now maps with `ioremap_np()`.
 The same mechanism probably explains docs/49's "unexplained" DAPF-write
 SErrors (posted `devm_ioremap()`, while m1n1 and apple-dart use
 non-posted mappings). Every driver write on `/soc` should be non-posted.
+
+## h2c (2026-09-24): the first HEVC frame
+
+`809295d` (slice block S+0x54C/0x550 = 0xFFFFFFFF, docs/77 §15), h2's
+parameters. **RESULT frame 0: 1207 bytes** (coded 1178 + a 29-byte slice
+header from the SliceHeader surface), NAL type 20 (IDR_N_LP), I slice,
+slice QP 30, SAO on, 22 WPP entry points, header ends in byte_alignment().
+`hevc_parse.py --check`: PASS 14/14. **`ramp_psnr.py`: decodes with
+ffmpeg, Y 50.96 dB (max error 4), U exact, V 60.63 dB.** HEVC encodes on
+the hardware.
