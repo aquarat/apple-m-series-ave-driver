@@ -111,6 +111,16 @@ struct ave_avc_session {
 	/* SRCDMAGO bit 3 and bits 4+ (docs/69); 0 = what every run has sent. */
 	u8	src_go_bit3;
 	u8	src_go_bits;
+	/*
+	 * Controller debug verbosity (wire 0xFCD8). Bit 5 is what lets the
+	 * firmware's own "AVC COMMON:: QPY %d nQuant %d" lines out at all.
+	 * docs/70.
+	 */
+	u32	dbg_bits;
+	/* wire 0xFCE4: code I-slice macroblocks as I_PCM (docs/73 P2). */
+	u8	ipcm_islice;
+	/* Send macOS's lambda block (docs/72 §5.2); 0 = zeros, every run before f45. */
+	bool	lambda_block;
 	u64	param_sets_addr;
 	u32	param_sets_size;
 

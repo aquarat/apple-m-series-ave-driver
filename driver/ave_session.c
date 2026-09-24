@@ -356,6 +356,46 @@ MODULE_PARM_DESC(session_src_go,
 	"Start_AVC wire 0xFECC (u8): SRCDMAGO bits 4 and up");
 
 /*
+ * Make the firmware talk (docs/70). Wire 0xFCD8's bit 5 is the single byte
+ * CController::Print tests before dropping every "AVC COMMON::" line, so
+ * with it clear - every run we have ever done - the firmware has been
+ * discarding its own diagnostics before they reach the ring we already
+ * drain. 0x20 is bit 5 alone: the per-frame lines, without DebugInit's
+ * hundreds. The log path allocates shared memory and sends synchronously,
+ * so wider values slow the frame and can overrun the 512-slot ring.
+ *
+ * Removed in f2b3341 with the f25-f30 deaths, which were the misaddressed
+ * session_costs group 4 read (docs/53, f38); restored 2026-09-24. It has
+ * never had a run that survived.
+ */
+static unsigned int session_dbg;
+module_param(session_dbg, uint, 0444);
+MODULE_PARM_DESC(session_dbg,
+	"Start_AVC wire 0xFCD8: firmware debug verbosity. 0x20 = bit 5, which is what lets its own QPY/nQuant lines out at all");
+
+/*
+ * docs/73 P2: ask the firmware to code every I-slice macroblock as I_PCM.
+ * The coded MB type then cannot be confused with the blank frame's
+ * I_16x16, and I_PCM carries raw source samples: the ramp means the pipe
+ * sees our source, flat grey means it does not. ~1.39 MB per 720p frame,
+ * so pair it with session_coded_kb=2048.
+ */
+static unsigned int session_ipcm;
+module_param(session_ipcm, uint, 0444);
+MODULE_PARM_DESC(session_ipcm,
+	"Start_AVC wire 0xFCE4 (u8): code I-slice MBs as I_PCM (docs/73 P2; 0 = every run before f43). Use with session_coded_kb=2048");
+
+/*
+ * docs/72 §5.2: macOS always sends five 0x400 lambda scales and three
+ * per-QP lambda tables in the RC block; we have sent zeros, so ModeDec's
+ * lambda registers 0x40D26A09C/0A0 read 0 (f42).
+ */
+static bool session_lambda;
+module_param(session_lambda, bool, 0444);
+MODULE_PARM_DESC(session_lambda,
+	"Start_AVC: send macOS's lambda block (RC+0x68..0x78 = 0x400, per-QP tables at wire 0xFFC0..0x10573); docs/72. 0 = zeros, every run before f45");
+
+/*
  * Rate control. The default reproduces every run so far: ui32RCFlag = 2
  * (AVE_RC_FIXQP), session_qp on every frame type. session_bitrate switches
  * to the firmware's own controller (ui32RCFlag = 1) with that target in
@@ -432,7 +472,9 @@ MODULE_PARM_DESC(session_flat_luma,
  *   bit 0  IntraEst cfg 0x40D24A1C8..1D8 and 0x40D24A394
  *   bit 1  ModeDec cost ladder 0x40D26A0AC..0x104
  *   bit 2  curMB 0x40D243180 and the 0x40D263180 control
- *   bit 3  IntraEst DMem 0x40D348000 and ME 0x40D190630
+ *   bit 3  IntraEst DMem 0x40D448000 and ME 0x40D190630 (until f39 this
+ *          read 0x40D348000 - DPE offset 0x248000, off by 0x100000 from
+ *          docs/58's DMem 0x1448000 - and that read is an SError, f38)
  *
  * Each group logs an ave_step() marker first, so with ave_step_ms set the
  * last marker on disk names the group that hung.
@@ -1370,6 +1412,29 @@ static int ave_session_start_avc(struct ave_device *ave,
 	s.src_cfg_byte = (u8)session_src_cfg;
 	s.src_go_bit3 = (u8)session_src_bit3;
 	s.src_go_bits = (u8)session_src_go;
+	s.dbg_bits = session_dbg;
+	s.ipcm_islice = (u8)session_ipcm;
+	s.lambda_block = session_lambda;
+	if (session_lambda)
+		dev_info(ave->dev,
+			 "session: Start_AVC: macOS lambda block (docs/72); expect 0x40D26A09C = 0x40D26A0A0 = nQuant\n");
+	if (session_ipcm)
+		dev_info(ave->dev,
+			 "session: Start_AVC: I_PCM in I slices %#x (wire 0xFCE4); expect IntraEst 0x1D0/1D4/1D8 = 0x01000000 and DMem 0x40D448000 bit 9 (docs/73 P2)\n",
+			 session_ipcm);
+	if (session_dbg) {
+		/*
+		 * The firmware's own lines come through the same ring as
+		 * everything else and would be thrown away by the rate limit
+		 * long before the interesting ones arrive - 100 lines per 5 s
+		 * against one per macroblock.
+		 */
+		ratelimit_state_init(&ave->fwlog_rs, 0, 0);
+		ratelimit_set_flags(&ave->fwlog_rs, RATELIMIT_MSG_ON_RELEASE);
+		dev_info(ave->dev,
+			 "session: Start_AVC: firmware debug bits %#x (wire 0xFCD8); fw log rate limit lifted - expect 'AVC COMMON:: QPY %%d nQuant %%d'\n",
+			 session_dbg);
+	}
 	if (session_src_bit3 || session_src_go)
 		dev_info(ave->dev,
 			 "session: Start_AVC: SRCDMAGO inputs bit3 %#x bits4+ %#x (wire 0xFCE9 / 0xFECC); watch 0x40D110128 and the third reader channel 0x40D120100\n",
@@ -2100,19 +2165,26 @@ static void ave_session_diag_costs(struct ave_device *ave)
 			 ave_read(ave, AVE_BANK_DPE, 0x14a394));
 	}
 	if (session_costs & BIT(1)) {
-		ave_step(ave, "diag costs: group 2, ModeDec cost 0x40D26A0AC..104");
-		for (i = 0; i < 24; i += 8)
+		/*
+		 * 0x40D26A09C..0x104: the two lambda words, then record 17's
+		 * 25 words (docs/73 §1.3) - word 0 intra enable, word 1 skip,
+		 * 2..24 the ladder. Until f42 this read 0x0AC..0x108, so its
+		 * last "0" was 0x108, past the ladder.
+		 */
+		ave_step(ave, "diag costs: group 2, ModeDec 0x40D26A09C..104");
+		for (i = 0; i < 27; i += 9)
 			dev_info(ave->dev,
-				 "session: diag ModeDec cost [%u..]: %08x %08x %08x %08x %08x %08x %08x %08x (seeded 0x01000001)\n",
-				 i,
-				 ave_read(ave, AVE_BANK_DPE, 0x16a0ac + 4 * (i + 0)),
-				 ave_read(ave, AVE_BANK_DPE, 0x16a0ac + 4 * (i + 1)),
-				 ave_read(ave, AVE_BANK_DPE, 0x16a0ac + 4 * (i + 2)),
-				 ave_read(ave, AVE_BANK_DPE, 0x16a0ac + 4 * (i + 3)),
-				 ave_read(ave, AVE_BANK_DPE, 0x16a0ac + 4 * (i + 4)),
-				 ave_read(ave, AVE_BANK_DPE, 0x16a0ac + 4 * (i + 5)),
-				 ave_read(ave, AVE_BANK_DPE, 0x16a0ac + 4 * (i + 6)),
-				 ave_read(ave, AVE_BANK_DPE, 0x16a0ac + 4 * (i + 7)));
+				 "session: diag ModeDec 0x40D26A%03X: %08x %08x %08x %08x %08x %08x %08x %08x %08x\n",
+				 0x09c + 4 * i,
+				 ave_read(ave, AVE_BANK_DPE, 0x16a09c + 4 * (i + 0)),
+				 ave_read(ave, AVE_BANK_DPE, 0x16a09c + 4 * (i + 1)),
+				 ave_read(ave, AVE_BANK_DPE, 0x16a09c + 4 * (i + 2)),
+				 ave_read(ave, AVE_BANK_DPE, 0x16a09c + 4 * (i + 3)),
+				 ave_read(ave, AVE_BANK_DPE, 0x16a09c + 4 * (i + 4)),
+				 ave_read(ave, AVE_BANK_DPE, 0x16a09c + 4 * (i + 5)),
+				 ave_read(ave, AVE_BANK_DPE, 0x16a09c + 4 * (i + 6)),
+				 ave_read(ave, AVE_BANK_DPE, 0x16a09c + 4 * (i + 7)),
+				 ave_read(ave, AVE_BANK_DPE, 0x16a09c + 4 * (i + 8)));
 	}
 	if (session_costs & BIT(2)) {
 		/*
@@ -2131,15 +2203,25 @@ static void ave_session_diag_costs(struct ave_device *ave)
 	}
 	if (session_costs & BIT(3)) {
 		/*
-		 * The prime suspect: MCPU DMem and the ME block are not
-		 * obviously powered here, unlike the pipe registers above.
+		 * IntraEst MCPU DMem is firmware offset 0x1448000 (docs/58
+		 * section 1.2), AP 0x40D448000, DPE offset 0x348000. This group
+		 * used 0x248000 (AP 0x40D348000), which is no MCPU block, and
+		 * f38 took an SError on it with the wired receiver watching.
+		 * One read per marker, so a fault names its access.
 		 */
-		ave_step(ave, "diag costs: group 4, IntraEst DMem 0x40D348000 + ME 0x40D190630");
+		ave_step(ave, "diag costs: group 4a, IntraEst DMem 0x40D448000");
+		v[0] = ave_read(ave, AVE_BANK_DPE, 0x348000);
+		ave_step(ave, "diag costs: group 4b, IntraEst DMem 0x40D448764");
+		v[1] = ave_read(ave, AVE_BANK_DPE, 0x348764);
+		ave_step(ave, "diag costs: group 4c, ME 0x40D190630");
+		v[2] = ave_read(ave, AVE_BANK_DPE, 0x90630);
+		ave_step(ave, "diag costs: group 4d, ModeDec DMem 0x40D468000");
+		v[3] = ave_read(ave, AVE_BANK_DPE, 0x368000);
+		ave_step(ave, "diag costs: group 4e, ModeDec DMem 0x40D4689AC");
+		v[4] = ave_read(ave, AVE_BANK_DPE, 0x3689ac);
 		dev_info(ave->dev,
-			 "session: diag IntraEst DMem %#x +0x764 %#x | MESATDSCALING %#x\n",
-			 ave_read(ave, AVE_BANK_DPE, 0x248000),
-			 ave_read(ave, AVE_BANK_DPE, 0x248764),
-			 ave_read(ave, AVE_BANK_DPE, 0x90630));
+			 "session: diag IntraEst DMem %#x +0x764 %#x | MESATDSCALING %#x | ModeDec DMem %#x +0x9AC %#x\n",
+			 v[0], v[1], v[2], v[3], v[4]);
 	}
 }
 

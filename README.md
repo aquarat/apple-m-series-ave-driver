@@ -11,12 +11,24 @@ This repository is the starting point for that work.
 which exposes two independent encoder instances (`ave0`, `ave1`). The approach
 should generalise across the M1 family and forward.
 
-## Status
+## Status (2026-09-24)
 
-A driver exists and runs on real hardware. It brings the block up, maps its
-firmware at DART IOVA 0 and starts the coprocessor; the firmware does not yet
-report in. See [docs/31-bringup-state.md](docs/31-bringup-state.md) for exactly
-how far it gets and what is believed to be missing.
+A driver exists and runs on real hardware. It brings the block up, starts the
+firmware, completes the command handshake, and encodes a frame: Config, Open,
+Start_AVC, Process, and a valid H.264 Baseline 1280x720 frame that ffmpeg
+decodes, with every macroblock accounted for and no faults.
+
+The picture is blank - every sample decodes to 128, and the frame is 2709
+bytes whatever the source holds, at any QP. That is the open problem. It is
+not the source path: with I_PCM switched on, the same pipe codes the source
+sample for sample (f43). The loss is in prediction/residual. The run log is
+[docs/53-first-frame.md](docs/53-first-frame.md); how to operate the
+hardware, and the rules for doing so, are in [AGENTS.md](AGENTS.md). Start
+there.
+
+The bring-up is operated from a separate host over SSH, because the target
+resets when an experiment goes wrong and nothing on it survives that; kernel
+logs go to a netconsole receiver on the LAN.
 
 The static analysis below is the project's foundation and is largely complete.
 
