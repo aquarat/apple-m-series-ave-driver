@@ -795,7 +795,6 @@ int ave_cmd_build_start_hevc(const struct ave_cmd_abi *abi, u8 *buf,
 	const struct ave_hevc_ps_layout *p;
 	const struct ave_avc_session *s;
 	u32 vps, sps, pps, rps, cw, ch, dw, dh, align, fmt, i;
-	bool rc;
 	struct ave_wr w;
 	int ret;
 
@@ -835,6 +834,10 @@ int ave_cmd_build_start_hevc(const struct ave_cmd_abi *abi, u8 *buf,
 	/* setPipe asserts all four recon planes (:13921..:13969). */
 	if (!s->need_lsb_planes)
 		return -EINVAL;
+	/* QP modulation is a rate-control setting (macOS clears it for FIXQP). */
+	if (h->qp_mod && (!s->rc_enable || hl->qp_mod == AVE_OFF_NONE ||
+			  !hl->qp_mod))
+		return -EINVAL;
 	if (h->log2_max_poc_lsb_minus4 > 12 || h->n_st_rps > AVE_HEVC_ST_RPS_MAX ||
 	    (h->n_st_rps && !h->max_num_ref_frames) ||
 	    h->max_num_ref_frames > 15 ||
@@ -868,7 +871,6 @@ int ave_cmd_build_start_hevc(const struct ave_cmd_abi *abi, u8 *buf,
 
 	cw = ave_mb_align(s->width);
 	ch = ave_mb_align(s->height);
-	rc = s->rc_enable;
 
 	/* ---- AVE_VIDEO_PARAMS / RC / buffer tables, as AVC_INIT ---- */
 	ave_vp_fill(&w, l, s, hl->sve_num);
@@ -961,12 +963,17 @@ int ave_cmd_build_start_hevc(const struct ave_cmd_abi *abi, u8 *buf,
 	wr32(&w, pps + p->extra_sh_bits, 0);		/* :945 */
 	wr32(&w, pps + p->init_qp_m26, 0);
 	/*
-	 * cu_qp_delta: macOS clears it for FIXQP (0x869e0) and sends 1 / depth
-	 * 2 otherwise (docs/77 §5), which the firmware's controller needs to
-	 * steer QP per CU.
+	 * cu_qp_delta goes with QP modulation (docs/77 §20). The firmware's
+	 * transcoder context sets it iff bEnableQPMod || bEnableMBInputCtrl
+	 * (0x856ac-0x856bc) while the live XC+0x214 takes this PPS flag
+	 * (0x75b54); macOS sets and clears the two together (user space
+	 * 0x6cf4c / 0x86a2c-0x86a30). h4a sent 1 here with QPMod 0 and the
+	 * transcoder hung on its first frame.
 	 */
-	wr8(&w, pps + p->cu_qp_delta, rc);
-	wr32(&w, pps + p->cu_qp_delta_depth, rc ? 2 : 0);
+	if (h->qp_mod)
+		wr8(&w, hl->qp_mod, 1);
+	wr8(&w, pps + p->cu_qp_delta, h->qp_mod);
+	wr32(&w, pps + p->cu_qp_delta_depth, h->qp_mod ? 2 : 0);
 	wr8(&w, pps + p->wpp, h->wpp);
 	wr8(&w, pps + p->deblock_ctrl_present, 1);
 	wr8(&w, pps + p->pps_fw_creates_header, 1);

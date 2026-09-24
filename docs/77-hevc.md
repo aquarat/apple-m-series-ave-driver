@@ -1592,9 +1592,9 @@ H.264 path is unchanged (see "AVC unchanged" below).
   for an HEVC stream.
 - **Rate control.** HEVC's VP/RC are AVC's offsets (§2.2), filled by the
   same `ave_vp_fill()`, so the V4L2 rule is the same: the controller runs
-  when RC is enabled and the mode is VBR. The one HEVC-specific RC field the
-  builder already handles is PPS `cu_qp_delta_enabled` 1 / depth 2 under RC,
-  0 / 0 under fixed QP (macOS, §5; pinned in `abi_selftest`). macOS's other
+  when RC is enabled and the mode is VBR. *(Superseded by §20: PPS
+  `cu_qp_delta_enabled` now follows `bEnableQPMod`, not RC. h4a hung the
+  transcoder with `cu_qp_delta` 1 under RC.)* macOS's other
   HEVC RC defaults are **not** sent: SoftMaxQP 48, QPModRefresh 0,
   FlatAreaLowQp 1, and the 0.075 bitrate default. They stay as AVC's.
   docs/76 notes that every `p[0]==1` arm of the controller's ProcessInit is
@@ -1696,3 +1696,136 @@ tools/v4l2-test.sh 60 ctl && tools/v4l2-test.sh 60 ffmpeg
     V4L2 layer from the firmware.
   - A decode error at the first mid-GOP IDR (run 4): the POC reset or the
     RPS set index; `tools/hevc_parse.py` on the stream.
+
+---
+
+## 20. After h4a: under rate control the transcoder hangs on `cu_qp_delta` without QP modulation
+
+**h4a.** h3h's run plus `session_bitrate=8000000 session_fps=30`: IDR frame
+0 with RC on. Firmware log:
+
+- `SetTranscode` ×2 with our `tmp_bitstream_addr_dst`, then
+  `XC SourceGo.all 3`, then `XCODE HANG: 1, 1`;
+- `ENC: StartCount 1-1-1-1, Idle 1-1-1-0`: the pipe finished, the
+  transcoders never did.
+
+The same frame at fixed QP (h3h) completes, and the firmware prints the
+same lines up to `SourceGo`. The only transcoder-visible difference we
+send is **PPS `cu_qp_delta_enabled` 1 / `diff_cu_qp_delta_depth` 2**. The
+builder wrote those under RC, following §5's "macOS: 1/2 except FIXQP".
+
+### 20.1 What the firmware assumes (**[C]**, 13.5 firmware)
+
+- **Field names.** PPS+`0x2E` is `cu_qp_delta_enabled_flag` and PPS+`0x30`
+  is `diff_cu_qp_delta_depth`. DebugInit prints them at `0x3b2b4`/`0x3b2cc`
+  (strings `0xc197d`/`0xc19a3`). The PPS pointer is `[ctrl+0x44638+0x4B50]`.
+- **Every reader of those two fields:**
+  - DebugInit;
+  - `SetTranscode` `0x75b54`/`0x75b5c`, into **XC+`0x214`** (`0x13F0214` +
+    `0x400`·xc) bits 18 and 20–21, **per frame**, from the PPS
+    (`0x75b38`–`0x75b98`);
+  - InitEncodingParameters `0x856e0` (the depth only);
+  - ConfigureMCPUs `0x86840` (the depth only, into the MCPU image).
+- **The context word.** InitEncodingParameters builds the transcoders'
+  config context at ctrl+`0x55B40`: 7 copies, stride `0x200` (`0x8574c`–
+  `0x85790`). Words +0/+8/+12 are the XC+`0x20C`/`0x210`/`0x214` images
+  (`0x85650`–`0x85748`). Its `0x214` word is the same packing as
+  SetTranscode's, **except bit 18**:
+  - It is **`bEnableQPMod || bEnableMBInputCtrl`**, not the PPS flag
+    (`0x85634` `ldrb w13,[x27,#1]`; `0x856ac`–`0x856bc`).
+  - `x27` = ctrl+`0x23FC4`.
+  - `[x27,#1]` ← wire **`0xFF70`** (RC+`0x40` `bEnableQPMod`; IEP
+    `0x83444`/`0x83448`, `x26` = VP+`0xF770`).
+  - `[x27,#36]` ← VP+`0xD` = wire **`0x6D`** (`bEnableMBInputCtrl`,
+    docs/72 §5; IEP `0x83194`/`0x83198`).
+- **So the firmware's own model** is that the transcoder codes
+  `cu_qp_delta` exactly when the pipe modulates QP per block. The live
+  register takes the PPS flag, so it relies on the host keeping the two
+  consistent. We sent PPS 1 with `bEnableQPMod` 0.
+- **Why this hangs [I].** The transcoder turns the pipe's syntax stream
+  into CABAC. With `cu_qp_delta` on, it would wait for per-CU QP-delta
+  elements the pipe never produced. That fits "pipe idle, transcoder hung".
+
+### 20.2 What macOS sends (**[C]**, `AppleVideoEncoder` 13.5)
+
+- **HEVC `AVE_SetEncoderDefault`** (`sub_6cb20`). RC is at `x19+0xB0`
+  (`ui32Bitrate` `stp w8,w23,[x19,#0xb0]` at `0x6cf2c`).
+  - RC+`0x40` **`bEnableQPMod` = 1**: `strb w22,[x19,#0xf0]` at `0x6cf4c`,
+    with `w22` = 1 from `0x6cc38`.
+  - RC+`0x42..0x45` = 1 (`0x6cf54`/`0x6cf58`).
+  - RC+`0x48` QPModRefresh = 0 (`0x6cf50`).
+  - RC+`0x4B`/`0x4C` = 1 (`0x6d02c`/`0x6d030`).
+  - RC+`0x50` = 1 (`0x6cf5c`).
+- **The FIXQP arm** (`0x869e0`–`0x86a48`) clears **both** RC+`0x40`
+  (`0x86a2c`) and PPS `cu_qp_delta_enabled`: `strb wzr,[x8,#6]` at
+  `0x86a30`, with `x8` = PPS+`0x28` (`init_qp_minus26`, stored at `0x869c8`).
+  - The same `x8+6` is set to 1 at `0x869d8` when `[x19+0x86d]` is set.
+- **macOS never sends `cu_qp_delta` without QP modulation.** §5's row
+  listed the PPS half only.
+
+### 20.3 Fix
+
+- **Default:** HEVC under RC now sends PPS `cu_qp_delta_enabled` 0 / depth
+  0 and `bEnableQPMod` 0.
+  - This is what the firmware's context computes for what we send.
+  - The PPS flag follows `ave_hevc_session.qp_mod`, no longer
+    `rc_enable`.
+- **`session_hevc_qpmod=1`** (module parameter; the self-test and V4L2
+  alike) sends macOS's pairing instead: wire `0xFF70` = 1 with
+  `cu_qp_delta` 1 / depth 2.
+  - The builder refuses `qp_mod` under fixed QP.
+  - The other QP-mod flags (RC+`0x42..0x45`, `0x4B`/`0x4C`, `0x50`) stay
+    0. IEP's `0xEE0005` check ties `0xFF7B`/`0xFF80` to QP-mod settings
+    (§7), so they are a later step, one at a time.
+- **Unchanged:** fixed-QP HEVC (h3h, H4's 44.27 dB) and every AVC byte.
+  The diff is confined to the HEVC builder's RC case.
+- **abi_selftest** 1630/0 (was 1622):
+  - RC → `0xFF70` 0, PPS 0/0;
+  - RC+QPMod → `0xFF70` 1, RC+`0x41` untouched, PPS 1/2;
+  - fixed QP → `0xFF70` 0;
+  - refusal: QPMod under fixed QP.
+- **session_selftest** 253/0.
+- **Consequence [I].** Without `cu_qp_delta` the controller can only move
+  QP per frame (the slice QP, `0x75f18`–`0x75fa0`). Unlike AVC, whose
+  per-MB `mb_qp_delta` needs no PPS flag, HEVC rate accuracy may be
+  coarser than AVC's at the same settings. h4b measures it; h4c is the
+  macOS way.
+
+### 20.4 Runs
+
+```sh
+# h4b: the default fix, one variable against h4a (cu_qp_delta 1 -> 0)
+tools/lab-run.sh h4b-hevc-rc-nocuqpd "OVERLAY=4 OVERLAY_WAIT=0 HOLD=5" session_selftest=1 session_codec=1 session_qp=30 session_dbg=0x20 session_frame=1 session_frames=4 session_bitrate=8000000 session_fps=30
+# h4c (after h4b, either outcome): macOS's pairing
+tools/lab-run.sh h4c-hevc-rc-qpmod "OVERLAY=4 OVERLAY_WAIT=0 HOLD=5" session_selftest=1 session_codec=1 session_qp=30 session_dbg=0x20 session_frame=1 session_frames=4 session_bitrate=8000000 session_fps=30 session_hevc_qpmod=1
+```
+
+- **h4b, expect:**
+  - `HEVC_INIT: rate control with bEnableQPMod 0 and PPS cu_qp_delta 0`;
+  - four `ENCODE_DONE`, no `XCODE HANG`;
+  - the stream decodes; the PPS parses with `cu_qp_delta_enabled_flag` 0
+    (`tools/hevc_parse.py`);
+  - the slice QPs may differ frame to frame.
+- **h4b, if it still hangs:** `cu_qp_delta` was not the cause. The next
+  suspects are the HEVC-only RC arms (docs/76 §2, the `p[0]==1` arms of
+  ProcessInit). Run h4c anyway: it is macOS's configuration.
+- **h4c, expect:** frames complete (macOS runs this way), and the slice
+  headers are then free to carry `cu_qp_delta`.
+  - If h4c hangs where h4b passes, QP modulation needs more of macOS's RC
+    set (RC+`0x42..0x45` first).
+- **Then V4L2:**
+  - `CODEC=hevc tools/v4l2-test.sh 60 ffmpeg` (RC on, the default fix);
+  - the same with `session_hevc_qpmod=1` at load, if h4c passed;
+  - compare the achieved rate against `-b:v`.
+
+**Reproduce** (13.5: `D="python3 tools/disas.py --macos 13.5"`)
+
+```sh
+$D --fw --addr 0x3b2a8 -n 0x30        # DebugInit: PPS+0x2E cu_qp_delta_enabled, +0x30 depth
+$D --fw --addr 0x75b38 -n 0x64        # SetTranscode: XC+0x214 from the PPS, per frame
+$D --fw --addr 0x85630 -n 0x90        # IEP: context word bit 18 = [x27,#1] || [x27,#36]
+$D --fw --addr 0x8574c -n 0x48        # the context, 7 copies, stride 0x200
+$D --fw --addr 0x83444 -n 0x10        # [x27,#1] <- wire 0xFF70 (bEnableQPMod)
+$D --fw --addr 0x83194 -n 0x08        # [x27,#36] <- VP+0xD (bEnableMBInputCtrl)
+# user space (AppleVideoEncoder, docs/72 §1): 0x6cf4c QPMod = 1; 0x869e0-0x86a48 FIXQP clears both
+```

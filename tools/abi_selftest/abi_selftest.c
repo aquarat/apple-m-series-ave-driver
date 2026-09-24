@@ -1346,6 +1346,7 @@ static void test_start_hevc_13_5(void)
 	E8(buf, 0x28491, 0, "cabac_init_present 0");
 	E32(buf, 0x2849c, 0, "init_qp_minus26");
 	E8(buf, 0x284a2, 0, "cu_qp_delta_enabled 0 at fixed QP");
+	E8(buf, 0xff70, 0, "bEnableQPMod 0 at fixed QP");
 	E32(buf, 0x284a4, 0, "diff_cu_qp_delta_depth 0");
 	E8(buf, 0x284ec, 0, "tiles 0");
 	E8(buf, 0x284ed, 1, "entropy_coding_sync (WPP) 1 (macOS)");
@@ -1405,7 +1406,11 @@ static void test_start_hevc_13_5(void)
 	E32(buf, 0x248f0, 4, "conf_win_bottom = 8 rows / 2");
 	E32(buf, 0xfdb4, 1088, "slice map height");
 
-	/* Rate control: cu_qp_delta on, depth 2 (macOS non-FIXQP, docs/77 §5). */
+	/*
+	 * Rate control (docs/77 §20): cu_qp_delta goes with bEnableQPMod, as
+	 * the firmware's transcoder context assumes (0x856ac-0x856bc). Plain
+	 * RC: neither - h4a hung the transcoder with cu_qp_delta 1 alone.
+	 */
 	begin("13.5 start_hevc rate control");
 	h = hevc_720p();
 	h.vp.rc_enable = true;
@@ -1416,6 +1421,17 @@ static void test_start_hevc_13_5(void)
 	expect_int(ave_cmd_build_start_hevc(a, buf, sizeof(buf), &CTX, &h), 0x32dc8, "size");
 	E32(buf, 0xff50, 1, "RCFlag 1");
 	E32(buf, 0xff30, 2000000, "bitrate");
+	E8(buf, 0xff70, 0, "bEnableQPMod 0");
+	E8(buf, 0x284a2, 0, "cu_qp_delta_enabled 0 without QP modulation");
+	E32(buf, 0x284a4, 0, "diff_cu_qp_delta_depth 0");
+
+	/* RC + QP modulation: macOS's HEVC defaults, the two together. */
+	begin("13.5 start_hevc rate control + QP modulation");
+	h.qp_mod = true;
+	memset(buf, 0, sizeof(buf));
+	expect_int(ave_cmd_build_start_hevc(a, buf, sizeof(buf), &CTX, &h), 0x32dc8, "size");
+	E8(buf, 0xff70, 1, "bEnableQPMod 1 (RC+0x40)");
+	E8(buf, 0xff71, 0, "RC+0x41 untouched");
 	E8(buf, 0x284a2, 1, "cu_qp_delta_enabled 1");
 	E32(buf, 0x284a4, 2, "diff_cu_qp_delta_depth 2");
 
@@ -1494,6 +1510,7 @@ static void test_start_hevc_refusals(void)
 	h.vp.cabac = true;		REFUSE("AVC CABAC flag set");
 	h.vp.scaling_flat = 16;		REFUSE("AVC scaling lists set");
 	h.level_idc = 121;		REFUSE("level_idc not in Table A.8");
+	h.qp_mod = true;		REFUSE("QP modulation under fixed QP");
 	h.vp.n_recon = 1;		REFUSE("1 DPB slot for 1 reference (numRefs copies 0..1)");
 	h.max_num_ref_frames = 0;	REFUSE("an IPPP set with no reference");
 	h.n_st_rps = 5;			REFUSE("more than 4 short-term sets");
