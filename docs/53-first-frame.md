@@ -3424,3 +3424,40 @@ why f60 was unaffected. Per-session caches are now reset after
 - **f62: 60 frames in one session** (`session_diag=0`): IDR 4351 B, then P
   frames of 2.3-2.9 KB, 165 455 B in all. **All 60 decode; Y PSNR min 48.6,
   median 50.1, max 50.3 dB.**
+
+## f63-f67 (2026-09-24): a V4L2 encoder, and ffmpeg encodes through it
+
+docs/68 steps 4-9, the smallest credible milestone.
+
+**Step 4, the session layer.** Geometry, QP and slot count move from module
+parameters into the session (`bufs->width/height/qp/req_slots`). The per-frame
+path takes an external NV12 source (`bufs->ext_src`) and goes quiet when
+streaming (`sess_info()`, diag gated by `bufs->quiet`). The API the V4L2
+layer drives is `ave_enc_init()` (Config once, reply hook installed for good),
+`ave_enc_start()` (Open + Start_AVC), `ave_enc_encode()` (one frame, copied
+out with SPS+PPS on an IDR) and `ave_enc_stop()` (Stop + Close + free). f63,
+the self-test after the refactor, is byte-identical to f61.
+
+**Steps 5-8, `driver/ave_v4l2.c`** (`v4l2=1`): single-planar M2M, NV12 on
+OUTPUT, H.264 on CAPTURE, MMAP/DMABUF through `vb2_dma_contig` on AVE's own
+device (so the IOVAs are DART ones), width %64 and height %16 (docs/68
+§3.3). Open + Start_AVC happen when the second queue starts streaming;
+`device_run` hands the job to an ordered workqueue; drain uses the m2m
+encoder_cmd helpers. Controls are the ones ffmpeg sets: `B_FRAMES` 0..0,
+`GOP_SIZE` (the driver emits an IDR every N frames), `FORCE_KEY_FRAME`,
+`H264_I_FRAME_QP`, and the rest accepted and stored.
+
+| run | what | result |
+|---|---|---|
+| f64 | first V4L2 load, `v4l2-ctl` 60 frames | node registered, Open + Start_AVC ACCEPTED, then **setPipe:6990 assert**: `ave_session_alloc_nbr/entropy()` were gated on the self-test's `session_frame` parameter, so SrcNeighbor went out zero. Now gated on `bufs->encode` |
+| f65 | fixed; `v4l2-ctl`, 60 frames of `testsrc2` | **60 frames, 818 724 B, PSNR Y 44.2 / avg 43.7 / min 43.6 dB**; EOS; Stop/Close clean |
+| f66 | same boot, **ffmpeg `h264_v4l2m2m`** -> mp4 | Baseline 1280x720 30 fps, 5 keyframes (GOP 12: mid-stream IDRs work), but **59 frames**: `run_work` took the source off the ready queue at the start, so a `STOP` arriving mid-frame got an empty LAST buffer ahead of the real last frame. Now peek at the start and remove at the end |
+| f67 | fixed; ffmpeg, then `v4l2-ctl`, same boot | ffmpeg **60 frames, PSNR Y 44.3 / avg 43.8 dB**; `v4l2-ctl` 60 frames, avg 43.7 dB. Then `rmmod`: node gone, powered off, up 30 s later |
+
+Test-side trap, twice: ffmpeg's `psnr` pairs frames by timestamp. A raw
+`.nv12` or `.h264` input without `-r 30`/`-framerate 30` is read at 25 fps
+and grades a correct stream at ~25 dB. `tools/v4l2-test.sh` sets both.
+
+The docs/68 §7 milestone command, `ffmpeg -i in -pix_fmt nv12 -c:v
+h264_v4l2m2m out.mp4`, works at 1280x720. Not yet done: `v4l2-compliance`,
+other resolutions on hardware, rate control, and making `v4l2=1` the default.

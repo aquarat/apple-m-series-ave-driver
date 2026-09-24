@@ -31,6 +31,7 @@
 #include "ave.h"
 #include "ave_dapf.h"
 #include "ave_session.h"
+#include "ave_v4l2.h"
 #include "ave_smmu.h"
 #include "ave_dpe_tables.h"
 
@@ -138,6 +139,14 @@ static bool dpe_tunables;
 module_param(dpe_tunables, bool, 0444);
 MODULE_PARM_DESC(dpe_tunables,
 		 "apply macOS's AVE_DPE Castor_6000 tunables and enable (0x40D1DC000) after power-on, before the core starts (docs/58 7.1)");
+
+/*
+ * Register the V4L2 mem2mem encoder (docs/68) instead of running the
+ * probe-time self-test: Config at probe, then one session per stream.
+ */
+static bool v4l2;
+module_param(v4l2, bool, 0444);
+MODULE_PARM_DESC(v4l2, "register /dev/videoN as a V4L2 H.264 encoder (docs/68); the self-test does not run");
 
 static bool core_reset_only;
 module_param(core_reset_only, bool, 0444);
@@ -1556,7 +1565,15 @@ iop_config_done:
 		 * Start_AVC (docs/46). Self-gated; no-op unless
 		 * session_selftest=1.
 		 */
-		ave_session_selftest(ave);
+		if (v4l2) {
+			ret = ave_enc_init(ave);
+			if (!ret)
+				ret = ave_v4l2_register(ave);
+			if (ret)
+				dev_err(dev, "v4l2: not registered (%d)\n", ret);
+		} else {
+			ave_session_selftest(ave);
+		}
 	}
 
 	return 0;
@@ -1615,6 +1632,8 @@ static void ave_remove(struct platform_device *pdev)
 	 * Both replies are withheld until the client's work has drained, so
 	 * this is also what makes the buffers below safe to free. docs/63.
 	 */
+	/* No new streams, and every open one stopped (Stop + Close). */
+	ave_v4l2_unregister(ave);
 	if (ave_session_close_client(ave))
 		clean_teardown = false;
 

@@ -57,6 +57,8 @@ struct ave_channel {
 	u64		ring_fw;	/* descriptor +0x4c */
 };
 
+struct ave_v4l2;
+
 struct ave_device {
 	struct device		*dev;
 	struct ave_bank		bank[AVE_NUM_BANKS];
@@ -179,6 +181,7 @@ struct ave_device {
 	 * ave_remove(), after the block is powered off.
 	 */
 	void			*session_bufs;
+	struct ave_v4l2		*v4l2;		/* ave_v4l2.c, v4l2=1 */
 
 	bool			running;
 	/*
