@@ -3865,3 +3865,13 @@ slice QP 30, SAO on, 22 WPP entry points, header ends in byte_alignment().
 `hevc_parse.py --check`: PASS 14/14. **`ramp_psnr.py`: decodes with
 ffmpeg, Y 50.96 dB (max error 4), U exact, V 60.63 dB.** HEVC encodes on
 the hardware.
+
+## h3 (2026-09-24): HEVC P frame: pipe hang
+
+h2c plus `session_frames=4`. Frame 0 as h2c (1207 bytes, IDR, decodes at
+50.96 dB). Frame 1: HEVC_ENCODE POC lsb 1, frame_type 1, slot 22, slice
+RPS {sps set 0}, accepted. About 2 s later: `Controller Heart Beat ERROR:
+PIPE HANG: 2, 2`, `ENC: StartCount 2-2-2-1, Idle 1-1-0-1`, no assert.
+Process timed out. The colocated slot was not written by frame 0 (0 of
+61440 bytes changed), and LowResResults are still zero ("required from the
+first P").
