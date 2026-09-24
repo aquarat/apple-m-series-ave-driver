@@ -20,6 +20,7 @@
 #include <linux/module.h>
 #include <linux/align.h>
 #include <linux/of.h>
+#include <linux/slab.h>
 
 #include "ave_overlay_dtbo.h"
 #include "ave_overlay_noiommu_dtbo.h"
@@ -29,6 +30,126 @@
 #include "ave_overlay_e5_dtbo.h"
 
 static int ovcs_id;
+
+/*
+ * The dtbos carry literal phandles because the base tree has no
+ * __symbols__. Those were taken from Fedora's stock t6001-j314c DT, and a
+ * different base DT renumbers them: with the APPLE_USE_PMP build (docs/78)
+ * ave0's list 0x1d 0xc2 0xc4 0xc3 0xc5 resolved to venc_sys, afnc2_lw0,
+ * dispdfr_fe, disp0_fe and dispdfr_be (f89). So the list is rewritten at
+ * load time to the phandles of the domains it named on the stock DT, by
+ * label, in the same order. On the stock DT the rewrite changes nothing.
+ * (The dtbo comments call these dma/pipe4/pipe5/me0; on the stock DT 0xc2
+ * is pipe5 and 0xc5 is afnc4_ioa. This keeps what every run up to f88 had.)
+ * The other two literals, 0x13 (AIC) and 0x1d (venc_sys, also on the DART
+ * nodes), are checked, and the load is refused if they moved.
+ */
+static const u8 ave_ov_pd_stock[] = {
+	0, 0, 0, 0x1d, 0, 0, 0, 0xc2, 0, 0, 0, 0xc4, 0, 0, 0, 0xc3, 0, 0, 0, 0xc5,
+};
+static const char * const ave_ov_pd_labels[] = {
+	"venc_sys", "venc_pipe5", "venc_me0", "venc_pipe4", "afnc4_ioa",
+};
+
+static int ave_ov_find_pd(const char *label, u32 *phandle)
+{
+	struct device_node *np, *hit = NULL;
+	const char *l;
+
+	for_each_node_with_property(np, "#power-domain-cells") {
+		if (of_property_read_string(np, "label", &l) || strcmp(l, label))
+			continue;
+		if (hit) {
+			pr_err("ave-overlay: two power domains labelled %s: %pOF, %pOF\n",
+			       label, hit, np);
+			of_node_put(np);
+			of_node_put(hit);
+			return -EEXIST;
+		}
+		hit = of_node_get(np);
+	}
+	if (!hit || !hit->phandle) {
+		pr_err("ave-overlay: no power domain labelled %s with a phandle\n", label);
+		of_node_put(hit);
+		return -ENODEV;
+	}
+	*phandle = hit->phandle;
+	of_node_put(hit);
+	return 0;
+}
+
+static int ave_ov_check_phandle(u32 ph, const char *prop, const char *want)
+{
+	struct device_node *np = of_find_node_by_phandle(ph);
+	const char *l = NULL;
+	bool ok;
+
+	if (!np) {
+		pr_err("ave-overlay: phandle %#x is not in the live tree\n", ph);
+		return -ENODEV;
+	}
+	if (want)
+		ok = !of_property_read_string(np, "label", &l) && !strcmp(l, want);
+	else
+		ok = of_property_read_bool(np, prop);
+	if (!ok)
+		pr_err("ave-overlay: phandle %#x is %pOF, not %s; refusing\n",
+		       ph, np, want ?: prop);
+	of_node_put(np);
+	return ok ? 0 : -EINVAL;
+}
+
+/* Returns a fixed-up copy of fdt (kfree it), or an ERR_PTR. */
+static void *ave_ov_fixup(const void *fdt, unsigned int len)
+{
+	const u8 *hit = NULL, *p = fdt, *end = p + len - sizeof(ave_ov_pd_stock);
+	__be32 cells[ARRAY_SIZE(ave_ov_pd_labels)];
+	bool changed = false;
+	u8 *copy;
+	int i, ret;
+
+	ret = ave_ov_check_phandle(0x13, "interrupt-controller", NULL) ?:
+	      ave_ov_check_phandle(0x1d, NULL, "venc_sys");
+	if (ret)
+		return ERR_PTR(ret);
+
+	for (; p <= end; p += 4) {
+		if (memcmp(p, ave_ov_pd_stock, sizeof(ave_ov_pd_stock)))
+			continue;
+		if (hit) {
+			pr_err("ave-overlay: power-domains list found twice in the dtbo\n");
+			return ERR_PTR(-EINVAL);
+		}
+		hit = p;
+	}
+	if (!hit) {
+		pr_err("ave-overlay: power-domains list not found in the dtbo\n");
+		return ERR_PTR(-EINVAL);
+	}
+
+	for (i = 0; i < ARRAY_SIZE(ave_ov_pd_labels); i++) {
+		u32 ph;
+
+		ret = ave_ov_find_pd(ave_ov_pd_labels[i], &ph);
+		if (ret)
+			return ERR_PTR(ret);
+		cells[i] = cpu_to_be32(ph);
+		if (memcmp(&cells[i], hit + 4 * i, 4)) {
+			pr_info("ave-overlay: power-domains[%d] %s: %#x (dtbo had %#x)\n",
+				i, ave_ov_pd_labels[i], ph,
+				be32_to_cpup((const __be32 *)(hit + 4 * i)));
+			changed = true;
+		}
+	}
+	if (!changed)
+		pr_info("ave-overlay: power-domains match the stock DT, unchanged\n");
+
+	copy = kmemdup(fdt, len, GFP_KERNEL);
+	if (!copy)
+		return ERR_PTR(-ENOMEM);
+	memcpy(copy + (hit - (const u8 *)fdt), cells, sizeof(cells));
+	return copy;
+}
 
 /*
  * variant=0 (default): AVE node plus the real DART, iommus = <&dart 0>.
@@ -72,6 +193,7 @@ MODULE_PARM_DESC(variant,
 static int __init ave_ov_init(void)
 {
 	const void *fdt;
+	void *fixed;
 	unsigned int len;
 	int ret;
 
@@ -110,8 +232,12 @@ static int __init ave_ov_init(void)
 		return -EINVAL;
 	}
 
-	ret = of_overlay_fdt_apply((void *)fdt, len,
-				   &ovcs_id, NULL);
+	fixed = ave_ov_fixup(fdt, len);
+	if (IS_ERR(fixed))
+		return PTR_ERR(fixed);
+	/* of_overlay_fdt_apply() keeps its own copy */
+	ret = of_overlay_fdt_apply(fixed, len, &ovcs_id, NULL);
+	kfree(fixed);
 	if (ret) {
 		pr_err("ave-overlay: apply failed: %d\n", ret);
 		return ret;
