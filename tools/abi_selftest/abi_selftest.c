@@ -1419,6 +1419,19 @@ static void test_start_hevc_13_5(void)
 	E8(buf, 0x284a2, 1, "cu_qp_delta_enabled 1");
 	E32(buf, 0x284a4, 2, "diff_cu_qp_delta_depth 2");
 
+	/*
+	 * V4L2's HEVC_LEVEL floor (docs/77 §19): the session sends the higher
+	 * of it and the size's level; the top of the menu, 6.2, reaches both
+	 * PTLs unchanged.
+	 */
+	begin("13.5 start_hevc level floor 6.2");
+	h = hevc_720p();
+	h.level_idc = 186;
+	memset(buf, 0, sizeof(buf));
+	expect_int(ave_cmd_build_start_hevc(a, buf, sizeof(buf), &CTX, &h), 0x32dc8, "size");
+	expect_ptl(0x105c8, 186, "VPS");
+	expect_ptl(0x246a4, 186, "SPS");
+
 	/* Intra-only / SAO-off / WPP-off variants. */
 	begin("13.5 start_hevc options off");
 	h = hevc_720p();

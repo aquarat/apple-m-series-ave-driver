@@ -55,8 +55,17 @@ int ave_session_close_client(struct ave_device *ave);
 
 /* The encoder API the V4L2 layer drives (ave_v4l2.c, docs/68). */
 int ave_enc_init(struct ave_device *ave);
+/*
+ * ave_enc_cfg.codec: the codec word of the Open/Stop/Close headers
+ * (docs/77 §1.2). HEVC needs the 13.5 firmware ABI (docs/77 §8.1 item 4).
+ */
+#define AVE_ENC_CODEC_H264	0
+#define AVE_ENC_CODEC_HEVC	1
+/* True when this firmware ABI (and the module's settings) can run HEVC. */
+bool ave_enc_hevc_supported(struct ave_device *ave);
 /* One stream's parameters (docs/68 step 4). Zero means "the default". */
 struct ave_enc_cfg {
+	u32	codec;			/* AVE_ENC_CODEC_*; 0 = H.264 */
 	u32	width, height;		/* the buffer, MB-aligned */
 	u32	crop_w, crop_h;		/* SPS crop; 0 = none */
 	u32	qp;			/* fixed QP, or the RC's starting QP */
@@ -65,9 +74,13 @@ struct ave_enc_cfg {
 	u32	fps_num;		/* integer Hz (wire 0xFF4C); 0 = 30 */
 	u32	fps_den;		/* wire 0xFF48, the non-droppable rate, NOT a divisor (docs/76); 0 = 1 */
 	u32	slots;			/* coded slots */
-	u32	profile_idc;		/* 66, 77, 100 */
-	u32	level_idc;		/* floor; the size may need more. 0 = none */
-	bool	cabac;
+	u32	profile_idc;		/* H.264 66, 77, 100; HEVC 0 or 1 (Main) */
+	/*
+	 * A floor; the size may need more. 0 = none. H.264 level_idc (10..52);
+	 * HEVC general_level_idc, 30 x level (Table A.8 values only).
+	 */
+	u32	level_idc;
+	bool	cabac;			/* H.264 only; HEVC is always CABAC */
 };
 int ave_enc_start(struct ave_device *ave, const struct ave_enc_cfg *cfg);
 int ave_enc_encode(struct ave_device *ave, u32 n, bool idr,

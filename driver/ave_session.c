@@ -549,8 +549,8 @@ MODULE_PARM_DESC(session_frame_type,
  * The self-test's codec (docs/77). 0 = H.264: AVC_INIT / AVC_ENCODE, every
  * run so far. 1 = HEVC Main: HEVC_INIT / HEVC_ENCODE, codec 1 in the Open,
  * Stop and Close headers, HEVC buffer sizes, a SliceHeader surface per coded
- * slot, and an Annex-B .h265 stream. 13.5 firmware only; UNTESTED on
- * hardware. The V4L2 path is H.264 whatever this says.
+ * slot, and an Annex-B .h265 stream. 13.5 firmware only. The V4L2 path
+ * does not read this: its CAPTURE format picks the codec (docs/77 §19).
  */
 #define AVE_SESS_CODEC_AVC	0
 #define AVE_SESS_CODEC_HEVC	1
@@ -845,13 +845,18 @@ struct ave_sess_bufs {
 	u32		width, height, qp;
 	u32		crop_w, crop_h;	/* SPS-only crop; 0 = none */
 	u32		profile;	/* profile_idc; 0 = 66 */
-	u32		level_floor;	/* level_idc asked for; 0 = none */
+	u32		level_floor;	/* level_idc asked for (HEVC: 30 x level); 0 = none */
 	bool		cabac;
 	u32		bitrate;	/* 0 = fixed QP */
 	u32		fps_num, fps_den;
 	u32		qp_min, qp_max;	/* 0,0 = the module parameters */
 	u32		req_slots;	/* coded slots to publish at Start_AVC */
 	bool		quiet;		/* streaming: no per-frame chatter or diag */
+	/*
+	 * An open-ended V4L2 stream (ave_enc_start): P frames will follow
+	 * however many frames n_frames (the self-test's count) says.
+	 */
+	bool		open_ended;
 	/*
 	 * This session will Process frames, so Start_AVC must publish the
 	 * SrcNeighbor and entropy tables (setPipe asserts at 6990 without
@@ -2074,7 +2079,9 @@ static int ave_session_start_hevc(struct ave_device *ave,
 	bufs->hevc_poc_mask = (1u << (AVE_SESS_HEVC_POC_LSB_M4 + 4)) - 1;
 	bufs->hevc_sao = session_hevc_sao;
 	bufs->last_idr = 0;
-	h->level_idc = ave_hevc_level_for(st.cw, st.ch);
+	/* A floor from V4L2 (HEVC_LEVEL); the size may need more. */
+	h->level_idc = max_t(u32, ave_hevc_level_for(st.cw, st.ch),
+			     bufs->level_floor);
 	h->input_format_word = AVE_SESS_HEVC_INPUT_FMT;
 	h->max_num_ref_frames = bufs->hevc_refs;
 	h->log2_max_poc_lsb_minus4 = AVE_SESS_HEVC_POC_LSB_M4;
@@ -2093,9 +2100,11 @@ static int ave_session_start_hevc(struct ave_device *ave,
 	 * (docs/77 §16). So a session that will code P frames sends macOS's
 	 * 30 (docs/72 §5, docs/76) unless session_idr_period asks otherwise;
 	 * frame types stay explicit, so no IDR is forced by it. A single-frame
-	 * or intra-only session keeps 1, byte-identical to h2c.
+	 * or intra-only session keeps 1, byte-identical to h2c. A V4L2 stream
+	 * (bufs->open_ended) is a P session whatever n_frames says.
 	 */
-	if (h->vp.key_interval == 1 && bufs->hevc_refs && bufs->n_frames > 1) {
+	if (h->vp.key_interval == 1 && bufs->hevc_refs &&
+	    (bufs->n_frames > 1 || bufs->open_ended)) {
 		h->vp.key_interval = AVE_SESS_HEVC_IDR_PERIOD;
 		dev_info(ave->dev,
 			 "session: HEVC_INIT: ui32IdrPeriod %u, not 1: 1 makes the HEVC firmware all-intra and the first P frame hangs the pipe (docs/77 §16)\n",
@@ -3582,6 +3591,29 @@ static int ave_session_process(struct ave_device *ave,
 			dev_warn(ave->dev,
 				 "session: frame %u: no slice header reported (record+0x218 = 0); the stream will not decode\n",
 				 n);
+		/*
+		 * The header is the firmware's, so it says what the frame is.
+		 * A stream gets IdrPeriod 30 (docs/77 §16) while the host picks
+		 * its IDRs; if the firmware ever makes one we did not ask for,
+		 * follow it - parameter sets in front, POC count restarted -
+		 * rather than emit a stream that disagrees with its headers.
+		 * h3h's frames were all what was asked, so a no-op so far.
+		 */
+		if (mine && f.frame_type != AVE_FRAME_TYPE_IDR) {
+			const u8 *hb = (const u8 *)bufs->slice_hdr[idx].cpu +
+				       (e->hdr_iova - bufs->slice_hdr[idx].iova);
+			int nt;
+
+			dma_rmb();
+			nt = ave_session_hevc_nal_type(hb, e->hdr_len);
+			if (nt == 19 || nt == 20) {
+				dev_warn(ave->dev,
+					 "session: frame %u: sent as type %u, the firmware coded an IDR (NAL %d); treating it as one\n",
+					 n, f.frame_type, nt);
+				f.frame_type = AVE_FRAME_TYPE_IDR;
+				bufs->last_idr = n;
+			}
+		}
 	}
 
 	/*
@@ -4315,29 +4347,63 @@ int ave_enc_init(struct ave_device *ave)
 	return 0;
 }
 
-/* Open + Start_AVC for one stream; one at a time (the caller serialises). */
+/*
+ * What HEVC needs beyond AVC: the 13.5 layouts (docs/77 is 13.5 only), the
+ * LSB recon planes (setPipe asserts all four, :13921..:13969) and a
+ * transcoder count the session knows how to set up (docs/77 §14). The same
+ * conditions as the self-test's session_codec=1.
+ */
+static bool ave_sess_hevc_ok(const struct ave_cmd_abi *abi)
+{
+	return abi && abi->start_hevc.vps_block != AVE_OFF_NONE &&
+	       session_lsb && session_hevc_xc >= 1 && session_hevc_xc <= 2;
+}
+
+bool ave_enc_hevc_supported(struct ave_device *ave)
+{
+	return ave_sess_hevc_ok(ave_cmd_abi_get(ave->fw_abi));
+}
+
+/*
+ * Open + Start_AVC or HEVC_INIT for one stream; one at a time (the caller
+ * serialises). HEVC gets what the self-test proved in h3h (docs/77 §15-§18):
+ * TranscodedData, the entropy table at INIT, S+0x54C/0x550, four RPS sets
+ * and IdrPeriod 30 - all inside ave_session_start_hevc() and the builders,
+ * so this only has to choose the codec.
+ */
 int ave_enc_start(struct ave_device *ave, const struct ave_enc_cfg *cfg)
 {
 	const struct ave_cmd_abi *abi = ave_cmd_abi_get(ave->fw_abi);
 	struct ave_sess_bufs *bufs = ave->session_bufs;
+	const bool hevc = cfg->codec == AVE_ENC_CODEC_HEVC;
 	int ret;
 
+	BUILD_BUG_ON(AVE_ENC_CODEC_H264 != AVE_SESS_CODEC_AVC ||
+		     AVE_ENC_CODEC_HEVC != AVE_SESS_CODEC_HEVC);
 	if (!abi || !bufs)
 		return -ENODEV;
 	if (ave->client_open)
 		return -EBUSY;
 	if (cfg->width < 192 || cfg->width > 4096 || cfg->height < 96 ||
 	    cfg->height > 4096 || (cfg->width & 1) || (cfg->height & 1) ||
-	    cfg->qp > 51 || cfg->qp_min > 51 || cfg->qp_max > 51)
+	    cfg->qp > 51 || cfg->qp_min > 51 || cfg->qp_max > 51 ||
+	    cfg->codec > AVE_ENC_CODEC_HEVC)
+		return -EINVAL;
+	if (hevc && !ave_sess_hevc_ok(abi))
+		return -EOPNOTSUPP;
+	/* HEVC: Main only (the builder writes general_profile_idc 1). */
+	if (hevc && cfg->profile_idc > 1)
 		return -EINVAL;
 
+	bufs->codec = cfg->codec;
 	bufs->width = cfg->width;
 	bufs->height = cfg->height;
 	bufs->crop_w = cfg->crop_w;
 	bufs->crop_h = cfg->crop_h;
-	bufs->profile = cfg->profile_idc;
+	/* The AVC-only fields stay 0 for HEVC: its builder refuses them. */
+	bufs->profile = hevc ? 0 : cfg->profile_idc;
 	bufs->level_floor = cfg->level_idc;
-	bufs->cabac = cfg->cabac && cfg->profile_idc != 66;
+	bufs->cabac = !hevc && cfg->cabac && cfg->profile_idc != 66;
 	bufs->qp = cfg->qp;
 	bufs->qp_min = cfg->qp_min;
 	bufs->qp_max = cfg->qp_max;
@@ -4346,11 +4412,13 @@ int ave_enc_start(struct ave_device *ave, const struct ave_enc_cfg *cfg)
 	bufs->fps_den = cfg->fps_den;
 	bufs->req_slots = cfg->slots;
 	bufs->quiet = true;
+	bufs->open_ended = true;
 	ave->dart_check_quiet = true;
 	bufs->encode = true;
 	bufs->n_done = 0;
 	bufs->stream_len = 0;
 
+	/* Codec 1 in the Open header for HEVC (docs/77 §1.2). */
 	ret = ave_session_open(ave, abi, bufs, AVE_SESS_CLIENT_ID);
 	if (ret)
 		return ret;
@@ -4358,7 +4426,7 @@ int ave_enc_start(struct ave_device *ave, const struct ave_enc_cfg *cfg)
 	ave_session_alloc_nbr(ave, bufs);
 	ave_session_alloc_entropy(ave, abi, bufs);
 	ave_session_alloc_dpb(ave, bufs);
-	ret = ave_session_start_avc(ave, abi, bufs, AVE_SESS_CLIENT_ID);
+	ret = ave_session_start(ave, abi, bufs, AVE_SESS_CLIENT_ID);
 	if (ret)
 		ave_enc_stop(ave);
 	return ret;
@@ -4367,7 +4435,9 @@ int ave_enc_start(struct ave_device *ave, const struct ave_enc_cfg *cfg)
 /*
  * Encode frame @n of the stream from an NV12 source the caller owns (both
  * planes 64-aligned, @stride a multiple of 64, AVE_MB-aligned rows), and
- * copy its Annex-B bytes - SPS+PPS first on an IDR - into @out.
+ * copy its Annex-B bytes into @out: SPS+PPS first on an H.264 IDR;
+ * VPS+SPS+PPS on every HEVC IDR, then each slice's header bytes and its
+ * coded bytes (docs/77 §8.1). An IDR restarts the HEVC POC.
  */
 int ave_enc_encode(struct ave_device *ave, u32 n, bool idr,
 		   dma_addr_t luma, dma_addr_t chroma, u32 stride,
@@ -4399,7 +4469,9 @@ int ave_enc_encode(struct ave_device *ave, u32 n, bool idr,
 		return -ENOSPC;
 	memcpy(out, bufs->stream, bufs->stream_len);
 	*out_len = bufs->stream_len;
-	*keyframe = !n || idr;
+	/* HEVC with no reference slot turns every P into an IDR. */
+	*keyframe = !n || idr ||
+		    (bufs->codec == AVE_SESS_CODEC_HEVC && bufs->last_idr == n);
 	bufs->t_total += ktime_get_ns() - t_start;
 	bufs->t_frames++;
 	return 0;
@@ -4433,6 +4505,10 @@ int ave_enc_stop(struct ave_device *ave)
 	memset(bufs->src, 0, sizeof(bufs->src));
 	memset(bufs->proc_cmd, 0, sizeof(bufs->proc_cmd));
 	memset(&bufs->pic_recon, 0, sizeof(bufs->pic_recon));
+	/* HEVC's per-stream surfaces went with the rest. */
+	memset(bufs->slice_hdr, 0, sizeof(bufs->slice_hdr));
+	memset(bufs->transcoded, 0, sizeof(bufs->transcoded));
+	bufs->n_transcoded = 0;
 	bufs->stream_len = 0;
 	bufs->n_done = 0;
 	ave->dart_check_quiet = false;
