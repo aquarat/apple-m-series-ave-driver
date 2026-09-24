@@ -23,3 +23,6 @@ test/*.mod.c
 modules.order
 Module.symvers
 test/*_dtbo.h
+# Local lab details (addresses, MACs, hostnames) - never commit.
+lab.env
+lab.local.md
