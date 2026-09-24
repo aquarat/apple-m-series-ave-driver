@@ -332,6 +332,16 @@ struct ave_hevc_session {
 	/* 1 = the IPPP short-term set (one reference, delta POC -1) in the
 	 * SPS (docs/77 §2.4); 0 = none (intra only). */
 	u32	n_st_rps;
+	/*
+	 * TranscodedData (docs/77 §14): the two transcoders' output buffers,
+	 * session-wide, 128-aligned, transcoded_size bytes each (the kext:
+	 * align4K(CodedData / 2)). Required - exactly transcoded_max of them -
+	 * unless every frame runs one transcoder (ave_hevc_frame.single_xc),
+	 * in which case 0: SetTranscode asserts :7605 on a zero entry.
+	 */
+	u64	transcoded[2];
+	u32	n_transcoded;		/* 0 or abi->start_hevc.transcoded_max */
+	u32	transcoded_size;
 };
 
 struct ave_hevc_frame {
@@ -348,6 +358,12 @@ struct ave_hevc_frame {
 	 */
 	u64	hdr_slot_base;
 	u32	hdr_slot_size;		/* >= hdr_slots * hdr_slot_bytes */
+	/*
+	 * PICMGMT+0xF65: one transcoder, straight into the coded buffer, and no
+	 * TranscodedData read. false = two transcoders into the Start-time
+	 * TranscodedData pair (what the kext does when it allocates that pair).
+	 */
+	bool	single_xc;
 };
 
 /* What ave_cmd_coded_length() recovers from a completed frame's header. */

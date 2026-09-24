@@ -1126,6 +1126,10 @@ static struct ave_hevc_session hevc_720p(void)
 		.log2_max_poc_lsb_minus4 = 4,
 		.sao = true, .wpp = true, .sps_tmvp = true,
 		.n_st_rps = 1,
+		/* TranscodedData: align4K(CodedData / 2), docs/77 §14 */
+		.transcoded = { 0x0000000b00000000ull, 0x0000000b00100000ull },
+		.n_transcoded = 2,
+		.transcoded_size = 0xa9000,
 	};
 	u32 i, j;
 
@@ -1221,6 +1225,11 @@ static void test_start_hevc_13_5(void)
 			E64(buf, 0xf830 + 32 * i + 8 * j, h.vp.entropy[i][j], "entropy 0xF830");
 			E32(buf, 0xfa30 + 16 * i + 4 * j, 0x10e000, "entropy size 0xFA30");
 		}
+	/* TranscodedData, VP+0x548/0x550/0x558 (fw 0x84548-0x8455c; kext 0xeaf280/0xeaf28c) */
+	E64(buf, 0x5a8, 0x0000000b00000000ull, "TranscodedData[0] 0x5A8 -> tmp_bitstream_addr_dst[0]");
+	E64(buf, 0x5b0, 0x0000000b00100000ull, "TranscodedData[1] 0x5B0 -> tmp_bitstream_addr_dst[1]");
+	E32(buf, 0x5b8, 0xa9000, "TranscodedData size 0x5B8 (one u32)");
+	E32(buf, 0x5bc, 0, "nothing after the size");
 	E64(buf, 0xfb30, 0x0000000400300000ull, "param sets addr 0xFB30 (fw 0x85228)");
 	E32(buf, 0xfb38, 0x1000, "param sets size 0xFB38");
 	/* VP scalars, docs/77 §6 */
@@ -1440,6 +1449,10 @@ static void test_start_hevc_refusals(void)
 		c2[0] = CODED_H[0]; c2[1] = CODED_H[1]; c2[1].addr += 64;
 		h.vp.coded = c2;	REFUSE("coded not 128-aligned (:7598)");
 	}
+	h.transcoded[1] += 64;		REFUSE("TranscodedData 64- but not 128-aligned (:7606)");
+	h.transcoded[1] = 0;		REFUSE("a zero TranscodedData entry (:7605)");
+	h.n_transcoded = 1;		REFUSE("one TranscodedData surface for two transcoders");
+	h.transcoded_size = 0;		REFUSE("TranscodedData with no size");
 	h.vp.profile_idc = 100;		REFUSE("an AVC profile in an HEVC session");
 	h.vp.cabac = true;		REFUSE("AVC CABAC flag set");
 	h.vp.scaling_flat = 16;		REFUSE("AVC scaling lists set");
@@ -1457,6 +1470,13 @@ static void test_start_hevc_refusals(void)
 	h.input_format_word = 4;
 	expect_int(ave_cmd_build_start_hevc(a, buf, sizeof(buf), &CTX, &h), 0x32dc8,
 		   "0xFEB4 = 4 (bits [4:2] = 1 = 4:2:0) passes :5118");
+	h = hevc_720p();
+	h.n_transcoded = 0;
+	memset(buf, 0, sizeof(buf));
+	expect_int(ave_cmd_build_start_hevc(a, buf, sizeof(buf), &CTX, &h), 0x32dc8,
+		   "no TranscodedData: allowed, for single-transcoder frames");
+	expect_int(get_unaligned_le64(buf + 0x5a8) | get_unaligned_le32(buf + 0x5b8), 0,
+		   "none published");
 	h = hevc_720p();
 	expect_int(ave_cmd_build_start_avc(a, buf, sizeof(buf), &hctx, &(struct ave_avc_session){0}),
 		   -EINVAL, "an empty AVC session");
@@ -1585,6 +1605,19 @@ static void test_process_hevc_13_5(void)
 	E32(buf, 0x6528, 0, "short_term_ref_pic_set_idx");
 	E32(buf, 0x6518, 0, "0x6518 block zero (as the kext)");
 	expect_rest_zero(buf, 0x6838);
+
+	/* PICMGMT+0xF65 = 1: one transcoder into the coded buffer (fw 0x74f64). */
+	begin("13.5 process_hevc single transcoder");
+	f.single_xc = true;
+	memset(buf, 0, sizeof(buf));
+	expect_int(ave_cmd_build_process_hevc(a, buf, sizeof(buf), &CTX, 22, &f),
+		   0x6838, "size");
+	E8(buf, 0x55b0 + 0xf65, 1, "PICMGMT+0xF65 (wire 0x6515) = 1");
+	E8(buf, 0x55b0 + 0xf64, 0, "PICMGMT+0xF64 untouched");
+	f.single_xc = false;
+	memset(buf, 0, sizeof(buf));
+	ave_cmd_build_process_hevc(a, buf, sizeof(buf), &CTX, 22, &f);
+	E8(buf, 0x6515, 0, "two transcoders: 0xF65 stays 0");
 
 	begin("13.5 process_hevc IDR");
 	f.pic.frame_type = AVE_FRAME_TYPE_IDR;

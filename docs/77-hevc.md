@@ -1067,3 +1067,87 @@ $D --fw --addr 0x75c88 -n 0x14         # coded buffer 128-aligned (:7597/7598)
 # user space (docs/72 §9 builds the listing)
 grep -nE '^0x0006cec[0-9a-f]|^0x0006d09[0-9a-f]|^0x0007376[0-9a-f]' /tmp/ave_ua.s
 ```
+
+---
+
+## 14. After h2: the transcoder outputs (TranscodedData) and PICMGMT+0xF65
+
+h2 (docs/53) got through HEVC_ENCODE's setup to `SetTranscode` and asserted
+`CHEVCController_H13C.cpp:7605: tmp_bitstream_addr_dst[xc_index] != 0`, with
+`tmp_bitstream_addr_dst[0]` logged as 0. §2.7 and §7 had the right fields
+but the wrong reading of the selector: `[x22,#426]` is not "of unknown
+origin", and 7605/7606 is not a fallback arm. Every VA below was read for
+this section (13.5 firmware / kext). **[C]** unless marked.
+
+**Where `tmp_bitstream_addr_dst[xc]` comes from.**
+
+| step | what | VA |
+|---|---|---|
+| HEVC IEP, x20 = VP | VP+`0x548` → ctrl+`0x2090`, VP+`0x550` → ctrl+`0x2098`, u32 VP+`0x558` → ctrl+`0x20A0` | fw `0x84548`–`0x8455c` |
+| wire | VP + `0x60`: **`0x5A8`, `0x5B0` (u64), `0x5B8` (u32 size, one for both)** | — |
+| ProcessTranscodeStart | `ldr q0,[x19,#8336]` → `tmp_bitstream_addr_dst[0..1]` = ctrl+`0x2C508`/`0x2C510` | fw `0x74d88`–`0x74dac` |
+| ProcessTranscodeStart | `SetTranscode(this, 0)`, then `SetTranscode(this, 1)` unless ctrl+`0x2418E` ≠ 0 | fw `0x74dc8`–`0x74de4` |
+| SetTranscode(xc) | `ldrb w9,[x22,#426]` (x22 = ctrl+`0x23FE4`, so ctrl+`0x2418E`): ≠ 0 → `curr_bitstream_addr_dst` (ctrl+`0x2088`), asserts :7597/:7598; = 0 → `tmp_bitstream_addr_dst[xc]` (ctrl+`0x2C508`+8·xc), asserts **:7605** (≠ 0) / **:7606** (`& 127 == 0`) | fw `0x75c64`–`0x75d1c` |
+| ctrl+`0x2418E` | written per frame from **PICMGMT+`0xF65`** (`ldrb w9,[x23,#3941]`, x23 = PICMGMT; `strb w9,[x22,#308]`, x22 = ctrl+`0x2405A`) | fw `0x74f64`, `0x74f70` |
+| after the frame | with the byte 0, the firmware maps both TranscodedData buffers (size ctrl+`0x20A0`) and the coded buffer and memcpy's the slice data into the coded buffer | fw `0x7e4f8`–`0x7e61c` |
+
+So `xc_index` is 0 **and** 1: with PICMGMT+`0xF65` = 0 there are two
+transcoders, each with its own buffer, and both entries must be non-zero
+and 128-aligned. With `0xF65` ≠ 0 there is one transcoder, writing straight
+into the coded buffer, and TranscodedData is never read.
+
+**What the kext does.**
+
+- `AVE_CHM_SetDataInfo_Frame` writes `PICMGMT+0xF65 = (client+0xE0E2C > 0)`
+  for every frame, whatever the codec (`strb w8,[x20,#3941]`
+  `0xfffffe0008eaaf14`, x23 = client+`0xE0D84`, `[x23,#168]`).
+- `AVE_CalcBufNumOfTranscodedData` (`0xfffffe0008ea5b18`): 0 below DevType 5,
+  2 below DevType 9, and from DevType 9 up (M1 Max is 12, docs/47) **2 when
+  client+`0xE0E2C` == 0**, else 0. The same field selects both, so macOS
+  never has 0xF65 = 0 without the pair.
+- Size, `0xfffffe0008ea5b44`: `align4K(CalcBufSizeOfCodedData(...) >> 1)`,
+  one size for both.
+- `AVE_CHM_SetFwBuf` publishes them **once, in the INIT command**: for
+  k = 0, 1, VP+`0x548`+8k = the surface's IOVA and VP+`0x558` = its size
+  (`str x0,[x23,#1352]` `0xfffffe0008eaf280`, `str w0,[x22,#1368]`
+  `0xeaf28c`, loop `0xeaf250`–`0xeaf2a8`). So they are **per session**, not
+  per coded slot and not per frame, and not distinct per slot.
+- What sets client+`0xE0E2C` was not traced. It is loaded as `[x23,#304]`
+  (x23 = client+`0xE0CFC`) in `AVE_Client_CalcSurfaceInfo` `0xfffffe0008ec69e8`.
+  Which value macOS uses for an HEVC session is **[U]**.
+
+**MBInputCtrl is not needed.** VP+`0xFC68`/`0xFC70` → ctrl+`0x13E8`/`0x13F0`
+(fw `0x84538`/`0x84540`) is read only by `0x2a6b0`, which asserts
+`fwDataAddr != 0 && & 127 == 0` (CAVECommonController.cpp:4099, `0x2b458`).
+Its only caller, PipePrepareParam `0x651bc`, runs it only when PICMGMT+`0xF50`
+> 0 (`ldr w8,[x23,#3920]` `0x64ee0`; `b.lt` `0x64ef0`). That field is the
+count of 64-byte regions copied from PICMGMT+`0xCD0` (`0x64ec4`–`0x64edc`), and
+we send 0.
+
+**What the driver does now.**
+
+- Default, `session_hevc_xc=2`: two TranscodedData surfaces of
+  `align4K(coded / 2)` (676 KiB at 720p), page-aligned, allocated at
+  HEVC_INIT, published at wire `0x5A8`/`0x5B0` with the size at `0x5B8`.
+  PICMGMT+`0xF65` stays 0. This is what the kext sets up when it allocates
+  the pair.
+- `session_hevc_xc=1`: nothing published, and PICMGMT+`0xF65` = 1 (wire
+  `0x6515`) in every HEVC_ENCODE, so one transcoder writes into the coded
+  buffer.
+- The builder refuses a TranscodedData table that is partial, has a zero
+  entry, is not 128-aligned, or has no size. `ave_abi.h` has the offsets as
+  `start_hevc.transcoded_*` and `process_hevc.pic_single_xc`.
+
+**Reproduce**
+
+```sh
+$D --fw   --addr 0x84538 -n 0x2c         # IEP: MBInputCtrl, TranscodedData pair + size
+$D --fw   --addr 0x74d88 -n 0x60         # ProcessTranscodeStart: tmp[0..1], SetTranscode(0)/(1)
+$D --fw   --addr 0x74f60 -n 0x14         # PICMGMT+0xF65 -> ctrl+0x2418E
+$D --fw   --addr 0x75c64 -n 0xbc         # SetTranscode: the two arms, :7597/:7598, :7605/:7606
+$D --fw   --addr 0x7e4f8 -n 0x130        # merge of the two outputs into the coded buffer
+$D --kext --addr 0xfffffe0008eaaf08 -n 0x10    # kext: PICMGMT+0xF65 = client+0xE0E2C > 0
+$D --kext --addr 0xfffffe0008ea5b14 -n 0x74    # count and size of TranscodedData
+$D --kext --addr 0xfffffe0008eaf250 -n 0x5c    # SetFwBuf: VP+0x548/0x550, VP+0x558
+$D --fw   --addr 0x64ee0 -n 0x14         # MBInputCtrl only with PICMGMT+0xF50 > 0
+```
