@@ -1226,3 +1226,75 @@ $D --fw --addr 0xa340 -n 0x30           # the per-row size table is a stack buff
 python3 tools/fetch_userspace.py ...    # then, in the docs/72 §9 listing:
 sed -n '/^0x0006d3a8/,/^0x0006d3b8/p' /tmp/ave_ua.s   # str d0(-1),[x21,#0x540]
 ```
+
+---
+
+## 16. After h3: ui32IdrPeriod = 1 makes the HEVC firmware all-intra
+
+h3 (IDR + 3 P, otherwise as h2c) coded frame 0 exactly like h2c. Frame 1
+(P, POC lsb 1, slice RPS {SPS set 0}) was accepted, and 2 s later the
+firmware's heartbeat reported `PIPE HANG: 2, 2`, `ENC: StartCount
+2-2-2-1, Idle 1-1-0-1`. There was no assert and no `SetTranscode` line for
+frame 1, so the pipe stopped before transcode. The source reader stopped
+at MB row 3 (MbInput last event y 1, x 4). Three other observations from
+the same run fit the same cause:
+
+- the colocated buffer was untouched after frame 0 (0 of 61440 bytes; an
+  AVC IDR writes it);
+- the recon writer (`0x40D130240` +0x24c) pointed at DPB slot 0 for frame 1
+  as well as frame 0 (AVC alternates slots);
+- nothing else changed between the frames.
+
+**The cause, [C] for the reads.** Wire `0xFF34` (RC+4, `ui32IdrPeriod`),
+which the driver sends as `session_idr_period` = 1 by default, is not only
+a rate-model hint in the HEVC controller (docs/76 §2.4 found that for AVC):
+
+| VA | what |
+|---|---|
+| `0x834ac`/`0x834b0` | IEP: `ldr w9,[x26,#1892]` (x26 = VP+0xF770, so VP+0xFED4 = wire **0xFF34**) → ctrl+`0x1214` |
+| `0x834b4`–`0x83530` | `== 1`: the still-image checks (5080/5084, already in §7) |
+| `0x656b8`–`0x656c8` | PipePrepareParam: `!= 1` → the inter arm at `0x6609c`; `== 1` → the intra-only arm |
+| `0x66088`–`0x66098` | the same test, second site |
+| `0x6e0d8`–`0x6e0fc` | before `H265VideoEncoderDPB::ManageDPBBuffer` (`0x2e65c`, called at `0x6e280`): `== 1` skips building the reference POC lists |
+| `0x761b4`–`0x761c8` | the other ManageDPBBuffer caller (`0x76280`) passes it in the params |
+| `0x714b4`–`0x714cc`, `0x71808`–`0x71820` | `cset (IdrPeriod != 1)` ORed into a pipe register at +`0xAB0` |
+| `0x77450`, `0x79c18` | `frame % IdrPeriod` GOP-position tests |
+
+So with 1 the controller is configured all-intra: no DPB reference, the
+same recon slot every frame, the inter enable bit clear. A frame typed P
+then runs an inter pipe the setup never prepared, and it hangs. AVC's
+controller has no such branch, which is why every AVC P-frame run, all with
+IdrPeriod 1, worked. macOS sends **30** (docs/72 §5, docs/76 §3).
+
+**Fix.** `ave_session_start_hevc` sends ui32IdrPeriod = 30 when the session
+will code P frames (`session_frames` > 1 with a reference slot) and
+`session_idr_period` was left at 1. A single-frame or intra-only session
+still sends 1, byte-identical to h2c. Frame types stay explicit (anything
+but 5 skips GetFrameType), so 30 forces no IDR. `session_selftest` pins
+0xFF34 = 30 for its IDR + 3 P sequence.
+
+Not changed, because nothing points at them once IdrPeriod is fixed:
+
+- LowResResults reach PICMGMT+`0xC28..0xC40` through the shared
+  `setRefPointers` (`str x8,[x1,#3112]` `0x2cd98`, …`0x2cdc8`), and HEVC's LRME
+  setup programs them from there (`0x6b17c`–`0x6b2bc`).
+- The colocated buffer (128·cW32·cH64).
+- numRefs at wire `0xFD2C` = 1 (§2.2 note).
+- The slice RPS {1, 0}.
+- TMVP: the hardware switch `0xFCF8` is 0 and every slice flag is 0.
+
+If h3b still hangs, the next single-variable runs, in order:
+
+1. `session_hevc_tmvp=0` (the SPS flag only; the cheapest change to the
+   inter setup);
+2. `session_hevc_wpp=0`;
+3. `session_dpb=3` (a spare DPB slot).
+
+**Reproduce**
+
+```sh
+$D --fw --addr 0x834ac -n 0x8           # wire 0xFF34 -> ctrl+0x1214
+$D --fw --addr 0x656b8 -n 0x14          # PipePrepareParam: == 1 -> intra-only arm
+$D --fw --addr 0x6e0d8 -n 0x28          # DPB reference setup skipped on == 1
+$D --fw --addr 0x714b4 -n 0x1c          # pipe enable bit = (IdrPeriod != 1)
+```
