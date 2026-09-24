@@ -2668,6 +2668,41 @@ static void ave_session_diag_row0(struct ave_device *ave,
  * after Start_AVC and again at the Process timeout, so a channel the firmware
  * programs for the frame shows up as a change. Read-only, bank 0.
  */
+/*
+ * HEVC inter path, read-only (docs/77 §17): the reference-pixel readers and
+ * the LowResResult (LRME candidate) readers a P frame's pipe fetches from,
+ * so a hang says whether each was programmed, with what, and how far it got.
+ * Every address is a channel window the HEVC firmware itself programs inside
+ * the 0x40D120000 source/reference DMA block, whose 0x40D120000, 0x40D120BC0,
+ * 0x40D124000 and 0x40D12C000 are already read every run:
+ *   0x40D128000 + 0x40i  luma ref readers   (fw base 0x1128000 + w22,
+ *                        0x718a4-0x7195c; AVC 0x536e0, docs/65 §1.2)
+ *   0x40D128200 + 0x40i  chroma ref readers (docs/65 §1.2)
+ *   0x40D120F80 + 0x40i  LowResResults[i]   (fw 0x1120C00 + 0x40i + 0x38C,
+ *                        0x70db8-0x70eac; AVC 0x53678)
+ */
+static void ave_session_diag_hevc_inter(struct ave_device *ave)
+{
+	static const struct { u32 base; const char *name; } grp[] = {
+		{ 0x28000, "ref luma" }, { 0x28200, "ref chroma" },
+		{ 0x20f80, "lowres result" },
+	};
+	int g, i, k;
+
+	for (g = 0; g < ARRAY_SIZE(grp); g++)
+		for (i = 0; i < 4; i++) {
+			u32 off = grp[g].base + 0x40 * i, v[16];
+
+			for (k = 0; k < 16; k++)
+				v[k] = ave_read(ave, AVE_BANK_DPE, off + 4 * k);
+			dev_info(ave->dev,
+				 "session: diag HEVC %s[%d] %llx: %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x\n",
+				 grp[g].name, i, 0x40D100000ULL + off, v[0], v[1],
+				 v[2], v[3], v[4], v[5], v[6], v[7], v[8], v[9],
+				 v[10], v[11], v[12], v[13], v[14], v[15]);
+		}
+}
+
 static void ave_session_diag_channels(struct ave_device *ave, const char *tag)
 {
 	static const u32 ch[] = { 0x30240, 0x30300, 0x30380, 0x303c0, 0x30400,
@@ -3469,6 +3504,10 @@ static int ave_session_process(struct ave_device *ave,
 		ave_session_diag_costs(ave);
 		ave_step(ave, "diag: channels");
 		ave_session_diag_channels(ave, "timeout");
+		if (hevc) {
+			ave_step(ave, "diag: HEVC reference / low-res readers");
+			ave_session_diag_hevc_inter(ave);
+		}
 		ave_step(ave, "diag: done");
 	}
 

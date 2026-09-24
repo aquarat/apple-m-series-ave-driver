@@ -1298,3 +1298,97 @@ $D --fw --addr 0x656b8 -n 0x14          # PipePrepareParam: == 1 -> intra-only a
 $D --fw --addr 0x6e0d8 -n 0x28          # DPB reference setup skipped on == 1
 $D --fw --addr 0x714b4 -n 0x1c          # pipe enable bit = (IdrPeriod != 1)
 ```
+
+---
+
+## 17. After h3b–h3e: what the first P frame's pipe does, and what is not yet known
+
+With ui32IdrPeriod = 30 (§16), frame 1 changed as §16 predicted:
+
+- the recon writer targets DPB slot 1;
+- the colocated buffer is written (29 440 of 61 440 bytes).
+
+The frame still hangs with the same signature as before in h3b, and in each
+single-variable bisect: h3c TMVP off, h3d WPP off, h3e 3 DPB slots.
+
+**What the logs say, re-read** (h3b receiver log, frame 0 against frame 1):
+
+- `ENC: StartCount 2-2-2-1, Idle 1-1-0-1` is `LRMEFS-LRMERC-Pipe-xcode` (format
+  string at fw `0xc0332`, heartbeat strings `0xc03a4`–`0xc04fc`). The low-res
+  full-search and low-res RC passes **ran and finished** for frame 1. The
+  pipe started and did not finish, and the transcoder never started, which
+  is expected: the HEVC transcode is started after the pipe
+  (`CHEVCController::ProcessTranscodeStart` `0x74c80`).
+- The recon writer's progress word (`0x40D130240`+0x20) is 0 for frame 1
+  (frame 0: `0x002c004e`). **No CTU was reconstructed**, so the stall is at
+  the first CTU, not at "row 1 x 4".
+- The source reader stops at `0x0003000a` (MB row 3, column 10). That is its
+  normal read-ahead of two 32-line CTU rows: it is waiting for a consumer.
+- The `diag MbInput produced/consumed … y x` line decodes the **AVC** MCPU
+  DMem layout. The HEVC MCPU image is a different one (IntraEst IMem[0] reads
+  `0xe97aa185`, not AVC's `0x10001000`), so those numbers mean nothing for
+  HEVC.
+
+**What was checked statically and looks right** (13.5 fw):
+
+- LowResResults: the start of INIT publishes them (wire `0x3B8`). The H265
+  DPB copies them to refinfo+296 exactly as H264's does (ctx+`0x11A0` +
+  64·set, `0x2ecf8`/`0x2ef44`), `setRefPointers` puts them in PICMGMT+`0xC28`
+  (`0x2cd98`), and HEVC setPipe programs `0x40D120F8C + 0x40·i` from them
+  (`0x70db8`–`0x70eac`, base `0x1120C00`).
+- Reference pixels: HEVC setPipe programs the reader at `0x40D128000 + w22`
+  from PICMGMT ref arrays (`0x718a4`–`0x7195c`; the list-1 print at `0x7186c`
+  names `encoder_ref_addr_luma_msb[%d][%d] … lsb`).
+- DPB plane geometry: `H265VideoEncoderDPB`'s constructor (`0x2e400`) derives
+  luma = ((w+31)>>5)·1024·((h+35)>>5) and meta = 32·2^(⌈log2 cols⌉+⌈log2
+  rows⌉), 128-aligned. That is exactly the driver's `ave_recon_planes()`.
+- The slice fields the kext sets per P frame (`HEVC_Slice::Setup_P_Frame`
+  `0xfffffe0008f4e6b0`: NAL type 1, slice type 0, refs {0, −1}, QP delta,
+  POC) are also computed by the firmware's `AVE_HEVC_PrepareSliceHeader`
+  (`0x21278`), which counts the references from its own ref arrays
+  (`0x213e4`–`0x21464`).
+- HEVC user-space defaults that reach VP (AppleVideoEncoder `0x6cb20`–
+  `0x6d3c0`, VP = storage + `0x860`, x20 = VP + `0xFC7C`): nothing inter-specific
+  differs from what we send. `search_range` is 4 only for device classes
+  0x13/0xE (`0x6ce30`–`0x6ce48`). `numFPCPUCand` (`0xFCFC`) and `enable_tmvp`
+  (`0xFCF8`) are left 0.
+
+What does **not** exist yet is evidence of what the reference and low-res
+readers were doing when the pipe stopped. So:
+
+**Diagnostics added** (read-only, HEVC only, after every frame, behind
+`session_diag` and not while streaming). `ave_session_diag_hevc_inter()` dumps
+16 words each of:
+
+- the luma reference readers `0x40D128000 + 0x40·i`;
+- the chroma reference readers `0x40D128200 + 0x40·i`;
+- the LowResResult readers `0x40D120F80 + 0x40·i`;
+
+for i = 0..3. All lie in the `0x40D120000` source/reference DMA block, whose
+`+0x0000`, `+0x0BC0`, `+0x4000` and `+0xC000` the driver already reads every
+run. Each is a window the HEVC firmware programs (VAs above; AVC: docs/65
+§1.2, fw `0x536e0`, `0x53678`).
+
+**Next runs, one variable each, most informative first.**
+
+1. **All-intra control:** h3b with `session_dpb=1`. With no reference slot the
+   driver makes every frame an IDR and keeps ui32IdrPeriod at 1. If frames
+   1–3 encode, multi-frame HEVC (slot rotation, SliceHeader surfaces,
+   TranscodedData reuse, the second coded slot) works and the fault is
+   inter-only. If frame 1 hangs too, the cause is second-frame state, not
+   inter prediction.
+2. **h3b with the new build:** the reader dumps after frame 0 (the control)
+   and after frame 1's timeout. They show whether the luma/chroma reference
+   readers hold DPB slot 0's MSB/LSB (`0xfcc00000` / `+0x159000`) and whether
+   the LowResResult readers hold `0xfcb40000 + 0xf400·i`, or are zero or stuck.
+3. `session_hevc_xc=1`: the one HEVC-only pipeline option not yet varied on a
+   P frame.
+
+**Reproduce**
+
+```sh
+$D --fw --addr 0x70db8 -n 0x100         # LowResResult readers 0x1120C00+0x40i+0x38C
+$D --fw --addr 0x718a4 -n 0xc0          # reference luma reader 0x1128000 + w22
+$D --fw --addr 0x2ece4 -n 0x18          # H265 DPB: refinfo+296 = ctx+4512+64*set
+$D --fw --addr 0x2e400 -n 0x9c          # H265VideoEncoderDPB ctor: plane sizes
+```
