@@ -712,7 +712,8 @@ static void test_hevc(void)
 	h.vp.frame_rate = 30;
 	h.vp.qp_i = h.vp.qp_p = h.vp.qp_b = SESS_QP;
 	h.vp.qp_min = 10; h.vp.qp_max = 51;
-	h.vp.key_interval = 1;
+	/* IDR + 3 P: ave_session_start_hevc sends 30, not 1 (docs/77 §16) */
+	h.vp.key_interval = 30;
 	h.vp.lambda_block = true;			/* session_lambda default */
 	h.vp.fw_client_addr = IOVA_FWCLIENT;
 	h.vp.fw_client_size = SESS_FWCLIENT_SIZE;
@@ -758,6 +759,8 @@ static void test_hevc(void)
 	CHECK(ret == (int)ave_cmd_size(abi, AVE_OP_START_HEVC),
 	      "start_hevc ret %d", ret);
 	CHECK(get_unaligned_le16(hbuf) == 5, "HEVC_INIT id %u", get_unaligned_le16(hbuf));
+	CHECK(get_unaligned_le32(hbuf + abi->start_avc.key_interval) == 30,
+	      "ui32IdrPeriod (wire 0xFF34) 30 for a session with P frames: 1 is all-intra (fw 0x656c4)");
 	CHECK(get_unaligned_le32(hbuf + abi->hdr.slot) == 6, "HEVC_INIT slot");
 	CHECK(get_unaligned_le64(hbuf + abi->start_hevc.transcoded_set) == 0xc0000000ull &&
 	      get_unaligned_le64(hbuf + abi->start_hevc.transcoded_set +

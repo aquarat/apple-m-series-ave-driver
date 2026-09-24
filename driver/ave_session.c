@@ -468,7 +468,7 @@ MODULE_PARM_DESC(session_qp_max, "rate control QP ceiling (default 51)");
 static unsigned int session_idr_period = 1;
 module_param(session_idr_period, uint, 0444);
 MODULE_PARM_DESC(session_idr_period,
-	"ui32IdrPeriod: frames between IDRs (default 1 = every frame)");
+	"ui32IdrPeriod: frames between IDRs (default 1 = every frame; an HEVC session with P frames sends 30 instead of 1, docs/77 §16)");
 
 /* Override the coded-buffer size (KiB). 0 = Apple's formula. */
 static unsigned int session_coded_kb;
@@ -595,6 +595,8 @@ MODULE_PARM_DESC(session_hevc_xc,
  */
 #define AVE_SESS_HEVC_INPUT_FMT		16
 #define AVE_SESS_HEVC_POC_LSB_M4	4
+/* ui32IdrPeriod for an HEVC session with P frames: macOS's 30 (docs/77 §16). */
+#define AVE_SESS_HEVC_IDR_PERIOD	30
 
 /* ------------------------------------------------------------------------ */
 /* Tunables that are pure sizing guesses (flagged in the report)            */
@@ -2080,6 +2082,24 @@ static int ave_session_start_hevc(struct ave_device *ave,
 	h->wpp = session_hevc_wpp;
 	h->sps_tmvp = session_hevc_tmvp;
 	h->n_st_rps = bufs->hevc_refs ? 1 : 0;
+	/*
+	 * ui32IdrPeriod (wire 0xFF34) = 1 is an all-intra session to the HEVC
+	 * firmware, not just to the rate model (docs/76): IEP copies it to
+	 * ctrl+0x1214 (fw 0x834ac/0x834b0), PipePrepareParam takes its intra-
+	 * only arm on == 1 (0x656b8-0x656c8), the DPB reference setup is
+	 * skipped (0x6e0d8-0x6e0fc) and a pipe enable bit is cleared
+	 * (0x714b4-0x714cc). h3's first P frame hung the pipe with it = 1
+	 * (docs/77 §16). So a session that will code P frames sends macOS's
+	 * 30 (docs/72 §5, docs/76) unless session_idr_period asks otherwise;
+	 * frame types stay explicit, so no IDR is forced by it. A single-frame
+	 * or intra-only session keeps 1, byte-identical to h2c.
+	 */
+	if (h->vp.key_interval == 1 && bufs->hevc_refs && bufs->n_frames > 1) {
+		h->vp.key_interval = AVE_SESS_HEVC_IDR_PERIOD;
+		dev_info(ave->dev,
+			 "session: HEVC_INIT: ui32IdrPeriod %u, not 1: 1 makes the HEVC firmware all-intra and the first P frame hangs the pipe (docs/77 §16)\n",
+			 h->vp.key_interval);
+	}
 	if (!bufs->hevc_refs)
 		dev_warn(ave->dev,
 			 "session: HEVC_INIT: %u DPB slot(s) leave no reference; every frame will be an IDR\n",
