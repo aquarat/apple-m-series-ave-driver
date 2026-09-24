@@ -1,0 +1,20 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/*
+ * docs/75 R3, docs/78: enable the PMP's report entry for VENC_SYS. Its genpd
+ * is a subdomain of ps_venc_sys; powering it sets PS-REQ bit 16 (AVE0) and
+ * waits for the PMP's ACK, and powering it off clears the bit first. The
+ * driver holds it with pmp_report=1. Only meaningful on a DT built with
+ * APPLE_USE_PMP, where the PMP runs. Applied by ave-overlay pmp_venc=1.
+ */
+/dts-v1/;
+/plugin/;
+
+/ {
+	fragment@0 {
+		target-path = "/soc/pmp_report@28e3c0000/report@10";
+
+		__overlay__ {
+			status = "okay";
+		};
+	};
+};
