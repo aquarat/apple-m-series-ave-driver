@@ -109,7 +109,8 @@ spending a reboot**: the QP was in the bitstream all along.
 | tool | what |
 |---|---|
 | `tools/lab-run.sh`, `tools/lab-reboot.sh` | one run / one reboot from the host, end to end |
-| `tools/v4l2-test.sh [N] [ctl\|ffmpeg]` | on the target: encode N frames of `testsrc2` through the V4L2 node and grade them |
+| `tools/v4l2-test.sh [N] [ctl\|ffmpeg]` | on the target: `[W= H= CROP_H=]` encode N frames of `testsrc2` through the V4L2 node and grade them |
+| `tools/ave-load.sh [unload]` | on the target, outside the harness: V4L2 core + overlay + driver, prints the node |
 | `tools/e3-run.sh` | on the target: one load, capture, overlay, netconsole, debugfs copy, optional unload |
 | `tools/nc-receiver.py` | the netconsole receiver: raw log and an arrival-timestamped log |
 | `tools/check_frame.py <results dir>` | decode the frame, grade it against the source, with controls |
@@ -119,8 +120,9 @@ spending a reboot**: the QP was in the bitstream all along.
 | `tools/fetch_userspace.py` | range-reads macOS 13.5's user-space encoder out of the IPSW (docs/72) |
 | `tools/abi_selftest/`, `tools/session_selftest/` | `make && ./abi_selftest`: 856 and 209 checks. Both Makefiles delete the binary before rebuilding, because a stale binary once passed three times in one day |
 
-Module parameters worth knowing: `v4l2=1` (register the V4L2 encoder instead
-of running the self-test; `tools/v4l2-test.sh` exercises it), `session_costs` (post-frame register
+Module parameters worth knowing: defaults are the working configuration
+(since f68) and `v4l2` is on; `session_selftest=1` runs the probe-time
+self-test instead. `session_costs` (post-frame register
 groups, default 0, each behind a step marker), `session_flat_luma`,
 `session_qp`, `session_frames`, `session_coded_kb`, `session_dbg`
 (firmware print gate, wire `0xFCD8`), `session_ipcm` (I_PCM in I slices,

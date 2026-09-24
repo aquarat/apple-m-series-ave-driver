@@ -56,6 +56,15 @@ struct ave_buf {
  */
 struct ave_avc_session {
 	u32	width, height;		/* display size; coded size is MB-aligned */
+	/*
+	 * SPS-only crop (0 = width/height). The firmware is given the
+	 * MB-aligned size - the configuration every working run used - and
+	 * only the SPS says 1080. Whether the firmware would handle a
+	 * non-aligned display height itself is untested: f71's apparent
+	 * corruption was the test feeding 1088-line frames to a v4l2-ctl
+	 * that reads crop-sized ones (docs/53, f72).
+	 */
+	u32	crop_width, crop_height;
 	u32	frame_rate;		/* fps, > 0 */
 	u32	bitrate;		/* ignored at fixed QP; may be 0 */
 	u32	qp_i, qp_p, qp_b;	/* 0..51 */

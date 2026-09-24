@@ -3461,3 +3461,54 @@ and grades a correct stream at ~25 dB. `tools/v4l2-test.sh` sets both.
 The docs/68 §7 milestone command, `ffmpeg -i in -pix_fmt nv12 -c:v
 h264_v4l2m2m out.mp4`, works at 1280x720. Not yet done: `v4l2-compliance`,
 other resolutions on hardware, rate control, and making `v4l2=1` the default.
+
+## f68-f72 (2026-09-24): no parameters, v4l2-compliance clean, every size
+
+**Defaults.** Every working encode needed eight bring-up switches that
+defaulted off: `stop_after` (0, "load and do nothing"), `fw_map_data`,
+`fw_map_text=2`, `session_lsb`, `power_me1`, `dpe_tunables`, `session_coloc`,
+`session_entropy_size`. They now default to the working values, and `v4l2`
+defaults on. The self-test runs only when `session_selftest`/`session_frame`
+ask for it, so the lab runs are unchanged. **f68: a load with no parameters
+at all** gives byte-identical output to f67 (873 224 B via ffmpeg,
+818 724 B via `v4l2-ctl`).
+
+**v4l2-compliance** (`v4l-utils-devel-tools`). f68: 47/48. CAPTURE must
+report OUTPUT's colorimetry. f69, with `-s`: 49/54. OUTPUT colorimetry is
+the application's to set and must be kept; queued buffers arrive with
+`V4L2_FIELD_ANY` and need a `buf_out_validate` that makes them NONE.
+**f70: 54/54, 0 warnings**, including four 60-frame streaming runs
+(select/epoll x REQBUFS/CREATE_BUFS), then ffmpeg and `v4l2-ctl` unchanged.
+Six sessions in one boot.
+
+**Sizes** (f70, `v4l2-ctl`, 30 frames of `testsrc2`):
+
+| size | PSNR avg (Y) |
+|---|---|
+| 640x480 | 43.5 (44.3) |
+| 1920x1088 | 44.8 (45.0) |
+| 192x96 (the minimum) | 38.1 (39.1) |
+| 3840x2160 | 44.4 (44.7) |
+
+Throughput with one frame in flight, setup included: 1080p ~58 fps, 4K
+~17 fps.
+
+**Level** (f71). The SPS said 4.0 at every size. The level is now the
+smallest from 4.0 up whose MaxFS holds the picture, capped at 5.2 (the
+firmware treats anything outside 10..52 as DPB 2, docs/66 §4.2). 4K now
+says 5.1, at the same 44.4 dB.
+
+**1080p** (f71, f72). `S_SELECTION` crop on OUTPUT: a 1920x1088 buffer
+with a 1920x1080 crop. The firmware is given the MB-aligned size, and the
+crop goes into the SPS only. f71 and f72 graded 12.8 dB, identical to six
+digits across a driver change, which pointed at the test rather than the
+encoder. With an OUTPUT crop set, `v4l2-ctl` reads *crop-sized* frames from
+the file and pads them into the buffer, and the test was feeding it
+1088-line frames. With 1080-line frames: **1920x1080, 44.3 dB.** Whether the
+firmware itself handles a non-aligned display height is untested; the driver
+never asks it to.
+
+**Outside the harness.** `sudo tools/ave-load.sh` loads the V4L2 core
+modules, the overlay (variant 4) and the driver with no parameters, and
+prints the node. After a plain reboot, `ffmpeg -f lavfi -i testsrc2=... -pix_fmt nv12 -c:v h264_v4l2m2m out.mp4`
+wrote 90 frames.

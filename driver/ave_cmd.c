@@ -257,7 +257,7 @@ int ave_cmd_build_start_avc(const struct ave_cmd_abi *abi, u8 *buf, size_t len,
 	const struct ave_start_avc_layout *l;
 	const struct ave_sps_layout *sps;
 	const struct ave_pps_layout *pps;
-	u32 cw, ch, i;
+	u32 cw, ch, dw, dh, i;
 	int prof, lvl, ret;
 	struct ave_wr w;
 
@@ -600,7 +600,9 @@ int ave_cmd_build_start_avc(const struct ave_cmd_abi *abi, u8 *buf, size_t len,
 	wr32(&w, sps->direct_8x8_inference_flag, 1);
 	wr8(&w, sps->vui_parameters_present_flag, 0);	/* 13.5 VUI has no timing */
 	/* CropUnitX = CropUnitY = 2 for 4:2:0 progressive */
-	wr8(&w, sps->frame_cropping_flag, cw != s->width || ch != s->height);
+	dw = s->crop_width ? s->crop_width : s->width;
+	dh = s->crop_height ? s->crop_height : s->height;
+	wr8(&w, sps->frame_cropping_flag, cw != dw || ch != dh);
 	wr32(&w, sps->crop_left, 0);
 	if (s->scaling_flat) {
 		/*
@@ -615,9 +617,9 @@ int ave_cmd_build_start_avc(const struct ave_cmd_abi *abi, u8 *buf, size_t len,
 		for (k = 0; k < 6 * 64; k++)
 			wr16(&w, sps->scaling_8x8 + 2 * k, s->scaling_flat);
 	}
-	wr32(&w, sps->crop_right, (cw - s->width) / 2);
+	wr32(&w, sps->crop_right, (cw - dw) / 2);
 	wr32(&w, sps->crop_top, 0);
-	wr32(&w, sps->crop_bottom, (ch - s->height) / 2);
+	wr32(&w, sps->crop_bottom, (ch - dh) / 2);
 	wr8(&w, sps->fw_creates_header, 1);		/* == PPS's (docs/37 §5.1) */
 	wr32(&w, sps->header_len, 0);			/* 26.6.2 checks == 0 */
 

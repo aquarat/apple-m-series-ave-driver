@@ -57,7 +57,13 @@ int ave_step_ms;
 module_param_named(step_ms, ave_step_ms, int, 0444);
 MODULE_PARM_DESC(step_ms, "hold each STEP marker this many ms so a crash leaves it on disk (0 = off)");
 
-static int stop_after;
+/*
+ * Default: run every stage (AVE_STAGE_START = 16), since f68. Bring-up used
+ * 0, "load and do nothing", so an accidental insmod could not touch the
+ * hardware; the encoder is now known to work and a driver that does nothing
+ * by default is not one.
+ */
+static int stop_after = 16;
 static int rvbar_probe;
 module_param(rvbar_probe, int, 0444);
 MODULE_PARM_DESC(rvbar_probe, "walk test values through the ASC RVBAR and report which bits move");
@@ -121,7 +127,8 @@ MODULE_PARM_DESC(core_reset_settle_ms,
  * did not finish. docs/57 #3. Attached through the node's genpd provider via a
  * holder device, exactly as genpd_dev_pm_attach_by_id() does internally.
  */
-static bool power_me1;
+/* Default on since f68: every working encode needed it (docs/53). */
+static bool power_me1 = true;
 module_param(power_me1, bool, 0444);
 MODULE_PARM_DESC(power_me1,
 		 "also power the venc_me1 domain, which no DT reference reaches (docs/57 #3, F8)");
@@ -135,7 +142,8 @@ MODULE_PARM_DESC(power_me1,
  * at reset defaults. dpe_tunables=1 applies exactly those tables, generated
  * from the kext (ave_dpe_tables.h).
  */
-static bool dpe_tunables;
+/* Default on since f68: every working encode needed it (docs/53). */
+static bool dpe_tunables = true;
 module_param(dpe_tunables, bool, 0444);
 MODULE_PARM_DESC(dpe_tunables,
 		 "apply macOS's AVE_DPE Castor_6000 tunables and enable (0x40D1DC000) after power-on, before the core starts (docs/58 7.1)");
@@ -144,7 +152,7 @@ MODULE_PARM_DESC(dpe_tunables,
  * Register the V4L2 mem2mem encoder (docs/68) instead of running the
  * probe-time self-test: Config at probe, then one session per stream.
  */
-static bool v4l2;
+static bool v4l2 = true;	/* the self-test runs only when asked for */
 module_param(v4l2, bool, 0444);
 MODULE_PARM_DESC(v4l2, "register /dev/videoN as a V4L2 H.264 encoder (docs/68); the self-test does not run");
 
@@ -1565,7 +1573,7 @@ iop_config_done:
 		 * Start_AVC (docs/46). Self-gated; no-op unless
 		 * session_selftest=1.
 		 */
-		if (v4l2) {
+		if (!ave_session_selftest_requested() && v4l2) {
 			ret = ave_enc_init(ave);
 			if (!ret)
 				ret = ave_v4l2_register(ave);

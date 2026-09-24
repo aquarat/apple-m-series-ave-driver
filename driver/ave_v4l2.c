@@ -58,9 +58,17 @@ struct ave_ctx {
 	struct v4l2_ctrl_handler hdl;
 	struct work_struct	run_work;
 	u32			width, height;	/* OUTPUT, as negotiated */
+	/*
+	 * OUTPUT crop: the picture actually encoded. Left/top are 0; the
+	 * MB-aligned remainder goes out as SPS frame cropping, so 1920x1080
+	 * is a 1920x1088 buffer with a 1920x1080 crop.
+	 */
+	struct v4l2_rect	crop;
 	u32			bytesperline;
 	u32			out_size, cap_size;
 	struct v4l2_fract	timeperframe;
+	/* The application's colorimetry: set on OUTPUT, echoed on CAPTURE. */
+	u32			colorspace, ycbcr_enc, quantization, xfer_func;
 	u32			qp;
 	u32			gop;
 	bool			force_key;
@@ -105,13 +113,13 @@ static void ave_fill_out_fmt(struct v4l2_pix_format *p, u32 w, u32 h)
 	/* Recomputed every time: ffmpeg sends back our stale 0x0 answer. */
 	p->bytesperline = ALIGN(w, 64);
 	p->sizeimage = ave_out_size(p->bytesperline, h);
-	p->colorspace = V4L2_COLORSPACE_REC709;
-	p->ycbcr_enc = V4L2_YCBCR_ENC_DEFAULT;
-	p->quantization = V4L2_QUANTIZATION_LIM_RANGE;
-	p->xfer_func = V4L2_XFER_FUNC_DEFAULT;
+	/* Colorimetry is the application's to set; only fill in "default". */
+	if (p->colorspace == V4L2_COLORSPACE_DEFAULT)
+		p->colorspace = V4L2_COLORSPACE_REC709;
 }
 
-static void ave_fill_cap_fmt(struct v4l2_pix_format *p, u32 w, u32 h,
+static void ave_fill_cap_fmt(const struct ave_ctx *ctx,
+			     struct v4l2_pix_format *p, u32 w, u32 h,
 			     u32 req_size)
 {
 	p->width = w;
@@ -121,7 +129,11 @@ static void ave_fill_cap_fmt(struct v4l2_pix_format *p, u32 w, u32 h,
 	p->bytesperline = 0;
 	/* ffmpeg's request is a floor, never a ceiling (docs/68 §3.4). */
 	p->sizeimage = max(req_size, ave_cap_size(w, h));
-	p->colorspace = V4L2_COLORSPACE_REC709;
+	/* The coded stream carries the source's colorimetry. */
+	p->colorspace = ctx->colorspace;
+	p->ycbcr_enc = ctx->ycbcr_enc;
+	p->quantization = ctx->quantization;
+	p->xfer_func = ctx->xfer_func;
 }
 
 static int ave_querycap(struct file *file, void *priv,
@@ -166,11 +178,16 @@ static int ave_g_fmt(struct file *file, void *priv, struct v4l2_format *f)
 {
 	struct ave_ctx *ctx = fh_to_ctx(file);
 
-	if (V4L2_TYPE_IS_OUTPUT(f->type))
+	if (V4L2_TYPE_IS_OUTPUT(f->type)) {
+		f->fmt.pix.colorspace = ctx->colorspace;
 		ave_fill_out_fmt(&f->fmt.pix, ctx->width, ctx->height);
-	else
-		ave_fill_cap_fmt(&f->fmt.pix, ctx->width, ctx->height,
+		f->fmt.pix.ycbcr_enc = ctx->ycbcr_enc;
+		f->fmt.pix.quantization = ctx->quantization;
+		f->fmt.pix.xfer_func = ctx->xfer_func;
+	} else {
+		ave_fill_cap_fmt(ctx, &f->fmt.pix, ctx->width, ctx->height,
 				 ctx->cap_size);
+	}
 	return 0;
 }
 
@@ -183,7 +200,7 @@ static int ave_try_fmt(struct file *file, void *priv, struct v4l2_format *f)
 		ave_fill_out_fmt(&f->fmt.pix, f->fmt.pix.width,
 				 f->fmt.pix.height);
 	else
-		ave_fill_cap_fmt(&f->fmt.pix, ctx->width, ctx->height,
+		ave_fill_cap_fmt(ctx, &f->fmt.pix, ctx->width, ctx->height,
 				 f->fmt.pix.sizeimage);
 	return 0;
 }
@@ -201,6 +218,11 @@ static int ave_s_fmt(struct file *file, void *priv, struct v4l2_format *f)
 		ctx->height = f->fmt.pix.height;
 		ctx->bytesperline = f->fmt.pix.bytesperline;
 		ctx->out_size = f->fmt.pix.sizeimage;
+		ctx->crop = (struct v4l2_rect){ 0, 0, ctx->width, ctx->height };
+		ctx->colorspace = f->fmt.pix.colorspace;
+		ctx->ycbcr_enc = f->fmt.pix.ycbcr_enc;
+		ctx->quantization = f->fmt.pix.quantization;
+		ctx->xfer_func = f->fmt.pix.xfer_func;
 		ctx->cap_size = max(ctx->cap_size,
 				    ave_cap_size(ctx->width, ctx->height));
 	} else {
@@ -238,6 +260,52 @@ static int ave_s_parm(struct file *file, void *priv, struct v4l2_streamparm *a)
 	return 0;
 }
 
+static int ave_g_selection(struct file *file, void *priv,
+			   struct v4l2_selection *s)
+{
+	struct ave_ctx *ctx = fh_to_ctx(file);
+
+	if (s->type != V4L2_BUF_TYPE_VIDEO_OUTPUT)
+		return -EINVAL;
+	switch (s->target) {
+	case V4L2_SEL_TGT_CROP:
+		s->r = ctx->crop;
+		return 0;
+	case V4L2_SEL_TGT_CROP_DEFAULT:
+	case V4L2_SEL_TGT_CROP_BOUNDS:
+		s->r = (struct v4l2_rect){ 0, 0, ctx->width, ctx->height };
+		return 0;
+	default:
+		return -EINVAL;
+	}
+}
+
+static int ave_s_selection(struct file *file, void *priv,
+			   struct v4l2_selection *s)
+{
+	struct ave_ctx *ctx = fh_to_ctx(file);
+	struct vb2_queue *vq = v4l2_m2m_get_vq(ctx->fh.m2m_ctx, s->type);
+
+	if (s->type != V4L2_BUF_TYPE_VIDEO_OUTPUT || s->target != V4L2_SEL_TGT_CROP)
+		return -EINVAL;
+	if (vb2_is_streaming(vq))
+		return -EBUSY;
+	/*
+	 * SPS cropping only trims right and bottom, by less than one MB, in
+	 * 2-pixel units (4:2:0); the firmware needs at least 192x96.
+	 */
+	s->r.left = 0;
+	s->r.top = 0;
+	s->r.width = clamp_t(u32, ALIGN(s->r.width, 2),
+			     max_t(u32, AVE_MIN_W, ALIGN(ctx->width, 16) - 14),
+			     ctx->width);
+	s->r.height = clamp_t(u32, ALIGN(s->r.height, 2),
+			      max_t(u32, AVE_MIN_H, ALIGN(ctx->height, 16) - 14),
+			      ctx->height);
+	ctx->crop = s->r;
+	return 0;
+}
+
 static int ave_subscribe_event(struct v4l2_fh *fh,
 			       const struct v4l2_event_subscription *sub)
 {
@@ -260,6 +328,8 @@ static const struct v4l2_ioctl_ops ave_ioctl_ops = {
 	.vidioc_try_fmt_vid_cap		= ave_try_fmt,
 	.vidioc_s_fmt_vid_out		= ave_s_fmt,
 	.vidioc_s_fmt_vid_cap		= ave_s_fmt,
+	.vidioc_g_selection		= ave_g_selection,
+	.vidioc_s_selection		= ave_s_selection,
 	.vidioc_g_parm			= ave_g_parm,
 	.vidioc_s_parm			= ave_s_parm,
 
@@ -376,6 +446,15 @@ static int ave_queue_setup(struct vb2_queue *vq, unsigned int *nbuf,
 	return 0;
 }
 
+static int ave_buf_out_validate(struct vb2_buffer *vb)
+{
+	struct vb2_v4l2_buffer *vbuf = to_vb2_v4l2_buffer(vb);
+
+	if (vbuf->field == V4L2_FIELD_ANY)
+		vbuf->field = V4L2_FIELD_NONE;
+	return vbuf->field == V4L2_FIELD_NONE ? 0 : -EINVAL;
+}
+
 static int ave_buf_prepare(struct vb2_buffer *vb)
 {
 	struct ave_ctx *ctx = vb2_get_drv_priv(vb->vb2_queue);
@@ -406,6 +485,7 @@ static void ave_buf_queue(struct vb2_buffer *vb)
 	    v4l2_m2m_dst_buf_is_last(ctx->fh.m2m_ctx)) {
 		/* Drained: this buffer carries the LAST flag and nothing else. */
 		vbuf->sequence = ctx->cap_seq++;
+		vbuf->field = V4L2_FIELD_NONE;
 		v4l2_m2m_last_buffer_done(ctx->fh.m2m_ctx, vbuf);
 		return;
 	}
@@ -450,8 +530,10 @@ static int ave_start_streaming(struct vb2_queue *q, unsigned int count)
 	if (av->owner && av->owner != ctx) {
 		ret = -EBUSY;
 	} else {
-		ret = ave_enc_start(av->ave, ctx->width, ctx->height, ctx->qp,
-				    AVE_CODED_SLOTS);
+		/* The firmware gets the MB-aligned size; the crop is SPS-only. */
+		ret = ave_enc_start(av->ave, ctx->width, ctx->height,
+				    ctx->crop.width, ctx->crop.height,
+				    ctx->qp, AVE_CODED_SLOTS);
 		if (!ret) {
 			av->owner = ctx;
 			ctx->session = true;
@@ -502,6 +584,7 @@ static void ave_stop_streaming(struct vb2_queue *q)
 
 static const struct vb2_ops ave_qops = {
 	.queue_setup		= ave_queue_setup,
+	.buf_out_validate	= ave_buf_out_validate,
 	.buf_prepare		= ave_buf_prepare,
 	.buf_queue		= ave_buf_queue,
 	.start_streaming	= ave_start_streaming,
@@ -589,6 +672,7 @@ static void ave_run_work(struct work_struct *work)
 	src->sequence = ctx->out_seq++;
 	dst->sequence = ctx->cap_seq++;
 	v4l2_m2m_buf_copy_metadata(src, dst);
+	dst->field = V4L2_FIELD_NONE;
 	vb2_set_plane_payload(&dst->vb2_buf, 0, len);
 	dst->flags &= ~(V4L2_BUF_FLAG_KEYFRAME | V4L2_BUF_FLAG_PFRAME);
 	dst->flags |= key ? V4L2_BUF_FLAG_KEYFRAME : V4L2_BUF_FLAG_PFRAME;
@@ -635,10 +719,15 @@ static int ave_open(struct file *file)
 	INIT_WORK(&ctx->run_work, ave_run_work);
 	ctx->width = AVE_DEF_W;
 	ctx->height = AVE_DEF_H;
+	ctx->crop = (struct v4l2_rect){ 0, 0, AVE_DEF_W, AVE_DEF_H };
 	ctx->bytesperline = ALIGN(AVE_DEF_W, 64);
 	ctx->out_size = ave_out_size(ctx->bytesperline, AVE_DEF_H);
 	ctx->cap_size = ave_cap_size(AVE_DEF_W, AVE_DEF_H);
 	ctx->timeperframe = (struct v4l2_fract){ 1, 30 };
+	ctx->colorspace = V4L2_COLORSPACE_REC709;
+	ctx->ycbcr_enc = V4L2_YCBCR_ENC_DEFAULT;
+	ctx->quantization = V4L2_QUANTIZATION_DEFAULT;
+	ctx->xfer_func = V4L2_XFER_FUNC_DEFAULT;
 	ctx->qp = AVE_DEF_QP;
 
 	v4l2_fh_init(&ctx->fh, video_devdata(file));

@@ -25,6 +25,8 @@ struct ave_device;
  * buffer it allocates on all paths.
  */
 int ave_session_selftest(struct ave_device *ave);
+/* session_selftest=1 or session_frame=1: the probe-time self-test, not V4L2. */
+bool ave_session_selftest_requested(void);
 
 /*
  * Free the buffers the self-test handed to the firmware. Only safe once the
@@ -53,8 +55,8 @@ int ave_session_close_client(struct ave_device *ave);
 
 /* The encoder API the V4L2 layer drives (ave_v4l2.c, docs/68). */
 int ave_enc_init(struct ave_device *ave);
-int ave_enc_start(struct ave_device *ave, u32 width, u32 height, u32 qp,
-		  u32 slots);
+int ave_enc_start(struct ave_device *ave, u32 width, u32 height,
+		  u32 crop_w, u32 crop_h, u32 qp, u32 slots);
 int ave_enc_encode(struct ave_device *ave, u32 n, bool idr,
 		   dma_addr_t luma, dma_addr_t chroma, u32 stride,
 		   void *out, size_t out_size, size_t *out_len, bool *keyframe);
