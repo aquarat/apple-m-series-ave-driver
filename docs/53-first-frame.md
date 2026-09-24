@@ -3765,3 +3765,24 @@ the USB adapter's DMA, which is why the tail was lost.
 Next: `ave_pmp_vote()` now logs before the write, 200 ms after it, and
 after the read-back, holding 200 ms after each line. Then R4′: VNOM only
 (`0x2000000000000001`, no FAB0).
+
+## f94 (2026-09-24): R4′, VNOM only: hang within 200 ms of the write
+
+`f5f7fbf`, as f92 plus `pmp_vote=0x2000000000000001` (SOC VNOM, no FAB0).
+All R1b dump lines arrived this time (so f93's missing dump lines were
+tail loss, not the reads). Then `pmp: writing AVE0 DVFS vote
+0x2000000000000001` arrived, and **"vote written, alive 200 ms later" never
+did**. The next boot's marker came 60 s later: a hang, then a reset, as in
+f93.
+
+**Reading.** The write to `0x28e3d0888`, or the PMP's reaction to it within
+200 ms, hangs the fabric. It happens at the smallest vote and without the
+FAB0 half, so it is not the size of the step. The PTD write-side formula is
+the one the R3 control validates (PS-REQ at `+0x7c0` = 8·248), so either
+entry 273 is not AVE0's, or the PMP needs something before it acts on an
+AVE0 vote that macOS does and Linux does not. Candidates:
+- the rest of the AVEMSR0 DVFS domain (MSR0) powered or reported
+- a PMP readiness handshake (`_waitForPMPReadyAction`, docs/75 §10)
+- a clock or DVFS controller the PMP touches while it sits in a gated domain
+
+**No further PTD writes until that is traced statically.**
