@@ -3886,3 +3886,20 @@ pmp_vote=0x2000000000000000 perf_dump=1`. **No SError.** Read-back
 stamp (bit 0 clear, unlike docs/75 §11's guess). The machine stayed up.
 1080p 17.38 ms and 4K 63.91 ms, unchanged, as a null vote should be. The
 PTD write path works; f93/f94 were our mapping.
+
+## f96 (2026-09-24): R4-np1, the VNOM vote: a third faster
+
+As f95 with `pmp_vote=0x2000000000000001` (SOC VNOM, no FAB0). Read-back
+equal, +8 `0x000000ce3e437800`, no SError. **DVFS-STATE 0 and 2 changed**
+from `0x2000010000000002` to `0x2001010000000002` (bit 48): the PMP acted
+on the vote. `v4l2-test.sh 60 ctl`, PSNR identical to six decimals:
+
+| size | f73 (no PMP) | f90 (PMP, no vote) | **f96 (VNOM)** |
+|---|---|---|---|
+| 1280x720 | 8.07 ms | 8.97 ms | **6.15 ms** |
+| 1920x1088 | 14.1 ms | 17.38 ms | **11.58 / 11.59 ms** |
+| 3840x2160 | 53.9 ms | 63.9 ms | **41.86 / 41.85 ms** |
+
+−33% against the unvoted PMP, and −18% (1080p) / −22% (4K) against the
+boot with no PMP. 1080p ≈ 86 fps, 4K ≈ 24 fps with one frame in flight.
+Next: VMID2 (…02), VMAX (…03), then VMAX + FAB0, one per boot.
