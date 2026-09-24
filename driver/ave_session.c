@@ -396,6 +396,17 @@ MODULE_PARM_DESC(session_lambda,
 	"Start_AVC: send macOS's lambda block (RC+0x68..0x78 = 0x400, per-QP tables at wire 0xFFC0..0x10573); docs/72. 0 = zeros, every run before f45");
 
 /*
+ * docs/74 R2: every SPS scaling list has gone out as zero, and the firmware
+ * turns each list weight w into a quantiser scale register as
+ * (0x10000 / w) << 16 | w - so every one of them has been 0. macOS sends
+ * flat 16.
+ */
+static unsigned int session_scaling;
+module_param(session_scaling, uint, 0444);
+MODULE_PARM_DESC(session_scaling,
+	"flat weight for every SPS 4x4/8x8 scaling list (16 = what macOS sends, docs/74); 0 = zeros, every run before f47");
+
+/*
  * Rate control. The default reproduces every run so far: ui32RCFlag = 2
  * (AVE_RC_FIXQP), session_qp on every frame type. session_bitrate switches
  * to the firmware's own controller (ui32RCFlag = 1) with that target in
@@ -1415,6 +1426,11 @@ static int ave_session_start_avc(struct ave_device *ave,
 	s.dbg_bits = session_dbg;
 	s.ipcm_islice = (u8)session_ipcm;
 	s.lambda_block = session_lambda;
+	s.scaling_flat = (u16)session_scaling;
+	if (session_scaling)
+		dev_info(ave->dev,
+			 "session: Start_AVC: flat scaling lists %u (docs/74); expect quantiser scale registers %#010x\n",
+			 session_scaling, ((0x10000 / session_scaling) << 16 | session_scaling) & 0x3fff00ff);
 	if (session_lambda)
 		dev_info(ave->dev,
 			 "session: Start_AVC: macOS lambda block (docs/72); expect 0x40D26A09C = 0x40D26A0A0 = nQuant\n");
@@ -2222,6 +2238,37 @@ static void ave_session_diag_costs(struct ave_device *ave)
 		dev_info(ave->dev,
 			 "session: diag IntraEst DMem %#x +0x764 %#x | MESATDSCALING %#x | ModeDec DMem %#x +0x9AC %#x\n",
 			 v[0], v[1], v[2], v[3], v[4]);
+	}
+	if (session_costs & BIT(4)) {
+		/*
+		 * docs/74 R1: the quantiser scale registers setPipe writes every
+		 * frame (fw 0x576b0-0x57814). IntraEst's page is group 1's
+		 * (0x40D24A1C8); ReconLuma's is the one diag_mcpu reads every run
+		 * (0x40D28A080). QPY/nQuant at 0x090/0x094 are the controls.
+		 */
+		static const u32 ie[] = { 0x14a088, 0x14a08c, 0x14a0c8 };
+		static const u32 rl[] = { 0x18a088, 0x18a08c, 0x18a090, 0x18a094,
+					  0x18a0a0, 0x18a0a4, 0x18a0e0, 0x18a120 };
+		u32 r[ARRAY_SIZE(rl)];
+
+		ave_step(ave, "diag costs: group 5a, IntraEst scaling 0x40D24A088/08C/0C8");
+		for (i = 0; i < ARRAY_SIZE(ie); i++)
+			v[i] = ave_read(ave, AVE_BANK_DPE, ie[i]);
+		ave_step(ave, "diag costs: group 5b, ReconLuma 0x40D28A088..120");
+		for (i = 0; i < ARRAY_SIZE(rl); i++)
+			r[i] = ave_read(ave, AVE_BANK_DPE, rl[i]);
+		dev_info(ave->dev,
+			 "session: diag scaling IntraEst 088 %#x 08C %#x 0C8 %#x | ReconLuma 8x8 %#x SKIPMODE %#x QPY %u nQuant %#x 0A0 %#x 0A4 %#x 0E0 %#x 120 %#x\n",
+			 v[0], v[1], v[2], r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7]);
+	}
+	if (session_costs & BIT(5)) {
+		/* docs/74 R4: ReconChroma's page; never read before f47. */
+		ave_step(ave, "diag costs: group 6, ReconChroma 0x40D2AA08C/0A4");
+		v[0] = ave_read(ave, AVE_BANK_DPE, 0x1aa08c);
+		v[1] = ave_read(ave, AVE_BANK_DPE, 0x1aa0a4);
+		dev_info(ave->dev,
+			 "session: diag ReconChroma SKIPMODE %#x scaling 0A4 %#x\n",
+			 v[0], v[1]);
 	}
 }
 

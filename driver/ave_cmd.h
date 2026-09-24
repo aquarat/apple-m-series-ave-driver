@@ -121,6 +121,8 @@ struct ave_avc_session {
 	u8	ipcm_islice;
 	/* Send macOS's lambda block (docs/72 §5.2); 0 = zeros, every run before f45. */
 	bool	lambda_block;
+	/* Flat scaling-list weight for every 4x4/8x8 list (docs/74 R2); 0 = zeros. */
+	u16	scaling_flat;
 	u64	param_sets_addr;
 	u32	param_sets_size;
 

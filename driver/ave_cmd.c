@@ -337,7 +337,8 @@ int ave_cmd_build_start_avc(const struct ave_cmd_abi *abi, u8 *buf, size_t len,
 	    (s->src_go_bits && l->src_go_bits == AVE_OFF_NONE) ||
 	    (s->dbg_bits && l->dbg_bits == AVE_OFF_NONE) ||
 	    (s->ipcm_islice && l->ipcm_islice == AVE_OFF_NONE) ||
-	    (s->lambda_block && l->lambda_scales == AVE_OFF_NONE))
+	    (s->lambda_block && l->lambda_scales == AVE_OFF_NONE) ||
+	    (s->scaling_flat && abi->sps.scaling_4x4 == AVE_OFF_NONE))
 		return -EINVAL;
 	if (s->n_entropy) {
 		u32 j, cols = s->n_entropy_cols ? s->n_entropy_cols : 1;
@@ -598,6 +599,19 @@ int ave_cmd_build_start_avc(const struct ave_cmd_abi *abi, u8 *buf, size_t len,
 	/* CropUnitX = CropUnitY = 2 for 4:2:0 progressive */
 	wr8(&w, sps->frame_cropping_flag, cw != s->width || ch != s->height);
 	wr32(&w, sps->crop_left, 0);
+	if (s->scaling_flat) {
+		/*
+		 * macOS fills every list with 16 when no matrix is in use
+		 * (AVE_PrepareSequenceHeader, docs/74). The present flag stays
+		 * 0, so the coded SPS does not change.
+		 */
+		u32 k;
+
+		for (k = 0; k < 6 * 16; k++)
+			wr16(&w, sps->scaling_4x4 + 2 * k, s->scaling_flat);
+		for (k = 0; k < 6 * 64; k++)
+			wr16(&w, sps->scaling_8x8 + 2 * k, s->scaling_flat);
+	}
 	wr32(&w, sps->crop_right, (cw - s->width) / 2);
 	wr32(&w, sps->crop_top, 0);
 	wr32(&w, sps->crop_bottom, (ch - s->height) / 2);
