@@ -21,10 +21,16 @@ cd "$(dirname "$0")/.."
 
 systemctl is-active -q ave-netconsole || { echo "receiver service not running" >&2; exit 1; }
 pre=$(ssh -o BatchMode=yes -o ConnectTimeout=5 "$TARGET" \
-    'lsmod | grep -cE "^(apple_ave|ave_overlay)"; sudo dmesg | grep -c "Disabling IRQ"; systemctl is-active netconsole-ave') \
+    'lsmod | grep -cE "^(apple_ave|ave_overlay)"; sudo dmesg | grep -c "Disabling IRQ"; systemctl is-active netconsole-ave; lsmod | grep -c "^apple_ave" || true') \
     || { echo "target unreachable" >&2; exit 1; }
-read -r loaded irqs ncsvc <<<"$(echo $pre)"
-[ "$loaded" = 0 ] || { echo "REFUSING: AVE modules already loaded this boot" >&2; exit 1; }
+read -r loaded irqs ncsvc drv <<<"$(echo $pre)"
+# ALLOW_RELOAD=1: a second load in the same boot after a clean unload - the
+# overlay stays applied, the driver must not be loaded (docs/63 §7).
+if [ "${ALLOW_RELOAD:-0}" = 1 ]; then
+    [ "$drv" = 0 ] || { echo "REFUSING: apple_ave is loaded" >&2; exit 1; }
+else
+    [ "$loaded" = 0 ] || { echo "REFUSING: AVE modules already loaded this boot (ALLOW_RELOAD=1 after a clean unload)" >&2; exit 1; }
+fi
 [ "$irqs" = 0 ] || { echo "REFUSING: an IRQ was disabled this boot" >&2; exit 1; }
 [ "$ncsvc" = active ] || echo "warning: netconsole-ave is $ncsvc; e3-run.sh will load netconsole itself"
 
@@ -35,8 +41,7 @@ ssh -o BatchMode=yes "$TARGET" "cd ~/Projects/apple-ave-driver; $ENVS NETCONSOLE
     nohup setsid tools/e3-run.sh $NAME $* > /tmp/$NAME.out 2>&1 < /dev/null &" \
     || { echo "launch failed" >&2; exit 1; }
 
-END='=== (saved debugfs|insmod failed)'
-grep -q 'UNLOAD=1' <<<"$ENVS" && END='=== still alive 8 s after the unload'
+END="=== e3-run done: $NAME ==="
 outcome=""
 while :; do
     sleep 1

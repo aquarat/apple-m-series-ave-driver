@@ -3362,3 +3362,41 @@ shifted 8 px. Without macOS's λ and skip mode, the P frame codes correctly
 but at 19x the size. With them, it is what an encoder should produce.
 Which of the two carries the saving was not separated. Both are what macOS
 sends, and both are now defaults.
+
+## f55-f60 (2026-09-24): teardown twice, and three sessions in one load
+
+The hardware prerequisites docs/68 §6-7 lists for a V4L2 driver, apart from
+the picture itself.
+
+**Teardown (docs/68 step 3).** f55 and f57: base + `session_frames=4` +
+`UNLOAD=1`. Stop ACCEPTED, Close ACCEPTED ("the firmware has let go of its
+buffers"), powered off, `rmmod` rc 0. Alive 8 s later and, in f55, another
+60 s. Two of two. The earlier resets seconds after `rmmod` do not reproduce.
+
+**Reloading the module in the same boot does not work yet, and is not
+needed.**
+- f56 (`ALLOW_RELOAD=1`, `core_reset=2 fw_restore_data=1`) died during the
+  post-pulse DAPF dump. The last line was DART1 `TTBR[0][2]`, the same
+  "touch the DART right after the pulse" hazard `ave_core_reset()`'s comment
+  records for F6/f6b/f6c. That dump predates variant 4 putting DART1 in play.
+- f58 (reload with `fw_restore_data=1`, no pulse) restored and verified
+  DATA, but `ASC start` timed out: `remove()`'s power-off does not return
+  the core to cold.
+- Both are development conveniences. A reboot costs ~40 s.
+
+**Several sessions in one load (docs/68 §6 item 9).** New `session_repeat=N`:
+after the first session's frames, Stop + Close, free that session's buffers
+(`ave_sess_free_to()` back to the post-Config marks), then Open + Start_AVC
++ frames again, with the firmware left running and Config sent once. That
+is what every V4L2 `open()`/`close()` will do.
+- f59 got as far as the second session's Open (ACCEPTED on the running
+  firmware), then failed with -ENOMEM. `AVE_SESS_MAX_IPC` is 8, session 1
+  uses 7 command slots, and `ave_sess_ipc_alloc()` returned NULL
+  **silently**. It now logs.
+- f60: `session_repeat=3`, 4 frames each. **Three sessions, identical
+  frame sizes each time** (4351/2509/2448/2333), the published last session
+  at 48.6-49.7 dB. Each session freed 26-27 DMA buffers and 6 commands
+  after its Close.
+
+Tooling: `e3-run.sh` always ends with `=== e3-run done: NAME ===`, and
+`lab-run.sh` waits for that (f59's wait hung for want of an end marker).
