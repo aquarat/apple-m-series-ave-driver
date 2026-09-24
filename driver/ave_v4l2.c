@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * V4L2 stateful mem2mem H.264 encoder front end (docs/68).
+ * V4L2 stateful mem2mem H.264 and HEVC encoder front end (docs/68, docs/77
+ * §19).
  *
- * NV12 in on the OUTPUT queue, H.264 Annex-B out on the CAPTURE queue,
- * single-planar, MMAP (and DMABUF, which costs nothing here). One stream
+ * NV12 in on the OUTPUT queue, H.264 or HEVC Annex-B out on the CAPTURE
+ * queue; the CAPTURE format picks the codec, which the session starts at
+ * STREAMON. HEVC is offered only when the firmware ABI has its layouts
+ * (13.5). Single-planar, MMAP (and DMABUF, which costs nothing here). One stream
  * owns the hardware at a time: a second context gets -EBUSY from
  * start_streaming, never from open() (docs/68 §7 step 5).
  *
@@ -63,6 +66,7 @@ struct ave_v4l2 {
 	struct mutex		hw_mutex;	/* ave_enc_* calls */
 	struct workqueue_struct	*wq;
 	struct ave_ctx		*owner;		/* the context holding a session */
+	bool			hevc;		/* HEVC offered (ave_enc_hevc_supported) */
 };
 
 struct ave_ctx {
@@ -92,6 +96,14 @@ struct ave_ctx {
 	u32			qp_min, qp_max;
 	u32			gop;
 	bool			force_key;
+	/*
+	 * The codec (AVE_ENC_CODEC_*), from the CAPTURE format, and HEVC's own
+	 * controls. H.264's are the fields above; GOP, bitrate, RC and the
+	 * forced keyframe are shared.
+	 */
+	u32			codec;
+	u32			hevc_qp, hevc_qp_min, hevc_qp_max;
+	u32			hevc_level_idc;	/* general_level_idc floor */
 	u32			frame_n;	/* frames sent this stream */
 	u32			out_seq, cap_seq;
 	bool			session;	/* Open + Start_AVC done */
@@ -112,9 +124,25 @@ static void ave_clamp_size(u32 *w, u32 *h)
 	*h = clamp_t(u32, ALIGN(*h, 16), AVE_MIN_H, AVE_MAX_H);
 }
 
-static u32 ave_out_size(u32 bpl, u32 h)
+/*
+ * H.264: the planes exactly. HEVC: chroma room for whole 64-row CTB pairs,
+ * as the self-test's source was allocated for every HEVC frame that has
+ * encoded (h2c..h3h). Whether the HEVC fetcher reads 32-row CTUs past a
+ * 720-line picture is unknown (docs/77 §8.2 H2); luma rows past the picture
+ * land in the chroma plane, chroma rows past it in this slack, never past
+ * the buffer. The chroma plane still starts at bytesperline * height.
+ */
+static u32 ave_out_size(u32 codec, u32 bpl, u32 h)
 {
+	if (codec == AVE_ENC_CODEC_HEVC)
+		return bpl * h + bpl * (ALIGN(h, 64) / 2);
 	return bpl * h * 3 / 2;
+}
+
+static u32 ave_cap_fourcc(u32 codec)
+{
+	return codec == AVE_ENC_CODEC_HEVC ? V4L2_PIX_FMT_HEVC :
+					     V4L2_PIX_FMT_H264;
 }
 
 /* Worst case is I_PCM, 384 bytes per MB plus headers (f43); add slack. */
@@ -123,7 +151,8 @@ static u32 ave_cap_size(u32 w, u32 h)
 	return ALIGN(w * h * 3 / 2 + SZ_64K, SZ_4K);
 }
 
-static void ave_fill_out_fmt(struct v4l2_pix_format *p, u32 w, u32 h)
+static void ave_fill_out_fmt(const struct ave_ctx *ctx,
+			     struct v4l2_pix_format *p, u32 w, u32 h)
 {
 	ave_clamp_size(&w, &h);
 	p->width = w;
@@ -132,7 +161,7 @@ static void ave_fill_out_fmt(struct v4l2_pix_format *p, u32 w, u32 h)
 	p->field = V4L2_FIELD_NONE;
 	/* Recomputed every time: ffmpeg sends back our stale 0x0 answer. */
 	p->bytesperline = ALIGN(w, 64);
-	p->sizeimage = ave_out_size(p->bytesperline, h);
+	p->sizeimage = ave_out_size(ctx->codec, p->bytesperline, h);
 	/* Colorimetry is the application's to set; only fill in "default". */
 	if (p->colorspace == V4L2_COLORSPACE_DEFAULT)
 		p->colorspace = V4L2_COLORSPACE_REC709;
@@ -144,7 +173,10 @@ static void ave_fill_cap_fmt(const struct ave_ctx *ctx,
 {
 	p->width = w;
 	p->height = h;
-	p->pixelformat = V4L2_PIX_FMT_H264;
+	/* The codec asked for, if offered; else the one already set. */
+	if (p->pixelformat != V4L2_PIX_FMT_H264 &&
+	    !(p->pixelformat == V4L2_PIX_FMT_HEVC && ctx->av->hevc))
+		p->pixelformat = ave_cap_fourcc(ctx->codec);
 	p->field = V4L2_FIELD_NONE;
 	p->bytesperline = 0;
 	/* ffmpeg's request is a floor, never a ceiling (docs/68 §3.4). */
@@ -159,20 +191,30 @@ static void ave_fill_cap_fmt(const struct ave_ctx *ctx,
 static int ave_querycap(struct file *file, void *priv,
 			struct v4l2_capability *cap)
 {
+	struct ave_v4l2 *av = video_drvdata(file);
+
 	strscpy(cap->driver, AVE_V4L2_NAME, sizeof(cap->driver));
-	strscpy(cap->card, "Apple AVE H.264 encoder", sizeof(cap->card));
+	strscpy(cap->card, av->hevc ? "Apple AVE H.264/HEVC encoder" :
+				      "Apple AVE H.264 encoder",
+		sizeof(cap->card));
 	strscpy(cap->bus_info, "platform:" AVE_V4L2_NAME, sizeof(cap->bus_info));
 	return 0;
 }
 
 static int ave_enum_fmt(struct file *file, void *priv, struct v4l2_fmtdesc *f)
 {
-	if (f->index)
-		return -EINVAL;
+	struct ave_v4l2 *av = video_drvdata(file);
+
 	if (V4L2_TYPE_IS_OUTPUT(f->type)) {
+		if (f->index)
+			return -EINVAL;
 		f->pixelformat = V4L2_PIX_FMT_NV12;
 	} else {
-		f->pixelformat = V4L2_PIX_FMT_H264;
+		/* H.264 first: the default, and index 0 as before HEVC. */
+		if (f->index > (av->hevc ? 1 : 0))
+			return -EINVAL;
+		f->pixelformat = ave_cap_fourcc(f->index ? AVE_ENC_CODEC_HEVC :
+							   AVE_ENC_CODEC_H264);
 		f->flags = V4L2_FMT_FLAG_COMPRESSED;
 	}
 	return 0;
@@ -181,8 +223,11 @@ static int ave_enum_fmt(struct file *file, void *priv, struct v4l2_fmtdesc *f)
 static int ave_enum_framesizes(struct file *file, void *priv,
 			       struct v4l2_frmsizeenum *fs)
 {
+	struct ave_v4l2 *av = video_drvdata(file);
+
 	if (fs->index || (fs->pixel_format != V4L2_PIX_FMT_NV12 &&
-			  fs->pixel_format != V4L2_PIX_FMT_H264))
+			  fs->pixel_format != V4L2_PIX_FMT_H264 &&
+			  !(fs->pixel_format == V4L2_PIX_FMT_HEVC && av->hevc)))
 		return -EINVAL;
 	fs->type = V4L2_FRMSIZE_TYPE_STEPWISE;
 	fs->stepwise.min_width = AVE_MIN_W;
@@ -200,11 +245,12 @@ static int ave_g_fmt(struct file *file, void *priv, struct v4l2_format *f)
 
 	if (V4L2_TYPE_IS_OUTPUT(f->type)) {
 		f->fmt.pix.colorspace = ctx->colorspace;
-		ave_fill_out_fmt(&f->fmt.pix, ctx->width, ctx->height);
+		ave_fill_out_fmt(ctx, &f->fmt.pix, ctx->width, ctx->height);
 		f->fmt.pix.ycbcr_enc = ctx->ycbcr_enc;
 		f->fmt.pix.quantization = ctx->quantization;
 		f->fmt.pix.xfer_func = ctx->xfer_func;
 	} else {
+		f->fmt.pix.pixelformat = ave_cap_fourcc(ctx->codec);
 		ave_fill_cap_fmt(ctx, &f->fmt.pix, ctx->width, ctx->height,
 				 ctx->cap_size);
 	}
@@ -217,7 +263,7 @@ static int ave_try_fmt(struct file *file, void *priv, struct v4l2_format *f)
 
 	/* 0x0 is ffmpeg's first question; clamp, never refuse (docs/68 §3.3). */
 	if (V4L2_TYPE_IS_OUTPUT(f->type))
-		ave_fill_out_fmt(&f->fmt.pix, f->fmt.pix.width,
+		ave_fill_out_fmt(ctx, &f->fmt.pix, f->fmt.pix.width,
 				 f->fmt.pix.height);
 	else
 		ave_fill_cap_fmt(ctx, &f->fmt.pix, ctx->width, ctx->height,
@@ -229,6 +275,7 @@ static int ave_s_fmt(struct file *file, void *priv, struct v4l2_format *f)
 {
 	struct ave_ctx *ctx = fh_to_ctx(file);
 	struct vb2_queue *vq = v4l2_m2m_get_vq(ctx->fh.m2m_ctx, f->type);
+	u32 codec;
 
 	if (vb2_is_busy(vq))
 		return -EBUSY;
@@ -246,6 +293,20 @@ static int ave_s_fmt(struct file *file, void *priv, struct v4l2_format *f)
 		ctx->cap_size = max(ctx->cap_size,
 				    ave_cap_size(ctx->width, ctx->height));
 	} else {
+		codec = f->fmt.pix.pixelformat == V4L2_PIX_FMT_HEVC ?
+			AVE_ENC_CODEC_HEVC : AVE_ENC_CODEC_H264;
+		/*
+		 * The codec sizes the OUTPUT buffers (ave_out_size), so it
+		 * cannot change under allocated ones.
+		 */
+		if (codec != ctx->codec) {
+			if (vb2_is_busy(v4l2_m2m_get_vq(ctx->fh.m2m_ctx,
+					V4L2_BUF_TYPE_VIDEO_OUTPUT)))
+				return -EBUSY;
+			ctx->codec = codec;
+			ctx->out_size = ave_out_size(codec, ctx->bytesperline,
+						     ctx->height);
+		}
 		ctx->cap_size = f->fmt.pix.sizeimage;
 	}
 	return 0;
@@ -419,11 +480,29 @@ static int ave_s_ctrl(struct v4l2_ctrl *c)
 	case V4L2_CID_MPEG_VIDEO_FORCE_KEY_FRAME:
 		ctx->force_key = true;
 		break;
+	case V4L2_CID_MPEG_VIDEO_HEVC_I_FRAME_QP:
+		ctx->hevc_qp = c->val;	/* one QP for I and P, as H.264 */
+		break;
+	case V4L2_CID_MPEG_VIDEO_HEVC_MIN_QP:
+		ctx->hevc_qp_min = c->val;
+		break;
+	case V4L2_CID_MPEG_VIDEO_HEVC_MAX_QP:
+		ctx->hevc_qp_max = c->val;
+		break;
+	case V4L2_CID_MPEG_VIDEO_HEVC_LEVEL: {
+		/* V4L2 menu order -> general_level_idc (30 x level, Table A.8). */
+		static const u8 idc[] = { 30, 60, 63, 90, 93, 120, 123, 150,
+					  153, 156, 180, 183, 186 };
+
+		ctx->hevc_level_idc = c->val < ARRAY_SIZE(idc) ? idc[c->val] : 186;
+		break;
+	}
 	default:
 		/*
 		 * Accepted and stored so that clients which set them blind -
 		 * ffmpeg sets BITRATE and FRAME_RC_ENABLE on every open -
-		 * succeed; the session is fixed-QP (docs/68 §3.5).
+		 * succeed; the session is fixed-QP (docs/68 §3.5). HEVC_PROFILE
+		 * and HEVC_TIER have one value each (Main, Main tier).
 		 */
 		break;
 	}
@@ -439,7 +518,7 @@ static int ave_init_ctrls(struct ave_ctx *ctx)
 	struct v4l2_ctrl_handler *h = &ctx->hdl;
 	const struct v4l2_ctrl_ops *o = &ave_ctrl_ops;
 
-	v4l2_ctrl_handler_init(h, 14);
+	v4l2_ctrl_handler_init(h, 20);
 	/* ffmpeg sets 0 and reads it back; non-zero fails its open (§3.1). */
 	v4l2_ctrl_new_std(h, o, V4L2_CID_MPEG_VIDEO_B_FRAMES, 0, 0, 1, 0);
 	v4l2_ctrl_new_std(h, o, V4L2_CID_MPEG_VIDEO_GOP_SIZE, 0, 65535, 1, 0);
@@ -488,6 +567,32 @@ static int ave_init_ctrls(struct ave_ctx *ctx)
 			       ~BIT(V4L2_MPEG_VIDEO_HEADER_MODE_JOINED_WITH_1ST_FRAME),
 			       V4L2_MPEG_VIDEO_HEADER_MODE_JOINED_WITH_1ST_FRAME);
 	v4l2_ctrl_new_std(h, o, V4L2_CID_MIN_BUFFERS_FOR_OUTPUT, 1, 1, 1, 1);
+	/*
+	 * HEVC (docs/77 §19), only where the firmware can run it. Main, Main
+	 * tier: what the builder writes. The level is a floor, as H.264's -
+	 * the SPS carries the higher of it and what the size needs - and any
+	 * Table A.8 level is accepted, so GStreamer can negotiate by setting
+	 * it. QP defaults as H.264's.
+	 */
+	if (ctx->av->hevc) {
+		v4l2_ctrl_new_std_menu(h, o, V4L2_CID_MPEG_VIDEO_HEVC_PROFILE,
+				       V4L2_MPEG_VIDEO_HEVC_PROFILE_MAIN,
+				       ~BIT(V4L2_MPEG_VIDEO_HEVC_PROFILE_MAIN),
+				       V4L2_MPEG_VIDEO_HEVC_PROFILE_MAIN);
+		v4l2_ctrl_new_std_menu(h, o, V4L2_CID_MPEG_VIDEO_HEVC_TIER,
+				       V4L2_MPEG_VIDEO_HEVC_TIER_MAIN,
+				       ~BIT(V4L2_MPEG_VIDEO_HEVC_TIER_MAIN),
+				       V4L2_MPEG_VIDEO_HEVC_TIER_MAIN);
+		v4l2_ctrl_new_std_menu(h, o, V4L2_CID_MPEG_VIDEO_HEVC_LEVEL,
+				       V4L2_MPEG_VIDEO_HEVC_LEVEL_6_2, 0,
+				       V4L2_MPEG_VIDEO_HEVC_LEVEL_4);
+		v4l2_ctrl_new_std(h, o, V4L2_CID_MPEG_VIDEO_HEVC_I_FRAME_QP,
+				  0, 51, 1, AVE_DEF_QP);
+		v4l2_ctrl_new_std(h, o, V4L2_CID_MPEG_VIDEO_HEVC_MIN_QP,
+				  0, 51, 1, 10);
+		v4l2_ctrl_new_std(h, o, V4L2_CID_MPEG_VIDEO_HEVC_MAX_QP,
+				  0, 51, 1, 51);
+	}
 	if (h->error) {
 		int err = h->error;
 
@@ -603,11 +708,14 @@ static int ave_start_streaming(struct vb2_queue *q, unsigned int count)
 		/* The firmware gets the MB-aligned size; the crop is SPS-only. */
 		u32 fps = clamp_t(u32, DIV_ROUND_CLOSEST(ctx->timeperframe.denominator,
 				  max_t(u32, ctx->timeperframe.numerator, 1)), 1, 240);
+		const bool hevc = ctx->codec == AVE_ENC_CODEC_HEVC;
 		struct ave_enc_cfg cfg = {
+			.codec = ctx->codec,
 			.width = ctx->width, .height = ctx->height,
 			.crop_w = ctx->crop.width, .crop_h = ctx->crop.height,
-			.qp = ctx->qp,
-			.qp_min = ctx->qp_min, .qp_max = ctx->qp_max,
+			.qp = hevc ? ctx->hevc_qp : ctx->qp,
+			.qp_min = hevc ? ctx->hevc_qp_min : ctx->qp_min,
+			.qp_max = hevc ? ctx->hevc_qp_max : ctx->qp_max,
 			/*
 			 * The firmware's bits-per-pixel controller (docs/66,
 			 * docs/76) only in VBR mode; CQ, the default, is
@@ -620,9 +728,10 @@ static int ave_start_streaming(struct vb2_queue *q, unsigned int count)
 			.fps_num = fps,
 			.fps_den = rc_nondrop ? fps : 1,
 			.slots = AVE_CODED_SLOTS,
-			.profile_idc = ctx->profile_idc,
-			.level_idc = ctx->level_idc,
-			.cabac = ctx->cabac,
+			/* HEVC: Main (1), and always CABAC. */
+			.profile_idc = hevc ? 1 : ctx->profile_idc,
+			.level_idc = hevc ? ctx->hevc_level_idc : ctx->level_idc,
+			.cabac = !hevc && ctx->cabac,
 		};
 
 		ret = ave_enc_start(av->ave, &cfg);
@@ -634,8 +743,11 @@ static int ave_start_streaming(struct vb2_queue *q, unsigned int count)
 	}
 	mutex_unlock(&av->hw_mutex);
 	if (ret) {
-		dev_err(av->ave->dev, "v4l2: start %ux%u QP %u failed: %d\n",
-			ctx->width, ctx->height, ctx->qp, ret);
+		dev_err(av->ave->dev, "v4l2: start %s %ux%u QP %u failed: %d\n",
+			ctx->codec == AVE_ENC_CODEC_HEVC ? "HEVC" : "H.264",
+			ctx->width, ctx->height,
+			ctx->codec == AVE_ENC_CODEC_HEVC ? ctx->hevc_qp : ctx->qp,
+			ret);
 		ave_return_bufs(ctx, q, VB2_BUF_STATE_QUEUED);
 	}
 	return ret;
@@ -813,7 +925,8 @@ static int ave_open(struct file *file)
 	ctx->height = AVE_DEF_H;
 	ctx->crop = (struct v4l2_rect){ 0, 0, AVE_DEF_W, AVE_DEF_H };
 	ctx->bytesperline = ALIGN(AVE_DEF_W, 64);
-	ctx->out_size = ave_out_size(ctx->bytesperline, AVE_DEF_H);
+	ctx->out_size = ave_out_size(AVE_ENC_CODEC_H264, ctx->bytesperline,
+				     AVE_DEF_H);
 	ctx->cap_size = ave_cap_size(AVE_DEF_W, AVE_DEF_H);
 	ctx->timeperframe = (struct v4l2_fract){ 1, 30 };
 	ctx->colorspace = V4L2_COLORSPACE_REC709;
@@ -821,6 +934,8 @@ static int ave_open(struct file *file)
 	ctx->quantization = V4L2_QUANTIZATION_DEFAULT;
 	ctx->xfer_func = V4L2_XFER_FUNC_DEFAULT;
 	ctx->qp = AVE_DEF_QP;
+	ctx->codec = AVE_ENC_CODEC_H264;
+	ctx->hevc_qp = AVE_DEF_QP;
 
 	v4l2_fh_init(&ctx->fh, video_devdata(file));
 	ret = ave_init_ctrls(ctx);
@@ -880,6 +995,7 @@ int ave_v4l2_register(struct ave_device *ave)
 	if (!av)
 		return -ENOMEM;
 	av->ave = ave;
+	av->hevc = ave_enc_hevc_supported(ave);
 	mutex_init(&av->dev_mutex);
 	mutex_init(&av->hw_mutex);
 	av->wq = alloc_ordered_workqueue("apple-ave", 0);
@@ -913,8 +1029,8 @@ int ave_v4l2_register(struct ave_device *ave)
 		goto err_m2m;
 
 	ave->v4l2 = av;
-	dev_info(ave->dev, "v4l2: H.264 encoder at /dev/video%d\n",
-		 av->vfd.num);
+	dev_info(ave->dev, "v4l2: %s encoder at /dev/video%d\n",
+		 av->hevc ? "H.264/HEVC" : "H.264", av->vfd.num);
 	return 0;
 
 err_m2m:

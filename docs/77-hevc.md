@@ -1495,3 +1495,204 @@ $D --fw   --addr 0x6c7d4 -n 0x20        # IPPP: set = frames since IDR (<= 3) el
 $D --kext --addr 0xfffffe0008f50c54 -n 0x1f4   # program_sps_rps_IPPP: sets 0..3
 $D --kext --addr 0xfffffe0008f50470 -n 0x60    # update_sps_rps_internal_variables
 ```
+
+---
+
+## 19. H4: HEVC through the V4L2 encoder (host side; not yet run)
+
+h3h (docs/53) proved the self-test path: an IDR and three P frames that
+decode, Y ~50 dB. This section wires that same path into `ave_enc_*` and
+`ave_v4l2.c`. No firmware reading was needed: every HEVC decision below was
+already made in the self-test path, and its evidence is in §14–§18. The
+H.264 path is unchanged (see "AVC unchanged" below).
+
+### 19.1 What selects HEVC
+
+- **CAPTURE format.** `V4L2_PIX_FMT_HEVC` is listed after `H264`, which
+  stays index 0 and the default. The format sets `ctx->codec`, and
+  `ave_enc_cfg.codec` carries it to `ave_enc_start()`. The session then
+  sends Open with codec 1, then `HEVC_INIT` (via `ave_session_start()`, the
+  dispatcher the self-test already used), then `HEVC_ENCODE` per frame.
+- **Firmware support.** HEVC is offered only when
+  `ave_enc_hevc_supported()` is true: 13.5 layouts present (26.6.2 has
+  none), `session_lsb` on, and `session_hevc_xc` 1 or 2. This is the same
+  gate as the self-test's `session_codec=1`. Without it the device looks
+  exactly as before: one CAPTURE format, the old card string and log line,
+  and no HEVC controls.
+- **Changing the codec.** `S_FMT(CAPTURE)` refuses a codec change with
+  `-EBUSY` once OUTPUT buffers exist, because the codec sizes them (19.3).
+
+### 19.2 What an HEVC stream gets (all from the self-test path)
+
+| what | where | evidence |
+|---|---|---|
+| TranscodedData, 2 × align4K(coded/2), published at INIT | `ave_session_start_hevc` | §14, h2c |
+| entropy table at INIT (2 rows, HEVC size) | `ave_session_alloc_entropy` | :14199, §2.7 |
+| S+`0x54C`/`0x550` = `0xFFFFFFFF` | `ave_cmd_build_process_hevc` | §15, h2c |
+| IdrPeriod (wire `0xFF34`) **30** | `ave_session_start_hevc`: now also when `bufs->open_ended` (every V4L2 stream), not only `n_frames > 1` | §16, h3h |
+| 4 SPS short-term sets with derived fields | builder | §18, h3h |
+| VPS+SPS+PPS before every IDR; per slice, header bytes then coded bytes | `ave_sess_stream_append_hevc` | h2c/h3h decode |
+| POC lsb = frames since the last IDR | `ave_session_process` (`last_idr`) | h3h |
+| conformance window from the OUTPUT crop | builder, `abi_selftest` "1080p crop" | §6 |
+
+- **Keyframes.** An IDR is frame 0, `FORCE_KEY_FRAME`, or every `GOP_SIZE`
+  frames. `ave_enc_encode()` passes it as `force_idr`, which makes the frame
+  type IDR and resets the POC (`last_idr = n`).
+- **Keyframe flag.** `*keyframe` is now also true for HEVC whenever
+  `last_idr == n`. This covers a DPB with no reference slot, where every
+  frame is an IDR, and the safety net below.
+- **Safety net.** IdrPeriod 30 goes to a stream whose IDRs the host picks.
+  §16 says frame types stay explicit, but nothing longer than 4 frames has
+  run. If the header of slice 0 has NAL type 19/20 (IDR) on a frame not sent
+  as an IDR:
+  - `ave_session_process()` logs it (`dev_warn`);
+  - treats the frame as the IDR it is, putting parameter sets in front and
+    restarting `last_idr`;
+  - so the stream never disagrees with its own headers.
+  
+  In h3h every frame was coded as requested, so this is a no-op so far.
+- **Teardown.** `ave_enc_stop()` also forgets the SliceHeader and
+  TranscodedData surfaces, which it frees with the rest, so a later stream
+  cannot see stale pointers.
+
+### 19.3 V4L2 surface
+
+- **CAPTURE:** `H264`, `HEVC`. `ENUM_FRAMESIZES` accepts both. The card is
+  "Apple AVE H.264/HEVC encoder" when HEVC is offered.
+- **OUTPUT (NV12) `sizeimage` for HEVC** is
+  `bytesperline·height + bytesperline·ALIGN(height, 64)/2`, not `·3/2`.
+  - Every HEVC frame that has encoded read from a source allocated with
+    whole 64-row CTB pairs (the self-test, §8.2 H2).
+  - Whether the fetcher reads past a 720-line picture is still **[U]**.
+    With this size, over-read luma lands in the chroma plane and over-read
+    chroma in the slack, never past the buffer.
+  - The chroma plane still starts at `bytesperline·height`, so ffmpeg's and
+    GStreamer's layout is unchanged.
+  - At 1088 lines the two formulas agree (1088 = 17·64). At 720 the extra
+    is 24 chroma rows (30 KiB at 1280 wide), and at 2160 it is 8 rows
+    (30 KiB at 3840).
+- **Size rules:** unchanged. Width is a multiple of 64 and height of 16,
+  with a 192×96 minimum. 1080p is a 1088-line buffer with an OUTPUT crop.
+  The firmware gets the MB-aligned size, and the crop becomes the SPS
+  conformance window (right/bottom, in chroma units).
+- **Controls added** (only when HEVC is offered):
+
+  | control | range | effect |
+  |---|---|---|
+  | `HEVC_PROFILE` | Main only | `general_profile_idc` 1 (builder) |
+  | `HEVC_TIER` | Main only | tier 0 (builder) |
+  | `HEVC_LEVEL` | 1 … 6.2, default 4 | floor: SPS/VPS level = max(this, size level from 4.0 up); `abi_selftest` pins 6.2 in both PTLs |
+  | `HEVC_I_FRAME_QP` | 0..51, default 30 | the fixed QP / RC start QP, I and P alike (as H.264) |
+  | `HEVC_MIN_QP` / `HEVC_MAX_QP` | 0..51, default 10 / 51 | RC clamp (wire `0xFF88`/`0xFF8C` under RC only) |
+
+- **Shared controls:** `GOP_SIZE`, `BITRATE`, `BITRATE_MODE`,
+  `FRAME_RC_ENABLE`, `FORCE_KEY_FRAME` and `HEADER_MODE` (joined with the
+  first frame). `B_FRAMES` stays fixed at 0.
+- **H.264-only controls** (`H264_*`, entropy) stay present and are ignored
+  for an HEVC stream.
+- **Rate control.** HEVC's VP/RC are AVC's offsets (§2.2), filled by the
+  same `ave_vp_fill()`, so the V4L2 rule is the same: the controller runs
+  when RC is enabled and the mode is VBR. The one HEVC-specific RC field the
+  builder already handles is PPS `cu_qp_delta_enabled` 1 / depth 2 under RC,
+  0 / 0 under fixed QP (macOS, §5; pinned in `abi_selftest`). macOS's other
+  HEVC RC defaults are **not** sent: SoftMaxQP 48, QPModRefresh 0,
+  FlatAreaLowQp 1, and the 0.075 bitrate default. They stay as AVC's.
+  docs/76 notes that every `p[0]==1` arm of the controller's ProcessInit is
+  HEVC-only, so HEVC RC runs code AVC never exercised. **Untested.**
+
+### 19.4 AVC unchanged
+
+- `ave_cmd.c` and `ave_abi.h` are untouched by H4, so every command byte is
+  built exactly as before.
+- In the session, an H.264 stream gets:
+  - the same `bufs` fields: codec 0, which kzalloc already gave, and
+    `open_ended`, which only the HEVC start reads;
+  - the same builder (`ave_session_start()` dispatches to
+    `ave_session_start_avc()`);
+  - the same keyframe expression.
+- In V4L2, H.264's OUTPUT/CAPTURE formats and sizes are the same expressions.
+  The only visible differences are on 13.5, where the device now also lists
+  HEVC: a second CAPTURE format, six more controls, the card string and the
+  probe log line.
+- `abi_selftest` 1622/0, with one new case (the HEVC level floor).
+  `session_selftest` 253/0.
+
+### 19.5 Not verifiable statically
+
+1. **Everything above 720p.**
+   - The self-test's HEVC ran only at 1280×720; 1080p (crop) and 4K HEVC
+     have never run.
+   - Their buffer sizes come from the kext formulas (§9): SrcNbr, entropy,
+     colocated and TranscodedData.
+   - The 1080p conformance window is pinned by `abi_selftest` but has never
+     been decoded.
+2. **Streams longer than 4 frames:**
+   - the IDR-every-GOP path (a mid-stream IDR, POC reset, the RPS set index
+     going back to 0);
+   - the POC lsb wrap at 256 frames (`log2_max_poc_lsb` 8), which a
+     `GOP_SIZE`-0 stream of more than 256 frames reaches;
+   - whether IdrPeriod 30 ever makes the firmware insert an IDR by itself
+     (the safety net logs it if so).
+3. **The OUTPUT source layout.**
+   - V4L2 hands the firmware one buffer with chroma at
+     `bytesperline·height`.
+   - The self-test used two separate allocations of whole CTB pairs.
+   - There are no per-plane sizes on 13.5 (docs/53), so only the addresses
+     differ, but the HEVC fetcher has never read from this layout.
+4. **HEVC under rate control** (19.3).
+5. **ffmpeg and GStreamer.**
+   - ffmpeg's `hevc_v4l2m2m` finds the device by `ENUM_FMT`.
+   - ffmpeg sets no HEVC-specific control that I know of; its codec switch
+     has no HEVC case.
+   - GStreamer's `v4l2h265enc` negotiates by `HEVC_PROFILE`/`HEVC_LEVEL`.
+   - That both work end to end is untested.
+   - Also untested: whether GStreamer copes with the larger HEVC OUTPUT
+     `sizeimage` (it should: chroma offset = `bytesperline·height` either
+     way).
+6. **ave_v4l2.c** was compile-checked here only against stub media headers.
+   pirat has no kernel build tree. The real build happens on the target.
+7. **v4l2-compliance** now sees two CAPTURE formats and the HEVC controls.
+   Its streaming tests run the default format (H.264).
+
+### 19.6 Test commands (for the lead)
+
+A normal load (`v4l2` defaults on). Then, one at a time, stopping at the
+first failure:
+
+```sh
+# 1. 720p through v4l2-ctl, fixed QP (the self-test's conditions, new source layout)
+CODEC=hevc tools/v4l2-test.sh 60 ctl
+# 2. ffmpeg hevc_v4l2m2m (RC on, VBR 8M)
+CODEC=hevc tools/v4l2-test.sh 60 ffmpeg
+# 3. 1080p with an OUTPUT crop, then 4K
+CODEC=hevc W=1920 H=1088 CROP_H=1080 tools/v4l2-test.sh 60 ctl
+CODEC=hevc W=3840 H=2160 tools/v4l2-test.sh 30 ctl
+# 4. a GOP: IDR every 12 frames, 300 frames (POC wrap is at 256 only without IDRs)
+CODEC=hevc FFARGS="-b:v 8M -g 12" tools/v4l2-test.sh 300 ffmpeg
+# 5. GStreamer
+CODEC=hevc tools/v4l2-test.sh 60 gst
+# 6. compliance, and the H.264 regression
+v4l2-compliance -d /dev/videoN -s
+tools/v4l2-test.sh 60 ctl && tools/v4l2-test.sh 60 ffmpeg
+```
+
+- **Expect:**
+  - the load line reads `v4l2: H.264/HEVC encoder at /dev/videoN`;
+  - `--list-formats` shows `H264` and `HEVC`;
+  - every HEVC run: `ffprobe` says `hevc`, Main, the right size; decoded
+    frames = N; PSNR in the H.264 range (44–45 dB at QP 30 on `testsrc2`);
+  - no "the firmware coded an IDR" warning in dmesg;
+  - the H.264 runs give byte-identical sizes to f80 at the same settings;
+  - compliance 54/54 on H.264, now with the HEVC format/controls enumerated.
+- **"No" shapes:**
+  - No `HEVC` in `--list-formats`: `ave_enc_hevc_supported()` is false (not
+    the 13.5 ABI, or `session_lsb`/`session_hevc_xc` changed).
+  - A hang or assert on frame 0 at 720p, where the self-test passed: the
+    V4L2 source layout (19.5.3). After a reboot, h3h's self-test
+    (`session_selftest=1 session_codec=1 session_qp=30 session_frame=1
+    session_frames=4`) tells the layout from the firmware.
+  - 1080p/4K failing where 720p works: the size-dependent buffers (19.5.1).
+    Run the self-test at that size (`session_width/height`) to separate the
+    V4L2 layer from the firmware.
+  - A decode error at the first mid-GOP IDR (run 4): the POC reset or the
+    RPS set index; `tools/hevc_parse.py` on the stream.
