@@ -1575,6 +1575,10 @@ static void test_process_hevc_13_5(void)
 	E8(buf, SH + 0x1aa, 1, "collocated_from_l0");
 	E32(buf, SH + 0x3d4, 3, "five_minus_max_num_merge_cand");
 	E8(buf, SH + 0x43c, 0, "slice_loop_filter_across_slices 0");
+	/* user space 0x6d3b4 (str d0 all-ones at S+0x54C); 0 = h2b's abort */
+	E32(buf, SH + 0x54c, 0xffffffff, "S+0x54C = -1 (macOS; wire 0x58C)");
+	E32(buf, SH + 0x550, 0xffffffff, "S+0x550 = -1 (fw divisor 0x7f384; wire 0x590)");
+	E32(buf, SH + 0x554, 0, "S+0x554 = 0 (kext GenerateMap 0xf4fb9c)");
 	for (i = 0; i < 256; i++)
 		E64(buf, SH + 0x568 + 8 * i, SLOTS + 0x400ull * i,
 		    "SliceHeader slot i = base + i*0x400 (S+0x568)");

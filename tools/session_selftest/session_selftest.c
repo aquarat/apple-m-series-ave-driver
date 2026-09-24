@@ -814,6 +814,11 @@ static void test_hevc(void)
 		      "frame %u: slice RPS flag", n);
 		CHECK(hbuf[abi->process_hevc.picmgmt + abi->process_hevc.pic_single_xc] == 0,
 		      "frame %u: two transcoders, PICMGMT+0xF65 must stay 0", n);
+		CHECK(get_unaligned_le32(hbuf + abi->process_hevc.slice +
+					 abi->process_hevc.sh_seg_limit) == 0xffffffffu &&
+		      get_unaligned_le32(hbuf + abi->process_hevc.slice +
+					 abi->process_hevc.sh_seg_limit + 4) == 0xffffffffu,
+		      "frame %u: S+0x54C/0x550 must be -1 (h2b abort, docs/77 §15)", n);
 	}
 	/* session_hevc_xc=1: PICMGMT+0xF65 = 1, and HEVC_INIT without the pair. */
 	f.single_xc = true;

@@ -1184,7 +1184,7 @@ int ave_cmd_build_process_hevc(const struct ave_cmd_abi *abi, u8 *buf,
 	hl = &abi->start_hevc;
 	if (hl->vps_block == AVE_OFF_NONE || !hp->slice || !hp->picmgmt ||
 	    !hp->st_rps || !hp->hdr_slots || !hp->hdr_slot_bytes ||
-	    !hp->pic_single_xc ||
+	    !hp->pic_single_xc || !hp->sh_seg_limit ||
 	    hp->pic_single_xc >= abi->process_avc.picmgmt_size ||
 	    hp->sh_hdr_slots + 8 * hp->hdr_slots > hp->slice_fw_copy ||
 	    hp->slice_fw_copy > hp->slice_size)
@@ -1229,6 +1229,9 @@ int ave_cmd_build_process_hevc(const struct ave_cmd_abi *abi, u8 *buf,
 	wr32(&w, sh + hp->sh_five_minus_merge, 3);
 	wr8(&w, sh + hp->sh_lf_across, 0);
 	/* sh_map stays zero: one slice (kext GenerateMap, docs/77 §3.2). */
+	/* macOS's all-ones pair after the map; 0 crashes the fw (§15). */
+	wr32(&w, sh + hp->sh_seg_limit, 0xffffffff);
+	wr32(&w, sh + hp->sh_seg_limit + 4, 0xffffffff);
 	for (i = 0; i < hp->hdr_slots; i++)
 		wr64(&w, sh + hp->sh_hdr_slots + 8 * i,
 		     hf->hdr_slot_base + (u64)i * hp->hdr_slot_bytes);
