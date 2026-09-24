@@ -3903,3 +3903,21 @@ on the vote. `v4l2-test.sh 60 ctl`, PSNR identical to six decimals:
 −33% against the unvoted PMP, and −18% (1080p) / −22% (4K) against the
 boot with no PMP. 1080p ≈ 86 fps, 4K ≈ 24 fps with one frame in flight.
 Next: VMID2 (…02), VMAX (…03), then VMAX + FAB0, one per boot.
+
+## f97-f98 (2026-09-24): VMID2 and VMAX
+
+One boot each, as f96, `pmp_vote` = `…02` (f97) and `…03` (f98). Read-back
+equal every time, no SError. DVFS-STATE 0 after the vote: f96
+`0x2001010000000002`, f97 `0x2002010000000002`, f98 `0x2033310000000002`.
+PSNR identical to six decimals in every run.
+
+| size | f73 no PMP | f90 PMP, no vote | f96 VNOM | f97 VMID2 | **f98 VMAX** |
+|---|---|---|---|---|---|
+| 1280x720 | 8.07 | 8.97 | 6.15 | 4.36 | **3.47 ms** |
+| 1920x1088 | 14.1 | 17.38 | 11.58 | 7.99 / 8.01 | **6.23 / 6.24 ms** |
+| 3840x2160 | 53.9 | 63.9 | 41.85 | 28.26 / 28.27 | **21.57 / 21.64 ms** |
+
+VMAX is 2.3x the pre-PMP boot at 1080p (~160 fps) and 2.5x at 4K (~46 fps,
+~380 Mpixel/s against the ~500 rating). docs/75 predicted ~5 ms / ~17 ms if
+the clock were the whole story. The FAB0 half (`0x2000000300000003`) is not
+run yet.
