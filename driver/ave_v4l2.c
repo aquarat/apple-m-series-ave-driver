@@ -41,6 +41,19 @@
 #define AVE_CODED_SLOTS		4
 #define AVE_DEF_QP		30
 
+/*
+ * Wire 0xFF48 is ui32AverageNonDroppableFrameRate, not a frame-rate divisor
+ * (docs/76 §3). Sending 1 (the default here, and every run to date) makes the
+ * controller treat 29 of 30 frames as droppable and add a QP offset of up to
+ * 4 to them; macOS leaves it unset, which the firmware treats as "equal to
+ * the frame rate". f82/f83: at a target below the content's floor, 1 lets QP
+ * reach 51 while the macOS value stalls at 46. rc_nondrop=1 sends the frame
+ * rate, for comparison at achievable rates.
+ */
+static bool rc_nondrop;
+module_param(rc_nondrop, bool, 0444);
+MODULE_PARM_DESC(rc_nondrop, "send the frame rate as the non-droppable frame rate (wire 0xFF48; macOS-equivalent) instead of 1");
+
 struct ave_v4l2 {
 	struct ave_device	*ave;
 	struct v4l2_device	v4l2_dev;
@@ -588,6 +601,8 @@ static int ave_start_streaming(struct vb2_queue *q, unsigned int count)
 		ret = -EBUSY;
 	} else {
 		/* The firmware gets the MB-aligned size; the crop is SPS-only. */
+		u32 fps = clamp_t(u32, DIV_ROUND_CLOSEST(ctx->timeperframe.denominator,
+				  max_t(u32, ctx->timeperframe.numerator, 1)), 1, 240);
 		struct ave_enc_cfg cfg = {
 			.width = ctx->width, .height = ctx->height,
 			.crop_w = ctx->crop.width, .crop_h = ctx->crop.height,
@@ -601,8 +616,9 @@ static int ave_start_streaming(struct vb2_queue *q, unsigned int count)
 			.bitrate = ctx->bitrate_mode ==
 					V4L2_MPEG_VIDEO_BITRATE_MODE_VBR &&
 				   ctx->rc_enable ? ctx->bitrate : 0,
-			.fps_num = ctx->timeperframe.denominator,
-			.fps_den = ctx->timeperframe.numerator,
+			/* The firmware reads 0xFF4C as integer Hz (docs/76). */
+			.fps_num = fps,
+			.fps_den = rc_nondrop ? fps : 1,
 			.slots = AVE_CODED_SLOTS,
 			.profile_idc = ctx->profile_idc,
 			.level_idc = ctx->level_idc,

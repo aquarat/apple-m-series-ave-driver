@@ -182,6 +182,7 @@ struct ave_device {
 	 */
 	void			*session_bufs;
 	struct ave_v4l2		*v4l2;		/* ave_v4l2.c, v4l2=1 */
+	bool			dart_check_quiet; /* streaming: log DART mismatches only */
 
 	bool			running;
 	/*

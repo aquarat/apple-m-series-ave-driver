@@ -62,7 +62,8 @@ struct ave_enc_cfg {
 	u32	qp;			/* fixed QP, or the RC's starting QP */
 	u32	qp_min, qp_max;		/* RC clamp; 0,0 = 10..51 */
 	u32	bitrate;		/* bit/s; 0 = fixed QP */
-	u32	fps_num, fps_den;	/* 0 = 30/1 */
+	u32	fps_num;		/* integer Hz (wire 0xFF4C); 0 = 30 */
+	u32	fps_den;		/* wire 0xFF48, the non-droppable rate, NOT a divisor (docs/76); 0 = 1 */
 	u32	slots;			/* coded slots */
 	u32	profile_idc;		/* 66, 77, 100 */
 	u32	level_idc;		/* floor; the size may need more. 0 = none */

@@ -513,6 +513,7 @@ int ave_dart_restore_datapath(struct ave_device *ave)
  */
 int ave_dart_datapath_check(struct ave_device *ave, const char *tag)
 {
+	bool match;
 	u32 c_tcr, c_ttbr, d_tcr, d_ttbr;
 	int ret;
 
@@ -532,13 +533,13 @@ int ave_dart_datapath_check(struct ave_device *ave, const char *tag)
 	c_ttbr = readl(ave->cpudart + DART_TTBR(0, 0));
 	d_tcr = readl(ave->dart1 + DART_TCR(0));
 	d_ttbr = readl(ave->dart1 + DART_TTBR(0, 0));
-	dev_info(ave->dev, "dart: [%s] SID0 CPUDART TCR %#x TTBR %#010x | DART1 TCR %#x TTBR %#010x -> %s\n",
-		 tag, c_tcr, c_ttbr, d_tcr, d_ttbr,
-		 (d_ttbr == c_ttbr && d_tcr == c_tcr && (d_ttbr & DART_TTBR_VALID))
-		 ? "MATCH" : "MISMATCH");
-	if (d_ttbr != c_ttbr || d_tcr != c_tcr || !(d_ttbr & DART_TTBR_VALID))
-		return -EIO;
-	return 0;
+	match = d_ttbr == c_ttbr && d_tcr == c_tcr && (d_ttbr & DART_TTBR_VALID);
+	/* Checked every frame; only a mismatch is news while streaming. */
+	if (!match || !ave->dart_check_quiet)
+		dev_info(ave->dev, "dart: [%s] SID0 CPUDART TCR %#x TTBR %#010x | DART1 TCR %#x TTBR %#010x -> %s\n",
+			 tag, c_tcr, c_ttbr, d_tcr, d_ttbr,
+			 match ? "MATCH" : "MISMATCH");
+	return match ? 0 : -EIO;
 }
 
 static bool ave_dapf_slot_read(struct ave_device *ave, unsigned int i,

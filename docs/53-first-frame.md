@@ -3549,7 +3549,8 @@ supported both). CABAC also needs the host to append the firmware's
 docs/66 expected two untraced firmware gates to block the controller.
 **f77** (self-test, ramp, `session_bitrate=300000`, ui32RCFlag 1): the slice
 QP varies per frame (39..46), so the controller is built with what we send.
-It undershoots badly on content this easy (~2x the per-frame budget). docs/76
+It **overshoots** (~2x the per-frame budget; an earlier revision of this
+entry said "undershoots", which was wrong - docs/76 §6). f82 explains it. docs/76
 (static, in progress) is tracing the gates and what else macOS sends.
 
 `ave_enc_start()` now takes a `struct ave_enc_cfg`: bitrate, frame rate (from
@@ -3625,3 +3626,50 @@ platform change (Asahi's PMP driver and DT) with effects on the whole
 machine, not an AVE driver change. It is left for a deliberate decision.
 docs/75 R2 (enable one PMGR clock counter to measure the VENC clock) and R4
 (the vote itself) remain proposals.
+
+## f82-f88 (2026-09-24): rate control understood, and quiet streaming
+
+docs/76 (static): docs/66's two "RC gates" (`sCRCInitParams+177/+180`) are
+the multipass block (wire `0xFEFC`/`0xFF00`) and never gated flag 1. Wire
+`0xFF48`, which the driver treated as a frame-rate divisor, is
+`ui32AverageNonDroppableFrameRate`. With 1 there, the controller treats 29 of
+30 frames as droppable and adds up to 4 QP to them. macOS leaves it unset,
+which reads as "equal to the frame rate". The first frame's QP comes from a
+reference-bitrate table (predicts 39 at 300 kbit/s; f77's IDR was 39).
+`tools/rc_track.py` grades a run with three controls first (initial QP, the
+coded header's per-MB QP sums against the slice QP, header bytes against
+slice bytes).
+
+Self-test, ramp 720p30, 300 frames at 300 kbit/s:
+
+| run | change | result |
+|---|---|---|
+| f82 (R0) | none | QP climbs to **51** and stays; 1.64x target: **CEILING** |
+| f83 (R1) | `0xFF48` = 30 (macOS-equivalent) | QP **stalls at 46**, 1.95x: worse |
+| f84 (R2) | IDR period 30 | as f82 |
+
+At QP 51 this content still needs ~490 kbit/s. 300 kbit/s is **below the
+content's floor**, which no encoder meets without dropping frames or
+scaling. That is the "overshoot" of f77 and of f78's 500 kbit/s case. The
+controller is doing its job.
+
+V4L2, `testsrc2` 720p30, 300 frames. `0xFF48`: f85 sends 1 (the default),
+f86 sends the frame rate (`rc_nondrop=1`):
+
+| target | f85 (1) | f86 (fps) |
+|---|---|---|
+| 1 Mbit/s | **101%**, 37.3 dB | 111% on a retry (see below) |
+| 2 Mbit/s | **98%**, 40.8 dB | 105%, 41.2 dB |
+| 4 Mbit/s | **99%**, 47.0 dB | 107%, 47.6 dB |
+
+1 stays the default (f86's extra dB is its extra bits). f86's first encode
+wrote no file. Its kernel log had already scrolled away under per-command
+logging, so it is **unexplained**. It did not recur.
+
+Fixes from docs/76: the firmware reads `0xFF4C` as integer Hz, so V4L2 now
+sends `round(denominator/numerator)` (29.97 fps used to arrive as 30000).
+Streaming is quiet: per-command lines, the per-frame DART-check MATCH line
+and the firmware's per-frame RC chatter are debug-only while a V4L2 stream
+runs (asserts and failures still print). f88: **26 kernel log lines per
+300-frame session**, down from ~1200. Output unchanged (ffmpeg `-b:v 2M` ->
+1.86 Mbit/s, 39.8 dB, High), compliance 54/54.
