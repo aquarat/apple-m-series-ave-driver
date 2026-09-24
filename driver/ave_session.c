@@ -213,7 +213,8 @@ MODULE_PARM_DESC(session_lowres_kb,
  * exactly sized by ave_recon_planes(); the firmware derives both chroma planes
  * from the two luma ones (fw 0x2d14c, 0x2c314).
  */
-static bool session_lsb;
+/* Default on since f68: every working encode needed it (docs/53). */
+static bool session_lsb = true;
 module_param(session_lsb, bool, 0444);
 MODULE_PARM_DESC(session_lsb,
 	"set NEED_LSB_PLANES (Start_AVC 0xFD7D) and publish per-slot LSB planes, so the firmware programs the recon writer (docs/57 #1)");
@@ -253,7 +254,8 @@ MODULE_PARM_DESC(session_nbr_fill,
  * 128 bytes per MB (the Colocated surface), 64-byte aligned, filled with 0x5A
  * so writes show at the timeout.
  */
-static bool session_coloc;
+/* Default on since f68: every working encode needed it (docs/53). */
+static bool session_coloc = true;
 module_param(session_coloc, bool, 0444);
 MODULE_PARM_DESC(session_coloc,
 	"publish per-slot colocated MV buffers in Start_AVC (wire 0xF6B0) so the pipe's colocated writer is enabled (docs/60 #1)");
@@ -264,10 +266,11 @@ MODULE_PARM_DESC(session_coloc,
  * control: the kext refuses to send a command with a zero size here, and a
  * zero-length ring cannot drain - which is what fills the SEB.
  */
-static bool session_entropy_size;	/* opt-in: see F15 */
+/* Default on since f68: every working encode needed it (docs/53). */
+static bool session_entropy_size = true;	/* F15 died with it on an older build */
 module_param(session_entropy_size, bool, 0444);
 MODULE_PARM_DESC(session_entropy_size,
-	"write the entropy buffer sizes at Start_AVC wire 0xFA30, which switches the SEB drain channels on (docs/62 0; off by default since F15 died at insmod on the first build that wrote it)");
+	"write the entropy buffer sizes at Start_AVC wire 0xFA30, which switches the SEB drain channels on (docs/62 0; default on since f68 - F15 died at insmod with it on an older build)");
 
 static bool session_diag = true;
 module_param(session_diag, bool, 0444);
@@ -754,6 +757,7 @@ struct ave_sess_bufs {
 	 * the module parameters; the V4L2 layer from its format and controls.
 	 */
 	u32		width, height, qp;
+	u32		crop_w, crop_h;	/* SPS-only crop; 0 = none */
 	u32		req_slots;	/* coded slots to publish at Start_AVC */
 	bool		quiet;		/* streaming: no per-frame chatter or diag */
 	/*
@@ -1404,6 +1408,28 @@ static void ave_session_alloc_dpb(struct ave_device *ave,
 			     : " (AVE_CalcBufSizeOfLowResRef formula)");
 }
 
+/*
+ * The smallest H.264 level from 4.0 up (the level every run before f71
+ * used) whose MaxFS (Annex A, Table A-1) holds the picture. The firmware
+ * derives its DPB size from the level and treats anything outside 10..52 as
+ * DPB 2 (fw 0x2d028-0x2d034, docs/66 §4.2), so cap at 5.2 even for pictures
+ * larger than any level's MaxFS.
+ */
+static u32 ave_level_for(u32 cw, u32 ch)
+{
+	u32 mbs = (cw / AVE_MB_SIZE) * (ch / AVE_MB_SIZE);
+
+	if (mbs <= 8192)
+		return 40;
+	if (mbs <= 8704)
+		return 42;
+	if (mbs <= 22080)
+		return 50;
+	if (mbs <= 36864)
+		return 51;
+	return 52;
+}
+
 static int ave_session_start_avc(struct ave_device *ave,
 				 const struct ave_cmd_abi *abi,
 				 struct ave_sess_bufs *bufs, u64 client_id)
@@ -1510,6 +1536,8 @@ static int ave_session_start_avc(struct ave_device *ave,
 
 	s.width = bufs->width;
 	s.height = bufs->height;
+	s.crop_width = bufs->crop_w;
+	s.crop_height = bufs->crop_h;
 	s.src_mode = (u16)session_src_mode;
 	s.src_cfg_byte = (u8)session_src_cfg;
 	s.src_go_bit3 = (u8)session_src_bit3;
@@ -1566,7 +1594,7 @@ static int ave_session_start_avc(struct ave_device *ave,
 			 abi->start_avc.rc_mode_on, s.bitrate, s.frame_rate,
 			 s.frame_rate_div, s.qp_min, s.qp_max, bufs->qp);
 	s.profile_idc = 66;			/* Baseline */
-	s.level_idc = 40;			/* 4.0 - covers 1080p */
+	s.level_idc = ave_level_for(cw, ch);
 	s.cabac = false;			/* CAVLC (required with Baseline) */
 
 	s.fw_client_addr = fwc_iova;
@@ -3007,6 +3035,11 @@ void ave_session_release(struct ave_device *ave)
 	kfree(bufs);
 }
 
+bool ave_session_selftest_requested(void)
+{
+	return session_selftest || session_frame;
+}
+
 int ave_session_selftest(struct ave_device *ave)
 {
 	const struct ave_cmd_abi *abi;
@@ -3570,8 +3603,8 @@ int ave_enc_init(struct ave_device *ave)
 }
 
 /* Open + Start_AVC for one stream; one at a time (the caller serialises). */
-int ave_enc_start(struct ave_device *ave, u32 width, u32 height, u32 qp,
-		  u32 slots)
+int ave_enc_start(struct ave_device *ave, u32 width, u32 height,
+		  u32 crop_w, u32 crop_h, u32 qp, u32 slots)
 {
 	const struct ave_cmd_abi *abi = ave_cmd_abi_get(ave->fw_abi);
 	struct ave_sess_bufs *bufs = ave->session_bufs;
@@ -3587,6 +3620,8 @@ int ave_enc_start(struct ave_device *ave, u32 width, u32 height, u32 qp,
 
 	bufs->width = width;
 	bufs->height = height;
+	bufs->crop_w = crop_w;
+	bufs->crop_h = crop_h;
 	bufs->qp = qp;
 	bufs->req_slots = slots;
 	bufs->quiet = true;

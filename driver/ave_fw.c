@@ -282,15 +282,17 @@ static int ave_fw_patch_ioba(struct ave_device *ave, void *img, size_t size)
  *     its aperture, and everything page aligned.
  * Any failure refuses, and ave_fw_load() fails so the core is never started.
  */
-static bool fw_map_data;
+/* Default on since f68: every working encode needed it (docs/53). */
+static bool fw_map_data = true;
 module_param(fw_map_data, bool, 0444);
 MODULE_PARM_DESC(fw_map_data,
-		 "E3: DART-map iBoot's DATA, DVA 0xec000 -> phys 0x10001a90000 +0x134000 (translating domain only; default off)");
+		 "E3: DART-map iBoot's DATA, DVA 0xec000 -> phys 0x10001a90000 +0x134000 (translating domain only; default on since f68)");
 
-static int fw_map_text;
+/* Default on since f68: every working encode needed it (docs/53). */
+static int fw_map_text = 2;
 module_param(fw_map_text, int, 0444);
 MODULE_PARM_DESC(fw_map_text,
-		 "E3: DVA 0xb28000 holds 0 = our image (legacy, default) | 1 = iBoot TEXT phys 0x10000b28000 read-only | 2 = nothing");
+		 "E3: DVA 0xb28000 holds 0 = our image (legacy) | 1 = iBoot TEXT phys 0x10000b28000 read-only | 2 = nothing (default)");
 
 int ave_fw_map_text_mode(void)
 {
