@@ -39,8 +39,9 @@ It is a stateful mem2mem encoder, NV12 in:
 - **Checks:** `v4l2-compliance -s` passes 54/54. ffmpeg and GStreamer
   (`v4l2h264enc`/`v4l2h265enc`) work. `testsrc2` comes back at 43-45 dB PSNR
   from 480p to 4K in both codecs.
-- **Throughput,** one frame in flight: 1080p ~70 fps, 4K ~19 fps at the boot
-  clock. **With the PMP running and a VMAX vote,** 1080p ~170 fps and 4K
+- **Throughput,** one frame in flight: 1080p ~70 fps, 4K ~19 fps on a stock
+  DT (no PMP; ~57/16 fps with the PMP running but no vote). **With a VMAX
+  vote,** 1080p ~170 fps and 4K
   ~48 fps (docs/78, docs/53 f95-f99; opt-in, `pmp_report=1
   pmp_vote=0x2000000300000003` with `OVERLAY_ARGS=pmp_venc=1`).
 - **Not yet:** B frames, HEVC Main 10, the second encoder instance (ave1),
