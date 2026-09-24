@@ -457,3 +457,181 @@ d 0xfffffe0009b9cab4 0x80    # AppleT6000PMGR::setPerfState domain switch
 - The `AVE_DPM_DecideIOPPower` thresholds, i.e. when macOS actually chooses VMax.
 - The soc-device word `+8` bit 2 (it gates the ACK wait on power-up only).
 - What perf block 9 `+0x004` is.
+
+---
+
+## 11. Why the R4 vote hangs (static, after f93/f94)
+
+Static analysis only; nothing was run. Sources: the 13.5 kernelcache
+(`ApplePMGR`, `AppleT6001PMGR`, `ApplePMP`, `AppleAVE2`), the 13.5 ADT, the
+13.5 PMP firmware (`Firmware/pmp/t6000pmp.im4p` range-read from
+`UniversalMac_13.5_22G74_Restore.ipsw`, im4p sha256 `8c7056a8…19cd`, an
+unsymbolled `RTKit-2062.141.1` Mach-O, the same RTKit build docs/31 found
+running on the target), Asahi `asahi`-branch sources (`pmp.rs`,
+`pmp-report.c`, `t6001.dtsi`, `t600x-die0.dtsi`, `lib/devres.c`,
+`arch/arm64/include/asm/io.h`), and the receiver log `$LOGDIR/ave-netconsole.log`.
+Labels as in §0.
+
+### 11.0 Verdict
+
+| # | finding | label |
+|---:|---|---|
+| 0 | **f94 did not hang silently. It took an SError on the CPU that did the write.** Receiver log lines 127438-127445: `[23.143467] pmp: writing AVE0 DVFS vote 0x2000000000000001`, then `[23.345264] SError Interrupt on CPU3, code 0x00000000be000000`, `Comm: insmod`, `lr : ave_pmp_vote+0xec`. That is 201.8 ms later, i.e. the end of the `msleep(200)` that immediately precedes the `writeq` (`driver/ave_drv.c:771-772` at `f5f7fbf`). The task is `insmod`, not an idle task, so the CPU was running driver code after the sleep, not sleeping. The ESR is the same as in f38 (log line 2451), and N1h2 (docs/49) was also a fatal asynchronous SError. Then the kernel panicked and the 30 s watchdog reset the machine (docs/49). f93 had no 200 ms holds, so its SError line was in the lost tail. docs/53's "no panic output" for f94 is wrong. The `pc` symbol (`ave_session_start.constprop.0+0x53c`) is not explained. | [C] log; [I] f93 |
+| 1 | **Leading cause: a posted write, not the PMP.** `ave_pmp_vote()` maps the entry with plain `ioremap()` (`ave_drv.c:756` at `f5f7fbf`), which on arm64 is `PROT_DEVICE_nGnRE`, a *posted* mapping (`asm/io.h:284`). Apple's on-SoC bus needs `nGnRnE`. Asahi marks it with `nonposted-mmio` on `/soc` (`t6001.dtsi:34`), and `t600x-die0.dtsi`, with the PMP and pmp_report nodes, is included directly under `/soc`. Only resource-based mappings honour that flag: `__devm_ioremap_resource` switches to `ioremap_np` when `IORESOURCE_MEM_NONPOSTED` is set (`lib/devres.c:139`). Plain `ioremap()`/`devm_ioremap()` never do. Asahi's `pmp-report` maps with `devm_platform_ioremap_resource`, so its PS-REQ `writeq` to the same block (`0x28e3d07c0`) is non-posted and works (f92). Ours is the first posted write to the PTD, and it is the one that faulted. Upstream commit `5ed9cc71432a` describes this exact failure: "On Apple Silicon machines we can't use ioremap() / Device-nGnRE to map most regions but must use ioremap_np() … to prevent SErrors." Reads are not affected, which is why every R1a/R1b/perf_dump read through `ioremap()` worked. | [C] sources; [I] that it is *this* SError |
+| 2 | **The same explanation fits docs/49's open question.** Every DAPF/CPU-DART write that SErrored (E3a, N1h2, N1j, N1k) went through `devm_ioremap()` (`ave_dapf.c:278-279`), which is also posted. apple-dart (resource mapping) and m1n1 (which maps device memory nGnRnE) write the same registers without trouble. docs/49 asked this question itself ("how our `devm_ioremap` mapping … differ[s] from apple-dart's", line 501). | [I] |
+| 3 | **Entry 273 is AVE0's DVFS entry, and the address is right.** §11.1. | [C] |
+| 4 | **Nothing in macOS powers, reports or votes MSR0 before an AVE vote, and no table ties VENC_SYS to MSR0.** §11.2, §11.3. | [C] |
+| 5 | **So R4 has not yet tested the PMP.** Whether the PMP acts on an AVE0 vote under Linux, and what it does, is still open. §11.4 lists the macOS/Linux differences that matter once the write gets through. | — |
+
+### 11.1 Q1: entry 273, re-derived without `tools/pmp_ptd_map.py`
+
+- **Slot table.** `_initPMPv2` walks `soc-device` in 124-byte records
+  (`add x12,x12,#0x7c`, `0xfffffe0009840e18`). For each record it stores
+  `socIdx[id] = record index` (`0x…0dd8`–`0x…0de0`, table `this+0x3594c`). If
+  word `+44` is non-zero, it stores `dvfsSlot[id] = counter++` (`0x…0de4`–`0x…0df8`,
+  table `this+0x36154`). Both tables are keyed by the record's **id** (word 0),
+  not by its index. **[C]**
+- **ADT.** Records with `+44 ≠ 0` before AVE0 are 6-14: EACC0, PACC0, PACC1,
+  AGX, ANE0, ISP0, DISP0, DISPEXT0 and DISPEXT1. That is 9. DISPDFR (15) has
+  `+44 = 0`. So AVE0 (index 16, id `0x11`) has slot **9**. MSR0 (id `0x13`) has
+  slot 11, AVD0 has slot 10. **[C]**
+- **Lookup.** `…SetVirtualDeviceState` keys the lookup on device byte 3 (`id1` =
+  17 for 457/600/459/602) plus die × `soc-device-die-offset`
+  (`0x…6a24`–`0x…6a2c`). It then writes to `rangeDVFS.base + slot` (`0x…6c04`–`0x…6c14`).
+  `rangeDVFS` is `this+0x35718`, the `ptd-range` record that `_initPMPv2` matched
+  to the third pmgr `ptd-ranges` id, 12 = `SOC-DEV-DVFS`, base 264
+  (`0x…0c28`–`0x…0c58`). 264 + 9 = **273**. **[C]**
+- **Write formula.** `ApplePTD::_writePTD` is the same for every range:
+  `writeReg64(RegMap 8, 0x10000 + idx*8)` (`0xfffffe000987aa78`–`0x…aa84`). It
+  has no range-specific path and no range check. Its callers are DVFS
+  (`0x…6c14`, `0x…7304`), PS-REQ (`0x…6de8`) and the dashboard ops (`0x…796c`).
+  The t6001 `initRegMaps` (`0xfffffe0009ba2288`) also maps RegMap 8 to pmgr
+  reg 41 (`0x28e3c0000`). The `/arm-io/pmp` `reg[3]` (`0x28e3d0000`, size
+  `0xc00`) covers `+0x888`. The write address `0x28e3d0888` is therefore
+  exactly what macOS writes. **[C]**
+
+### 11.2 Q2: what macOS does between VENC_SYS power-up and the first AVE DVFS write
+
+1. `AVE_HwC::PowerOn` → `AVE_DPM_PowerOn` (`0xfffffe0008f15034` →
+   `0xfffffe0008ee9ba8`). It first calls `SetPS(DMA, 2, 1)` (`0x…9c74`), which
+   brings up VENC_SYS through the dependency chain. In ApplePMGR, VENC_SYS
+   (`notify_pmp,b7`) gets command 15 → `…SetDeviceState` → PS-REQ bit 16. The
+   ACK is waited for because AVE0's `+8` is 3 (docs/75 §1.5). **[C]**
+2. Then `SetIOP(cfg+40)` (`0x…9cf8`), `SetDCS(cfg+48)` and `SetFAB(cfg+56)`
+   (`0x…9dec`, `0x…9ee4`), then `AVE_DPM_Start` (`0x…9fd0`). The defaults are
+   PL 1, 1 and 3 (`AVE_Cfg_Default` `0xfffffe0008ea5fec` → `AVE_Cfg_DefaultDPM`
+   at cfg+0x20: `+8 = 1`, `+16 = 1`, `+24 = 3`, `0x…5f3c`–`0x…5f78`). **PL 1 =
+   VMin: only 456 is on, and nothing is sent to the PMP. FAB PL 3 < 4 leaves 602
+   off. Power-on therefore writes no SOC-DEV-DVFS entry.** **[C]** for the
+   defaults; whether boot-args override them was not traced, **[I]**.
+3. The first vote comes later: `AVE_HwC::Process` → `AVE_DPM_CalcDPMStats` →
+   `AVE_DPM_Tune` (`0xfffffe0008f163e0`, `0x…63f0`) → `TuneIOP` → `SetIOP(PL ≥ 2)`
+   (`0x…91d8`) → 457 on. **So on macOS the AVE firmware is running and a frame
+   is being processed when the first vote is written.** f93/f94 voted at probe,
+   before the firmware started. **[C]** call chain; **[I]** firmware state.
+4. On the PMGR side, the vote does the following (§1.3, re-checked). It calls
+   `_waitForPMPReadyAction` (`0x…9400`). For v2 that is
+   `_waitForPMPReadyActionGatedv2` (`0xfffffe00098663f0`), which polls
+   **PMP-STATUS ≠ 0** (the `readPTD` of the range at `this+0x35728` = pmgr
+   `ptd-ranges[4]` = 2, at `0x…64b4`) every 100 ms and panics after 30 s ("PMP
+   Failed to Come Online"). There is no handshake beyond that, and the target
+   reads STATUS = 1. Then comes the no-op perf-domain step, no PS/clock write
+   (virtual device, `tbnz w8,#4` `0x…9ae4`), and the post-transition command 14
+   (`0x…9660`) → `_writePTD`. **There is no wait and no read of the entry's
+   `+8` after the write** (`0x…6c14` → return). **No PMGR or clock register is
+   written around the vote**, including nothing near `0x28e070000` (that is
+   block 8's event *counters*). **[C]**
+5. **MSR0.** Nothing on this path touches it. AppleAVE2 has no string
+   containing MSR, scaler, AVEMSR or PMP. ave0's `clock-gates`/`power-gates`
+   list only VENC devices. The vote writes only AVE0's own slot: MSR0's slot
+   (275) is written only when 484/485 change, which is the scaler's business.
+   The AVEMSR0 domain is never written as a unit from the AP. **[C]**
+6. **What macOS does once, at PMP start, that Linux does not.** See §11.4.
+
+### 11.3 Q3: the AVEMSR0 DVFS domain in the ADT
+
+- `dvfs-domain` (28-byte records): 12 `AVEMSR0` (4 states), 13 `AVEMSR0_AVE`
+  (4), 14 `AVEMSR0_MSR` (4). The PMP firmware's descriptor table names their
+  states VMIN/V1/V2/VMAX and FMIN/F1/F2/FMAX (records at firmware VA
+  `0x1056378`, `0x1056430`, `0x10564e8`). So 12 is the rail, and 13/14 are the
+  AVE and MSR clocks on it. **[C]** ADT and strings; **[I]** roles.
+- `soc-device +24` (primary domain): AVE0 → 13, **AVE1 → 13**, MSR0 → 14,
+  MSR1 → 14. No record names 12 directly. AVE0's `+28` = 6 (FAB_AFNCX) and
+  `+32` = 7 (AFR). `_pmpWriteDashBoardSetDeviceConstraint` matches a domain
+  against `+24` for the SOC field and against `+28..+40` for FAB0..FAB3
+  (`0x…714c`, `0x…71fc`–`0x…7238`). The message's FAB0 field for AVE0 is
+  therefore FAB_AFNCX. **[C]** code; **[I]** meaning.
+- PMGR `devices`: VENC_SYS (294, ps 10/22) and MSR0 (291, ps 10/19;
+  MSR0_ASE_CORE 292 ps 10/20) have the **same parent, AVEMSR-V** (519, `no_ps`,
+  parent AFR). VENC_SYS has no MSR parent, and MSR0 has no VENC parent. There
+  is no "requires" relation anywhere in `devices`, `power-domains` or
+  `soc-device`. MSR0's own votes are 484/485 (`id1` 19), gated by `scaler0`.
+  **[C]**
+- `soc-device-ps-group` (`0x0ffff803f1fffe00`) contains indices 9-24 and
+  28-33, so it includes AVE0 (16) and MSR0 (18). Under macOS, MSR0 is
+  PS-reported only while the scaler runs. **An AVE vote with MSR0 unreported is
+  therefore the normal macOS state, not a missing prerequisite.** **[I]**
+
+### 11.4 Differences that matter once the write gets through (not the f94 cause)
+
+| difference | macOS | Linux now | label |
+|---|---|---|---|
+| PIO windows for the PMP | `ApplePMPv2::handleMemInitReq` reads `pio-reg-index` and `reg` (`0xfffffe00098867d0`, `0x…6898`) and maps `/arm-io/pmp` reg[4..12] (fabric `0x282000000`/`0x304000000`/…, AMCC-PMGR `0x210e70000`…) into the PMP's DART | `pmp.rs` `get_iova_table()` answers with **no table** when `apple,pio-ranges` is absent, and neither the Asahi DT nor m1n1 `dt_set_pmp` sets it | [C] sources; [U] effect |
+| initial device status | `_notifyPMPInitialDeviceStatusGated` (`0xfffffe00098690c4`) sends command 14/15 for **every** `notify_pmp` device that is on | only the DT's enabled report entries | [C]; [U] effect |
+| PS-REQ numbering | bit = soc-device **index** (`0x…6d98`–`0x…6dac`) | `report@1d`/`@1e` ("afnc4/5-ioa", always-on) use id−1 = 29/30, which in index terms are **DISPEXT2/DISPEXT3** (both in the PS group). IOA4/IOA5 (26/27) are never reported | [C]; [U] effect |
+| when the first vote is written | during `Process`, firmware running (§11.2) | at probe, before the firmware starts | [C]/[I] |
+
+The PMP firmware's DVFS handler was not traced. The binary has a "PTD abort"
+panic path (`0x10070f0`) and no symbols. **[U]**
+
+### 11.5 Proposal (for the lead; one variable each, not run)
+
+**R4-np0: the f94 run with non-posted mappings and the null vote.** Map
+`AVE_PTD_AVE0_DVFS_WR`/`_RD` with `ioremap_np()` (or `devm_ioremap_np()`). Keep
+everything else as in f94 (R3 on, 200 ms holds), but write
+`0x2000000000000000`: SOC 0, FAB 0, the message macOS sends when 457 goes off
+(§1.4). It asks the PMP for nothing it does not already have, so it tests only
+"can the AP write entry 273".
+
+- **Predicted:** no SError. The read-back of `0x28e3c1110` is
+  `0x2000000000000000`, and `+8` changes from 0 to a timestamp with bit 0 set
+  (the format of the DVFS-STATE `+8` words in f92). PS-ACK and DVFS-STATE are
+  unchanged. Encode timing matches f92.
+- **"No":** the same `SError … be000000` right after the write. Then the
+  posted-write explanation is wrong for this block, the PTD itself refuses AP
+  writes to entry 273, and **no further PTD writes should be made** until the
+  PMP's PTD setup is traced statically (§11.4 row 1 first).
+
+**R4-np1** (only after R4-np0 survives, and after a repeat of it): the same
+run with `0x2000000000000001` (VNOM).
+
+- **Predicted:** read-back matches. The 1080p round trip drops below f92's
+  17.37 ms.
+- **"No" (A):** read-back matches but timing is unchanged. The PMP ignores
+  the vote. Next, one per run: vote during a running encode instead of at
+  probe (the macOS timing), then the PIO table (`apple,pio-ranges` from pmp
+  reg[4..12], §11.4).
+- **"No" (B):** a hang *without* an SError line. This is the first real
+  PMP-side failure. Stop and look at the PMP's reaction (its syslog/crashlog
+  via `apple_pmp`, and `28e300000.iommu` faults).
+
+**R4-c** (optional mechanism control, no PMP involved): repeat N1h2's
+same-value `TCR[0]` write with an `ioremap_np()` mapping. If it survives, the
+posted-write explanation is confirmed independently of the PMP. The same fix
+then belongs in `ave_dapf.c`/`ave_smmu.c` wherever they write.
+
+In every variant the teardown release (`ave_pmp_vote_off`) must use the same
+non-posted mapping.
+
+### 11.6 Corrections
+
+- **docs/53 f94**: the receiver has the SError (lines 127438-127445). The run
+  ended in a fatal SError plus the watchdog, not a silent fabric hang. f93 is
+  probably the same, with its tail lost.
+- **§6 (Safety)** assumed the AP-side write was proven by `pmp_report`. It was
+  proven only for a non-posted mapping. **Every AP write from this driver must
+  use a non-posted mapping** (`ioremap_np`, `devm_ioremap_np`, or a
+  resource-based `devm_*ioremap_resource`). This applies to the PTD, to PMGR,
+  and to anything else on `/soc`.
+- **§7 R4's predicted "should not hang"**: the prediction was about the PMP.
+  The run never got that far.

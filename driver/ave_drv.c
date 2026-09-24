@@ -753,8 +753,13 @@ static int ave_pmp_vote(struct ave_device *ave, u64 val)
 	void __iomem *wr, *rd;
 	u64 back, st;
 
-	wr = ioremap(AVE_PTD_AVE0_DVFS_WR, 8);
-	rd = ioremap(AVE_PTD_AVE0_DVFS_RD, 16);
+	/*
+	 * Non-posted, as /soc's nonposted-mmio makes every resource-based
+	 * mapping there (pmp-report's PS-REQ writes to this same block). f94:
+	 * a posted (plain ioremap) store here raised SError 0xbe000000.
+	 */
+	wr = ioremap_np(AVE_PTD_AVE0_DVFS_WR, 8);
+	rd = ioremap_np(AVE_PTD_AVE0_DVFS_RD, 16);
 	if (!wr || !rd) {
 		if (wr)
 			iounmap(wr);

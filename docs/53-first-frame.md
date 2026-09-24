@@ -3831,3 +3831,27 @@ took a **data abort**: pc `0x7F578`, lr `0x7EF40`, far `0x220000`, esr
 fault address is firmware-virtual and small, so it is probably a
 pointer or offset the firmware derived from a field we left zero or
 unexpected, in the post-transcode path.
+
+## f93/f94 correction (2026-09-24): an SError from our own posted write, not the PMP
+
+docs/75 §11 (static) found what my reading of f94 missed: the receiver log
+has, **201.8 ms after "writing AVE0 DVFS vote"**, i.e. at the `writeq` after
+the 200 ms hold, `SError Interrupt on CPU3, code 0x00000000be000000`,
+`Comm: insmod`, `lr : ave_pmp_vote+0xec` (receiver log line 127439). It is
+the same code as f38's SError. So there *was* panic output, and the "hang"
+was a panic followed by the watchdog reset. f93 had no holds; its SError was
+probably in the lost tail. I filtered the log to `pmp:` lines and missed it.
+
+**Cause (inferred, strong).** `ave_pmp_vote()` mapped the entry with plain
+`ioremap()`, which is Device-nGnRE (posted). Asahi's `/soc` has
+`nonposted-mmio`, which only resource-based mappings honour (they switch to
+`ioremap_np`). apple-pmp-report writes PS-REQ into the same block through
+such a mapping, and that worked in f92. Posted writes on this bus raise
+SErrors (upstream `5ed9cc71432a`). Reads are unaffected, which is why every
+R1b read through `ioremap()` worked. **Entry 273 is AVE0's** (docs/75 §11,
+[C]). The PMP never saw a vote. The earlier "fabric hang"/MSR0 readings
+of f93/f94 are withdrawn. The vote now maps with `ioremap_np()`.
+
+The same mechanism probably explains docs/49's "unexplained" DAPF-write
+SErrors (posted `devm_ioremap()`, while m1n1 and apple-dart use
+non-posted mappings). Every driver write on `/soc` should be non-posted.
