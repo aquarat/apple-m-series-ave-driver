@@ -59,6 +59,7 @@
 #define SESS_LOWRES_SIZE	0x3c000ull
 #define SESS_STRIDE		1280		/* % 64 == 0 */
 #define SESS_PROCESS_SLOT	21
+#define ALIGN_UP(x, a)		(((x) + (a) - 1) / (a) * (a))
 
 static int failures, checks;
 static const char *ctx;
@@ -661,6 +662,161 @@ static void test_abi(enum ave_fw_abi which, const char *name)
 	       ave_cmd_size(abi, AVE_OP_PROCESS_AVC));
 }
 
+
+/*
+ * HEVC (docs/77): the opening sequence ave_session.c sends with
+ * session_codec=1 - Open and Stop/Close carrying codec 1, HEVC_INIT with the
+ * session's HEVC sizes, then IDR + three P HEVC_ENCODEs - rebuilt with the
+ * same values, 13.5 only. The 26.6.2 builders must refuse.
+ */
+/* ave_session.c HEVC sizes at 1280x720 (docs/77 §9 formulas, by hand):
+ * entropy 2304 * 40 * max(4, 12); SrcNbr Pixel 768 * 40 * 11 -> 16K;
+ * colocated 128 * 40 * 12 -> 4K; SliceHeader 256 * 0x400. */
+#define H_ENTROPY_SIZE		1105920u
+#define H_NBR_SLOT		344064u
+#define H_COLOC_SIZE		61440u
+#define H_SLICEHDR_SIZE		0x40000u
+#define IOVA_SLICEHDR		0xa0000000ull
+
+static u8 hbuf[0x40000];
+
+static void test_hevc(void)
+{
+	const struct ave_cmd_abi *abi = ave_cmd_abi_get(AVE_ABI_MACOS_13_5);
+	const struct ave_cmd_abi *a26 = ave_cmd_abi_get(AVE_ABI_MACOS_26_6);
+	struct ave_cmd_ctx c = { .count = 2, .client_id = SESS_CLIENT_ID,
+				 .hevc = true };
+	struct ave_recon_buf recon[SESS_DPB] = {
+		{ IOVA_RECON, 0, IOVA_RECON + 0x300000 },
+		{ IOVA_RECON + 0x1000000ull, 0, IOVA_RECON + 0x1300000ull },
+	};
+	struct ave_buf coded = { .addr = IOVA_CODED, .size = 0x152000 };
+	struct ave_buf coded_hdr = { .addr = IOVA_CODEDHDR, .size = 0x23000 };
+	static struct ave_hevc_session h;
+	static struct ave_hevc_frame f;
+	u8 reply[0x80];
+	u32 i, j, n;
+	int ret;
+
+	printf("HEVC (macOS 13.5):\n");
+	ctx = "HEVC Open";
+	ret = ave_cmd_build_open(abi, hbuf, sizeof(hbuf), &c);
+	CHECK(ret == 0x40, "open ret %d", ret);
+	CHECK(get_unaligned_le32(hbuf + abi->hdr.codec) == 1,
+	      "Open codec %u, want 1 (docs/77 §1.2)",
+	      get_unaligned_le32(hbuf + abi->hdr.codec));
+
+	ctx = "HEVC_INIT";
+	memset(&h, 0, sizeof(h));
+	h.vp.width = SESS_WIDTH; h.vp.height = SESS_HEIGHT;
+	h.vp.frame_rate = 30;
+	h.vp.qp_i = h.vp.qp_p = h.vp.qp_b = SESS_QP;
+	h.vp.qp_min = 10; h.vp.qp_max = 51;
+	h.vp.key_interval = 1;
+	h.vp.lambda_block = true;			/* session_lambda default */
+	h.vp.fw_client_addr = IOVA_FWCLIENT;
+	h.vp.fw_client_size = SESS_FWCLIENT_SIZE;
+	h.vp.fw_client_mem_addr = IOVA_FWCLIENTMEM;
+	h.vp.fw_client_mem_size = SESS_FWCLIENTMEM_SIZE;
+	h.vp.param_sets_addr = IOVA_FWCLIENTMEM + 0x100000;
+	h.vp.param_sets_size = 0x1000;
+	h.vp.need_lsb_planes = true;
+	h.vp.recon = recon; h.vp.n_recon = SESS_DPB;
+	h.vp.low_res_ref[0] = IOVA_LOWRES;
+	h.vp.low_res_ref[1] = IOVA_LOWRES + SESS_LOWRES_SIZE;
+	h.vp.n_low_res_ref = SESS_DPB;
+	for (i = 0; i < 4; i++)
+		h.vp.low_res_result[i] = IOVA_LOWRES + 0x100000 + 0x10000 * i;
+	h.vp.n_low_res_result = 4;
+	h.vp.colocated[0] = IOVA_LOWRES + 0x200000;
+	h.vp.colocated[1] = IOVA_LOWRES + 0x200000 + H_COLOC_SIZE;
+	h.vp.n_colocated = SESS_DPB;
+	for (i = 0; i < 2; i++)
+		for (j = 0; j < 4; j++)
+			h.vp.entropy[i][j] = 0xb0000000ull + (u64)ALIGN_UP(H_ENTROPY_SIZE, 128) * (4 * i + j);
+	h.vp.n_entropy = 2; h.vp.n_entropy_cols = 4;
+	h.vp.entropy_size = H_ENTROPY_SIZE;
+	for (i = 0; i < 4; i++)
+		for (j = 0; j < 4; j++)
+			h.vp.src_nbr[i][j] = IOVA_NBR + (u64)H_NBR_SLOT * (4 * i + j);
+	h.vp.n_src_nbr = 4;
+	h.vp.coded = &coded; h.vp.coded_hdr = &coded_hdr; h.vp.n_coded = 1;
+	h.level_idc = 120;
+	h.input_format_word = 16;
+	h.max_num_ref_frames = 1;
+	h.log2_max_poc_lsb_minus4 = 4;
+	h.sao = h.wpp = h.sps_tmvp = true;
+	h.n_st_rps = 1;
+	c.count = 3;
+	ret = ave_cmd_build_start_hevc(abi, hbuf, sizeof(hbuf), &c, &h);
+	CHECK(ret == (int)ave_cmd_size(abi, AVE_OP_START_HEVC),
+	      "start_hevc ret %d", ret);
+	CHECK(get_unaligned_le16(hbuf) == 5, "HEVC_INIT id %u", get_unaligned_le16(hbuf));
+	CHECK(get_unaligned_le32(hbuf + abi->hdr.slot) == 6, "HEVC_INIT slot");
+	make_reply(abi, AVE_OP_START_HEVC, SESS_CLIENT_ID, abi->reply.status_ok, 0, reply);
+	CHECK(ave_cmd_check_reply(abi, AVE_OP_START_HEVC, reply,
+				  abi->cmd[AVE_OP_START_HEVC].reply_size,
+				  SESS_CLIENT_ID, NULL) == 0,
+	      "INIT_DONE (0xE04) refused for HEVC_INIT");
+	CHECK(abi->cmd[AVE_OP_START_HEVC].reply_id == 0xe04, "HEVC_INIT reply id");
+	CHECK(ave_cmd_build_start_hevc(a26, hbuf, sizeof(hbuf), &c, &h) == -EINVAL,
+	      "26.6.2 must refuse HEVC_INIT");
+
+	ctx = "HEVC_ENCODE";
+	for (n = 0; n < 4; n++) {
+		memset(&f, 0, sizeof(f));
+		f.pic.frame_type = n ? AVE_FRAME_TYPE_P : AVE_FRAME_TYPE_IDR;
+		f.pic.frame_num = n;
+		f.pic.in_luma_addr = IOVA_LUMA;
+		f.pic.in_luma_stride = SESS_STRIDE;
+		f.pic.in_chroma_addr = IOVA_CHROMA;
+		f.pic.in_chroma_stride = SESS_STRIDE;
+		f.pic.coded_index = 0;
+		f.pic.coded_addr = IOVA_CODED;
+		f.pic.coded_hdr_addr = IOVA_CODEDHDR;
+		f.pic.coded_size = coded.size;
+		f.pic.recon_luma_addr = IOVA_RECON;
+		f.pic.recon_chroma_addr = IOVA_RECON + 0x100000;
+		f.pic.recon_luma_lsb_addr = IOVA_RECON + 0x200000;
+		f.pic.recon_chroma_lsb_addr = IOVA_RECON + 0x300000;
+		f.pic.recon_mv_addr = IOVA_RECON + 0x400000;
+		f.pic.force_key_frame = !n;
+		f.pic.low_res_src_addr = IOVA_LOWRES;
+		memcpy(f.pic.entropy, h.vp.entropy, sizeof(f.pic.entropy));
+		f.pic.n_entropy = 2; f.pic.n_entropy_cols = 4;
+		memcpy(f.pic.src_nbr, h.vp.src_nbr, sizeof(f.pic.src_nbr));
+		f.pic.n_src_nbr = 4;
+		f.poc_lsb = n & 255;			/* frames since the IDR */
+		f.sao = true;
+		f.hdr_slot_base = IOVA_SLICEHDR;
+		f.hdr_slot_size = H_SLICEHDR_SIZE;
+		c.count = 4 + n;
+		ret = ave_cmd_build_process_hevc(abi, hbuf, sizeof(hbuf), &c,
+						 SESS_PROCESS_SLOT, &f);
+		CHECK(ret == 0x6838, "frame %u: process_hevc ret %d", n, ret);
+		CHECK(get_unaligned_le16(hbuf) == 8, "HEVC_ENCODE id");
+		CHECK(get_unaligned_le32(hbuf + abi->hdr.codec) == 1, "HEVC_ENCODE codec");
+		CHECK(get_unaligned_le32(hbuf + abi->process_hevc.slice +
+					 abi->process_hevc.sh_poc_lsb) == n,
+		      "frame %u: POC lsb", n);
+		CHECK(hbuf[abi->process_hevc.st_rps] == (n ? 1 : 0),
+		      "frame %u: slice RPS flag", n);
+	}
+	make_reply(abi, AVE_OP_PROCESS_HEVC, SESS_CLIENT_ID, abi->reply.status_ok, 0, reply);
+	CHECK(ave_cmd_check_reply(abi, AVE_OP_PROCESS_HEVC, reply,
+				  abi->cmd[AVE_OP_PROCESS_HEVC].reply_size,
+				  SESS_CLIENT_ID, NULL) == 0,
+	      "ENCODE_DONE refused for HEVC_ENCODE");
+
+	ctx = "HEVC Stop/Close";
+	ret = ave_cmd_build_simple(abi, AVE_OP_STOP, hbuf, sizeof(hbuf), &c);
+	CHECK(ret == 0x40 && get_unaligned_le32(hbuf + abi->hdr.codec) == 1,
+	      "Stop codec 1 (ret %d)", ret);
+	ret = ave_cmd_build_close(abi, hbuf, sizeof(hbuf), &c);
+	CHECK(ret == 0x48 && get_unaligned_le32(hbuf + abi->hdr.codec) == 1,
+	      "Close codec 1 (ret %d)", ret);
+}
+
 int main(void)
 {
 	/* NULL ABI must be handled, not crash (mirrors the driver's guard). */
@@ -670,6 +826,7 @@ int main(void)
 
 	test_abi(AVE_ABI_MACOS_13_5, "macOS 13.5");
 	test_abi(AVE_ABI_MACOS_26_6, "macOS 26.6.2");
+	test_hevc();
 
 	printf("\n%d checks, %d failures\n", checks, failures);
 	return failures ? 1 : 0;
