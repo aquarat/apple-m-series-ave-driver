@@ -65,6 +65,7 @@ struct ave_enc_cfg {
 	u32	fps_num, fps_den;	/* 0 = 30/1 */
 	u32	slots;			/* coded slots */
 	u32	profile_idc;		/* 66, 77, 100 */
+	u32	level_idc;		/* floor; the size may need more. 0 = none */
 	bool	cabac;
 };
 int ave_enc_start(struct ave_device *ave, const struct ave_enc_cfg *cfg);

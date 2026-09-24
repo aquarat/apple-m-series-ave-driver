@@ -3573,3 +3573,22 @@ macroblock. Accurate to a few percent from ~1 Mbit/s up; below that it
 overshoots, probably a floor from the QP clamp or the controller's
 start-up, for docs/76 to explain. Fixed-QP output is unchanged, and
 v4l2-compliance is 54/54.
+
+## f80 (2026-09-24): GStreamer, and the webcam
+
+The MacBook's camera (`apple-isp`, `/dev/video0`) delivers NV12 at 1280x720
+and 1920x1080, 30 fps, which is the encoder's own input format.
+
+- ffmpeg `-f v4l2 -i /dev/video0 ... -c:v h264_v4l2m2m -b:v 4M`: 149 frames
+  of High 1280x720, decode clean (83 kbit/s: VBR on a dark, static scene).
+- GStreamer `v4l2h264enc` refused to negotiate. It sets `H264_LEVEL` to what
+  its caps want, and only 4.0 was allowed. The level control now accepts
+  1.0..5.2 as a floor (the SPS carries the higher of it and what the size
+  needs). After that: `videotestsrc ! v4l2h264enc ! h264parse ! mp4mux`
+  90 frames, and **`v4l2src device=/dev/video0 ! v4l2h264enc ! ... mp4mux`
+  150 frames**, both decode clean. GStreamer picks Baseline.
+- The webcam MP4 decodes with repeated-DTS warnings every ~14 frames. The
+  encoder copies OUTPUT timestamps to CAPTURE unchanged, so this is probably
+  the camera's timestamps. Not investigated.
+- v4l2-compliance 54/54. `tools/v4l2-test.sh` ffmpeg mode now passes
+  `-b:v 8M` (ffmpeg's own default is 200 kbit/s, which the VBR default honours).

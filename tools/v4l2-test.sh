@@ -1,7 +1,9 @@
 #!/bin/bash
 # On the target, with apple-ave loaded v4l2=1: encode N frames of a test
 # pattern through the V4L2 node and grade the result against the input.
-#   [W=1920 H=1088] tools/v4l2-test.sh [frames] [ctl|ffmpeg]
+#   [W=1920 H=1088] [CROP_H=1080] [FFARGS="-b:v 8M"] tools/v4l2-test.sh [frames] [ctl|ffmpeg]
+# ctl: v4l2-ctl, fixed QP (RC off). ffmpeg: h264_v4l2m2m, which always turns
+# RC on, so it gets FFARGS' bitrate (default 8M; ffmpeg's own default is 200k).
 set -u
 N=${1:-60}; MODE=${2:-ctl}
 W=${W:-1280}; H=${H:-720}
@@ -34,7 +36,7 @@ ctl)
     OUT=out.h264; FMT="-f h264 -framerate 30" ;;
 ffmpeg)
     timeout 60 ffmpeg -v warning -y -f rawvideo -pix_fmt nv12 -s ${W}x$H -r 30 \
-        -i "$IN" -c:v h264_v4l2m2m out.mp4 2>&1 | tail -5
+        -i "$IN" -c:v h264_v4l2m2m ${FFARGS:--b:v 8M} out.mp4 2>&1 | tail -5
     OUT=out.mp4; FMT= ;;
 esac
 ls -l "$OUT"
