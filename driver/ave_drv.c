@@ -705,20 +705,33 @@ static int ave_pmp_report_on(struct ave_device *ave)
 
 	if (!pmp_report || ave->pmp_dev)
 		return 0;
-	if (!ave->soc->pmp_report_node)
-		return dev_err_probe(ave->dev, -ENODEV,
-				     "pmp: no pmp-venc-sys node known for %s\n", ave->soc->name);
+	if (!ave->soc->pmp_report_node) {
+		dev_warn(ave->dev, "pmp: pmp_report ignored: no pmp-venc-sys node known for %s\n",
+			 ave->soc->name);
+		return 0;
+	}
 
 	args.np = of_find_node_by_path(ave->soc->pmp_report_node);
 	if (!args.np)
 		return dev_err_probe(ave->dev, -ENODEV, "pmp: no %s\n",
 				     ave->soc->pmp_report_node);
 	if (of_property_read_string(args.np, "label", &label) ||
-	    strcmp(label, "pmp-venc-sys") || !of_device_is_available(args.np)) {
+	    strcmp(label, "pmp-venc-sys")) {
 		of_node_put(args.np);
 		return dev_err_probe(ave->dev, -ENODEV,
-				     "pmp: %s is not an enabled pmp-venc-sys (ave-overlay pmp_venc=1?)\n",
+				     "pmp: %s is not pmp-venc-sys; refusing\n",
 				     ave->soc->pmp_report_node);
+	}
+	/*
+	 * A kernel/DT without the PMP running (stock Fedora, docs/78) is
+	 * normal: encode at the boot clock instead of failing the probe.
+	 */
+	if (!of_device_is_available(args.np)) {
+		of_node_put(args.np);
+		dev_warn(ave->dev,
+			 "pmp: %s is disabled (PMP not running, or no ave-overlay pmp_venc=1); pmp_report/pmp_vote ignored, encoding at the boot clock\n",
+			 ave->soc->pmp_report_node);
+		return 0;
 	}
 
 	vdev = kzalloc(sizeof(*vdev), GFP_KERNEL);
@@ -808,12 +821,16 @@ static int ave_pmp_vote_on(struct ave_device *ave)
 
 	if (!v || ave->pmp_voted)
 		return 0;
-	if (!ave->soc->pmp_dvfs_wr || !ave->soc->pmp_dvfs_rd)
-		return dev_err_probe(ave->dev, -ENODEV,
-				     "pmp: no AVE0 DVFS entry known for %s\n", ave->soc->name);
-	if (!ave->pmp_dev)
-		return dev_err_probe(ave->dev, -EINVAL,
-				     "pmp: pmp_vote needs pmp_report=1 (R3 before R4)\n");
+	if (!ave->soc->pmp_dvfs_wr || !ave->soc->pmp_dvfs_rd) {
+		dev_warn(ave->dev, "pmp: pmp_vote ignored: no AVE0 DVFS entry known for %s\n",
+			 ave->soc->name);
+		return 0;
+	}
+	if (!ave->pmp_dev) {
+		/* R3 before R4: never vote without the report (docs/75 §10) */
+		dev_warn(ave->dev, "pmp: pmp_vote ignored: no pmp-venc-sys report held (pmp_report=1, and a running PMP)\n");
+		return 0;
+	}
 	if (!(v & AVE_PTD_DVFS_VALID) || (v & ~AVE_PTD_DVFS_MASK))
 		return dev_err_probe(ave->dev, -EINVAL,
 				     "pmp: pmp_vote %#llx is not 1<<61 | FAB0(0-3)<<32 | SOC(0-3)\n", v);
