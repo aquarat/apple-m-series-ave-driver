@@ -19,6 +19,12 @@ if [ -n "${NETCONSOLE:-}" ]; then
     NC_MAC=${NETCONSOLE#*:}; [ "$NC_MAC" = "$NETCONSOLE" ] && NC_MAC=$(ip neigh show "$NC_IP" | awk '{print $5}')
     NC_DEV=$(ip route get "$NC_IP" | awk '{for(i=1;i<=NF;i++) if($i=="dev") print $(i+1)}' | head -1)
     NC_SRC=$(ip route get "$NC_IP" | awk '{for(i=1;i<=NF;i++) if($i=="src") print $(i+1)}' | head -1)
+    ping -c 1 -W 2 "$NC_IP" >/dev/null || { echo "REFUSING: receiver $NC_IP does not answer" >&2; exit 1; }
+    # The wired adapter (AX88179, cdc_ncm) batches tx frames for up to
+    # tx_timer_usecs (400) and flushes them from a timer. A hang inside that
+    # window loses exactly the tail we want. 0 sends every frame at once.
+    NCM=/sys/class/net/$NC_DEV/cdc_ncm/tx_timer_usecs
+    [ -e "$NCM" ] && echo 0 | sudo tee "$NCM" >/dev/null
     lsmod | grep -q '^netconsole' || sudo modprobe netconsole \
         "netconsole=6666@$NC_SRC/$NC_DEV,6666@$NC_IP/$NC_MAC"
     sudo dmesg -n 8
