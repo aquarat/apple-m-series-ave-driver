@@ -3786,3 +3786,12 @@ AVE0 vote that macOS does and Linux does not. Candidates:
 - a clock or DVFS controller the PMP touches while it sits in a gated domain
 
 **No further PTD writes until that is traced statically.**
+
+## h1 (2026-09-24): HEVC_INIT refused by our own builder
+
+`67d5b2a`, PMP boot DT (irrelevant here), `session_selftest=1
+session_codec=1 session_qp=30 session_dbg=0x20`. Config and Open were
+accepted, then `HEVC_INIT build failed: -22` on the host. Nothing was sent.
+The entropy buffers are allocated only when a frame will be encoded (the
+f64 gate), and the HEVC builder rightly requires them at INIT (setPipe
+:14199). With `session_codec=1` they are now allocated at INIT as well.
