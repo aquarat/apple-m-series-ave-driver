@@ -1151,3 +1151,78 @@ $D --kext --addr 0xfffffe0008ea5b14 -n 0x74    # count and size of TranscodedDat
 $D --kext --addr 0xfffffe0008eaf250 -n 0x5c    # SetFwBuf: VP+0x548/0x550, VP+0x558
 $D --fw   --addr 0x64ee0 -n 0x14         # MBInputCtrl only with PICMGMT+0xF50 > 0
 ```
+
+---
+
+## 15. After h2b: the data abort at 0x7F578 is S+0x54C/0x550 left 0
+
+h2b got through both `SetTranscode` calls and started the transcoders
+(`XC SourceGo.all 3`). About 6 ms later the firmware took a data abort:
+`pc 0x7F578`, `far 0x220000`, `esr 0x96000007` (read, level-3 translation
+fault), `lr 0x7EF40`, `sp 0x1C03A0`. The call stack is
+0x7D9D4 → 0x68108 → 0xA5AC. Every VA below was read for this section.
+**[C]** unless marked.
+
+**Where it faults.** `0x7F578` is `ldr q2,[x13]` in the vectorised arm of a
+max-length scan inside `WriteSliceHeadersHevc` (function `0x7ee10`, called
+from the transcode-done handler `0x7d54c` at `0x7d9d4`). The loop computes
+`offset_len_minus1` = max over the entry points of `32 − clz(size − 1)`, and
+stores it to S+`0x444` (`str w9,[x21,#1092]` `0x7f5c0`). It reads a u32
+array `x9 = [x28,#24]` (`0x7f424`), indexed `w22 … w22 + count`, eight at a
+time (`0x7f55c`–`0x7f5a4`). That array is the per-CTB-row byte-size table of
+the transcode-done message. It is a stack buffer in the message sender:
+`x24 = sp+0x38` is stored as message `+24` at `0xa35c` and `0xa5a0`, and
+passed on at `0x680e8`. So the pointer is fine. The **count** is what runs
+away, and `far 0x220000` is simply where the read walked off the top of
+the stack.
+
+**Where the count comes from.**
+
+- `num_entry_point_offsets` = `w10 − 1` (`subs w8,w10,#1` `0x7f418`,
+  `str w8,[x21,#1088]` → S+`0x440`).
+- In the arm taken when S+`0x554` == 0 (`cbz w21` `0x7ef48`), `w10` starts as
+  the transcoded row count at ctrl+`0x2C4A0` (`0x7f23c`–`0x7f2ac`).
+- It is then cut to the current slice segment using two host fields of the
+  slice block:
+  - `w20` = S+`0x54C` and `w27` = S+`0x550` (`ldr w20,[x23,#1356]` `0x7ef14`,
+    `ldr w27,[x23,#1360]` `0x7ef18`; x23 = S, from ctrl+`0x54578`+8·ctx
+    `0x7ee9c`).
+  - The segment start is tested with `row % S+0x550` (`udiv w17,w22,w27`
+    `0x7f384`, `msub` `0x7f3a8`).
+  - If `min(S+0x54C, S+0x550) ≥ count` (`0x7f2b4`–`0x7f2cc`, `0x7f3b0`–`0x7f3b8`),
+    the count is kept.
+  - Otherwise it becomes `min(count − row, S+0x550·(row/S+0x550 + 1) − row, …)`
+    (`0x7f3bc`–`0x7f40c`).
+- With both fields **0**, as we sent them, the division is by zero (0 on
+  arm64), the next segment boundary computes to 0, and `w10` = 0. That gives
+  `num_entry_point_offsets` = 0xFFFFFFFF, and the scan is told to read ~4 G
+  entries.
+
+**What macOS sends.** User space's HEVC defaults store all-ones there:
+`movi v0.2d,#-1; str d0,[x21,#0x540]` with x21 = slice block + 0xC
+(AppleVideoEncoder `0x6d3b0`/`0x6d3b4`). The slice block is storage + `0x2D4E0`,
+DriverInit slot `sp+0x360` (`0x6e14c`–`0x6e160`); x21 = storage + `0x2D4EC`
+(`0x6cc08`/`0x6cc0c`). So **S+`0x54C` = S+`0x550` = 0xFFFFFFFF**. Nothing in the
+kext touches them. `HEVC_Slice::GenerateMap` clears only the map and
+S+`0x554` (`0xfffffe0008f4fb88`–`0xf4fb9c`), and the constructor clears S+`0x560`
+(`0xf4e1fc`). With −1 the `min ≥ count` test passes and the count is the
+real row count, which for 720p WPP is 23 rows, so 22 entry points.
+
+What the two fields mean is **[U]**. They behave as slice-segment length
+limits, with −1 meaning "none". §3.2's table was built from user space
+`0x6d360`–`0x6d3b8` and stopped one store short of `0x6d3b4`.
+
+**Fix.** `ave_cmd_build_process_hevc` writes 0xFFFFFFFF at S+`0x54C` and
+S+`0x550` (wire `0x58C`/`0x590`). S+`0x554` stays 0, as the kext leaves it.
+`abi_selftest` and `session_selftest` pin both values.
+
+**Reproduce**
+
+```sh
+$D --fw --addr 0x7ef0c -n 0x40          # S+0x54C/0x550/0x554 loads, cbz S+0x554
+$D --fw --addr 0x7f23c -n 0x1e0         # count, the % and min segment logic, the scan
+$D --fw --addr 0x7f55c -n 0x68          # the faulting vector loop (0x7f578)
+$D --fw --addr 0xa340 -n 0x30           # the per-row size table is a stack buffer
+python3 tools/fetch_userspace.py ...    # then, in the docs/72 §9 listing:
+sed -n '/^0x0006d3a8/,/^0x0006d3b8/p' /tmp/ave_ua.s   # str d0(-1),[x21,#0x540]
+```

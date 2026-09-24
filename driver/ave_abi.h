@@ -1643,6 +1643,19 @@ struct ave_process_hevc_layout {
 	u32	sh_five_minus_merge;
 	u32	sh_lf_across;		/* u8 */
 	u32	sh_map;			/* 0x100 bytes, zero for one slice */
+	/*
+	 * Two u32 right after the slice map, S+0x54C and S+0x550, which macOS
+	 * user space sets to 0xFFFFFFFF (str d0 = all-ones, [x21,#0x540] with
+	 * x21 = S+0xC, AppleVideoEncoder 0x6d3b0-0x6d3b4) and nothing else
+	 * writes. WriteSliceHeadersHevc divides the CTB row by S+0x550 and
+	 * takes min(S+0x54C, S+0x550) as a segment length (ldr w20/w27
+	 * [x23,#1356/#1360] 0x7ef14/0x7ef18; udiv 0x7f384; 0x7f2b4-0x7f2cc,
+	 * 0x7f3b0-0x7f40c). Left 0, the entry-point count comes out 0,
+	 * num_entry_point_offsets = 0 - 1, and the max-length scan over the
+	 * per-row sizes runs off the stack: h2b's data abort at 0x7f578,
+	 * far 0x220000 (docs/77 §15). Meaning [U]: "no limit" as sent.
+	 */
+	u32	sh_seg_limit;		/* 2 x u32, both 0xFFFFFFFF */
 	u32	sh_hdr_slots;		/* u64[hdr_slots] SliceHeader IOVAs */
 	u32	hdr_slots;		/* 256 */
 	u32	hdr_slot_bytes;		/* 0x400 per slot */
@@ -2234,6 +2247,7 @@ const struct ave_cmd_abi ave_cmd_abi_13_5 = {
 		.sh_five_minus_merge = 0x3d4,
 		.sh_lf_across	= 0x43c,
 		.sh_map		= 0x44c,
+		.sh_seg_limit	= 0x54c,	/* user space 0x6d3b4; fw 0x7ef14 */
 		.sh_hdr_slots	= 0x568,	/* fw ldr x26,[x9,#1384] 0x7f1bc */
 		.hdr_slots	= 256,
 		.hdr_slot_bytes	= 0x400,	/* kext HEVC_Slice::UpdateBuffer 0xf4e318 */
