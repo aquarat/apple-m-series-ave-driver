@@ -1,0 +1,1 @@
+=== f38-f36wired 2026-09-24T12:35:55+01:00 commit b8272b6: insmod driver/apple-ave.ko stop_after=16 fw_map_data=1 fw_map_text=2 smmu_watch=1 session_selftest=1 session_frame=1 session_lsb=1 power_me1=1 dpe_tunables=1 session_coloc=1 session_entropy_size=1 session_flat_luma=200 session_nbr_fill=1 session_costs=0xf ave_step_ms=200 ===

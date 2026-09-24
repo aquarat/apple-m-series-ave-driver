@@ -1200,6 +1200,48 @@ struct ave_start_avc_layout {
 	u32	src_go_bit3;		/* u8; AVE_OFF_NONE = not located */
 	u32	src_go_bits;		/* u8; AVE_OFF_NONE = not located */
 	/*
+	 * The controller's debug-verbosity bitfield (docs/70). It reaches
+	 * ctrl+0xA7C (fw 0x5cedc), and setPipe copies its BIT 5 into
+	 * this+408 (fw 0x58550) - which is the single byte CController::Print
+	 * tests before returning (fw 0x924d4: ldrb w8,[x0,#408]; cbz w8).
+	 *
+	 * So with this zero, as in every run we have ever done, the firmware
+	 * drops all of its own "AVC COMMON::" diagnostics before they reach
+	 * the TERMINAL ring the driver already drains. Setting bit 5 makes
+	 * the firmware report its own QP, quantiser and mode parameters
+	 * instead of us inferring them from registers.
+	 *
+	 * Any non-zero value also runs CAVCController::DebugInit; bits 1, 3,
+	 * 4 and 7 add more sections and much more traffic. The log path
+	 * allocates from shared memory and sends synchronously, so start at
+	 * 0x20 - bit 5 alone - rather than anything wider.
+	 */
+	u32	dbg_bits;		/* u32; AVE_OFF_NONE = not located */
+	/*
+	 * u8 at wire 0xFCE4 -> ctrl+0x23FDE (fw 0x5cf58). The HEVC twin of
+	 * this block names it enable_IPCM_in_IntraSlice, and the firmware's
+	 * own debug text is "code macro-blocks in I slices as I_PCM"
+	 * (docs/73 §4.2). Also bit 9 of IntraEst's DMem mode word
+	 * (fw 0x612e4, docs/70 §8). 0 in every run before f43.
+	 */
+	u32	ipcm_islice;
+	/*
+	 * The lambda block macOS 13.5 always sends, fixed-QP included
+	 * (docs/72 §5.2, AppleVideoEncoder.bundle AVE_SetEncoderDefault):
+	 *   RC+0x68..0x78  five u32 lambda scales, 0x400 = x1.0
+	 *                  (ME_FullPel, ME_SubPel, ME_LowRes, MD_Inter,
+	 *                  MD_Intra); fw 0x5d3d8 -> ctrl+0xB10..0xB20, and
+	 *                  setPipe (v * nQuant + 0x200) >> 10 -> 0x40D26A09C/0A0
+	 *                  and the ME lambda registers (fw 0x5633c/0x56354)
+	 *   RC+0x90..0x643 three per-QP tables, one fw memcpy of 0x5B4 bytes
+	 *                  to ctrl+0x15E4 (fw 0x5d3a0-0x5d3b8)
+	 * Offsets are wire (RC = 0xFF30 + RC offset).
+	 */
+	u32	lambda_scales;		/* 5 x u32 */
+	u32	lambda_qp_tab;		/* 52 x u32 */
+	u32	lambda_idx_tab;		/* 52 x u32 */
+	u32	lambda_rec_tab;		/* 29 x { u32, 8 x u32 } */
+	/*
 	 * iNumViews. Apple's own kext refuses to send the command unless
 	 * 0 < iNumViews <= 2 (pInfo validator, kext 0xec9078, assert string
 	 * 0xfffffe00071f090b) and we send zero, which macOS would reject. The
@@ -1603,6 +1645,12 @@ const struct ave_cmd_abi ave_cmd_abi_13_5 = {
 		.src_cfg_byte	= 0xfce8,	/* fw 0x5d118 -> [x22,#41],  docs/62 §6.2 */
 		.src_go_bit3	= 0xfce9,	/* fw 0x5cfcc -> SRCDMAGO bit 3, docs/69 */
 		.src_go_bits	= 0xfecc,	/* fw 0x5cfe4 -> SRCDMAGO bits 4+, docs/69 */
+		.dbg_bits	= 0xfcd8,	/* fw 0x5cedc -> ctrl+0xA7C, docs/70 */
+		.ipcm_islice	= 0xfce4,	/* fw 0x5cf58 -> ctrl+0x23FDE, docs/73 */
+		.lambda_scales	= 0xff98,	/* RC+0x68, fw 0x5d3d8, docs/72 */
+		.lambda_qp_tab	= 0xffc0,	/* RC+0x90, fw memcpy 0x5d3a0 */
+		.lambda_idx_tab	= 0x10090,	/* RC+0x160 */
+		.lambda_rec_tab	= 0x10160,	/* RC+0x230, ends 0x10574 */
 		.num_views	= { 0xff24, 0xff28 },	/* kext 0xec9078 rejects 0 */
 		.sps_block	= 0x105b0,	/* memcpy 0x6ac from payload+0x10550 0x5ce68-90 */
 		.sps_block_size	= 0x6ac,
@@ -1903,6 +1951,12 @@ const struct ave_cmd_abi ave_cmd_abi_26_6 = {
 		.src_cfg_byte	= AVE_OFF_NONE,
 		.src_go_bit3	= AVE_OFF_NONE,
 		.src_go_bits	= AVE_OFF_NONE,
+		.dbg_bits	= AVE_OFF_NONE,
+		.ipcm_islice	= AVE_OFF_NONE,
+		.lambda_scales	= AVE_OFF_NONE,
+		.lambda_qp_tab	= AVE_OFF_NONE,
+		.lambda_idx_tab	= AVE_OFF_NONE,
+		.lambda_rec_tab	= AVE_OFF_NONE,
 		.num_views	= { AVE_OFF_NONE, AVE_OFF_NONE },
 		.sps_block	= AVE_START_SPS_OFF,
 		.sps_block_size	= AVE_START_SPS_SIZE,

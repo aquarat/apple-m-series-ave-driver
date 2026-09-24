@@ -3049,3 +3049,260 @@ one memory access known to coincide with the hang either lets the run
 finish - channel windows, cost ladder, curMB control, and the published
 frame all land - or moves the death to the next access, which says a master
 is wedged regardless of what the CPU touches.
+
+## f37 (2026-09-24): F24 plus wired netconsole survives, and codes F24's frame byte for byte
+
+The discriminating run the previous handover proposed ("F24 plus netconsole
+and nothing else"), with one change forced by the hardware: netconsole now
+goes over a USB‑C Ethernet adapter (AX88179, `cdc_ncm`, tx batching off) to
+the operator's host, not over Wi‑Fi to the old receiver (AGENTS.md). Otherwise F24's exact configuration: overlay `variant=5`,
+`OVERLAY_WAIT=20`, `probe_diag=7`, `ave_step_ms` 0, 32-bit mask, the F24
+parameter list, built from `b8272b6` (`make` had nothing to rebuild).
+
+```
+RESULT frame 0: 2709 coded bytes, MB I 3600 P 0 skip 0 of 3600, FrameTypeReturned 3
+STEP diag: colocated scan (CPU read of 462848 bytes) - f33/f34 hung here   7408.130752
+STEP diag: costs (session_costs gated)                                      7408.140249
+STEP diag: done
+e3-run heartbeat f37-f24plusnc t=0s
+=== saved debugfs to results/f37-f24plusnc-1790245086-load1 ===
+```
+
+**It survived.** The colocated scan that f33-f36 died in took 9.5 ms and
+the run went on through the channel dump, the heartbeat and the debugfs
+copy; the machine was still up minutes later, driver loaded, no disabled
+IRQs.
+
+Controls, so this is F24 and not something that merely resembles it:
+
+- `frame.h264` is **byte-identical** to F24's (`cmp`). `check_frame.py`:
+  its three self-tests pass; decoded 1 distinct value; MISMATCH, 11.2 dB.
+  `h264_parse.py`: slice QP 30, I IDR, 3600 MBs.
+- Same log signature as F24: 18 `chan [timeout]` window lines, 2 DAPF
+  stream-14 `ERROR` lines, 3 stream-15 translation faults at `0x7f100000`.
+- Local capture and receiver agree line for line on every timestamped
+  `apple-ave` line (695 vs 693 by `grep -c` is `e3-run.sh`'s two untimestamped
+  header lines, and a `§` the local capture escapes). On a run that
+  survives, the wired receiver loses nothing.
+
+What it says, n=1:
+
+- **Wired netconsole alone does not kill the F24 configuration.** That is
+  the whole of it.
+- It does **not** convict Wi‑Fi netconsole: F24 plus *Wi‑Fi* netconsole was
+  never run, and cannot be now without putting the old receiver back.
+- The other three f33-f36 differences (`OVERLAY_WAIT` 0, `probe_diag` 0,
+  `ave_step_ms` 200-1000) are untouched by this run and remain candidates,
+  as does the Wi‑Fi path itself.
+
+Next: repeat f37 unchanged before building on it (AGENTS.md: repeat before believing), then
+bisect those three one per run, keeping wired netconsole on throughout -
+it is now the constant, not the variable.
+
+## f37b-f40 (2026-09-24): the "colocated scan hang" was a misaddressed read, and a lossy receiver
+
+Four runs, wired netconsole throughout, the target rebooted between each.
+
+| run | configuration | outcome | last line on the receiver |
+|---|---|---|---|
+| f37b | f37 repeated (F24 + netconsole) | survived | debugfs saved; frame byte-identical to F24 again |
+| f38 | **f36's exact configuration** (overlay 4, no wait, `session_costs=0xf`, `session_nbr_fill=1`, ...) | **died** | `STEP diag costs: group 4, IntraEst DMem 0x40D348000 + ME 0x40D190630` then `SError Interrupt on CPU0, code 0x00000000be000000 -- SError` |
+| f39 | f38 with `session_costs=0x7` (group 4 off), nothing else | survived | debugfs saved |
+| f40 | f38 with group 4's address corrected (below), nothing else | survived | debugfs saved; group 4 read and printed |
+
+**f38 got past the colocated scan** (8 ms, `230400 of 462848 bytes
+changed`) and through cost groups 1-3, and died on group 4. The receiver
+has the SError's first line, and then nothing: no register dump, no panic.
+The machine reset itself about 30 s later.
+
+**Group 4 read the wrong address.** docs/58 §1.2 puts IntraEst's MCPU DMem
+at firmware offset `0x1448000`, AP `0x40D448000`, DPE bank offset
+`0x348000`; docs/70 §9.1 lists `0x448000`. The driver read DPE `0x248000`,
+AP `0x40D348000`, which is off by `0x100000` and falls in the gap between
+the host-interface blocks (`0x12c8000`) and the first MCPU (`0x1400000`).
+Nothing is mapped there, and a read of it is an SError. Fixed in
+`ave_session_diag_costs()`, which now reads each of the three words behind
+its own marker.
+
+### What this does to f33-f36
+
+All four had `session_costs=0xf`. F21-F28, which survived the same scan, did
+not have it. Two things hid that:
+
+1. **The Wi‑Fi receiver lost the tail.** Every f33-f36 log ended at the
+   colocated-scan marker. The scan takes 8 ms; groups 1-4 run in the next
+   8 µs. On the wired link f38's lines arrived 8 µs apart, right up to the
+   SError. Over Wi‑Fi the last ~8 ms never left the machine. So "it dies in
+   the scan" was where the Wi‑Fi path stopped, not where the CPU stopped.
+2. **`ave_step_ms` was never a parameter.** The module parameter is
+   `step_ms` (`module_param_named(step_ms, ...)`, `driver/ave_drv.c:56`).
+   f32 and f38 both log `apple_ave: unknown parameter 'ave_step_ms'
+   ignored`. The one-second marker holds that f33's reasoning relies on
+   ("its group-1 marker, held a full second, never appeared") never
+   happened. Use `step_ms=`.
+
+So f33-f36 almost certainly died on the same misaddressed read. For f36
+that is close to direct: f38 is f36's configuration on the same driver
+code and it died there. For f33-f35 (31-bit mask, older binaries) it is
+**inferred**. Nothing was wrong with the colocated scan, the 31-bit mask,
+or Wi‑Fi netconsole in itself, beyond losing the tail. The 32-bit mask
+stays anyway, for docs/71's reasons. f25/f26/f29 were blamed on "the
+diag-costs dump", which fits.
+
+Withdrawn: "the machine dies inside the CPU scan of the colocated buffer"
+(f35), "it correlates with the 31-bit mask" (f35), and "prime suspect:
+netconsole itself" (the previous handover's §5).
+
+### What groups 1-4 say, now that they can be read (f39, f40)
+
+```
+diag QP/lambda QPY 30 nQuant 0x80 +0x1D0 0x1000001 +0x1D4 0x1000000 +0x1D8 0x1000001 | enable 0x40D24A394 0x1
+diag ModeDec cost [0..23]: 0x01000000 x22, then 0x00000000       (seeded 0x01000001)
+diag curMB IntraEst 0x00000000 0x58d75767 | ModeDec 0x93630402 0xe0a42a39 (the control)
+diag IntraEst DMem 0x0 +0x764 0x0 | MESATDSCALING 0x400          (f40)
+diag nbr fill Info[0]: 5120 of 81920 bytes changed; Pixel[0]: 81920 of 81920    (f39)
+```
+
+Against docs/70 §9:
+
+- **Rank 1 (QP/λ not what we asked for): dead again.** QPY 30, nQuant `0x80`
+  is sane and non-zero. The bitstream already said QP 30.
+- **Rank 2 (ModeDec cost ladder):** not zero, and **not the `0x01000001`
+  reset seed either**. It is `0x01000000`, with the last word 0. Something
+  rewrote the seed's low bit. Open, and a better lead than before.
+- **Rank 3 (IntraEst DMem mode word is zero): observed.** `0x40D448000` and
+  `+0x764` both read 0. Control: in the same run and the same bank, MbInput's
+  DMem counters (`0x40D4088A8`, `0x40D409584`) read 3845/3845 and
+  IntraEst's IMem[0] reads its expected `0x10001000`. So post-frame reads of
+  MCPU memory return data, and IntraEst's zero is a real zero. That is the
+  zero docs/70 predicted: the MCPU programs no per-MB QP or λ.
+
+## f40b, f41 (2026-09-24): the DMem zero repeats; the firmware talks, but not about QP
+
+**f40b** repeats f40 unchanged (`step_ms=0`, the real name, spelled out).
+Survived. Every group 1-4 value is identical: DMem `0x40D448000` = 0,
+`+0x764` = 0, QPY 30 / nQuant `0x80`, cost ladder `0x01000000` x22 then 0,
+IntraEst curMB 0. n=2 on all of it.
+
+**f41** is f40 plus `session_dbg=0x20`: wire `0xFCD8` bit 5, docs/70 §9.2's
+"make the firmware state its own parameters". The parameter was removed in
+`f2b3341` along with the f25-f30 deaths, which the dump caused (above), and
+is restored. It had never had a run that survived. This one survived,
+with the same 2709-byte frame.
+
+- Without the bit, every run prints one firmware line (`FW Cfg: prod, tag:
+  AppleAVE2FW-6070.11.1`). With it, **nine more**, all at Start_AVC:
+  ```
+  fw[0]| EncCommParams.encoder_addr_src_nbr_data 00000000ff0a0000
+  fw[0]| Set Transcode: EncCommParams.num_encoder_addr_entropy 4
+  fw[0]| AVC:: encoder_addr_entropy[0..3][0]: fe000000 fe3c0000 fe780000 feb40000
+  fw[0]| AVC:: curr_bitstream_addr_dst:00000000fd600000
+  fw[0]| AVC:: enc_params->entropy_coding_mode 0
+  fw[0]| AVC:: Transcode SourceGo.all 3
+  ```
+  So bit 5 is a real print gate. [C] by A/B, n=1 each side (plus f39/f40/f40b
+  without it).
+- **No `AVC COMMON:: QPY %d nQuant %d` line.** docs/70 §9.2 read no line as
+  "a clean no to the mechanism". The mechanism works (above); what is
+  missing is that particular call site (fw `0x566a8`), which must sit behind
+  another condition. Not worth chasing for QP, which the registers already
+  give. What gates `0x566a8` is [U].
+
+## f42, f43 (2026-09-24): the pipe sees our source. I_PCM codes it exactly
+
+docs/73 (static, the cost-ladder/per-QP provenance) proposed P1 and P2.
+Both run, one variable apart. Both survived.
+
+**A correction first.** Group 2 used to read 24 words from `0x40D26A0AC`,
+which is `0x0AC..0x108`. The "22 x `0x01000000` then 0" recorded for
+f39-f40b was a miscount: it is **23 x `0x01000000` (`0x0AC..0x104`), then
+`0x108` = 0**, one word past the ladder. The whole ladder is what docs/73's
+model predicts, and docs/73 §2.4's "23rd word" question does not exist.
+Group 2 now reads `0x09C..0x104` (27 words).
+
+**f42 = f40b + `session_coded_kb=2048`, with the P1 reads.** Every
+predicted value matched: `0x09C` 0, `0x0A0` 0, **`0x0A4` `0x01000001`**
+(intra candidate enabled), `0x0A8` `0x01000000`, `0x0AC..0x104`
+`0x01000000`, ModeDec DMem `0x40D468000` / `+0x9AC` 0 / 0.
+`frame.h264` is byte-identical to F24's, so the 2 MiB buffer changes
+nothing. The ModeDec/IntraEst configuration holds no fault for an I slice.
+docs/70 ranks 1 and 2 are both closed.
+
+**f43 = f42 + `session_ipcm=1`** (wire `0xFCE4` = 1, "code macro-blocks in
+I slices as I_PCM"), nothing else.
+
+```
+RESULT frame 0: 1389608 coded bytes, MB I 3600 P 0 skip 0 of 3600
+diag QP/lambda QPY 30 nQuant 0x80 +0x1D0 0x1000000 +0x1D4 0x1000000 +0x1D8 0x1000000
+diag IntraEst DMem 0x0 +0x764 0x0 | ... | ModeDec DMem 0x0 +0x9AC 0x0
+```
+
+- **1 389 608 bytes: every macroblock is I_PCM** (3600 x 384 raw samples =
+  1 382 400, plus MB headers). The coded MB type does follow the firmware's
+  intra configuration.
+- The IntraEst per-QP words went to `0x01000000` x3, as docs/73 predicted:
+  the byte arrived. IntraEst DMem `0x40D448000` stayed **0**; docs/73
+  predicted `0x200` (bit 9). That prediction is wrong, or the word is
+  rewritten before we read it. [U]
+- **The decoded picture is our source, exactly.** Y: all 921 600 samples =
+  200 (`session_flat_luma=200`). U: all 128 (our Cb). V: 120..135 in steps
+  of 16 samples, which is exactly our Cr staircase
+  `128 + ((x/32) & 15) - 8`. `check_frame.py`: **MATCH** (its controls
+  pass), the first MATCH this project has produced. NV12's Cb/Cr order is
+  right.
+
+**What this settles.** The source path works end to end: source DMA, the
+pixels, the macroblock pipe and the entropy coder. Every "does the encoder
+see our buffer" question since F18 is answered: yes. The blank frame lives
+in **prediction/residual**. With I_16x16 chosen and a flat 200 source, DC
+prediction for MB 0 is 128, and a residual of +72 at QP 30 must produce
+coefficients. The coefficients come out zero, or are never produced. The
+next candidates are in the transform/quant path (ReconLuma's QP/nQuant at
+`0x40D28A090/94`, quantisation or scaling tables, any "no residual"
+control), not the source path or the mode configuration.
+
+## f44 (2026-09-24): QP 10 changes nothing. It is not quantisation
+
+f42 + `session_qp=10`, one variable. Survived.
+
+```
+diag QP/lambda QPY 10 nQuant 0x10 ...          (f42: QPY 30 nQuant 0x80)
+slice 1: I IDR ... slice_qp 10                  (h264_parse.py)
+RESULT frame 0: 2709 coded bytes, MB I 3600 of 3600
+check_frame.py: decoded 1 distinct value, MISMATCH
+```
+
+The hardware took QP 10 (the registers and the slice header both say so).
+The frame is still 2709 bytes of I_16x16 with no coefficients. A +72 DC
+residual at QP 10 cannot quantise to zero. So the residual reaching the
+transform is zero, or the residual path is not fed or not enabled.
+
+Together with f43 (I_PCM codes the true source): the entropy coder's copy
+of the source is right, and the prediction/residual side behaves as if its
+"original" pixels equalled its prediction, for a flat source and (F18-era) a
+ramp alike. IntraEst's curMB has been 0 in every run while ModeDec's moves.
+docs/74 (static, in progress) traces where the residual stages get original
+pixels, and what IntraEst contributes.
+
+## f45 (2026-09-24): macOS's λ block arrives and changes nothing
+
+docs/72 recovered macOS 13.5's user-space encoder (AppleVideoEncoder.bundle).
+macOS sends **0** at wire `0x68` too, so that lead is closed. The real
+difference is a λ block that macOS fills even in fixed-QP mode and we sent
+as zeros: five `0x400` scales at wire `0xFF98..0xFFA8`, and three per-QP
+tables at `0xFFC0..0x10573`, all generated from `max(1, round(2^((QP-12)/6)))`
+(the driver's generator matches the bundle's 1460 bytes exactly).
+`session_lambda=1` sends it.
+
+f42 + `session_lambda=1`. Survived.
+
+```
+diag ModeDec 0x40D26A09C: 00000080 00000080 01000181 01000000 0100ff80 01000000 ...
+```
+
+- The block arrived: `0x09C` = `0x0A0` = `0x80` = nQuant (was 0 and 0), and
+  `0x0A4` bits 4..15 = 24 (was 0), as docs/72 and docs/73 predicted.
+  `0x0AC` is now `0x0100ff80`.
+- **`frame.h264` is byte-identical to F24's.** λ = 0 was a real divergence
+  from macOS, but it is not the blank frame. docs/72 said as much in
+  advance: λ steers mode choice, and QP/nQuant were already right.
