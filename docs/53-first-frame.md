@@ -3933,3 +3933,30 @@ source reader still stops at the same place (currMbRow 3, last src event
 y 1 x 4, MbInput produced 65539). So a second inter-only input is missing.
 Bisect, one per boot: `session_hevc_tmvp=0`, then `session_hevc_wpp=0`,
 then `session_dpb=3`.
+
+## f99 (2026-09-24): VMAX + FAB0, the full macOS vote
+
+`pmp_vote=0x2000000300000003`, as f98 otherwise. Read-back equal, no
+SError; the value that took f93 down is fine through a non-posted mapping.
+DVFS-STATE 0 `0x2233310000222222` (f98: `0x2033310000000002`): the fabric
+fields moved too. PSNR identical.
+
+| size | f98 VMAX | **f99 VMAX + FAB0** |
+|---|---|---|
+| 1280x720 | 3.47 ms | **3.07 ms** |
+| 1920x1088 | 6.23 ms | **5.81 / 5.85 ms** |
+| 3840x2160 | 21.6 ms | **21.04 / 21.02 ms** |
+
+FAB0 is worth 12% at 720p but 3% at 4K. Against the pre-PMP boot: 1080p
+2.4x, 4K 2.6x (~395 Mpixel/s).
+
+## h3c-h3e (2026-09-24): HEVC P-frame bisect: none of the three
+
+One boot each, h3b's parameters plus one change:
+- h3c `session_hevc_tmvp=0`
+- h3d `session_hevc_wpp=0` (frame 0 1186 bytes, so it was applied)
+- h3e `session_dpb=3`
+
+Every one: frame 0 fine, frame 1 `PIPE HANG: 2, 2`, source reader at
+currMbRow 3 (last src event y 1 x 4), exactly as h3b. TMVP, WPP and the DPB
+depth are not the missing inter input.
