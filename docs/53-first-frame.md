@@ -3960,3 +3960,28 @@ One boot each, h3b's parameters plus one change:
 Every one: frame 0 fine, frame 1 `PIPE HANG: 2, 2`, source reader at
 currMbRow 3 (last src event y 1 x 4), exactly as h3b. TMVP, WPP and the DPB
 depth are not the missing inter input.
+
+## h3f, h3g (2026-09-24): multi-frame intra works; P never gets reference readers
+
+`d6d0934` (reader dump, docs/77 §17). **h3f** (`session_dpb=1`, so every
+frame is IDR): all four frames encode (1207/1217/1225/1234 bytes, NAL 20)
+and decode at Y 50.96/50.92/50.88/50.91 dB. Slot rotation, the SliceHeader
+surfaces, TranscodedData reuse and the second coded slot all work. The hang
+is inter-only.
+
+**h3g** (h3b's parameters): after P frame 1 the **low-res result readers
+were programmed** with our surfaces (`0x40D120F80`+0x40·i word 3 =
+`fcb40000`, `fcb4f400`, `fcb5e800`, `fcb6dc00`; 0 after frame 0). The **luma
+and chroma reference readers (`0x40D128000`/`0x40D128200` + 0x40·i) are
+word-for-word the same as after frame 0**: `84037f04 0 0 44072014 0 5 …`
+and `80037f70 0 0 04072084 0 5 …`, with no address anywhere. The firmware
+did not program the reference pixel readers for the P frame, and the pipe
+waits at the first CTU.
+
+## f100 (2026-09-24): PMP options without a PMP report
+
+`6700edd`, PMP boot DT, `ave-load.sh pmp_report=1
+pmp_vote=0x2000000300000003` **without** `OVERLAY_ARGS=pmp_venc=1`, so
+report@10 stays disabled, as on a DT without the PMP. Probe warned
+("report@10 is disabled … encoding at the boot clock"; "pmp_vote ignored")
+and carried on. 1080p encodes at 18.5 ms (unvoted), with the same PSNR.
