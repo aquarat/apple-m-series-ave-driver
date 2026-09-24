@@ -3696,6 +3696,13 @@ PSNR unchanged (44.3 / 44.7 / 44.7 dB). R1b now reads **PMP-STATUS = 1**,
 **PS-ACK = PS-REQ** (`0x60003000`, was 0) and non-zero DVFS-STATE words
 (all 0 in f81); AVE0 DVFS is still 0, since nothing votes for it.
 
+**Confound, found after the run.** The overlay's literal phandles were
+taken from the stock DT, and the flagged DT renumbers them. ave0 was
+attached to venc_sys plus afnc2_lw0, disp0_fe, dispdfr_fe and dispdfr_be
+instead of venc_pipe5, venc_me0, venc_pipe4 and afnc4_ioa. The VENC chain
+was still powered, through the driver's `venc_me1` holder and its parents.
+The overlay module now resolves the list by label (f90).
+
 **Reading.** f81's control case is now the live one. With the PMP running
 and no request from the encoder, the encoder is *slower*. So the PMP does
 govern something on the encoder's clock or rail path, and left alone it
@@ -3703,3 +3710,19 @@ settles lower than whatever the boot had left behind. That is the direction
 docs/75's model predicts for an unvoted consumer. Next, one step each:
 R3 (`pmp-venc-sys` reports VENC_SYS power to the PMP), then R4 (the DVFS
 vote).
+
+## f90 (2026-09-24): f89 again, with the right power domains
+
+Same boot DT and module as f89, overlay module from `1b02c90`: it rewrote
+power-domains[1..4] to venc_pipe5 `0xc7`, venc_me0 `0xc9`, venc_pipe4 `0xc8`
+and afnc4_ioa `0xca`. genpd confirms venc_sys, pipe5, me0, pipe4, afnc4_ioa
+plus the me1 holder, the stock-era set. `tools/v4l2-test.sh 60 ctl`:
+
+| size | f73 (no PMP) | f89 (wrong domains) | f90 |
+|---|---|---|---|
+| 1280x720 | 8.07 ms (f88) | 8.97 ms | 8.97 ms |
+| 1920x1088 | 14.1 ms | 17.35 ms | 17.37 / 17.38 / 17.38 ms |
+| 3840x2160 | 53.9 ms | 63.8 ms | 63.82 / 63.87 / 63.93 ms |
+
+**Reading.** The domains made no difference. The slowdown is the running
+PMP's. R1b as in f89 (PMP-STATUS 1, PS-ACK `0x60003000`, AVE0 DVFS 0).
