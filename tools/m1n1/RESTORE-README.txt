@@ -1,3 +1,21 @@
+PMP experiment (2026-09-24, docs/78) - try this first
+======================================================
+
+boot.bin now carries a t6001-j314c device tree built with APPLE_USE_PMP, so
+m1n1 starts the PMP coprocessor. To undo just that and keep the AVE patch,
+run restore-pre-pmp.sh in place of restore-m1n1.sh in step 3 below:
+
+     from Linux:  sudo sh /boot/efi/m1n1/restore-pre-pmp.sh
+     macOS:       sudo sh "/Volumes/EFI - FEDRA/m1n1/restore-pre-pmp.sh"
+     recoveryOS:  sh "/Volumes/EFI - FEDRA/m1n1/restore-pre-pmp.sh"
+
+It verifies boot.bin.pre-pmp (sha256 73577b99...49fd), keeps the current
+boot.bin as boot.bin.failed-pmp and puts the pre-PMP stage 2 back.
+Manual equivalent:  cp boot.bin.pre-pmp boot.bin
+If that fails too, carry on below: restore-m1n1.sh goes back further, to
+stock m1n1 without the AVE patch.
+
+
 If Fedora/Asahi Linux no longer boots after the m1n1 (AVE DAPF) experiments
 ===========================================================================
 

@@ -3673,3 +3673,33 @@ and the firmware's per-frame RC chatter are debug-only while a V4L2 stream
 runs (asserts and failures still print). f88: **26 kernel log lines per
 300-frame session**, down from ~1200. Output unchanged (ffmpeg `-b:v 2M` ->
 1.86 Mbit/s, 39.8 dB, High), compliance 54/54.
+
+## f89 (2026-09-24): the PMP running, with no vote: the encoder gets slower
+
+The operator approved booting with the PMP (docs/78): the stock
+`t6001-j314c` device tree rebuilt with `-DAPPLE_USE_PMP`, installed in
+`boot.bin` next to the unchanged DAPF-patched m1n1. m1n1 enabled
+`pmp@28e700000` with 67 `apple,tunable-*` properties, `apple_pmp` bound and
+the firmware logged "PMP started". Display, camera and the unchanged
+driver: as before (docs/78 §3).
+
+Same module as f88, plain `tools/ave-load.sh perf_dump=1`, `tools/v4l2-test.sh
+60 ctl` (fixed QP), all in one load; 1080p and 4K three times each, 720p once:
+
+| size | f73 (no PMP) | f89 (PMP, no vote) | change |
+|---|---|---|---|
+| 1280x720 | 8.07 ms (f88) | 8.97 ms | +11% |
+| 1920x1088 | 14.1 ms | 17.38 / 17.34 / 17.35 ms | **+23%** |
+| 3840x2160 | 53.9 ms | 63.82 / 63.79 / 63.88 ms | **+18%** |
+
+PSNR unchanged (44.3 / 44.7 / 44.7 dB). R1b now reads **PMP-STATUS = 1**,
+**PS-ACK = PS-REQ** (`0x60003000`, was 0) and non-zero DVFS-STATE words
+(all 0 in f81); AVE0 DVFS is still 0, since nothing votes for it.
+
+**Reading.** f81's control case is now the live one. With the PMP running
+and no request from the encoder, the encoder is *slower*. So the PMP does
+govern something on the encoder's clock or rail path, and left alone it
+settles lower than whatever the boot had left behind. That is the direction
+docs/75's model predicts for an unvoted consumer. Next, one step each:
+R3 (`pmp-venc-sys` reports VENC_SYS power to the PMP), then R4 (the DVFS
+vote).
