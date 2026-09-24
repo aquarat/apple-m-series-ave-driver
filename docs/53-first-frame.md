@@ -3875,3 +3875,14 @@ PIPE HANG: 2, 2`, `ENC: StartCount 2-2-2-1, Idle 1-1-0-1`, no assert.
 Process timed out. The colocated slot was not written by frame 0 (0 of
 61440 bytes changed), and LowResResults are still zero ("required from the
 first P").
+
+## f95 (2026-09-24): R4-np0, the null vote through a non-posted mapping
+
+Operator-approved. `5d8433c` (vote mapped with `ioremap_np`), PMP boot DT,
+`OVERLAY_ARGS=pmp_venc=1 ave-load.sh pmp_report=1
+pmp_vote=0x2000000000000000 perf_dump=1`. **No SError.** Read-back
+`0x2000000000000000` equals the value written, and the entry's +8 went from
+0 (every earlier dump) to `0x000009df8f71d000`, presumably the PMP's update
+stamp (bit 0 clear, unlike docs/75 §11's guess). The machine stayed up.
+1080p 17.38 ms and 4K 63.91 ms, unchanged, as a null vote should be. The
+PTD write path works; f93/f94 were our mapping.
