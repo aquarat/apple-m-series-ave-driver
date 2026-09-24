@@ -1521,6 +1521,23 @@ struct ave_start_hevc_layout {
 	u32	slice_map_height;
 	u32	entropy_rows;		/* rows setPipe uses (ctrl+3768) */
 	u32	buf_align;		/* SrcNbr/entropy/coded alignment */
+	/*
+	 * TranscodedData: the two transcoders' output buffers (docs/77 §14).
+	 * HEVC IEP copies VP+0x548/0x550 to ctrl+0x2090/0x2098 and the u32
+	 * VP+0x558 to ctrl+0x20A0 (fw 0x84548-0x8455c; x20 = VP);
+	 * ProcessTranscodeStart copies the pair to tmp_bitstream_addr_dst[0..1]
+	 * = ctrl+0x2C508 (0x74d88-0x74dac) and runs SetTranscode(0) and, unless
+	 * PICMGMT+0xF65 is set, SetTranscode(1) (0x74dd0-0x74de4); SetTranscode
+	 * asserts tmp_bitstream_addr_dst[xc] != 0 and & 127 == 0 (:7605/:7606,
+	 * 0x75ce8-0x75d1c). The kext publishes one Start-time pair and ONE size
+	 * (AVE_CHM_SetFwBuf 0xfffffe0008eaf250-0xeaf2a8), each surface
+	 * align4K(CodedData / 2) (0xfffffe0008ea5b44), count 2 on DevType 12
+	 * when client+0xE0E2C == 0 (0xfffffe0008ea5b18).
+	 */
+	u32	transcoded_set;		/* u64[transcoded_max] */
+	u32	transcoded_stride;
+	u32	transcoded_max;
+	u32	transcoded_size;	/* u32, one for all */
 };
 
 /*
@@ -1629,6 +1646,18 @@ struct ave_process_hevc_layout {
 	u32	sh_hdr_slots;		/* u64[hdr_slots] SliceHeader IOVAs */
 	u32	hdr_slots;		/* 256 */
 	u32	hdr_slot_bytes;		/* 0x400 per slot */
+	/*
+	 * PICMGMT-relative u8: non-zero = ONE transcoder, writing straight into
+	 * the coded buffer (SetTranscode's curr_bitstream_addr_dst arm, :7597);
+	 * zero = two, into the TranscodedData pair, merged into the coded
+	 * buffer by the firmware afterwards (0x7e4f8-0x7e61c). ProcessTranscode-
+	 * Start copies it to ctrl+0x2418E (ldrb [x23,#3941] 0x74f64 / strb
+	 * 0x74f70); SetTranscode reads it back as [x22,#426] (0x75c88). The kext
+	 * writes (client+0xE0E2C > 0) there for every frame (strb w8,[x20,#3941]
+	 * 0xfffffe0008eaaf14), the same field that zeroes the TranscodedData
+	 * count - so the two go together.
+	 */
+	u32	pic_single_xc;
 };
 
 struct ave_cmd_abi {
@@ -2057,6 +2086,10 @@ const struct ave_cmd_abi ave_cmd_abi_13_5 = {
 		.slice_map_height = 0xfdb4,	/* 0x85d6c, slice mode only */
 		.entropy_rows	= 2,		/* ctrl+3768, fw 0x835bc-0x83600 */
 		.buf_align	= 128,		/* :14062/:7447/:7597 (docs/77 §7) */
+		.transcoded_set	   = 0x5a8,	/* VP+0x548, fw ldr [x20,#1352] 0x84548 */
+		.transcoded_stride = 0x08,	/* VP+0x550, 0x84550 */
+		.transcoded_max	   = 2,		/* tmp_bitstream_addr_dst[0..1] */
+		.transcoded_size   = 0x5b8,	/* VP+0x558 u32, 0x84558 */
 	},
 	.hps = {
 		/* PTL writer 0x1a870: [x] +0 u(2), ldrb +4, ldr +8 u(5),
@@ -2204,6 +2237,7 @@ const struct ave_cmd_abi ave_cmd_abi_13_5 = {
 		.sh_hdr_slots	= 0x568,	/* fw ldr x26,[x9,#1384] 0x7f1bc */
 		.hdr_slots	= 256,
 		.hdr_slot_bytes	= 0x400,	/* kext HEVC_Slice::UpdateBuffer 0xf4e318 */
+		.pic_single_xc	= 0xf65,	/* fw 0x74f64; kext 0xfffffe0008eaaf14 */
 	},
 };
 

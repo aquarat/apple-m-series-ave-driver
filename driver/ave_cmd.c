@@ -845,6 +845,20 @@ int ave_cmd_build_start_hevc(const struct ave_cmd_abi *abi, u8 *buf,
 	for (i = 0; i < s->n_coded; i++)
 		if (s->coded[i].addr & (align - 1))
 			return -EINVAL;
+	/*
+	 * TranscodedData: all or none (none only for single-transcoder frames),
+	 * each non-zero and 128-aligned (:7605/:7606), with a size.
+	 */
+	if (h->n_transcoded) {
+		if (h->n_transcoded != hl->transcoded_max ||
+		    h->n_transcoded > ARRAY_SIZE(h->transcoded) ||
+		    !hl->transcoded_set || !hl->transcoded_size ||
+		    !h->transcoded_size)
+			return -EINVAL;
+		for (i = 0; i < h->n_transcoded; i++)
+			if (!h->transcoded[i] || (h->transcoded[i] & (align - 1)))
+				return -EINVAL;
+	}
 
 	ret = ave_cmd_begin(abi, AVE_OP_START_HEVC, buf, len, ctx, 0, &w);
 	if (ret < 0)
@@ -866,6 +880,11 @@ int ave_cmd_build_start_hevc(const struct ave_cmd_abi *abi, u8 *buf,
 	wr32(&w, hl->input_bitdepth, 8);
 	wr32(&w, hl->max_num_ref_frames, h->max_num_ref_frames);
 	wr32(&w, hl->slice_map_height, ch);
+	for (i = 0; i < h->n_transcoded; i++)
+		wr64(&w, hl->transcoded_set + i * hl->transcoded_stride,
+		     h->transcoded[i]);
+	if (h->n_transcoded)
+		wr32(&w, hl->transcoded_size, h->transcoded_size);
 
 	/* ---- VPS (video_header_parameter_set_rbsp 0x1d294) ---- */
 	vps = hl->vps_block;
@@ -1165,6 +1184,8 @@ int ave_cmd_build_process_hevc(const struct ave_cmd_abi *abi, u8 *buf,
 	hl = &abi->start_hevc;
 	if (hl->vps_block == AVE_OFF_NONE || !hp->slice || !hp->picmgmt ||
 	    !hp->st_rps || !hp->hdr_slots || !hp->hdr_slot_bytes ||
+	    !hp->pic_single_xc ||
+	    hp->pic_single_xc >= abi->process_avc.picmgmt_size ||
 	    hp->sh_hdr_slots + 8 * hp->hdr_slots > hp->slice_fw_copy ||
 	    hp->slice_fw_copy > hp->slice_size)
 		return -EINVAL;
@@ -1211,6 +1232,10 @@ int ave_cmd_build_process_hevc(const struct ave_cmd_abi *abi, u8 *buf,
 	for (i = 0; i < hp->hdr_slots; i++)
 		wr64(&w, sh + hp->sh_hdr_slots + 8 * i,
 		     hf->hdr_slot_base + (u64)i * hp->hdr_slot_bytes);
+
+	/* One transcoder into the coded buffer, or two into TranscodedData. */
+	if (hf->single_xc)
+		wr8(&w, hp->picmgmt + hp->pic_single_xc, 1);
 
 	/* P: the SPS short-term set 0 (docs/77 §3.2); I/IDR carry none. */
 	if (hf->pic.frame_type == AVE_FRAME_TYPE_P) {

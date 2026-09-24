@@ -747,12 +747,23 @@ static void test_hevc(void)
 	h.log2_max_poc_lsb_minus4 = 4;
 	h.sao = h.wpp = h.sps_tmvp = true;
 	h.n_st_rps = 1;
+	/* session_hevc_xc=2 (default): two TranscodedData surfaces of
+	 * align4K(coded / 2), docs/77 §14 */
+	h.transcoded[0] = 0xc0000000ull;
+	h.transcoded[1] = 0xc0200000ull;
+	h.n_transcoded = 2;
+	h.transcoded_size = 0xa9000;	/* 0x152000 / 2 */
 	c.count = 3;
 	ret = ave_cmd_build_start_hevc(abi, hbuf, sizeof(hbuf), &c, &h);
 	CHECK(ret == (int)ave_cmd_size(abi, AVE_OP_START_HEVC),
 	      "start_hevc ret %d", ret);
 	CHECK(get_unaligned_le16(hbuf) == 5, "HEVC_INIT id %u", get_unaligned_le16(hbuf));
 	CHECK(get_unaligned_le32(hbuf + abi->hdr.slot) == 6, "HEVC_INIT slot");
+	CHECK(get_unaligned_le64(hbuf + abi->start_hevc.transcoded_set) == 0xc0000000ull &&
+	      get_unaligned_le64(hbuf + abi->start_hevc.transcoded_set +
+				 abi->start_hevc.transcoded_stride) == 0xc0200000ull &&
+	      get_unaligned_le32(hbuf + abi->start_hevc.transcoded_size) == 0xa9000,
+	      "TranscodedData pair and size not published");
 	make_reply(abi, AVE_OP_START_HEVC, SESS_CLIENT_ID, abi->reply.status_ok, 0, reply);
 	CHECK(ave_cmd_check_reply(abi, AVE_OP_START_HEVC, reply,
 				  abi->cmd[AVE_OP_START_HEVC].reply_size,
@@ -801,7 +812,19 @@ static void test_hevc(void)
 		      "frame %u: POC lsb", n);
 		CHECK(hbuf[abi->process_hevc.st_rps] == (n ? 1 : 0),
 		      "frame %u: slice RPS flag", n);
+		CHECK(hbuf[abi->process_hevc.picmgmt + abi->process_hevc.pic_single_xc] == 0,
+		      "frame %u: two transcoders, PICMGMT+0xF65 must stay 0", n);
 	}
+	/* session_hevc_xc=1: PICMGMT+0xF65 = 1, and HEVC_INIT without the pair. */
+	f.single_xc = true;
+	ret = ave_cmd_build_process_hevc(abi, hbuf, sizeof(hbuf), &c,
+					 SESS_PROCESS_SLOT, &f);
+	CHECK(ret == 0x6838 &&
+	      hbuf[abi->process_hevc.picmgmt + abi->process_hevc.pic_single_xc] == 1,
+	      "single transcoder: PICMGMT+0xF65 = 1 (ret %d)", ret);
+	h.n_transcoded = 0;
+	ret = ave_cmd_build_start_hevc(abi, hbuf, sizeof(hbuf), &c, &h);
+	CHECK(ret == 0x32dc8, "HEVC_INIT with no TranscodedData (ret %d)", ret);
 	make_reply(abi, AVE_OP_PROCESS_HEVC, SESS_CLIENT_ID, abi->reply.status_ok, 0, reply);
 	CHECK(ave_cmd_check_reply(abi, AVE_OP_PROCESS_HEVC, reply,
 				  abi->cmd[AVE_OP_PROCESS_HEVC].reply_size,
