@@ -149,6 +149,24 @@ MODULE_PARM_DESC(pmp_report,
 #define AVE_PMP_REPORT_NODE	"/soc/pmp_report@28e3c0000/report@10"
 
 /*
+ * docs/75 R4: the VENC DVFS vote. macOS's AVE_DPM gates 457/600/459/602 are
+ * virtual devices whose only effect is this 64-bit write into the PMP's
+ * dashboard: SOC level | FAB0 level << 32 | 1 << 61, ave0's SOC-DEV-DVFS
+ * entry 273 (tools/pmp_ptd_map.py, controls C1-C4). VMax + FAB0 VMax =
+ * 0x2000000300000003, VNOM = 0x2000000000000001. Written after the R3
+ * report and before Config, read back, and released (0x2000000000000000)
+ * before the report and VENC_SYS go down. 0 = no vote (default).
+ */
+static unsigned long pmp_vote;
+module_param(pmp_vote, ulong, 0444);
+MODULE_PARM_DESC(pmp_vote,
+		 "VENC DVFS vote written to the PMP dashboard, e.g. 0x2000000300000003 = VMax + FAB0 VMax (needs pmp_report=1; docs/75 R4). 0 = none");
+#define AVE_PTD_AVE0_DVFS_WR	0x28e3d0888ULL
+#define AVE_PTD_AVE0_DVFS_RD	0x28e3c1110ULL
+#define AVE_PTD_DVFS_VALID	BIT_ULL(61)
+#define AVE_PTD_DVFS_MASK	(AVE_PTD_DVFS_VALID | GENMASK_ULL(33, 32) | GENMASK_ULL(1, 0))
+
+/*
  * docs/58 5.1 / 7.1: macOS programs AVE_DPE (0x40D1DC000) on every power-on -
  * AVE_HwC::PowerOn -> ResetDPE -> AVE_DPE::Reset applies the Castor_6000 CAT and
  * CAC Default tables, then CAC 8-bit and AVE_DPE::Enable. The firmware never
@@ -730,6 +748,54 @@ static int ave_pmp_report_on(struct ave_device *ave)
 	return 0;
 }
 
+static int ave_pmp_vote(struct ave_device *ave, u64 val)
+{
+	void __iomem *wr, *rd;
+	u64 back, st;
+
+	wr = ioremap(AVE_PTD_AVE0_DVFS_WR, 8);
+	rd = ioremap(AVE_PTD_AVE0_DVFS_RD, 16);
+	if (!wr || !rd) {
+		if (wr)
+			iounmap(wr);
+		if (rd)
+			iounmap(rd);
+		return -ENOMEM;
+	}
+	writeq(val, wr);
+	back = readq(rd);
+	st = readq(rd + 8);
+	iounmap(wr);
+	iounmap(rd);
+	dev_info(ave->dev, "pmp: AVE0 DVFS vote %#018llx, read back %#018llx (+8 %#018llx)%s\n",
+		 val, back, st, back == val ? "" : " - MISMATCH");
+	return 0;
+}
+
+static int ave_pmp_vote_on(struct ave_device *ave)
+{
+	u64 v = pmp_vote;
+
+	if (!v || ave->pmp_voted)
+		return 0;
+	if (!ave->pmp_dev)
+		return dev_err_probe(ave->dev, -EINVAL,
+				     "pmp: pmp_vote needs pmp_report=1 (R3 before R4)\n");
+	if (!(v & AVE_PTD_DVFS_VALID) || (v & ~AVE_PTD_DVFS_MASK))
+		return dev_err_probe(ave->dev, -EINVAL,
+				     "pmp: pmp_vote %#llx is not 1<<61 | FAB0(0-3)<<32 | SOC(0-3)\n", v);
+	ave->pmp_voted = !ave_pmp_vote(ave, v);
+	return ave->pmp_voted ? 0 : -ENOMEM;
+}
+
+static void ave_pmp_vote_off(struct ave_device *ave)
+{
+	if (!ave->pmp_voted)
+		return;
+	ave->pmp_voted = false;
+	ave_pmp_vote(ave, AVE_PTD_DVFS_VALID);
+}
+
 static void ave_pmp_report_off(struct ave_device *ave)
 {
 	struct device *vdev = ave->pmp_dev;
@@ -795,6 +861,8 @@ static void ave_power_off(struct ave_device *ave, const char *why)
 				 pend);
 		}
 	}
+	/* Vote, then report, then VENC_SYS: the reverse of power-up (docs/75 §6) */
+	ave_pmp_vote_off(ave);
 	/* Clears PS-REQ bit 16 while VENC_SYS is still up (macOS's order) */
 	ave_pmp_report_off(ave);
 	/* Child of venc_me0, and the last thing holding a reference. */
@@ -1321,6 +1389,9 @@ static int ave_probe_stages(struct platform_device *pdev)
 		if (ret)
 			return ret;
 		ret = ave_pmp_report_on(ave);
+		if (ret)
+			return ret;
+		ret = ave_pmp_vote_on(ave);
 		if (ret)
 			return ret;
 

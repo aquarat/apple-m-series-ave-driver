@@ -3734,3 +3734,16 @@ shared helpers), same PMP boot DT and overlay as f90. `v4l2-test.sh 60 ctl`:
 720p 9.07 ms, 1080p 17.14 / 17.39 ms, 4K 63.91 / 63.72 ms. PSNR identical
 to f89/f90 to six decimals (44.255294 / 44.686854 / 44.701624). ffmpeg
 `-b:v 2M` 300 frames: 1.86 Mbit/s, High, as f88. **No AVC regression.**
+
+## f92 (2026-09-24): R3, VENC_SYS reported to the PMP
+
+`6ad0862`, PMP boot DT. `OVERLAY_ARGS=pmp_venc=1 tools/ave-load.sh
+pmp_report=1 perf_dump=1`. The overlay enabled `report@10`, the entry
+probed as genpd `pmp-venc-sys` (a subdomain of venc_sys), and the driver's
+holder powered it after venc_me1: **PS-REQ `0x60003000` → `0x60013000` (bit
+16, AVE0), and PS-ACK followed** within the entry's 50 ms poll. AVE0 DVFS
+stays 0, and DVFS-STATE is unchanged.
+
+Timing, as docs/75 predicted: unchanged. 720p 8.98 ms, 1080p 17.37 /
+17.37 ms, 4K 63.87 / 63.96 ms, PSNR identical. The report alone raises
+nothing; the vote (R4) is next.
