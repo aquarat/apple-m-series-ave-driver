@@ -3921,3 +3921,15 @@ VMAX is 2.3x the pre-PMP boot at 1080p (~160 fps) and 2.5x at 4K (~46 fps,
 ~380 Mpixel/s against the ~500 rating). docs/75 predicted ~5 ms / ~17 ms if
 the clock were the whole story. The FAB0 half (`0x2000000300000003`) is not
 run yet.
+
+## h3b (2026-09-24): IdrPeriod 30: the inter setup now happens, and still hangs
+
+`27d485c` (ui32IdrPeriod 30 for P sessions, docs/77 §16), h3's parameters.
+Frame 0 as h2c. Frame 1 still ends in `PIPE HANG: 2, 2`, same StartCount/Idle.
+But the IdrPeriod change took effect as predicted: **the recon writer now
+targets DPB slot 1** (`+0x24c 0xfcd6d000`; h3 wrote slot 0 again), and **the
+colocated buffer was written** (29440 of 61440 bytes changed; h3: 0). The
+source reader still stops at the same place (currMbRow 3, last src event
+y 1 x 4, MbInput produced 65539). So a second inter-only input is missing.
+Bisect, one per boot: `session_hevc_tmvp=0`, then `session_hevc_wpp=0`,
+then `session_dpb=3`.
