@@ -417,6 +417,7 @@ static void test_start_13_5(void)
 	E32(buf, 0xffbc, 28, "QP B (fw 0x5cec8)");
 	/* SPS params, docs/46 §9.2 and the SPS writer 0x194e4.. */
 	E32(buf, 0x105b4, 100, "profile_idc raw (u(8) 0x194e4)");
+	E32(buf, 0xfcec, 2, "mode_8x8_transform = 2 for High (fw 0x5cf50, docs/73 §3)");
 	E32(buf, 0x105d0, 40, "level_idc raw (u(8) 0x19564)");
 	E32(buf, 0x105d4, 0, "seq_parameter_set_id (0x19570)");
 	E32(buf, 0x105d8, 1, "chroma_format_idc (0x195ac)");

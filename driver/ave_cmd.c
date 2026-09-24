@@ -495,6 +495,9 @@ int ave_cmd_build_start_avc(const struct ave_cmd_abi *abi, u8 *buf, size_t len,
 		wr8(&w, l->ipcm_islice, s->ipcm_islice);
 	if (s->skip_mode)
 		wr16(&w, l->skip_mode, s->skip_mode);
+	/* High: the 8x8 transform, matching PPS transform_8x8_mode_flag. */
+	if (s->profile_idc >= 100)
+		wr32_opt(&w, l->mode_8x8, 2);
 	if (s->lambda_block) {
 		/*
 		 * max(1, round(2^((QP - 12) / 6))) for QP 0..51: the sqrt-lambda

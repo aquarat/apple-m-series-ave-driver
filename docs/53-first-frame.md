@@ -3512,3 +3512,34 @@ never asks it to.
 modules, the overlay (variant 4) and the driver with no parameters, and
 prints the node. After a plain reboot, `ffmpeg -f lavfi -i testsrc2=... -pix_fmt nv12 -c:v h264_v4l2m2m out.mp4`
 wrote 90 frames.
+
+## f73-f76 (2026-09-24): the speed ceiling, and Main/High with CABAC
+
+**Where the time goes.** Timing in `ave_enc_encode()`: at 1080p the Process
+round trip is 14.1 ms of a 14.4 ms frame; at 4K it is 53.9 of 54.6 ms. The
+driver's own overhead is under 1 ms, so pipelining submissions would gain
+little. Both sizes come to ~150 Mpixel/s, a constant pixel rate, i.e. the
+pipe itself. Apple rates the block for 4K60 (~500 Mpixel/s). The ADT's pmgr
+`devices` show why this might be: `VENC_SYS` carries `flags.perf`, perf
+block 9 index 36. ave0's "gates" 456-459/600/602 are not power domains at
+all but pseudo-devices `VENC-SOC-VNOM/VMID2/VMAX`, `VENC-FAB0-VMAX`,
+`VENC-MEM-FAST`: SoC voltage, fabric and memory performance requests,
+tied to `VENC_SYS`. Linux's `apple-pmgr-pwrstate` handles power states only.
+**f73** (read-only, `perf_dump=1`): perf block 9 (`0x28e5d8000`) reads zero
+everywhere, `VENC_SYS`'s entry included, apart from one word at `+0x004`.
+docs/75 (static, in progress) is working out what macOS writes there.
+
+**Main and High** (`session_profile`, `session_cabac`; the builder already
+supported both). CABAC also needs the host to append the firmware's
+`cabac_zero_word`s (`00 00 03` each, docs/67); the stream now does.
+- **f74**, Main + CABAC, 8 ramp frames: IDR 4351 -> **1370 B**, P frames
+  ~2.5 -> 1.3-1.6 KB, PSNR identical to CAVLC frame for frame (same
+  quantiser). ffprobe: Main.
+- **f75**, High + CABAC: wire `0xFCEC` (`mode_8x8_transform`) = 2, macOS's
+  value for High (docs/72 §4.2, docs/73 §3). ReconLuma `0x40D28A088` reads
+  **2**, as docs/73 P4 predicted. ffprobe: High. 49.1-49.9 dB.
+- **f76**, V4L2: `H264_PROFILE` (Baseline/Constrained Baseline/Main/High)
+  and `H264_ENTROPY_MODE`, **default High + CABAC**. `testsrc2` 720p
+  725 KB (CAVLC 819 KB), 1080p crop and 4K (level 5.1) at 44.3-44.4 dB.
+  ffmpeg `-profile:v 66` gives Baseline byte-identical to f67, 77 gives
+  Main (761 KB), the default High (763 KB). v4l2-compliance 54/54.
