@@ -26,15 +26,15 @@ sudo tools/ave-load.sh                  # prints /dev/videoN; once per boot
 ffmpeg -i input.mp4 -pix_fmt nv12 -c:v h264_v4l2m2m out.mp4
 ```
 
-It is a stateful mem2mem H.264 encoder: NV12 in, Baseline H.264 out, P
+It is a stateful mem2mem H.264 encoder: NV12 in, H.264 out (High +
+CABAC by default; Main and Baseline selectable), P
 frames and periodic IDRs (ffmpeg's `-g`), fixed QP (default 30; the
 `H264_I_FRAME_QP` control). Sizes from 192x96 to 4096x4096, width a
 multiple of 64 and height a multiple of 16, or any height via an OUTPUT
 crop (1920x1080 is a 1920x1088 buffer with a crop). `v4l2-compliance -s`
 passes 54/54. `testsrc2` encodes at 43-45 dB PSNR at 480p, 720p, 1080p
 and 4K. Throughput with one frame in flight: ~58 fps at 1080p, ~17 fps at
-4K. Not yet: rate control (bitrate is accepted and ignored), CABAC/Main/High,
-B frames, and reloading the module without a reboot.
+4K. Not yet: rate control (bitrate is accepted and ignored), B frames, and reloading the module without a reboot.
 
 **It encodes correctly (2026-09-24, f48):** a 1280x720 ramp comes back at
 48.6 dB PSNR against the source. The long-standing blank frame (every sample

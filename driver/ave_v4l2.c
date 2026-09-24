@@ -70,6 +70,8 @@ struct ave_ctx {
 	/* The application's colorimetry: set on OUTPUT, echoed on CAPTURE. */
 	u32			colorspace, ycbcr_enc, quantization, xfer_func;
 	u32			qp;
+	u32			profile_idc;	/* 66, 77 or 100 */
+	bool			cabac;
 	u32			gop;
 	bool			force_key;
 	u32			frame_n;	/* frames sent this stream */
@@ -365,6 +367,14 @@ static int ave_s_ctrl(struct v4l2_ctrl *c)
 	case V4L2_CID_MPEG_VIDEO_GOP_SIZE:
 		ctx->gop = c->val;
 		break;
+	case V4L2_CID_MPEG_VIDEO_H264_PROFILE:
+		ctx->profile_idc =
+			c->val == V4L2_MPEG_VIDEO_H264_PROFILE_HIGH ? 100 :
+			c->val == V4L2_MPEG_VIDEO_H264_PROFILE_MAIN ? 77 : 66;
+		break;
+	case V4L2_CID_MPEG_VIDEO_H264_ENTROPY_MODE:
+		ctx->cabac = c->val == V4L2_MPEG_VIDEO_H264_ENTROPY_MODE_CABAC;
+		break;
 	case V4L2_CID_MPEG_VIDEO_FORCE_KEY_FRAME:
 		ctx->force_key = true;
 		break;
@@ -388,7 +398,7 @@ static int ave_init_ctrls(struct ave_ctx *ctx)
 	struct v4l2_ctrl_handler *h = &ctx->hdl;
 	const struct v4l2_ctrl_ops *o = &ave_ctrl_ops;
 
-	v4l2_ctrl_handler_init(h, 12);
+	v4l2_ctrl_handler_init(h, 14);
 	/* ffmpeg sets 0 and reads it back; non-zero fails its open (§3.1). */
 	v4l2_ctrl_new_std(h, o, V4L2_CID_MPEG_VIDEO_B_FRAMES, 0, 0, 1, 0);
 	v4l2_ctrl_new_std(h, o, V4L2_CID_MPEG_VIDEO_GOP_SIZE, 0, 65535, 1, 0);
@@ -404,11 +414,20 @@ static int ave_init_ctrls(struct ave_ctx *ctx)
 			       V4L2_MPEG_VIDEO_BITRATE_MODE_CQ,
 			       ~BIT(V4L2_MPEG_VIDEO_BITRATE_MODE_CQ),
 			       V4L2_MPEG_VIDEO_BITRATE_MODE_CQ);
+	/*
+	 * High + CABAC by default: the best compression, and what any decoder
+	 * made this century handles (f74/f75). Baseline is always CAVLC.
+	 */
 	v4l2_ctrl_new_std_menu(h, o, V4L2_CID_MPEG_VIDEO_H264_PROFILE,
-			       V4L2_MPEG_VIDEO_H264_PROFILE_CONSTRAINED_BASELINE,
+			       V4L2_MPEG_VIDEO_H264_PROFILE_HIGH,
 			       ~(BIT(V4L2_MPEG_VIDEO_H264_PROFILE_BASELINE) |
-				 BIT(V4L2_MPEG_VIDEO_H264_PROFILE_CONSTRAINED_BASELINE)),
-			       V4L2_MPEG_VIDEO_H264_PROFILE_BASELINE);
+				 BIT(V4L2_MPEG_VIDEO_H264_PROFILE_CONSTRAINED_BASELINE) |
+				 BIT(V4L2_MPEG_VIDEO_H264_PROFILE_MAIN) |
+				 BIT(V4L2_MPEG_VIDEO_H264_PROFILE_HIGH)),
+			       V4L2_MPEG_VIDEO_H264_PROFILE_HIGH);
+	v4l2_ctrl_new_std_menu(h, o, V4L2_CID_MPEG_VIDEO_H264_ENTROPY_MODE,
+			       V4L2_MPEG_VIDEO_H264_ENTROPY_MODE_CABAC, 0,
+			       V4L2_MPEG_VIDEO_H264_ENTROPY_MODE_CABAC);
 	v4l2_ctrl_new_std_menu(h, o, V4L2_CID_MPEG_VIDEO_H264_LEVEL,
 			       V4L2_MPEG_VIDEO_H264_LEVEL_4_0,
 			       ~BIT(V4L2_MPEG_VIDEO_H264_LEVEL_4_0),
@@ -533,7 +552,8 @@ static int ave_start_streaming(struct vb2_queue *q, unsigned int count)
 		/* The firmware gets the MB-aligned size; the crop is SPS-only. */
 		ret = ave_enc_start(av->ave, ctx->width, ctx->height,
 				    ctx->crop.width, ctx->crop.height,
-				    ctx->qp, AVE_CODED_SLOTS);
+				    ctx->qp, AVE_CODED_SLOTS,
+				    ctx->profile_idc, ctx->cabac);
 		if (!ret) {
 			av->owner = ctx;
 			ctx->session = true;

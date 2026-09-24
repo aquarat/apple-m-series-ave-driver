@@ -156,6 +156,40 @@ static bool v4l2 = true;	/* the self-test runs only when asked for */
 module_param(v4l2, bool, 0444);
 MODULE_PARM_DESC(v4l2, "register /dev/videoN as a V4L2 H.264 encoder (docs/68); the self-test does not run");
 
+/*
+ * Read-only look at the VENC perf domain (docs/75). ADT pmgr perf-regs[9] =
+ * reg 2 (0x28e580000) + 0x58000, 0x54 entries; VENC_SYS is perf_idx 36,
+ * MSR0 33. m1n1's dump_pmgr puts entry i at +0x100 + i*0x10; dump both the
+ * block head and that window. PMGR is always on; nothing is written.
+ */
+static bool perf_dump;
+module_param(perf_dump, bool, 0444);
+MODULE_PARM_DESC(perf_dump, "log the VENC PMGR perf-domain registers at probe (read-only, docs/75)");
+
+static void ave_perf_dump(struct device *dev)
+{
+	void __iomem *p = ioremap(0x28e580000ULL + 0x58000, 0x700);
+	unsigned int i;
+
+	if (!p) {
+		dev_warn(dev, "perf_dump: ioremap failed\n");
+		return;
+	}
+	for (i = 0; i < 0x100; i += 0x10)
+		dev_info(dev, "perf_dump: blk9 +%#05x: %08x %08x %08x %08x\n", i,
+			 readl(p + i), readl(p + i + 4), readl(p + i + 8),
+			 readl(p + i + 12));
+	for (i = 30; i < 40; i++) {
+		u32 o = 0x100 + i * 0x10;
+
+		dev_info(dev, "perf_dump: blk9 idx %2u (+%#05x): %08x %08x %08x %08x%s\n",
+			 i, o, readl(p + o), readl(p + o + 4), readl(p + o + 8),
+			 readl(p + o + 12),
+			 i == 36 ? "  <- VENC_SYS" : i == 33 ? "  <- MSR0" : "");
+	}
+	iounmap(p);
+}
+
 static bool core_reset_only;
 module_param(core_reset_only, bool, 0444);
 MODULE_PARM_DESC(core_reset_only,
@@ -1573,6 +1607,8 @@ iop_config_done:
 		 * Start_AVC (docs/46). Self-gated; no-op unless
 		 * session_selftest=1.
 		 */
+		if (perf_dump)
+			ave_perf_dump(dev);
 		if (!ave_session_selftest_requested() && v4l2) {
 			ret = ave_enc_init(ave);
 			if (!ret)

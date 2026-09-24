@@ -415,6 +415,18 @@ MODULE_PARM_DESC(session_scaling,
  * [U]; expected to matter for P frames.
  */
 static unsigned int session_skipmode = 3;
+
+/*
+ * Profile and entropy coder (docs/67, CABAC untested before f74). 66 is
+ * Baseline and must stay CAVLC; 77 is Main. 100 (High) also needs the 8x8
+ * transform path (docs/73 P4), which nothing here sets yet.
+ */
+static unsigned int session_profile = 66;
+module_param(session_profile, uint, 0444);
+MODULE_PARM_DESC(session_profile, "SPS profile_idc: 66 Baseline (default), 77 Main, 100 High (8x8 transform)");
+static bool session_cabac;
+module_param(session_cabac, bool, 0444);
+MODULE_PARM_DESC(session_cabac, "CABAC entropy coding (PPS entropy_coding_mode_flag; needs profile 77+)");
 module_param(session_skipmode, uint, 0444);
 MODULE_PARM_DESC(session_skipmode,
 	"Start_AVC wire 0xFCF0 (u16) skip_mode -> RECONL/RECONC SKIPMODE; default 3, what macOS sends (docs/74 R3), since f54. 0 = every run before f51");
@@ -758,6 +770,8 @@ struct ave_sess_bufs {
 	 */
 	u32		width, height, qp;
 	u32		crop_w, crop_h;	/* SPS-only crop; 0 = none */
+	u32		profile;	/* profile_idc; 0 = 66 */
+	bool		cabac;
 	u32		req_slots;	/* coded slots to publish at Start_AVC */
 	bool		quiet;		/* streaming: no per-frame chatter or diag */
 	/*
@@ -772,6 +786,9 @@ struct ave_sess_bufs {
 	u32		ext_stride;
 	bool		force_idr;	/* next Process is an IDR (n > 0) */
 	unsigned int	mark_dma, mark_ipc;	/* end of the Config allocations */
+	/* Streaming timing (ns), reported at ave_enc_stop(). */
+	u64		t_cmd, t_total, t_max_cmd;
+	u32		t_frames;
 	/* Every completed frame's Annex-B bytes, appended as it completes. */
 	u8		*stream;
 	size_t		stream_len, stream_cap;
@@ -1593,9 +1610,9 @@ static int ave_session_start_avc(struct ave_device *ave,
 			 "session: Start_AVC: rate control ON (ui32RCFlag %u), target %u bit/s at %u/%u fps, QP %u..%u starting at %u - watch the slice QP, which under fixed QP cannot vary\n",
 			 abi->start_avc.rc_mode_on, s.bitrate, s.frame_rate,
 			 s.frame_rate_div, s.qp_min, s.qp_max, bufs->qp);
-	s.profile_idc = 66;			/* Baseline */
+	s.profile_idc = bufs->profile ? bufs->profile : 66;
 	s.level_idc = ave_level_for(cw, ch);
-	s.cabac = false;			/* CAVLC (required with Baseline) */
+	s.cabac = bufs->cabac;			/* never with Baseline (builder refuses) */
 
 	s.fw_client_addr = fwc_iova;
 	s.fw_client_size = fwc_size;
@@ -2429,6 +2446,8 @@ static int ave_sess_stream_append(struct ave_sess_bufs *b, u32 idx, bool first)
 
 	for (sl = 0; sl < b->coded[idx].n_slice; sl++)
 		need += b->coded[idx].slice[sl].len;
+	/* H.264 7.3.4: the host appends each cabac_zero_word (docs/67). */
+	need += 3 * b->coded[idx].cabac_zero_words;
 	if (b->stream_len + need > b->stream_cap) {
 		size_t cap = max(2 * b->stream_cap, b->stream_len + need + SZ_64K);
 
@@ -2453,6 +2472,11 @@ static int ave_sess_stream_append(struct ave_sess_bufs *b, u32 idx, bool first)
 		memcpy(p, (u8 *)b->coded[idx].cpu + e->off, e->len);
 		p += e->len;
 	}
+	for (sl = 0; sl < b->coded[idx].cabac_zero_words; sl++) {
+		*p++ = 0x00;
+		*p++ = 0x00;
+		*p++ = 0x03;
+	}
 	b->stream_len = p - b->stream;
 	return 0;
 }
@@ -2475,6 +2499,7 @@ static int ave_session_process(struct ave_device *ave,
 	u8 *luma, *chroma;
 	void *cmd;
 	int ret;
+	u64 t0;
 
 	if (!bufs->n_coded || !bufs->coded[idx].cpu)
 		return -EINVAL;
@@ -2697,8 +2722,12 @@ static int ave_session_process(struct ave_device *ave,
 			 AVE_SVE_IDLE);
 	}
 
+	t0 = ktime_get_ns();
 	ret = ave_session_cmd(ave, abi, AVE_OP_PROCESS_AVC, "Process",
 			      cmd_iova, cmd_len, client_id);
+	t0 = ktime_get_ns() - t0;
+	bufs->t_cmd += t0;
+	bufs->t_max_cmd = max(bufs->t_max_cmd, t0);
 
 	/*
 	 * Did the firmware program the pipe's recon writer? The only code that
@@ -3104,6 +3133,8 @@ int ave_session_selftest(struct ave_device *ave)
 	bufs->qp = session_qp;
 	bufs->req_slots = session_frames;
 	bufs->encode = session_frame;
+	bufs->profile = session_profile;
+	bufs->cabac = session_cabac;
 	ave_session_release(ave);	/* a previous run's, if any */
 	ave->session_bufs = bufs;
 
@@ -3604,7 +3635,8 @@ int ave_enc_init(struct ave_device *ave)
 
 /* Open + Start_AVC for one stream; one at a time (the caller serialises). */
 int ave_enc_start(struct ave_device *ave, u32 width, u32 height,
-		  u32 crop_w, u32 crop_h, u32 qp, u32 slots)
+		  u32 crop_w, u32 crop_h, u32 qp, u32 slots,
+		  u32 profile_idc, bool cabac)
 {
 	const struct ave_cmd_abi *abi = ave_cmd_abi_get(ave->fw_abi);
 	struct ave_sess_bufs *bufs = ave->session_bufs;
@@ -3622,6 +3654,8 @@ int ave_enc_start(struct ave_device *ave, u32 width, u32 height,
 	bufs->height = height;
 	bufs->crop_w = crop_w;
 	bufs->crop_h = crop_h;
+	bufs->profile = profile_idc;
+	bufs->cabac = cabac && profile_idc != 66;
 	bufs->qp = qp;
 	bufs->req_slots = slots;
 	bufs->quiet = true;
@@ -3653,6 +3687,7 @@ int ave_enc_encode(struct ave_device *ave, u32 n, bool idr,
 {
 	const struct ave_cmd_abi *abi = ave_cmd_abi_get(ave->fw_abi);
 	struct ave_sess_bufs *bufs = ave->session_bufs;
+	u64 t_start;
 	int ret;
 
 	if (!abi || !bufs || !ave->client_open)
@@ -3660,6 +3695,7 @@ int ave_enc_encode(struct ave_device *ave, u32 n, bool idr,
 	if (!stride || (stride & (AVE_STRIDE_ALIGN - 1)))
 		return -EINVAL;
 
+	t_start = ktime_get_ns();
 	bufs->ext_src = true;
 	bufs->ext_luma = luma;
 	bufs->ext_chroma = chroma;
@@ -3676,6 +3712,8 @@ int ave_enc_encode(struct ave_device *ave, u32 n, bool idr,
 	memcpy(out, bufs->stream, bufs->stream_len);
 	*out_len = bufs->stream_len;
 	*keyframe = !n || idr;
+	bufs->t_total += ktime_get_ns() - t_start;
+	bufs->t_frames++;
 	return 0;
 }
 
@@ -3691,6 +3729,15 @@ int ave_enc_stop(struct ave_device *ave)
 
 	if (!bufs || !ave->client_open)
 		return 0;
+	if (bufs->t_frames)
+		dev_info(ave->dev,
+			 "enc: %u frames %ux%u: Process round trip avg %llu us (max %llu), whole frame avg %llu us\n",
+			 bufs->t_frames, bufs->width, bufs->height,
+			 div_u64(bufs->t_cmd, bufs->t_frames * 1000ULL),
+			 div_u64(bufs->t_max_cmd, 1000),
+			 div_u64(bufs->t_total, bufs->t_frames * 1000ULL));
+	bufs->t_cmd = bufs->t_total = bufs->t_max_cmd = 0;
+	bufs->t_frames = 0;
 	ret = ave_session_close_client(ave);
 	if (ret)
 		return ret;
