@@ -3400,3 +3400,27 @@ is what every V4L2 `open()`/`close()` will do.
 
 Tooling: `e3-run.sh` always ends with `=== e3-run done: NAME ===`, and
 `lab-run.sh` waits for that (f59's wait hung for want of an end marker).
+
+## f61, f62 (2026-09-24): streaming - 60 frames through 4 rotating slots
+
+A V4L2 stream is unbounded, and the coded table is latched at Start_AVC:
+index *i* <-> command slot 21 + *i*, at most 20 (docs/68 §1.4). Frame *n*
+now uses index *n* % `n_coded`. Each index allocates its source planes and
+Process command on first use and reuses them. Each completed frame's Annex-B
+bytes are appended to a growing stream (`ave_sess_stream_append()`, the
+per-frame copy-out the CAPTURE path will make). `session_frames` goes up to
+1000. The ramp now scrolls cyclically (`(x + shift) % w`), so frames past
+the first few stay legal; `tools/ramp_psnr.py` follows.
+
+Also fixed: `session_repeat` left `pic_recon` pointing into the freed
+session's memory. The firmware only asserts those per-frame recon pointers
+are non-zero (it rebuilds the real ones from its DPB, docs/64 §1), which is
+why f60 was unaffected. Per-session caches are now reset after
+`ave_sess_free_to()`.
+
+- **f61** (4 frames): frame 0 byte-identical to f54. Frames 1-3 differ at the
+  right-hand edge, where the old ramp overran 235 and the new one wraps.
+  Graded against the new source: 48.6 / 49.1 / 49.3 / 49.6 dB.
+- **f62: 60 frames in one session** (`session_diag=0`): IDR 4351 B, then P
+  frames of 2.3-2.9 KB, 165 455 B in all. **All 60 decode; Y PSNR min 48.6,
+  median 50.1, max 50.3 dB.**
