@@ -1125,7 +1125,7 @@ static struct ave_hevc_session hevc_720p(void)
 		.max_num_ref_frames = 1,
 		.log2_max_poc_lsb_minus4 = 4,
 		.sao = true, .wpp = true, .sps_tmvp = true,
-		.n_st_rps = 1,
+		.n_st_rps = 4,
 		/* TranscodedData: align4K(CodedData / 2), docs/77 §14 */
 		.transcoded = { 0x0000000b00000000ull, 0x0000000b00100000ull },
 		.n_transcoded = 2,
@@ -1307,13 +1307,36 @@ static void test_start_hevc_13_5(void)
 	E32(buf, 0x26378, 0, "SPS header_len 0");
 	E32(buf, 0x26580 + 0x14, 0, "SPS[1] untouched");
 	/* RPS 0x2CFBC, the IPPP set (docs/77 §2.4) */
-	E32(buf, 0x2cfbc, 1, "num_short_term_ref_pic_sets");
+	E32(buf, 0x2cfbc, 4, "num_short_term_ref_pic_sets = 4 (fw picks 0..3, 0x6c974)");
 	E8(buf, 0x2cfc0, 0, "entry 0 inter_ref_pic_set_prediction 0");
 	E32(buf, 0x2cff0, 1, "entry 0 num_negative_pics");
 	E32(buf, 0x2cff4, 0, "entry 0 num_positive_pics");
 	E16(buf, 0x2cff8, 0, "entry 0 delta_poc_s0_minus1[0] (u16)");
 	E8(buf, 0x2d018, 1, "entry 0 used_by_curr_pic_s0[0]");
 	E32(buf, 0x2d120, 1, "entry 0 NumDeltaPocs");
+	/* derived fields, fw 0x6de64 / kext 0xf50470 (docs/77 §18) */
+	E32(buf, 0x2d078, 1, "entry 0 NumNegativePics (+0xB8, read 0x6ce24)");
+	E32(buf, 0x2d07c, 0, "entry 0 NumPositivePics (+0xBC)");
+	E8(buf, 0x2d080, 1, "entry 0 UsedByCurrPicS0[0] (+0xC0)");
+	E8(buf, 0x2d090, 0, "entry 0 UsedByCurrPicS1[0] (+0xD0)");
+	E32(buf, 0x2d0a0, 0xffffffff, "entry 0 DeltaPocS0[0] = -1 (+0xE0)");
+	E32(buf, 0x2d0e0, 0, "entry 0 DeltaPocS1[0] (+0x120)");
+	/* entries 1..3 (stride 0x164): the same one-reference set */
+	for (i = 1; i < 4; i++) {
+		u32 e = 0x2cfc0 + 0x164 * i;
+
+		E8(buf, e + 0x00, 0, "entry i inter_ref_pic_set_prediction 0");
+		E32(buf, e + 0x30, 1, "entry i num_negative_pics");
+		E32(buf, e + 0x34, 0, "entry i num_positive_pics");
+		E16(buf, e + 0x38, 0, "entry i delta_poc_s0_minus1[0]");
+		E8(buf, e + 0x58, 1, "entry i used_by_curr_pic_s0[0]");
+		E32(buf, e + 0xb8, 1, "entry i NumNegativePics");
+		E32(buf, e + 0xbc, 0, "entry i NumPositivePics");
+		E8(buf, e + 0xc0, 1, "entry i UsedByCurrPicS0[0]");
+		E32(buf, e + 0xe0, 0xffffffff, "entry i DeltaPocS0[0]");
+		E32(buf, e + 0x160, 1, "entry i NumDeltaPocs");
+	}
+	E32(buf, 0x2cfc0 + 0x164 * 4 + 0x30, 0, "entry 4 untouched");
 	E8(buf, 0x32a24, 0, "long_term_ref_pics_present 0");
 	/* PPS[0] 0x28474 */
 	E32(buf, 0x28480, 0, "pps_pic_parameter_set_id (fw overwrites)");
@@ -1408,6 +1431,7 @@ static void test_start_hevc_13_5(void)
 	E8(buf, 0x284ed, 0, "WPP 0");
 	E8(buf, 0x262b8, 0, "SPS TMVP 0");
 	E32(buf, 0x2cfbc, 0, "no short-term set");
+	E32(buf, 0x2d078, 0, "no derived NumNegativePics");
 	E32(buf, 0x2cff0, 0, "entry 0 untouched");
 	E32(buf, 0xfd2c, 0, "max_num_ref_frames 0");
 	E32(buf, 0x24904, 0, "sps_max_dec_pic_buffering_minus1 0");
@@ -1459,6 +1483,7 @@ static void test_start_hevc_refusals(void)
 	h.level_idc = 121;		REFUSE("level_idc not in Table A.8");
 	h.vp.n_recon = 1;		REFUSE("1 DPB slot for 1 reference (numRefs copies 0..1)");
 	h.max_num_ref_frames = 0;	REFUSE("an IPPP set with no reference");
+	h.n_st_rps = 5;			REFUSE("more than 4 short-term sets");
 	h.log2_max_poc_lsb_minus4 = 13;	REFUSE("log2_max_poc_lsb_minus4 > 12");
 	h.vp.param_sets_addr = 0;	REFUSE("no param-sets buffer");
 	h.vp.width = 176;		REFUSE("below 192 wide");

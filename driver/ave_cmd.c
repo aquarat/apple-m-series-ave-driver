@@ -695,6 +695,8 @@ int ave_cmd_build_start_avc(const struct ave_cmd_abi *abi, u8 *buf, size_t len,
 /* ------------------------------------------------------------------------ */
 
 #define AVE_HEVC_PROFILE_MAIN	1	/* general_profile_idc */
+/* Short-term sets the builder writes at most; the IPPP selector needs 4. */
+#define AVE_HEVC_ST_RPS_MAX	4
 
 /* general_level_idc values of Table A.8 (30 x level). */
 static bool ave_hevc_level_ok(u8 idc)
@@ -833,7 +835,7 @@ int ave_cmd_build_start_hevc(const struct ave_cmd_abi *abi, u8 *buf,
 	/* setPipe asserts all four recon planes (:13921..:13969). */
 	if (!s->need_lsb_planes)
 		return -EINVAL;
-	if (h->log2_max_poc_lsb_minus4 > 12 || h->n_st_rps > 1 ||
+	if (h->log2_max_poc_lsb_minus4 > 12 || h->n_st_rps > AVE_HEVC_ST_RPS_MAX ||
 	    (h->n_st_rps && !h->max_num_ref_frames) ||
 	    h->max_num_ref_frames > 15 ||
 	    s->n_recon < h->max_num_ref_frames + 1)
@@ -931,8 +933,14 @@ int ave_cmd_build_start_hevc(const struct ave_cmd_abi *abi, u8 *buf,
 	/* ---- RPS (docs/77 §2.4) ---- */
 	rps = hl->rps_block;
 	wr32(&w, rps + p->rps_num_st, h->n_st_rps);
-	if (h->n_st_rps) {
-		u32 e = rps + p->rps_entry0;
+	/*
+	 * Every set is the same one-reference set: the firmware, not the
+	 * slice RPS we send, picks the set per frame - for IPPP it takes set
+	 * "frames since the IDR" while that is <= 3, else set 0 (fw
+	 * 0x6c7d4 -> 0x6c974) - so sets 0..3 must all exist (docs/77 §18).
+	 */
+	for (i = 0; i < h->n_st_rps; i++) {
+		u32 e = rps + p->rps_entry0 + i * p->rps_entry_stride;
 
 		wr8(&w, e + p->rps_inter_pred, 0);
 		wr32(&w, e + p->rps_num_neg, 1);
@@ -940,6 +948,11 @@ int ave_cmd_build_start_hevc(const struct ave_cmd_abi *abi, u8 *buf,
 		wr16(&w, e + p->rps_dpoc_s0_m1, 0);	/* delta POC -1 */
 		wr8(&w, e + p->rps_used_s0, 1);
 		wr32(&w, e + p->rps_num_delta_pocs, 1);
+		/* The derived fields the firmware's ref lists read (docs/77 §18). */
+		wr32(&w, e + p->rps_d_num_neg, 1);
+		wr32(&w, e + p->rps_d_num_pos, 0);
+		wr8(&w, e + p->rps_d_used_s0, 1);
+		wr32(&w, e + p->rps_d_delta_poc_s0, (u32)-1);	/* DeltaPocS0[0] */
 	}
 
 	/* ---- PPS[0] (pic_parameter_set_rbsp 0x1f50c) ---- */

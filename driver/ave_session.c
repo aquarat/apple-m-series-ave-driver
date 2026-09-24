@@ -2081,7 +2081,8 @@ static int ave_session_start_hevc(struct ave_device *ave,
 	h->sao = session_hevc_sao;
 	h->wpp = session_hevc_wpp;
 	h->sps_tmvp = session_hevc_tmvp;
-	h->n_st_rps = bufs->hevc_refs ? 1 : 0;
+	/* the firmware picks set 0..3 per frame itself (docs/77 §18) */
+	h->n_st_rps = bufs->hevc_refs ? 4 : 0;
 	/*
 	 * ui32IdrPeriod (wire 0xFF34) = 1 is an all-intra session to the HEVC
 	 * firmware, not just to the rate model (docs/76): IEP copies it to
