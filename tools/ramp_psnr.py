@@ -22,7 +22,7 @@ def source(w, h, n, flat):
         y = bytes([flat]) * (w * h)
     else:
         sh = n * 8
-        y = bytes(16 + ((x + sh) * 219) // w + ((r // 16) & 7)
+        y = bytes(16 + (((x + sh) % w) * 219) // w + ((r // 16) & 7)
                   for r in range(h) for x in range(w))
     u = bytes([128]) * (w * h // 4)
     v = bytes(128 + (((2 * c) // 32) & 15) - 8
