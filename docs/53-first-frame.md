@@ -4023,3 +4023,26 @@ Fedora's ffmpeg has no HEVC decoder, so the streams are graded on the host
 session_fps=30`): `Controller Heart Beat ERROR: XCODE HANG: 1, 1`, `Idle
 1-1-1-0`. The pipe finished and the transcoder did not. Suspect: PPS
 cu_qp_delta (depth 2) under RC. Being traced.
+
+## h4b-h4e (2026-09-24): HEVC rate control
+
+`779ae79` (docs/77 §20): the firmware codes `cu_qp_delta` when QP
+modulation (`bEnableQPMod`, wire 0xFF70) is on, and we had sent the PPS
+flag on with modulation off. Now they are paired: off by default,
+`session_hevc_qpmod=1` for both on, as macOS does.
+- **h4b** (self-test, RC 8 Mbit/s, pairing off): 4 frames, no XCODE HANG,
+  Y 53.2-54.3 dB.
+- **h4c** (`session_hevc_qpmod=1`): the same, 1-2% larger frames.
+
+V4L2, `CODEC=hevc tools/v4l2-test.sh 300 ffmpeg`, 720p, ffmpeg's GOP 12
+(25 I + 275 P):
+
+| target | pairing off (default) | `session_hevc_qpmod=1` |
+|---|---|---|
+| 2 Mbit/s | **2016 kbit/s**, Y 41.16 dB | 2016 kbit/s, Y 41.14 dB |
+| 4 Mbit/s | **4017 kbit/s**, Y 47.08 dB | 4017 kbit/s, Y 47.07 dB |
+
+H.264 on the same test (f85): 2M 98% / 40.8 dB, 4M 99% / 47.0 dB. The
+default stays off. GStreamer `v4l2h265enc` (`v4l2-test.sh 60 gst`): 60
+frames, Y 44.27 dB, as with v4l2-ctl. **HEVC through V4L2 is done: H1-H4
+pass.**

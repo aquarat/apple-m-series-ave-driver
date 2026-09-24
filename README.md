@@ -18,23 +18,36 @@ firmware, completes the command handshake, and encodes a frame: Config, Open,
 Start_AVC, Process, and a valid H.264 Baseline 1280x720 frame that ffmpeg
 decodes, with every macroblock accounted for and no faults.
 
-**It is a V4L2 encoder (2026-09-24).** Load it and encode:
+**It is a V4L2 H.264 and HEVC encoder (2026-09-24).** Load it and encode:
 
 ```sh
 make -C driver && make -C test          # on the MacBook, Fedora Asahi Remix
 sudo tools/ave-load.sh                  # prints /dev/videoN; once per boot
-ffmpeg -i input.mp4 -pix_fmt nv12 -c:v h264_v4l2m2m out.mp4
+ffmpeg -i input.mp4 -pix_fmt nv12 -c:v h264_v4l2m2m -b:v 4M out.mp4
+ffmpeg -i input.mp4 -pix_fmt nv12 -c:v hevc_v4l2m2m -b:v 4M out.mp4
 ```
 
-It is a stateful mem2mem H.264 encoder: NV12 in, H.264 out (High +
-CABAC by default; Main and Baseline selectable), P
-frames and periodic IDRs (ffmpeg's `-g`), fixed QP (default 30; the
-`H264_I_FRAME_QP` control). Sizes from 192x96 to 4096x4096, width a
-multiple of 64 and height a multiple of 16, or any height via an OUTPUT
-crop (1920x1080 is a 1920x1088 buffer with a crop). `v4l2-compliance -s`
-passes 54/54. `testsrc2` encodes at 43-45 dB PSNR at 480p, 720p, 1080p
-and 4K. Throughput with one frame in flight: ~58 fps at 1080p, ~17 fps at
-4K. Not yet: rate control (bitrate is accepted and ignored), B frames, and reloading the module without a reboot.
+It is a stateful mem2mem encoder, NV12 in:
+- **H.264:** High with CABAC by default; Main and Baseline selectable.
+- **HEVC:** Main, CTU 32, SAO and WPP on. The CAPTURE format selects the codec.
+- **Both:** P frames, periodic and forced IDRs, and fixed QP or rate
+  control (`-b:v`). Rate control lands within 1-2% of the target: HEVC gave
+  2016 kbit/s for 2M and 4017 for 4M.
+- **Sizes:** 192x96 to 4096x4096, width a multiple of 64 and height a
+  multiple of 16, or any height via an OUTPUT crop (1920x1080 is a 1920x1088
+  buffer with a crop).
+- **Checks:** `v4l2-compliance -s` passes 54/54. ffmpeg and GStreamer
+  (`v4l2h264enc`/`v4l2h265enc`) work. `testsrc2` comes back at 43-45 dB PSNR
+  from 480p to 4K in both codecs.
+- **Throughput,** one frame in flight: 1080p ~70 fps, 4K ~19 fps at the boot
+  clock. **With the PMP running and a VMAX vote,** 1080p ~170 fps and 4K
+  ~48 fps (docs/78, docs/53 f95-f99; opt-in, `pmp_report=1
+  pmp_vote=0x2000000300000003` with `OVERLAY_ARGS=pmp_venc=1`).
+- **Not yet:** B frames, HEVC Main 10, the second encoder instance (ave1),
+  and reloading the module without a reboot.
+- **Porting:** another Apple Silicon machine takes a per-SoC table row and
+  an overlay (docs/79). Fedora's own ffmpeg has no HEVC *decoder*, so check
+  HEVC output elsewhere, or with a full ffmpeg build.
 
 **It encodes correctly (2026-09-24, f48):** a 1280x720 ramp comes back at
 48.6 dB PSNR against the source. The long-standing blank frame (every sample
