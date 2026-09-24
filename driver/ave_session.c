@@ -771,6 +771,7 @@ struct ave_sess_bufs {
 	u32		width, height, qp;
 	u32		crop_w, crop_h;	/* SPS-only crop; 0 = none */
 	u32		profile;	/* profile_idc; 0 = 66 */
+	u32		level_floor;	/* level_idc asked for; 0 = none */
 	bool		cabac;
 	u32		bitrate;	/* 0 = fixed QP */
 	u32		fps_num, fps_den;
@@ -1615,7 +1616,8 @@ static int ave_session_start_avc(struct ave_device *ave,
 			 abi->start_avc.rc_mode_on, s.bitrate, s.frame_rate,
 			 s.frame_rate_div, s.qp_min, s.qp_max, bufs->qp);
 	s.profile_idc = bufs->profile ? bufs->profile : 66;
-	s.level_idc = ave_level_for(cw, ch);
+	s.level_idc = clamp_t(u32, max(ave_level_for(cw, ch), bufs->level_floor),
+			      10, 52);
 	s.cabac = bufs->cabac;			/* never with Baseline (builder refuses) */
 
 	s.fw_client_addr = fwc_iova;
@@ -3661,6 +3663,7 @@ int ave_enc_start(struct ave_device *ave, const struct ave_enc_cfg *cfg)
 	bufs->crop_w = cfg->crop_w;
 	bufs->crop_h = cfg->crop_h;
 	bufs->profile = cfg->profile_idc;
+	bufs->level_floor = cfg->level_idc;
 	bufs->cabac = cfg->cabac && cfg->profile_idc != 66;
 	bufs->qp = cfg->qp;
 	bufs->qp_min = cfg->qp_min;

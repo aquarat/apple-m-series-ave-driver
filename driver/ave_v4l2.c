@@ -71,6 +71,7 @@ struct ave_ctx {
 	u32			colorspace, ycbcr_enc, quantization, xfer_func;
 	u32			qp;
 	u32			profile_idc;	/* 66, 77 or 100 */
+	u32			level_idc;
 	bool			cabac;
 	u32			bitrate;
 	bool			rc_enable;
@@ -376,6 +377,14 @@ static int ave_s_ctrl(struct v4l2_ctrl *c)
 			c->val == V4L2_MPEG_VIDEO_H264_PROFILE_HIGH ? 100 :
 			c->val == V4L2_MPEG_VIDEO_H264_PROFILE_MAIN ? 77 : 66;
 		break;
+	case V4L2_CID_MPEG_VIDEO_H264_LEVEL: {
+		/* V4L2 menu order -> level_idc (1b is signalled as 1.1 + flag; use 11). */
+		static const u8 idc[] = { 10, 11, 11, 12, 13, 20, 21, 22, 30, 31,
+					  32, 40, 41, 42, 50, 51, 52 };
+
+		ctx->level_idc = c->val < ARRAY_SIZE(idc) ? idc[c->val] : 52;
+		break;
+	}
 	case V4L2_CID_MPEG_VIDEO_BITRATE:
 		ctx->bitrate = c->val;
 		break;
@@ -453,9 +462,13 @@ static int ave_init_ctrls(struct ave_ctx *ctx)
 	v4l2_ctrl_new_std_menu(h, o, V4L2_CID_MPEG_VIDEO_H264_ENTROPY_MODE,
 			       V4L2_MPEG_VIDEO_H264_ENTROPY_MODE_CABAC, 0,
 			       V4L2_MPEG_VIDEO_H264_ENTROPY_MODE_CABAC);
+	/*
+	 * Any level the firmware accepts (10..52). It is a floor: the SPS
+	 * carries the higher of this and what the picture size needs. GStreamer
+	 * negotiates by setting it, and gave up when only 4.0 was allowed.
+	 */
 	v4l2_ctrl_new_std_menu(h, o, V4L2_CID_MPEG_VIDEO_H264_LEVEL,
-			       V4L2_MPEG_VIDEO_H264_LEVEL_4_0,
-			       ~BIT(V4L2_MPEG_VIDEO_H264_LEVEL_4_0),
+			       V4L2_MPEG_VIDEO_H264_LEVEL_5_2, 0,
 			       V4L2_MPEG_VIDEO_H264_LEVEL_4_0);
 	v4l2_ctrl_new_std_menu(h, o, V4L2_CID_MPEG_VIDEO_HEADER_MODE,
 			       V4L2_MPEG_VIDEO_HEADER_MODE_JOINED_WITH_1ST_FRAME,
@@ -592,6 +605,7 @@ static int ave_start_streaming(struct vb2_queue *q, unsigned int count)
 			.fps_den = ctx->timeperframe.numerator,
 			.slots = AVE_CODED_SLOTS,
 			.profile_idc = ctx->profile_idc,
+			.level_idc = ctx->level_idc,
 			.cabac = ctx->cabac,
 		};
 
