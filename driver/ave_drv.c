@@ -157,14 +157,61 @@ module_param(v4l2, bool, 0444);
 MODULE_PARM_DESC(v4l2, "register /dev/videoN as a V4L2 H.264 encoder (docs/68); the self-test does not run");
 
 /*
- * Read-only look at the VENC perf domain (docs/75). ADT pmgr perf-regs[9] =
- * reg 2 (0x28e580000) + 0x58000, 0x54 entries; VENC_SYS is perf_idx 36,
- * MSR0 33. m1n1's dump_pmgr puts entry i at +0x100 + i*0x10; dump both the
- * block head and that window. PMGR is always on; nothing is written.
+ * Read-only look at VENC's PMGR performance *counters* (docs/75 §2: not perf
+ * states; block 9 is disabled until something enables it, on macOS too) and,
+ * via ave_pmp_dump(), the PMP report window. perf-regs[9] = reg 2
+ * (0x28e580000) + 0x58000; entry i at +0x100 + i*0x10 (VENC_SYS 36, MSR0 33).
+ * Nothing is written.
  */
 static bool perf_dump;
 module_param(perf_dump, bool, 0444);
 MODULE_PARM_DESC(perf_dump, "log the VENC PMGR perf-domain registers at probe (read-only, docs/75)");
+
+/*
+ * docs/75 R1a/R1b, read-only. R1a: the PMP and PMS_SRAM PS registers (ADT
+ * ps-regs[5], psidx 27/28). Only if both read PS_ACTUAL 0xf, R1b: 64-bit
+ * reads in the PMP report window 0x28e3c0000 (+0x20000), which Linux's bound
+ * apple-pmp-report already maps: STATUS, DVFS-STATE x4, PS-REQ, PS-ACK and
+ * the AVE0/AVD0 DVFS read-backs. Controls: PS-REQ bits 12/13 (disp0,
+ * dispext0) set; AVD0 (report@11 okay) for comparison.
+ */
+static void ave_pmp_dump(struct device *dev)
+{
+	static const struct { u32 off; const char *what; } q[] = {
+		{ 0x0010, "PMP-STATUS" },
+		{ 0x0080, "DVFS-STATE 0" }, { 0x0088, "DVFS-STATE 0+8" },
+		{ 0x0090, "DVFS-STATE 1" }, { 0x0098, "DVFS-STATE 1+8" },
+		{ 0x00a0, "DVFS-STATE 2" }, { 0x00a8, "DVFS-STATE 2+8" },
+		{ 0x00b0, "DVFS-STATE 3" }, { 0x00b8, "DVFS-STATE 3+8" },
+		{ 0x0f80, "PS-REQ" }, { 0x0f88, "PS-REQ+8" },
+		{ 0x1000, "PS-ACK" }, { 0x1008, "PS-ACK+8" },
+		{ 0x1110, "AVE0 DVFS" }, { 0x1118, "AVE0 DVFS+8" },
+		{ 0x1120, "AVD0 DVFS (control)" },
+	};
+	void __iomem *ps = ioremap(0x28e0802d8ULL, 0x10);
+	void __iomem *w;
+	u32 pmp, sram;
+	unsigned int i;
+
+	if (!ps)
+		return;
+	pmp = readl(ps);
+	sram = readl(ps + 8);
+	iounmap(ps);
+	dev_info(dev, "pmp_dump: R1a PMP PS %#010x (actual %#x), PMS_SRAM PS %#010x (actual %#x)\n",
+		 pmp, (pmp >> 4) & 0xf, sram, (sram >> 4) & 0xf);
+	if (((pmp >> 4) & 0xf) != 0xf || ((sram >> 4) & 0xf) != 0xf) {
+		dev_info(dev, "pmp_dump: R1a failed; not reading the PMP window (docs/75)\n");
+		return;
+	}
+	w = ioremap(0x28e3c0000ULL, 0x2000);
+	if (!w)
+		return;
+	for (i = 0; i < ARRAY_SIZE(q); i++)
+		dev_info(dev, "pmp_dump: R1b %#x %-20s %#018llx\n",
+			 (u32)(0x28e3c0000 + q[i].off), q[i].what, readq(w + q[i].off));
+	iounmap(w);
+}
 
 static void ave_perf_dump(struct device *dev)
 {
@@ -188,6 +235,7 @@ static void ave_perf_dump(struct device *dev)
 			 i == 36 ? "  <- VENC_SYS" : i == 33 ? "  <- MSR0" : "");
 	}
 	iounmap(p);
+	ave_pmp_dump(dev);
 }
 
 static bool core_reset_only;
