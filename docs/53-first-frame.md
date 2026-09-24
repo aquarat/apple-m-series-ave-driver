@@ -3795,3 +3795,12 @@ accepted, then `HEVC_INIT build failed: -22` on the host. Nothing was sent.
 The entropy buffers are allocated only when a frame will be encoded (the
 f64 gate), and the HEVC builder rightly requires them at INIT (setPipe
 :14199). With `session_codec=1` they are now allocated at INIT as well.
+
+## h1b (2026-09-24): HEVC_INIT accepted; the firmware writes VPS/SPS/PPS
+
+Same parameters, with the entropy fix. **HEVC_INIT: ACCEPTED, status
+0xee0000** (208328 bytes, reply id 0x0e04). The firmware wrote 72 bytes of
+parameter sets, NAL types 32@0, 33@27 and 34@61. `tools/hevc_parse.py
+--check`: **PASS**, 12/12. Main, level 4.0, CTB 32 (40x23), min CB 8, TB
+4..32, flat scaling, 8-bit 4:2:0, 1280x720 with no conformance window,
+SAO 1, TMVP 1, WPP 1, st_rps[0] = {-1 used}, max_dec_pic_buffering_minus1 1.
