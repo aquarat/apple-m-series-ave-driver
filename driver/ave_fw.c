@@ -47,14 +47,13 @@
 #include "ave.h"
 #include "ave_dapf.h"
 
-#define AVE_FW_NAME		"apple/ave_h13c.bin"
 /*
- * Version-specific on purpose: this blob is the macOS 13.5 image's DATA, and
- * ave_fw_restore_data() refuses to use it for any other ABI. The older
- * (identical-content) apple/ave-data-pristine.bin still works via
+ * The image names are per SoC (ave->soc->fw_name, ->fw_pristine_name). The
+ * pristine DATA blob is version-specific on purpose: it is the macOS 13.5
+ * image's DATA, and ave_fw_restore_data() refuses it for any other ABI. The
+ * older (identical-content) apple/ave-data-pristine.bin still works via
  * fw_restore_path=.
  */
-#define AVE_FW_PRISTINE_NAME	"apple/ave-13.5-data-pristine.bin"
 
 /* Mach-O, enough of it to walk the load commands. */
 #define MH_MAGIC_64		0xfeedfacf
@@ -364,7 +363,7 @@ int ave_fw_map_text_mode(void)
  * Refusals, because this is the first time Linux WRITES this DRAM (it has only
  * ever read it). Every one of these fails the probe before the core is started:
  *   - fw_abi must be 13.5: the blob belongs to that image and no other;
- *   - the blob must be exactly AVE_IBOOT_DATA_SIZE bytes and match the
+ *   - the blob must be exactly ave->soc->iboot.data_size bytes and match the
  *     compiled-in sha256;
  *   - the running image must be the image the blob belongs to: RVBAR base,
  *     the iBoot literal at TEXT+0x423c, and three 16 KiB windows of TEXT
@@ -377,10 +376,10 @@ int ave_fw_map_text_mode(void)
  *     only released at stage 13, so this is the window the restore belongs in;
  *   - after the copy every byte is read back and compared, and any mismatch
  *     refuses.
- * Nothing outside [AVE_IBOOT_DATA_PHYS, +AVE_IBOOT_DATA_SIZE) is ever written:
+ * Nothing outside [ave->soc->iboot.data_phys, +ave->soc->iboot.data_size) is ever written:
  * that is the extent of the memremap and the length of the single memcpy.
  *
- * Power/coherency. DATA at AVE_IBOOT_DATA_PHYS is ordinary DRAM below Linux's
+ * Power/coherency. DATA at ave->soc->iboot.data_phys is ordinary DRAM below Linux's
  * /memory map, not the VENC MMIO block, so VENC power is irrelevant to writing
  * it - the peek/snapshot code already reads it with no power handling. It uses
  * a cacheable (MEMREMAP_WB) mapping exactly as that read path does, then cleans
@@ -410,10 +409,10 @@ module_param(fw_restore_stkg, ulong, 0444);
 MODULE_PARM_DESC(fw_restore_stkg,
 		 "write this 64-bit value over the STKG word at DATA+0x3a38 in the restored image (0 = the blob's own)");
 
-static char *fw_restore_path = AVE_FW_PRISTINE_NAME;
+static char *fw_restore_path;	/* NULL: ave->soc->fw_pristine_name */
 module_param(fw_restore_path, charp, 0444);
 MODULE_PARM_DESC(fw_restore_path,
-		 "request_firmware() path for the pristine DATA blob (default " AVE_FW_PRISTINE_NAME ")");
+		 "request_firmware() path for the pristine DATA blob (default: the SoC's, apple/ave-13.5-data-pristine.bin on t6001)");
 
 /*
  * sha256 of data/blobs/ave-13.5-data-pristine.bin, 0x134000 bytes, as produced
@@ -431,7 +430,7 @@ static const u8 ave_pristine_sha256[SHA256_DIGEST_SIZE] = {
 /*
  * Three 16 KiB windows of the 13.5 image's __TEXT (file offsets 0x4000 +
  * these), which the pre-boot dump reproduces byte for byte. If the DRAM at
- * AVE_IBOOT_TEXT_PHYS does not hash to these, the image in memory is not the
+ * ave->soc->iboot.text_phys does not hash to these, the image in memory is not the
  * one this blob's DATA belongs to and the restore is refused.
  */
 #define AVE_TEXT_WINDOW_SIZE	SZ_16K
@@ -462,7 +461,6 @@ static const struct ave_text_window ave_text_windows[] = {
 #define AVE_DATA_STKG_OFF	0x3a38
 
 #define AVE_IBOOT_DATA_LITERAL_OFF	0x423c	/* image offset, docs/44 §2.4 */
-#define AVE_IBOOT_DATA_LITERAL		0x1f0000ec000ULL
 
 static bool ave_ranges_overlap(u64 a, u64 alen, u64 b, u64 blen)
 {
@@ -549,10 +547,10 @@ static int ave_fw_check_iboot_placement(struct ave_device *ave)
 	u64 lit;
 	void *p;
 
-	if (base != AVE_IBOOT_TEXT_PHYS) {
+	if (base != ave->soc->iboot.text_phys) {
 		dev_err(ave->dev,
 			"  iboot: REFUSING - RVBAR %#llx base %#llx, constants assume %#llx\n",
-			fwreg, base, AVE_IBOOT_TEXT_PHYS);
+			fwreg, base, ave->soc->iboot.text_phys);
 		return -EINVAL;
 	}
 
@@ -562,7 +560,7 @@ static int ave_fw_check_iboot_placement(struct ave_device *ave)
 	 * on 2026-09-13 (results/e3a-*.log).
 	 */
 	ave_step(ave, "next: memremap + read iBoot TEXT literal");
-	p = memremap(AVE_IBOOT_TEXT_PHYS,
+	p = memremap(ave->soc->iboot.text_phys,
 		     PAGE_ALIGN(AVE_IBOOT_DATA_LITERAL_OFF + 8), MEMREMAP_WB);
 	if (!p) {
 		dev_err(ave->dev, "  iboot: REFUSING - cannot memremap TEXT to check the DATA literal\n");
@@ -573,10 +571,10 @@ static int ave_fw_check_iboot_placement(struct ave_device *ave)
 	      ((u64)get_unaligned_le32(p + AVE_IBOOT_DATA_LITERAL_OFF + 4) << 32);
 	memunmap(p);
 
-	if (lit != AVE_IBOOT_DATA_LITERAL) {
+	if (lit != ave->soc->iboot.data_literal) {
 		dev_err(ave->dev,
 			"  iboot: REFUSING - TEXT+%#x holds DATA base %#llx, expected %#llx\n",
-			AVE_IBOOT_DATA_LITERAL_OFF, lit, AVE_IBOOT_DATA_LITERAL);
+			AVE_IBOOT_DATA_LITERAL_OFF, lit, ave->soc->iboot.data_literal);
 		return -EINVAL;
 	}
 	dev_info(ave->dev, "  iboot: RVBAR base %#llx, DATA literal %#llx - placement as expected\n",
@@ -654,15 +652,15 @@ static void ave_fw_unmap_iboot(struct ave_device *ave)
 		return;
 	}
 	if (ave->iboot_data_mapped) {
-		n = iommu_unmap(domain, AVE_IBOOT_DATA_DVA, AVE_IBOOT_DATA_SIZE);
+		n = iommu_unmap(domain, ave->soc->iboot.data_dva, ave->soc->iboot.data_size);
 		dev_info(ave->dev, "iboot: DATA unmapped, %zu of %#llx bytes\n",
-			 n, AVE_IBOOT_DATA_SIZE);
+			 n, ave->soc->iboot.data_size);
 		ave->iboot_data_mapped = false;
 	}
 	if (ave->iboot_text_mapped) {
-		n = iommu_unmap(domain, AVE_IBOOT_TEXT_DVA, AVE_IBOOT_TEXT_SIZE);
+		n = iommu_unmap(domain, ave->soc->iboot.text_dva, ave->soc->iboot.text_size);
 		dev_info(ave->dev, "iboot: TEXT unmapped, %zu of %#llx bytes\n",
-			 n, AVE_IBOOT_TEXT_SIZE);
+			 n, ave->soc->iboot.text_size);
 		ave->iboot_text_mapped = false;
 	}
 	ave->iboot_domain = NULL;
@@ -686,10 +684,10 @@ static int ave_fw_map_iboot(struct ave_device *ave, struct iommu_domain *domain,
 			domain->type);
 		return -EINVAL;
 	}
-	if (fw_map_text && map_iova != AVE_IBOOT_TEXT_DVA) {
+	if (fw_map_text && map_iova != ave->soc->iboot.text_dva) {
 		dev_err(ave->dev,
 			"iboot: REFUSING - RVBAR-derived DVA %#llx, TEXT option assumes %#llx\n",
-			map_iova, AVE_IBOOT_TEXT_DVA);
+			map_iova, ave->soc->iboot.text_dva);
 		return -EINVAL;
 	}
 
@@ -700,8 +698,8 @@ static int ave_fw_map_iboot(struct ave_device *ave, struct iommu_domain *domain,
 	ave->iboot_domain = domain;
 
 	if (fw_map_data) {
-		ret = ave_fw_map_one(ave, domain, AVE_IBOOT_DATA_DVA,
-				     AVE_IBOOT_DATA_PHYS, AVE_IBOOT_DATA_SIZE,
+		ret = ave_fw_map_one(ave, domain, ave->soc->iboot.data_dva,
+				     ave->soc->iboot.data_phys, ave->soc->iboot.data_size,
 				     IOMMU_READ | IOMMU_WRITE, "iboot DATA");
 		if (ret)
 			goto fail;
@@ -709,8 +707,8 @@ static int ave_fw_map_iboot(struct ave_device *ave, struct iommu_domain *domain,
 	}
 
 	if (fw_map_text == 1) {
-		ret = ave_fw_map_one(ave, domain, AVE_IBOOT_TEXT_DVA,
-				     AVE_IBOOT_TEXT_PHYS, AVE_IBOOT_TEXT_SIZE,
+		ret = ave_fw_map_one(ave, domain, ave->soc->iboot.text_dva,
+				     ave->soc->iboot.text_phys, ave->soc->iboot.text_size,
 				     IOMMU_READ, "iboot TEXT");
 		if (ret)
 			goto fail;
@@ -718,7 +716,7 @@ static int ave_fw_map_iboot(struct ave_device *ave, struct iommu_domain *domain,
 	} else if (fw_map_text == 2) {
 		dev_info(ave->dev,
 			 "  iboot TEXT: leaving DVA %#llx UNMAPPED (discriminating run: a translated fetch must fault there)\n",
-			 AVE_IBOOT_TEXT_DVA);
+			 ave->soc->iboot.text_dva);
 	}
 	return 0;
 
@@ -731,7 +729,7 @@ fail:
 /*
  * Load the pristine DATA blob into a vmalloc buffer, once.
  *
- * The file must be exactly AVE_IBOOT_DATA_SIZE bytes and hash to
+ * The file must be exactly ave->soc->iboot.data_size bytes and hash to
  * ave_pristine_sha256. A blob that is merely "about the right size" is refused:
  * this buffer is about to be written over DRAM the coprocessor executes from,
  * and the only cheap way to know it is the right bytes is to check all of them.
@@ -741,25 +739,26 @@ static int ave_fw_load_pristine(struct ave_device *ave)
 {
 	const struct firmware *fw;
 	u8 dig[SHA256_DIGEST_SIZE];
+	const char *path;
 	u8 *buf;
 	int ret;
 
 	if (ave->iboot_data_pristine)
 		return 0;
 
-	ret = request_firmware(&fw, fw_restore_path, ave->dev);
+	path = fw_restore_path ?: ave->soc->fw_pristine_name;
+	ret = request_firmware(&fw, path, ave->dev);
 	if (ret) {
 		dev_err(ave->dev,
 			"fw_restore_data: no pristine blob at %s (%d). Build it with "
-			"tools/make_ave_data_blob.py and install at "
-			"/lib/firmware/" AVE_FW_PRISTINE_NAME "\n",
-			fw_restore_path, ret);
+			"tools/make_ave_data_blob.py and install at /lib/firmware/%s\n",
+			path, ret, ave->soc->fw_pristine_name);
 		return ret;
 	}
-	if (fw->size != AVE_IBOOT_DATA_SIZE) {
+	if (fw->size != ave->soc->iboot.data_size) {
 		dev_err(ave->dev,
 			"fw_restore_data: REFUSING - %s is %zu bytes, DATA is %#llx\n",
-			fw_restore_path, fw->size, AVE_IBOOT_DATA_SIZE);
+			path, fw->size, ave->soc->iboot.data_size);
 		ret = -EINVAL;
 		goto out;
 	}
@@ -768,18 +767,18 @@ static int ave_fw_load_pristine(struct ave_device *ave)
 	if (memcmp(dig, ave_pristine_sha256, sizeof(dig))) {
 		dev_err(ave->dev,
 			"fw_restore_data: REFUSING - %s sha256 %*phN, expected %*phN\n",
-			fw_restore_path, (int)sizeof(dig), dig,
+			path, (int)sizeof(dig), dig,
 			(int)sizeof(ave_pristine_sha256), ave_pristine_sha256);
 		ret = -EINVAL;
 		goto out;
 	}
 
-	buf = vmalloc(AVE_IBOOT_DATA_SIZE);
+	buf = vmalloc(ave->soc->iboot.data_size);
 	if (!buf) {
 		ret = -ENOMEM;
 		goto out;
 	}
-	memcpy(buf, fw->data, AVE_IBOOT_DATA_SIZE);
+	memcpy(buf, fw->data, ave->soc->iboot.data_size);
 	if (fw_restore_stkg) {
 		dev_info(ave->dev,
 			 "fw_restore_data: STKG override %#lx replaces the blob's %#llx (fw_restore_stkg)\n",
@@ -790,7 +789,7 @@ static int ave_fw_load_pristine(struct ave_device *ave)
 	ave->iboot_data_pristine = buf;
 	dev_info(ave->dev,
 		 "fw_restore_data: pristine DATA from %s, %#llx bytes, sha256 %*phN OK\n",
-		 fw_restore_path, AVE_IBOOT_DATA_SIZE,
+		 path, ave->soc->iboot.data_size,
 		 (int)sizeof(dig), dig);
 	ret = 0;
 out:
@@ -815,7 +814,7 @@ static int ave_fw_check_text_identity(struct ave_device *ave)
 	for (i = 0; i < ARRAY_SIZE(ave_text_windows); i++) {
 		const struct ave_text_window *w = &ave_text_windows[i];
 
-		p = memremap(AVE_IBOOT_TEXT_PHYS + w->off, AVE_TEXT_WINDOW_SIZE,
+		p = memremap(ave->soc->iboot.text_phys + w->off, AVE_TEXT_WINDOW_SIZE,
 			     MEMREMAP_WB);
 		if (!p) {
 			dev_err(ave->dev,
@@ -837,7 +836,7 @@ static int ave_fw_check_text_identity(struct ave_device *ave)
 	}
 	dev_info(ave->dev,
 		 "  restore: TEXT at %#llx matches the 13.5 image over %u x %#x bytes\n",
-		 AVE_IBOOT_TEXT_PHYS, (unsigned int)ARRAY_SIZE(ave_text_windows),
+		 ave->soc->iboot.text_phys, (unsigned int)ARRAY_SIZE(ave_text_windows),
 		 AVE_TEXT_WINDOW_SIZE);
 	return 0;
 }
@@ -855,7 +854,7 @@ static u64 ave_fw_diff_pristine(struct ave_device *ave, const u8 *live,
 	size_t i, off;
 	bool got_first = false;
 
-	for (off = 0; off < AVE_IBOOT_DATA_SIZE; off += SZ_4K) {
+	for (off = 0; off < ave->soc->iboot.data_size; off += SZ_4K) {
 		if (!memcmp(live + off, want + off, SZ_4K))
 			continue;
 		pages++;
@@ -873,16 +872,16 @@ static u64 ave_fw_diff_pristine(struct ave_device *ave, const u8 *live,
 	if (bytes)
 		dev_info(ave->dev,
 			 "  restore: DATA %s pristine: %llu byte(s) in %u page(s) differ, first at DATA+%#llx (phys %#llx)\n",
-			 when, bytes, pages, first, AVE_IBOOT_DATA_PHYS + first);
+			 when, bytes, pages, first, ave->soc->iboot.data_phys + first);
 	else
 		dev_info(ave->dev,
 			 "  restore: DATA %s pristine: 0 bytes differ over %#llx\n",
-			 when, AVE_IBOOT_DATA_SIZE);
+			 when, ave->soc->iboot.data_size);
 	return bytes;
 }
 
 /*
- * Restore pristine DATA over physical AVE_IBOOT_DATA_PHYS, as 13.5's
+ * Restore pristine DATA over physical ave->soc->iboot.data_phys, as 13.5's
  * AVE_Firmware::UpdateImage -> RestoreCTRRData does at the head of StartUpIOP.
  *
  * Must be called with the core NOT started in this power session - Apple calls
@@ -965,17 +964,17 @@ int ave_fw_restore_data(struct ave_device *ave)
 	 * /reserved-memory check the DART mapping path uses. Any overlap refuses
 	 * and fails the start.
 	 */
-	ret = ave_fw_range_is_foreign(ave, AVE_IBOOT_DATA_PHYS,
-				      AVE_IBOOT_DATA_SIZE, "restore DATA");
+	ret = ave_fw_range_is_foreign(ave, ave->soc->iboot.data_phys,
+				      ave->soc->iboot.data_size, "restore DATA");
 	if (ret)
 		return ret;
 
-	p = memremap(AVE_IBOOT_DATA_PHYS, AVE_IBOOT_DATA_SIZE,
+	p = memremap(ave->soc->iboot.data_phys, ave->soc->iboot.data_size,
 		     ARCH_MEMREMAP_PMEM);
 	if (!p) {
 		dev_err(ave->dev,
 			"fw_restore_data: cannot memremap DATA phys %#llx +%#llx\n",
-			AVE_IBOOT_DATA_PHYS, AVE_IBOOT_DATA_SIZE);
+			ave->soc->iboot.data_phys, ave->soc->iboot.data_size);
 		return -ENOMEM;
 	}
 
@@ -1001,15 +1000,15 @@ int ave_fw_restore_data(struct ave_device *ave)
 	 * machine that dies here names the operation that killed it.
 	 */
 	ave_step(ave, "next: WRITE %#llx bytes of pristine DATA over phys %#llx (first write to this DRAM)",
-		 AVE_IBOOT_DATA_SIZE, AVE_IBOOT_DATA_PHYS);
-	memcpy(p, ave->iboot_data_pristine, AVE_IBOOT_DATA_SIZE);
+		 ave->soc->iboot.data_size, ave->soc->iboot.data_phys);
+	memcpy(p, ave->iboot_data_pristine, ave->soc->iboot.data_size);
 	/* Clean to the point of coherency: the core fetches DRAM, not our cache. */
-	arch_wb_cache_pmem(p, AVE_IBOOT_DATA_SIZE);
+	arch_wb_cache_pmem(p, ave->soc->iboot.data_size);
 	wmb();	/* land the copy before the ASC-start writes that follow */
 	ave_step(ave, "write returned; next: read back and verify every byte");
 
 	/* So the verification reads DRAM rather than the lines we just wrote. */
-	arch_invalidate_pmem(p, AVE_IBOOT_DATA_SIZE);
+	arch_invalidate_pmem(p, ave->soc->iboot.data_size);
 	after = ave_fw_diff_pristine(ave, p, ave->iboot_data_pristine, "after restore vs");
 	memunmap(p);
 
@@ -1022,7 +1021,7 @@ int ave_fw_restore_data(struct ave_device *ave)
 
 	dev_info(ave->dev,
 		 "fw_restore_data: restored %#llx bytes over phys %#llx (%llu had drifted), read-back verified\n",
-		 AVE_IBOOT_DATA_SIZE, AVE_IBOOT_DATA_PHYS, before);
+		 ave->soc->iboot.data_size, ave->soc->iboot.data_phys, before);
 
 	/*
 	 * Re-baseline the liveness snapshot. ave_drv.c checksums the 16 MiB
@@ -1051,12 +1050,13 @@ int ave_fw_load(struct ave_device *ave)
 	size_t span, size;
 	int ret;
 
-	ret = request_firmware(&fw, AVE_FW_NAME, ave->dev);
+	ret = request_firmware(&fw, ave->soc->fw_name, ave->dev);
 	if (ret) {
 		dev_err(ave->dev,
-			"no firmware at " AVE_FW_NAME " (%d). Extract it with "
+			"no firmware at %s (%d). Extract it with "
 			"tools/fetch_firmware.py, unwrap with pyimg4, and place "
-			"the Mach-O at /lib/firmware/" AVE_FW_NAME "\n", ret);
+			"the Mach-O at /lib/firmware/%s\n",
+			ave->soc->fw_name, ret, ave->soc->fw_name);
 		return ret;
 	}
 	dev_info(ave->dev, "firmware image: %zu bytes\n", fw->size);

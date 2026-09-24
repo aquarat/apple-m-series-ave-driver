@@ -6,7 +6,7 @@
 #     make -C driver
 #
 obj-m += apple-ave.o
-apple-ave-y := ave_drv.o ave_ipc.o ave_fw.o ave_version.o ave_cmd.o ave_dapf.o ave_session.o ave_smmu.o ave_v4l2.o
+apple-ave-y := ave_drv.o ave_ipc.o ave_fw.o ave_version.o ave_cmd.o ave_dapf.o ave_session.o ave_smmu.o ave_v4l2.o ave_soc.o
 
 KDIR ?= /lib/modules/$(shell uname -r)/build
 PWD  := $(shell pwd)

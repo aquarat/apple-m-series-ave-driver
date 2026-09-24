@@ -37,7 +37,6 @@
 #include "ave.h"
 #include "ave_smmu.h"
 
-#define AVE_SMMU_PHYS		0x40d020000ULL	/* ADT dart-ave0 "SMMU" instance */
 #define AVE_SMMU_SIZE		0x4000
 #define SMMU_ERROR		0x40		/* bit 31 = fault pending, docs/56 */
 #define SMMU_ERROR_FLAG		BIT(31)
@@ -95,9 +94,9 @@ int ave_smmu_init(struct ave_device *ave)
 	}
 
 	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "smmu");
-	if (!res || res->start != AVE_SMMU_PHYS || resource_size(res) != AVE_SMMU_SIZE) {
+	if (!res || res->start != ave->soc->smmu_phys || resource_size(res) != AVE_SMMU_SIZE) {
 		dev_err(ave->dev, "smmu: no \"smmu\" reg at %#llx +%#x (overlay variant=4?); refusing\n",
-			AVE_SMMU_PHYS, AVE_SMMU_SIZE);
+			(u64)ave->soc->smmu_phys, AVE_SMMU_SIZE);
 		return -ENODEV;
 	}
 	irq = platform_get_irq_optional(pdev, 1);
@@ -124,7 +123,7 @@ int ave_smmu_init(struct ave_device *ave)
 	}
 	ave->smmu_irq = irq;
 	dev_info(ave->dev, "smmu: watching %#llx on shared irq %d (read-only)\n",
-		 AVE_SMMU_PHYS, irq);
+		 (u64)ave->soc->smmu_phys, irq);
 	return 0;
 }
 

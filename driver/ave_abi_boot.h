@@ -193,9 +193,7 @@ struct ave_boot_abi {
 	/* Pre-start scratch 1/2. */
 	bool		cfg_block;	/* 26.6.2: IOVA of _S_AVE_Fw_Cfg; 13.5: integers */
 	u32		instance;	/* ave0 */
-	u32		dev_id;		/* ave0 (soc-id t6000) */
-	u32		dev_type;	/* ipcinfo +0x28 */
-	u32		chip_type;
+	/* dev_id / dev_type / chip_type are per SoC: ave->soc->dev[abi] */
 	u32		dev_num;	/* 26.6.2 cfg +0x08 */
 	u32		dev_num_per_group;
 
@@ -253,9 +251,7 @@ static inline const struct ave_boot_abi *ave_boot_abi_get(enum ave_fw_abi abi)
 		.name			= "macOS 13.5",
 		.cfg_block		= false,	/* k13 f12004 / f1211c write integers */
 		.instance		= 0,		/* HwC+0x40 (k13 f11ffc); 0 INFERRED: t6000 maxNum = 1 (k13 0xfffffe0007bc2a38 entry 13) */
-		.dev_id			= 14,		/* k13 table 0xfffffe0007bc2a38 entry 13 +0x08; fw 0xee4d0 same row */
-		.dev_type		= 11,		/* same entry +0x04; ipcinfo +0x28 k13 f13450 */
-		.chip_type		= 8,		/* same entry +0x00; Castor via k13 0xfffffe0007bc3ae0 */
+		/* DevID/DevType/ChipType: ave_soc.c (k13 table 0xfffffe0007bc2a38, fw 0xee4d0; ipcinfo +0x28 k13 f13450) */
 		.dev_num		= 1,		/* same entry +0x0c (unused on 13.5) */
 		.dev_num_per_group	= 1,		/* same entry +0x10 (unused on 13.5) */
 		.fwipc_size		= 0x700000,	/* k13 f22ad4 */
@@ -282,9 +278,7 @@ static inline const struct ave_boot_abi *ave_boot_abi_get(enum ave_fw_abi abi)
 		.name			= "macOS 26.6.2",
 		.cfg_block		= true,		/* k26 c1d690 Alloc(0x38), c1dc7c/c1dd10 */
 		.instance		= 0,		/* HwC+0x48 k26 c1cc18; 0 INFERRED (docs/34 §4 fn) */
-		.dev_id			= 11,		/* docs/45 row 3; MakeFwCfg k26 c1cc24 */
-		.dev_type		= 9,		/* ipcinfo +0x28 k26 c1f41c (docs/34 §9) */
-		.chip_type		= 6,		/* docs/45 row 3 */
+		/* DevID/DevType/ChipType: ave_soc.c (docs/45 row 3; MakeFwCfg k26 c1cc24, ipcinfo +0x28 k26 c1f41c) */
 		.dev_num		= 1,		/* GetDevNum k26 c1cc30, "1 / 2" docs/34 §4 */
 		.dev_num_per_group	= 1,		/* GetDevNumPerGroup k26 c1cc3c: VALUE UNVERIFIED */
 		.fwipc_size		= 0x1400000,	/* k26 c426ec mov w4,#0x1400000 */

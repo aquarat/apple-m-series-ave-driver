@@ -37,19 +37,11 @@ struct ave_dapf_entry {
 
 #define AVE_DAPF_MAX_ENTRIES	16
 
-/* AP-physical addresses (docs/44 §3 and addendum). */
-#define AVE_CPUDART_PHYS	0x40d040000ULL	/* dart-ave0 reg[0], bus 0x20d040000 */
-#define AVE_DAPF_PHYS		0x40d044000ULL	/* dart-ave0 reg[3], bus 0x20d044000 */
+/*
+ * The dart-ave0 addresses and iBoot's firmware placement are per SoC and
+ * machine: ave->soc (ave_soc.c, docs/79).
+ */
 #define AVE_DAPF_OFFSET		0x4000		/* DAPF = CPUDART + 0x4000 (ave0, isp0) */
-#define AVE_DART1_PHYS		0x40d030000ULL	/* dart-ave0 "DART": the datapath's (F4, docs/56) */
-
-/* iBoot's 13.5 firmware placement on this machine (docs/43, docs/44 §2.4). */
-#define AVE_IBOOT_TEXT_PHYS	0x10000b28000ULL
-#define AVE_IBOOT_TEXT_SIZE	0xec000ULL
-#define AVE_IBOOT_TEXT_DVA	0xb28000ULL	/* low 32 bits of the RVBAR base */
-#define AVE_IBOOT_DATA_PHYS	0x10001a90000ULL
-#define AVE_IBOOT_DATA_SIZE	0x134000ULL
-#define AVE_IBOOT_DATA_DVA	0xec000ULL	/* DATA VA; reached as 0x1f0000ec000 */
 
 /*
  * E2: map "cpudart" and "dapf" (devm_ioremap, never request) and dump DART
