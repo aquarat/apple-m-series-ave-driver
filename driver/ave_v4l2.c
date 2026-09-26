@@ -104,6 +104,9 @@ struct ave_ctx {
 	u32			codec;
 	u32			hevc_qp, hevc_qp_min, hevc_qp_max;
 	u32			hevc_level_idc;	/* general_level_idc floor */
+	bool			hevc_main10;	/* HEVC_PROFILE = MAIN_10 (docs/83) */
+	struct v4l2_ctrl	*hevc_profile;
+	u32			out_fourcc;	/* NV12, or P010 with HEVC */
 	u32			frame_n;	/* frames sent this stream */
 	u32			out_seq, cap_seq;
 	bool			session;	/* Open + Start_AVC done */
@@ -154,13 +157,17 @@ static u32 ave_cap_size(u32 w, u32 h)
 static void ave_fill_out_fmt(const struct ave_ctx *ctx,
 			     struct v4l2_pix_format *p, u32 w, u32 h)
 {
+	/* P010 only with HEVC (docs/83): two bytes a sample, same geometry */
+	const bool p010 = p->pixelformat == V4L2_PIX_FMT_P010 &&
+			  ctx->codec == AVE_ENC_CODEC_HEVC;
+
 	ave_clamp_size(&w, &h);
 	p->width = w;
 	p->height = h;
-	p->pixelformat = V4L2_PIX_FMT_NV12;
+	p->pixelformat = p010 ? V4L2_PIX_FMT_P010 : V4L2_PIX_FMT_NV12;
 	p->field = V4L2_FIELD_NONE;
 	/* Recomputed every time: ffmpeg sends back our stale 0x0 answer. */
-	p->bytesperline = ALIGN(w, 64);
+	p->bytesperline = ALIGN(w, 64) * (p010 ? 2 : 1);
 	p->sizeimage = ave_out_size(ctx->codec, p->bytesperline, h);
 	/* Colorimetry is the application's to set; only fill in "default". */
 	if (p->colorspace == V4L2_COLORSPACE_DEFAULT)
@@ -205,11 +212,13 @@ static int ave_querycap(struct file *file, void *priv,
 static int ave_enum_fmt(struct file *file, void *priv, struct v4l2_fmtdesc *f)
 {
 	struct ave_v4l2 *av = video_drvdata(file);
+	struct ave_ctx *ctx = fh_to_ctx(file);
 
 	if (V4L2_TYPE_IS_OUTPUT(f->type)) {
-		if (f->index)
+		/* The raw formats the current CAPTURE codec takes: P010 is HEVC's */
+		if (f->index > (ctx->codec == AVE_ENC_CODEC_HEVC ? 1 : 0))
 			return -EINVAL;
-		f->pixelformat = V4L2_PIX_FMT_NV12;
+		f->pixelformat = f->index ? V4L2_PIX_FMT_P010 : V4L2_PIX_FMT_NV12;
 	} else {
 		/* H.264 first: the default, and index 0 as before HEVC. */
 		if (f->index > (av->hevc ? 1 : 0))
@@ -227,6 +236,7 @@ static int ave_enum_framesizes(struct file *file, void *priv,
 	struct ave_v4l2 *av = video_drvdata(file);
 
 	if (fs->index || (fs->pixel_format != V4L2_PIX_FMT_NV12 &&
+			  !(fs->pixel_format == V4L2_PIX_FMT_P010 && av->hevc) &&
 			  fs->pixel_format != V4L2_PIX_FMT_H264 &&
 			  !(fs->pixel_format == V4L2_PIX_FMT_HEVC && av->hevc)))
 		return -EINVAL;
@@ -246,6 +256,7 @@ static int ave_g_fmt(struct file *file, void *priv, struct v4l2_format *f)
 
 	if (V4L2_TYPE_IS_OUTPUT(f->type)) {
 		f->fmt.pix.colorspace = ctx->colorspace;
+		f->fmt.pix.pixelformat = ctx->out_fourcc;
 		ave_fill_out_fmt(ctx, &f->fmt.pix, ctx->width, ctx->height);
 		f->fmt.pix.ycbcr_enc = ctx->ycbcr_enc;
 		f->fmt.pix.quantization = ctx->quantization;
@@ -285,6 +296,15 @@ static int ave_s_fmt(struct file *file, void *priv, struct v4l2_format *f)
 		ctx->width = f->fmt.pix.width;
 		ctx->height = f->fmt.pix.height;
 		ctx->bytesperline = f->fmt.pix.bytesperline;
+		ctx->out_fourcc = f->fmt.pix.pixelformat;
+		/*
+		 * P010 means Main 10: ffmpeg never sets the profile, and GStreamer
+		 * sets main-10 anyway. Main 10 from NV12 stays possible by setting
+		 * the control after the format.
+		 */
+		if (ctx->out_fourcc == V4L2_PIX_FMT_P010 && ctx->hevc_profile)
+			v4l2_ctrl_s_ctrl(ctx->hevc_profile,
+					 V4L2_MPEG_VIDEO_HEVC_PROFILE_MAIN_10);
 		ctx->out_size = f->fmt.pix.sizeimage;
 		ctx->crop = (struct v4l2_rect){ 0, 0, ctx->width, ctx->height };
 		ctx->colorspace = f->fmt.pix.colorspace;
@@ -305,6 +325,12 @@ static int ave_s_fmt(struct file *file, void *priv, struct v4l2_format *f)
 					V4L2_BUF_TYPE_VIDEO_OUTPUT)))
 				return -EBUSY;
 			ctx->codec = codec;
+			/* P010 is HEVC-only: back to NV12 for H.264 */
+			if (codec != AVE_ENC_CODEC_HEVC &&
+			    ctx->out_fourcc == V4L2_PIX_FMT_P010) {
+				ctx->out_fourcc = V4L2_PIX_FMT_NV12;
+				ctx->bytesperline = ALIGN(ctx->width, 64);
+			}
 			ctx->out_size = ave_out_size(codec, ctx->bytesperline,
 						     ctx->height);
 		}
@@ -490,6 +516,9 @@ static int ave_s_ctrl(struct v4l2_ctrl *c)
 	case V4L2_CID_MPEG_VIDEO_HEVC_MAX_QP:
 		ctx->hevc_qp_max = c->val;
 		break;
+	case V4L2_CID_MPEG_VIDEO_HEVC_PROFILE:
+		ctx->hevc_main10 = c->val == V4L2_MPEG_VIDEO_HEVC_PROFILE_MAIN_10;
+		break;
 	case V4L2_CID_MPEG_VIDEO_HEVC_LEVEL: {
 		/* V4L2 menu order -> general_level_idc (30 x level, Table A.8). */
 		static const u8 idc[] = { 30, 60, 63, 90, 93, 120, 123, 150,
@@ -576,9 +605,12 @@ static int ave_init_ctrls(struct ave_ctx *ctx)
 	 * it. QP defaults as H.264's.
 	 */
 	if (ctx->av->hevc) {
-		v4l2_ctrl_new_std_menu(h, o, V4L2_CID_MPEG_VIDEO_HEVC_PROFILE,
-				       V4L2_MPEG_VIDEO_HEVC_PROFILE_MAIN,
-				       ~BIT(V4L2_MPEG_VIDEO_HEVC_PROFILE_MAIN),
+		/* Main 10 (docs/83): 10-bit coding from NV12 or P010 */
+		ctx->hevc_profile = v4l2_ctrl_new_std_menu(h, o,
+				       V4L2_CID_MPEG_VIDEO_HEVC_PROFILE,
+				       V4L2_MPEG_VIDEO_HEVC_PROFILE_MAIN_10,
+				       ~(BIT(V4L2_MPEG_VIDEO_HEVC_PROFILE_MAIN) |
+					 BIT(V4L2_MPEG_VIDEO_HEVC_PROFILE_MAIN_10)),
 				       V4L2_MPEG_VIDEO_HEVC_PROFILE_MAIN);
 		v4l2_ctrl_new_std_menu(h, o, V4L2_CID_MPEG_VIDEO_HEVC_TIER,
 				       V4L2_MPEG_VIDEO_HEVC_TIER_MAIN,
@@ -729,8 +761,11 @@ static int ave_start_streaming(struct vb2_queue *q, unsigned int count)
 			.fps_num = fps,
 			.fps_den = rc_nondrop ? fps : 1,
 			.slots = AVE_CODED_SLOTS,
-			/* HEVC: Main (1), and always CABAC. */
-			.profile_idc = hevc ? 1 : ctx->profile_idc,
+			/* HEVC: Main (1) or Main 10 (2), and always CABAC. */
+			.profile_idc = hevc ? (ctx->hevc_main10 ? 2 : 1) :
+				       ctx->profile_idc,
+			.src_bitdepth = hevc && ctx->out_fourcc ==
+					V4L2_PIX_FMT_P010 ? 10 : 8,
 			.level_idc = hevc ? ctx->hevc_level_idc : ctx->level_idc,
 			.cabac = !hevc && ctx->cabac,
 		};
@@ -936,6 +971,7 @@ static int ave_open(struct file *file)
 	ctx->xfer_func = V4L2_XFER_FUNC_DEFAULT;
 	ctx->qp = AVE_DEF_QP;
 	ctx->codec = AVE_ENC_CODEC_H264;
+	ctx->out_fourcc = V4L2_PIX_FMT_NV12;
 	ctx->hevc_qp = AVE_DEF_QP;
 
 	v4l2_fh_init(&ctx->fh, video_devdata(file));

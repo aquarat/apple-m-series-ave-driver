@@ -4206,3 +4206,20 @@ The host analysis of b4 ranked five hypotheses (docs/81 status).
   the picture with the low bits, 54.75 dB against it without**. Row 0
   decodes to 64 65 66 67 64 65 70 71 68, exactly as written. **The 10-bit
   path is real end to end.**
+
+## m5 (2026-09-27): Main 10 through V4L2
+
+OUTPUT offers P010 as index 1 while CAPTURE is HEVC. P010 doubles
+bytesperline and sets HEVC_PROFILE to MAIN_10, which is now in the menu
+(MAIN_10 from NV12 is also allowed: m1's path). Switching CAPTURE back to
+H.264 resets OUTPUT to NV12. One boot, `tools/v4l2-test.sh`, 1280x720,
+60 frames; the HEVC streams are graded on the host.
+- **m5**: P010 -> HEVC gave Main 10 but 59 frames at 11.6 dB (max 56).
+  v4l2-ctl does not know P010 and reads sizeimage bytes a frame (chroma
+  rounded to 64 rows: 2 826 240 against the file's 2 764 800), so frames
+  drift after the first. It was the test, not the driver:
+  `v4l2-test.sh SRCFMT=p010` now pads each frame to the buffer layout.
+- **m5b**: **P010 -> HEVC Main 10, 60 frames, yuv420p10le, Y 55.53 dB in
+  10 bits** (avg 54.52, min 54.32). The regressions in the same boot:
+  NV12 -> HEVC Main 44.27 dB (as h4) and NV12 -> H.264 1080p **44.686854**
+  (as always).
