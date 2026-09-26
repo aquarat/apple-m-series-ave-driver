@@ -157,9 +157,13 @@ static u32 ave_cap_size(u32 w, u32 h)
 static void ave_fill_out_fmt(const struct ave_ctx *ctx,
 			     struct v4l2_pix_format *p, u32 w, u32 h)
 {
-	/* P010 only with HEVC (docs/83): two bytes a sample, same geometry */
-	const bool p010 = p->pixelformat == V4L2_PIX_FMT_P010 &&
-			  ctx->codec == AVE_ENC_CODEC_HEVC;
+	/*
+	 * P010 (docs/83): two bytes a sample, same geometry. Accepted whatever
+	 * CAPTURE says now: GStreamer probes the raw formats at open, before
+	 * any codec is chosen, and sets OUTPUT before CAPTURE (m7). HEVC is
+	 * the only codec that takes it; H.264 + P010 is refused at STREAMON.
+	 */
+	const bool p010 = p->pixelformat == V4L2_PIX_FMT_P010 && ctx->av->hevc;
 
 	ave_clamp_size(&w, &h);
 	p->width = w;
@@ -212,11 +216,10 @@ static int ave_querycap(struct file *file, void *priv,
 static int ave_enum_fmt(struct file *file, void *priv, struct v4l2_fmtdesc *f)
 {
 	struct ave_v4l2 *av = video_drvdata(file);
-	struct ave_ctx *ctx = fh_to_ctx(file);
 
 	if (V4L2_TYPE_IS_OUTPUT(f->type)) {
-		/* The raw formats the current CAPTURE codec takes: P010 is HEVC's */
-		if (f->index > (ctx->codec == AVE_ENC_CODEC_HEVC ? 1 : 0))
+		/* P010 whenever HEVC exists (see ave_fill_out_fmt) */
+		if (f->index > (av->hevc ? 1 : 0))
 			return -EINVAL;
 		f->pixelformat = f->index ? V4L2_PIX_FMT_P010 : V4L2_PIX_FMT_NV12;
 	} else {
@@ -733,6 +736,12 @@ static int ave_start_streaming(struct vb2_queue *q, unsigned int count)
 	/* Open + Start_AVC when the second queue starts (docs/68 §7 step 5). */
 	if (!vb2_is_streaming(other) || ctx->session)
 		return 0;
+	if (ctx->codec != AVE_ENC_CODEC_HEVC &&
+	    ctx->out_fourcc == V4L2_PIX_FMT_P010) {
+		dev_err(av->ave->dev, "v4l2: P010 input needs HEVC; H.264 takes NV12 only\n");
+		ave_return_bufs(ctx, q, VB2_BUF_STATE_QUEUED);
+		return -EINVAL;
+	}
 
 	mutex_lock(&av->hw_mutex);
 	if (av->owner && av->owner != ctx) {

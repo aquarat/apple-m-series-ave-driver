@@ -4231,3 +4231,12 @@ H.264 resets OUTPUT to NV12. One boot, `tools/v4l2-test.sh`, 1280x720,
   search_range 0 the same frame completes (bs1). So the stall is not a
   missing per-reference buffer: the reference fetch / motion search works
   in exactly one configuration, the widest window with one reference.
+- **m7** (GStreamer, `v4l2h265enc` from `p010-10le`): not-negotiated, 0
+  bytes. GStreamer probes the raw formats at open, when CAPTURE is still
+  H.264, so P010 was not listed, and it sets OUTPUT before CAPTURE. P010
+  is now listed and accepted whenever HEVC exists; H.264 + P010 is refused
+  at STREAMON.
+- **m7b**: **GStreamer P010 -> Main 10, 60 frames, Y 55.53 dB** (as
+  v4l2-ctl). `v4l2-compliance -s` still **54/54**. (GStreamer caches pad
+  templates: clear `~/.cache/gstreamer-1.0/registry.*.bin` after a
+  driver format change.)
