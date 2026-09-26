@@ -4147,3 +4147,18 @@ Plan: docs/82 (host analysis of the 13.5 ADT/kext/firmware).
   per device; per-instance debugfs/V4L2 names, encoder 0 unchanged):
   `probe: SoC row t6001 (encoder 0)`, and the b1 configuration gives a
   **byte-identical 60-frame stream** (Y 44.686854 dB).
+- **Overlay control S0b** (ave0, variant=4, on the overlay module that
+  resolves only the sentinels a dtbo holds): the same phandles as before,
+  and the b1 configuration byte-identical.
+- **A1a** (`OVERLAY=6` = ave1 alone, `stop_after=6`): the overlay applies
+  (venc1_sys 0x24, venc1_pipe5/me0/pipe4 0xd4/0xd5/0xd3). apple-dart
+  initialises iommu@507040000 and @507030000. `probe: SoC row t6001-ave1
+  (encoder 1)`. Stages 1-6 are OK with 4 power domains. venc1_sys..me1 are
+  all **on** in pm_genpd_summary, and ME1's PS reads 0x3ff through ave1's
+  bank 3 (the corrected 0x28e688000). No machine trouble.
+- **A1b** (`stop_after=8 dapf_dump=1`): the stage-7 SVE write and stage-8
+  read work. **ave1 CPU_STATUS = 0x2a (cold)**, as ave0 reads on a first
+  load. dart-ave1's DAPF: **16 non-empty slots of garbage** (random r0/r4
+  and ranges; the DART ERROR register holds a stale stream-7 write). It is
+  uninitialised SRAM that nothing programmed, so ave1's core cannot fetch
+  until m1n1 programs it (docs/82 M1).

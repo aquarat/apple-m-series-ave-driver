@@ -1,0 +1,80 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/*
+ * variant=6: ave1, t6001's second encoder, alone - variant=4's shape
+ * (both DART instances in iommus) at ave1's addresses. docs/82.
+ *
+ * Every value is the ADT's ave1 / dart-ave1, CPU physical = bus +
+ * 0x2_00000000 (tools/check_addrs.py), which is ave0's + 0xFA000000 for
+ * each block. Except bank 3: the ADT's ave1 reg[3] is 0x28e680260 +0x7dc4,
+ * spanning ANE1/MSR1 power registers; the driver reads bank 3 at +0..+0x20
+ * as DMA..ME1, so this uses ps-regs[17], 0x28e688000 +0x24 (docs/82 §0.6).
+ *
+ * Sentinel phandles 0xa7e000NN, replaced by ave_overlay_mod.c at load:
+ *   0x13  the AIC (compatible)   0xe1  venc1_sys (label; also resets)
+ *   0xe2  venc1_pipe5            0xe4  venc1_me0
+ *   0xe3  venc1_pipe4
+ * No afnc4_ioa counterpart: ave1's fabric path is AFNC5, which the ADT
+ * marks critical and on (docs/82 §1.3). venc1_me1 is powered by the
+ * driver's holder (ave_soc_t6001_ave1.me1_node), as venc_me1 is for ave0.
+ *
+ * Nothing programs dart-ave1's DAPF yet (m1n1 does ave0's only), so the
+ * core cannot fetch its firmware: runs on this overlay stop before the
+ * core starts (stop_after <= 8) until the m1n1 steps M0/M1 are done.
+ *
+ * Same once-per-boot rule as every variant: the overlay module has no exit.
+ * Compile WITHOUT -@.
+ */
+/dts-v1/;
+/plugin/;
+
+/ {
+	fragment@0 {
+		target-path = "/soc";
+
+		__overlay__ {
+			#address-cells = <2>;
+			#size-cells = <2>;
+
+			/* Both DART instances share IRQ 1038 (ADT dart-ave1); see e4.dts */
+			dart_ave1_0: iommu@507040000 {
+				compatible = "apple,t6000-dart";
+				reg = <0x5 0x07040000 0x0 0x4000>;
+				interrupt-parent = <0xa7e00013>;
+				interrupts = <0 0 1038 4>;
+				#iommu-cells = <1>;
+				power-domains = <0xa7e000e1>;
+			};
+
+			dart_ave1_1: iommu@507030000 {
+				compatible = "apple,t6000-dart";
+				reg = <0x5 0x07030000 0x0 0x4000>;
+				interrupt-parent = <0xa7e00013>;
+				interrupts = <0 0 1038 4>;
+				#iommu-cells = <1>;
+				power-domains = <0xa7e000e1>;
+			};
+
+			ave1: video-encoder@507100000 {
+				compatible = "apple,t6001-ave", "apple,ave";
+				reg = <0x5 0x07100000 0x0 0x45c000>,
+				      <0x5 0x07800000 0x0 0x800000>,
+				      <0x5 0x07050000 0x0 0x008000>,
+				      <0x2 0x8e688000 0x0 0x000024>,
+				      <0x5 0x06000000 0x0 0x1000000>,
+				      <0x5 0x07040000 0x0 0x4000>,
+				      <0x5 0x07044000 0x0 0x4000>,
+				      <0x5 0x07020000 0x0 0x4000>;
+				reg-names = "dpe", "asc", "sve", "unk3", "axi2af",
+					    "cpudart", "dapf", "smmu";
+				interrupt-parent = <0xa7e00013>;
+				/* ADT ave1 interrupts[0] = 1041; [1] the DARTs' 1038 */
+				interrupts = <0 0 1041 4>, <0 0 1038 4>;
+				power-domains = <0xa7e000e1>, <0xa7e000e2>, <0xa7e000e4>,
+						<0xa7e000e3>;
+				resets = <0xa7e000e1>;
+				iommus = <&dart_ave1_0 0>, <&dart_ave1_0 1>,
+					 <&dart_ave1_1 0>, <&dart_ave1_1 1>;
+			};
+		};
+	};
+};

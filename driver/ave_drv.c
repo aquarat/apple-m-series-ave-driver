@@ -650,8 +650,8 @@ static int ave_power_me1_on(struct ave_device *ave)
 		return dev_err_probe(ave->dev, ret, "me1: power on\n");
 	}
 	ave->me1_dev = vdev;
-	dev_info(ave->dev, "me1: venc_me1 powered; PMGR PS ME1 = %#010x\n",
-		 ave_read(ave, AVE_BANK_PMGR_PS, 0x20));
+	dev_info(ave->dev, "me1: %s powered; PMGR PS ME1 = %#010x\n",
+		 ave->soc->me1_label, ave_read(ave, AVE_BANK_PMGR_PS, 0x20));
 	return 0;
 }
 
