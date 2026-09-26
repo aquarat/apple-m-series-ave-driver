@@ -4240,3 +4240,8 @@ H.264 resets OUTPUT to NV12. One boot, `tools/v4l2-test.sh`, 1280x720,
   v4l2-ctl). `v4l2-compliance -s` still **54/54**. (GStreamer caches pad
   templates: clear `~/.cache/gstreamer-1.0/registry.*.bin` after a
   driver format change.)
+- **m8** (rate control, v4l2-ctl `video_bitrate_mode=VBR
+  video_bitrate=4000000 frame_level_rate_control_enable=1`, 300 frames
+  1280x720): **P010 -> Main 10 3993 kbit/s** (99.8 %), Y 47.91 dB in 10
+  bits; NV12 -> Main 3991 kbit/s in the same boot. No assert or hang. The
+  12-step QP domain shift at 10 bits does not upset the controller.
