@@ -734,6 +734,14 @@ static void test_start_13_5(void)
 	expect_int(ave_cmd_build_start_avc(a, buf, sizeof(buf), &CTX, &s), 0x10e10, "size, RefSpacingP 2");
 	E32(buf, 0x10574, 2, "RefSpacingP (ldr [x27,#1604] fw 0x5da74)");
 	E32(buf, 0x10578, 0, "RefSpacingB0 untouched");
+	E16(buf, 0xfce0, 0, "search_range 0 unless asked");
+	s.search_range = 2;
+	memset(buf, 0, sizeof(buf));
+	ave_cmd_build_start_avc(a, buf, sizeof(buf), &CTX, &s);
+	E16(buf, 0xfce0, 2, "search_range (ldrh fw 0x5cf0c, docs/65)");
+	s.search_range = 3;
+	expect_int(ave_cmd_build_start_avc(a, buf, sizeof(buf), &CTX, &s), -EINVAL, "search_range 3");
+	s.search_range = 0;
 }
 
 static void test_start_26_6(void)
