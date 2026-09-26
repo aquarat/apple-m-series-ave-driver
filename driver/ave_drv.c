@@ -153,14 +153,24 @@ MODULE_PARM_DESC(pmp_report,
  * virtual devices whose only effect is this 64-bit write into the PMP's
  * dashboard: SOC level | FAB0 level << 32 | 1 << 61, ave0's SOC-DEV-DVFS
  * entry 273 (tools/pmp_ptd_map.py, controls C1-C4). VMax + FAB0 VMax =
- * 0x2000000300000003, VNOM = 0x2000000000000001. Written after the R3
- * report and before Config, read back, and released (0x2000000000000000)
- * before the report and VENC_SYS go down. 0 = no vote (default).
+ * 0x2000000300000003, VNOM = 0x2000000000000001. Read back after each
+ * write, and released (0x2000000000000000) before the report and VENC_SYS
+ * go down. 0 = no vote (default).
+ *
+ * By default the vote is held only while a stream is open: written at
+ * ave_enc_start() before Open, released at ave_enc_stop() after Close
+ * (docs/80), so an idle encoder does not keep the SoC and fabric at
+ * their top levels. pmp_vote_always=1 holds it from probe to unload, as
+ * f95-f99 did; so does the probe-time self-test, which never streams.
  */
 static unsigned long pmp_vote;
 module_param(pmp_vote, ulong, 0444);
 MODULE_PARM_DESC(pmp_vote,
 		 "VENC DVFS vote written to the PMP dashboard, e.g. 0x2000000300000003 = VMax + FAB0 VMax (needs pmp_report=1; docs/75 R4). 0 = none");
+static bool pmp_vote_always;
+module_param(pmp_vote_always, bool, 0444);
+MODULE_PARM_DESC(pmp_vote_always,
+		 "hold pmp_vote from probe to unload instead of only while a stream is open (default 0)");
 /* The entry's addresses are per SoC: ave->soc->pmp_dvfs_wr / _rd */
 #define AVE_PTD_DVFS_VALID	BIT_ULL(61)
 #define AVE_PTD_DVFS_MASK	(AVE_PTD_DVFS_VALID | GENMASK_ULL(33, 32) | GENMASK_ULL(1, 0))
@@ -177,7 +187,7 @@ MODULE_PARM_DESC(pmp_vote,
 static bool dpe_tunables = true;
 module_param(dpe_tunables, bool, 0444);
 MODULE_PARM_DESC(dpe_tunables,
-		 "apply macOS's AVE_DPE Castor_6000 tunables and enable (0x40D1DC000) after power-on, before the core starts (docs/58 7.1)");
+		 "apply macOS's AVE_DPE Castor_6000 tunables and enable (DPE+0xDC000) after power-on, before the core starts (docs/58 7.1)");
 
 /*
  * Register the V4L2 mem2mem encoder (docs/68) instead of running the
@@ -775,7 +785,12 @@ static int ave_pmp_report_on(struct ave_device *ave)
 	return 0;
 }
 
-static int ave_pmp_vote(struct ave_device *ave, u64 val)
+/*
+ * @hold: 200 ms around each access, so each marker leaves the machine
+ * before the next one (f93-f99, docs/75 §10). The streaming votes skip it:
+ * they run inside STREAMON and STREAMOFF.
+ */
+static int ave_pmp_vote(struct ave_device *ave, u64 val, bool hold)
 {
 	void __iomem *wr, *rd;
 	u64 back, st;
@@ -799,27 +814,33 @@ static int ave_pmp_vote(struct ave_device *ave, u64 val)
 	 * and reset it. Each step below is held 200 ms so its line leaves the
 	 * machine before the next access: write, PMP reaction, read-back.
 	 */
-	dev_info(ave->dev, "pmp: writing AVE0 DVFS vote %#018llx\n", val);
-	msleep(200);
+	if (hold) {
+		dev_info(ave->dev, "pmp: writing AVE0 DVFS vote %#018llx\n", val);
+		msleep(200);
+	}
 	writeq(val, wr);
-	msleep(200);
-	dev_info(ave->dev, "pmp: vote written, alive 200 ms later; reading back\n");
-	msleep(200);
+	if (hold) {
+		msleep(200);
+		dev_info(ave->dev, "pmp: vote written, alive 200 ms later; reading back\n");
+		msleep(200);
+	}
 	back = readq(rd);
 	st = readq(rd + 8);
 	iounmap(wr);
 	iounmap(rd);
 	dev_info(ave->dev, "pmp: AVE0 DVFS vote %#018llx, read back %#018llx (+8 %#018llx)%s\n",
 		 val, back, st, back == val ? "" : " - MISMATCH");
-	msleep(200);
+	if (hold)
+		msleep(200);
 	return 0;
 }
 
-static int ave_pmp_vote_on(struct ave_device *ave)
+/* Probe: check pmp_vote once, then vote now or leave it to the streams. */
+static int ave_pmp_vote_setup(struct ave_device *ave)
 {
 	u64 v = pmp_vote;
 
-	if (!v || ave->pmp_voted)
+	if (!v)
 		return 0;
 	if (!ave->soc->pmp_dvfs_wr || !ave->soc->pmp_dvfs_rd) {
 		dev_warn(ave->dev, "pmp: pmp_vote ignored: no AVE0 DVFS entry known for %s\n",
@@ -834,16 +855,38 @@ static int ave_pmp_vote_on(struct ave_device *ave)
 	if (!(v & AVE_PTD_DVFS_VALID) || (v & ~AVE_PTD_DVFS_MASK))
 		return dev_err_probe(ave->dev, -EINVAL,
 				     "pmp: pmp_vote %#llx is not 1<<61 | FAB0(0-3)<<32 | SOC(0-3)\n", v);
-	ave->pmp_voted = !ave_pmp_vote(ave, v);
+	if (!pmp_vote_always && !ave_session_selftest_requested()) {
+		ave->pmp_vote_streaming = true;
+		dev_info(ave->dev, "pmp: vote %#llx will be held while a stream is open\n", v);
+		return 0;
+	}
+	ave->pmp_voted = !ave_pmp_vote(ave, v, true);
 	return ave->pmp_voted ? 0 : -ENOMEM;
 }
 
-static void ave_pmp_vote_off(struct ave_device *ave)
+static void ave_pmp_vote_off(struct ave_device *ave, bool hold)
 {
 	if (!ave->pmp_voted)
 		return;
 	ave->pmp_voted = false;
-	ave_pmp_vote(ave, AVE_PTD_DVFS_VALID);
+	ave_pmp_vote(ave, AVE_PTD_DVFS_VALID, hold);
+}
+
+/*
+ * ave_enc_start()/ave_enc_stop(), which the caller serialises (one stream
+ * at a time). A failed vote only costs speed, so the stream goes on.
+ */
+void ave_pmp_stream_on(struct ave_device *ave)
+{
+	if (!ave->pmp_vote_streaming || ave->pmp_voted || !ave->pmp_dev)
+		return;
+	ave->pmp_voted = !ave_pmp_vote(ave, pmp_vote, false);
+}
+
+void ave_pmp_stream_off(struct ave_device *ave)
+{
+	if (ave->pmp_vote_streaming)
+		ave_pmp_vote_off(ave, false);
 }
 
 static void ave_pmp_report_off(struct ave_device *ave)
@@ -912,7 +955,7 @@ static void ave_power_off(struct ave_device *ave, const char *why)
 		}
 	}
 	/* Vote, then report, then VENC_SYS: the reverse of power-up (docs/75 §6) */
-	ave_pmp_vote_off(ave);
+	ave_pmp_vote_off(ave, true);
 	/* Clears PS-REQ bit 16 while VENC_SYS is still up (macOS's order) */
 	ave_pmp_report_off(ave);
 	/* Child of venc_me0, and the last thing holding a reference. */
@@ -1446,7 +1489,7 @@ static int ave_probe_stages(struct platform_device *pdev)
 		ret = ave_pmp_report_on(ave);
 		if (ret)
 			return ret;
-		ret = ave_pmp_vote_on(ave);
+		ret = ave_pmp_vote_setup(ave);
 		if (ret)
 			return ret;
 

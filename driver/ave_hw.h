@@ -134,13 +134,11 @@
  * an earlier revision of this file recorded.
  */
 /*
- * The /arm-io bus->AP-physical translation. ADT reg entries are bus
- * addresses; Linux nodes carry the translated ones. Subtracting this is how
- * we recover what the coprocessor itself must be told - see
- * docs/30-address-translation-bug.md for what happens when the two are
- * confused in the other direction.
+ * The /arm-io bus->AP-physical offset (t6001: 0x2_0000_0000) is per SoC and
+ * not needed at run time: every address the driver uses is AP-physical,
+ * from the DT or ave_soc.c. tools/check_addrs.py derives it from the ADT
+ * (docs/30 for what confusing the two did, docs/79 §3).
  */
-#define AVE_ARM_IO_BUS_OFFSET	0x200000000ULL
 
 /*
  * The firmware's own I/O window. Its IOBA tag takes the AP-PHYSICAL base

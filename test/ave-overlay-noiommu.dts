@@ -13,11 +13,14 @@
  * It also removes the backstop: a stray coprocessor write lands in physical
  * RAM instead of raising a DART fault.
  *
- * Literal phandles (the base tree has no __symbols__):
- *   0x13  aic
- *   0x1d  ps_venc_sys      0xc2  ps_venc_dma
- *   0xc4  ps_venc_pipe4    0xc3  ps_venc_pipe5
- *   0xc5  ps_venc_me0
+ * Sentinel phandles 0xa7e000NN (the base tree has no __symbols__), which
+ * ave_overlay_mod.c replaces at load time with the live phandles (docs/79
+ * §3). NN is the stock t6001 phandle; what it pointed at there is what the
+ * module looks up (earlier comments here named 0xc2-0xc5 dma/pipe4/pipe5/me0,
+ * which the stock DT does not bear out):
+ *   0x13  the AIC (compatible)   0x1d  venc_sys (label; also resets)
+ *   0xc2  venc_pipe5             0xc4  venc_me0
+ *   0xc3  venc_pipe4             0xc5  afnc4_ioa
  *
  * All five referenceable domains are listed rather than relying on genpd to
  * pull ancestors up. venc_me1 has no phandle in the base tree so cannot be
@@ -47,13 +50,13 @@
 				      <0x2 0x8e588000 0x0 0x000024>,
 				      <0x4 0x0c000000 0x0 0x1000000>;
 				reg-names = "dpe", "asc", "sve", "unk3", "axi2af";
-				interrupt-parent = <0x13>;
+				interrupt-parent = <0xa7e00013>;
 				interrupts = <0 0 1031 4>;
-				power-domains = <0x1d>, <0xc2>, <0xc4>,
-						<0xc3>, <0xc5>;
+				power-domains = <0xa7e0001d>, <0xa7e000c2>, <0xa7e000c4>,
+						<0xa7e000c3>, <0xa7e000c5>;
 				/* apple-avd does reset_control_reset() before its
 				 * first register access; #reset-cells is 0 */
-				resets = <0x1d>;
+				resets = <0xa7e0001d>;
 				/*
 				 * No "iommus" on purpose, and no DART nodes
 				 * above. apple-dart therefore never binds to

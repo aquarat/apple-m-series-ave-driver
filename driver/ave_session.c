@@ -335,12 +335,12 @@ MODULE_PARM_DESC(session_dpb,
 static unsigned int session_src_mode;
 module_param(session_src_mode, uint, 0444);
 MODULE_PARM_DESC(session_src_mode,
-	"Start_AVC wire 0xFEC0 (u16): source-read mode, split into 0x40D120050 and 0x40D1200D0 (0 = what every run so far sent)");
+	"Start_AVC wire 0xFEC0 (u16): source-read mode, split into DPE+0x20050 and DPE+0x200D0 (0 = what every run so far sent)");
 
 static unsigned int session_src_cfg;
 module_param(session_src_cfg, uint, 0444);
 MODULE_PARM_DESC(session_src_cfg,
-	"Start_AVC wire 0xFCE8 (u8): high byte of the source format word 0x40D12000C (0 = what every run so far sent)");
+	"Start_AVC wire 0xFCE8 (u8): high byte of the source format word DPE+0x2000C (0 = what every run so far sent)");
 
 /*
  * The other two bytes that reach SRCDMAGO (docs/69). session_src_bit3 also
@@ -351,7 +351,7 @@ MODULE_PARM_DESC(session_src_cfg,
 static unsigned int session_src_bit3;
 module_param(session_src_bit3, uint, 0444);
 MODULE_PARM_DESC(session_src_bit3,
-	"Start_AVC wire 0xFCE9 (u8): SRCDMAGO bit 3, and the gate on the third reader channel 0x40D120100");
+	"Start_AVC wire 0xFCE9 (u8): SRCDMAGO bit 3, and the gate on the third reader channel DPE+0x20100");
 
 static unsigned int session_src_go;
 module_param(session_src_go, uint, 0444);
@@ -1712,11 +1712,11 @@ static int ave_session_start_prep(struct ave_device *ave,
 			 session_scaling, ((0x10000 / session_scaling) << 16 | session_scaling) & 0x3fff00ff);
 	if (session_lambda)
 		dev_info(ave->dev,
-			 "session: %s: macOS lambda block (docs/72); expect 0x40D26A09C = 0x40D26A0A0 = nQuant\n",
+			 "session: %s: macOS lambda block (docs/72); expect DPE+0x16A09C = DPE+0x16A0A0 = nQuant\n",
 			 name);
 	if (session_ipcm)
 		dev_info(ave->dev,
-			 "session: %s: I_PCM in I slices %#x (wire 0xFCE4); expect IntraEst 0x1D0/1D4/1D8 = 0x01000000 and DMem 0x40D448000 bit 9 (docs/73 P2)\n",
+			 "session: %s: I_PCM in I slices %#x (wire 0xFCE4); expect IntraEst 0x1D0/1D4/1D8 = 0x01000000 and DMem DPE+0x348000 bit 9 (docs/73 P2)\n",
 			 name, session_ipcm);
 	if (session_dbg) {
 		/*
@@ -1733,11 +1733,11 @@ static int ave_session_start_prep(struct ave_device *ave,
 	}
 	if (session_src_bit3 || session_src_go)
 		dev_info(ave->dev,
-			 "session: %s: SRCDMAGO inputs bit3 %#x bits4+ %#x (wire 0xFCE9 / 0xFECC); watch 0x40D110128 and the third reader channel 0x40D120100\n",
+			 "session: %s: SRCDMAGO inputs bit3 %#x bits4+ %#x (wire 0xFCE9 / 0xFECC); watch DPE+0x10128 and the third reader channel DPE+0x20100\n",
 			 name, session_src_bit3, session_src_go);
 	if (session_src_mode || session_src_cfg)
 		dev_info(ave->dev,
-			 "session: %s: source-path sweep src_mode %#x (expect 0x40D120050=%#x 0x40D1200D0=%#x) src_cfg %#x (expect 0x40D12000C=%#x)\n",
+			 "session: %s: source-path sweep src_mode %#x (expect DPE+0x20050=%#x DPE+0x200D0=%#x) src_cfg %#x (expect DPE+0x2000C=%#x)\n",
 			 name, s->src_mode, s->src_mode & 3, s->src_mode >> 2,
 			 s->src_cfg_byte, (s->src_cfg_byte << 16) | (20 << 8));
 	s->frame_rate = bufs->fps_num ? bufs->fps_num : 30;
@@ -2726,7 +2726,7 @@ static void ave_session_diag_hevc_inter(struct ave_device *ave)
 				v[k] = ave_read(ave, AVE_BANK_DPE, off + 4 * k);
 			dev_info(ave->dev,
 				 "session: diag HEVC %s[%d] %llx: %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x\n",
-				 grp[g].name, i, 0x40D100000ULL + off, v[0], v[1],
+				 grp[g].name, i, (u64)ave->bank[AVE_BANK_DPE].phys + off, v[0], v[1],
 				 v[2], v[3], v[4], v[5], v[6], v[7], v[8], v[9],
 				 v[10], v[11], v[12], v[13], v[14], v[15]);
 		}
@@ -2761,7 +2761,7 @@ static void ave_session_diag_channels(struct ave_device *ave, const char *tag)
 			v[k] = ave_read(ave, AVE_BANK_DPE, ch[i] + 4 * k);
 		dev_info(ave->dev,
 			 "session: chan [%s] %llx: %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x\n",
-			 tag, 0x40D100000ULL + ch[i], v[0], v[1], v[2], v[3], v[4],
+			 tag, (u64)ave->bank[AVE_BANK_DPE].phys + ch[i], v[0], v[1], v[2], v[3], v[4],
 			 v[5], v[6], v[7], v[8], v[9], v[10], v[11], v[12], v[13],
 			 v[14], v[15]);
 	}
@@ -2792,11 +2792,11 @@ static void ave_session_diag_costs(struct ave_device *ave)
 		return;
 
 	if (session_costs & BIT(0)) {
-		ave_step(ave, "diag costs: group 1, IntraEst cfg 0x40D24A1C8..1D8");
+		ave_step(ave, "diag costs: group 1, IntraEst cfg DPE+0x14A1C8..1D8");
 		for (i = 0; i < 6; i++)
 			v[i] = ave_read(ave, AVE_BANK_DPE, 0x14a1c8 + 4 * i);
 		dev_info(ave->dev,
-			 "session: diag QP/lambda QPY %u nQuant %#x +0x1D0 %#x +0x1D4 %#x +0x1D8 %#x | enable 0x40D24A394 %#x\n",
+			 "session: diag QP/lambda QPY %u nQuant %#x +0x1D0 %#x +0x1D4 %#x +0x1D8 %#x | enable DPE+0x14A394 %#x\n",
 			 v[0], v[1], v[2], v[3], v[4],
 			 ave_read(ave, AVE_BANK_DPE, 0x14a394));
 	}
@@ -2807,7 +2807,7 @@ static void ave_session_diag_costs(struct ave_device *ave)
 		 * 2..24 the ladder. Until f42 this read 0x0AC..0x108, so its
 		 * last "0" was 0x108, past the ladder.
 		 */
-		ave_step(ave, "diag costs: group 2, ModeDec 0x40D26A09C..104");
+		ave_step(ave, "diag costs: group 2, ModeDec DPE+0x16A09C..104");
 		for (i = 0; i < 27; i += 9)
 			dev_info(ave->dev,
 				 "session: diag ModeDec 0x40D26A%03X: %08x %08x %08x %08x %08x %08x %08x %08x %08x\n",
@@ -2829,7 +2829,7 @@ static void ave_session_diag_costs(struct ave_device *ave)
 		 * makes IntraEst's mean anything - the control docs/70 caught
 		 * me reasoning without.
 		 */
-		ave_step(ave, "diag costs: group 3, curMB 0x40D243180 / 0x40D263180");
+		ave_step(ave, "diag costs: group 3, curMB DPE+0x143180 / DPE+0x163180");
 		dev_info(ave->dev,
 			 "session: diag curMB IntraEst %#010x %#010x | ModeDec %#010x %#010x (the control)\n",
 			 ave_read(ave, AVE_BANK_DPE, 0x143180),
@@ -2845,15 +2845,15 @@ static void ave_session_diag_costs(struct ave_device *ave)
 		 * f38 took an SError on it with the wired receiver watching.
 		 * One read per marker, so a fault names its access.
 		 */
-		ave_step(ave, "diag costs: group 4a, IntraEst DMem 0x40D448000");
+		ave_step(ave, "diag costs: group 4a, IntraEst DMem DPE+0x348000");
 		v[0] = ave_read(ave, AVE_BANK_DPE, 0x348000);
-		ave_step(ave, "diag costs: group 4b, IntraEst DMem 0x40D448764");
+		ave_step(ave, "diag costs: group 4b, IntraEst DMem DPE+0x348764");
 		v[1] = ave_read(ave, AVE_BANK_DPE, 0x348764);
-		ave_step(ave, "diag costs: group 4c, ME 0x40D190630");
+		ave_step(ave, "diag costs: group 4c, ME DPE+0x90630");
 		v[2] = ave_read(ave, AVE_BANK_DPE, 0x90630);
-		ave_step(ave, "diag costs: group 4d, ModeDec DMem 0x40D468000");
+		ave_step(ave, "diag costs: group 4d, ModeDec DMem DPE+0x368000");
 		v[3] = ave_read(ave, AVE_BANK_DPE, 0x368000);
-		ave_step(ave, "diag costs: group 4e, ModeDec DMem 0x40D4689AC");
+		ave_step(ave, "diag costs: group 4e, ModeDec DMem DPE+0x3689AC");
 		v[4] = ave_read(ave, AVE_BANK_DPE, 0x3689ac);
 		dev_info(ave->dev,
 			 "session: diag IntraEst DMem %#x +0x764 %#x | MESATDSCALING %#x | ModeDec DMem %#x +0x9AC %#x\n",
@@ -2871,10 +2871,10 @@ static void ave_session_diag_costs(struct ave_device *ave)
 					  0x18a0a0, 0x18a0a4, 0x18a0e0, 0x18a120 };
 		u32 r[ARRAY_SIZE(rl)];
 
-		ave_step(ave, "diag costs: group 5a, IntraEst scaling 0x40D24A088/08C/0C8");
+		ave_step(ave, "diag costs: group 5a, IntraEst scaling DPE+0x14A088/08C/0C8");
 		for (i = 0; i < ARRAY_SIZE(ie); i++)
 			v[i] = ave_read(ave, AVE_BANK_DPE, ie[i]);
-		ave_step(ave, "diag costs: group 5b, ReconLuma 0x40D28A088..120");
+		ave_step(ave, "diag costs: group 5b, ReconLuma DPE+0x18A088..120");
 		for (i = 0; i < ARRAY_SIZE(rl); i++)
 			r[i] = ave_read(ave, AVE_BANK_DPE, rl[i]);
 		dev_info(ave->dev,
@@ -2883,7 +2883,7 @@ static void ave_session_diag_costs(struct ave_device *ave)
 	}
 	if (session_costs & BIT(5)) {
 		/* docs/74 R4: ReconChroma's page; never read before f47. */
-		ave_step(ave, "diag costs: group 6, ReconChroma 0x40D2AA08C/0A4");
+		ave_step(ave, "diag costs: group 6, ReconChroma DPE+0x1AA08C/0A4");
 		v[0] = ave_read(ave, AVE_BANK_DPE, 0x1aa08c);
 		v[1] = ave_read(ave, AVE_BANK_DPE, 0x1aa0a4);
 		dev_info(ave->dev,
@@ -2910,7 +2910,7 @@ static void ave_session_diag_mcpu(struct ave_device *ave,
 		for (k = 0; k < 0xa0; k += 0x20)
 			dev_info(ave->dev,
 				 "session: diag stack %-9s %llx: %08x %08x %08x %08x %08x %08x %08x %08x\n",
-				 stk[i].name, 0x40D100000ULL + stk[i].base + k,
+				 stk[i].name, (u64)ave->bank[AVE_BANK_DPE].phys + stk[i].base + k,
 				 ave_read(ave, AVE_BANK_DPE, stk[i].base + k),
 				 ave_read(ave, AVE_BANK_DPE, stk[i].base + k + 4),
 				 ave_read(ave, AVE_BANK_DPE, stk[i].base + k + 8),
@@ -2920,7 +2920,7 @@ static void ave_session_diag_mcpu(struct ave_device *ave,
 				 ave_read(ave, AVE_BANK_DPE, stk[i].base + k + 24),
 				 ave_read(ave, AVE_BANK_DPE, stk[i].base + k + 28));
 	dev_info(ave->dev,
-		 "session: diag ModeDec ctx 0x40D263000 %08x +180 %08x +184 %08x +228 %08x go 0x40D26A080 %08x +084 %08x | ReconLuma ctx 0x40D283000 %08x +180 %08x +184 %08x +228 %08x go 0x40D28A080 %08x\n",
+		 "session: diag ModeDec ctx DPE+0x163000 %08x +180 %08x +184 %08x +228 %08x go DPE+0x16A080 %08x +084 %08x | ReconLuma ctx DPE+0x183000 %08x +180 %08x +184 %08x +228 %08x go DPE+0x18A080 %08x\n",
 		 ave_read(ave, AVE_BANK_DPE, 0x163000),
 		 ave_read(ave, AVE_BANK_DPE, 0x163180),
 		 ave_read(ave, AVE_BANK_DPE, 0x163184),
@@ -3365,7 +3365,7 @@ static int ave_session_process(struct ave_device *ave,
 	 * deliberately not the interrupt-status registers (docs/57 #4).
 	 */
 	sess_info(bufs, ave->dev,
-		 "session: recon writer 0x40D130240 = %#010x (want 0x800314b1 when programmed); +0x24c %#010x +0x25c %#010x +0x31c %#010x\n",
+		 "session: recon writer DPE+0x30240 = %#010x (want 0x800314b1 when programmed); +0x24c %#010x +0x25c %#010x +0x31c %#010x\n",
 		 ave_read(ave, AVE_BANK_DPE, 0x30240),
 		 ave_read(ave, AVE_BANK_DPE, 0x3024c),
 		 ave_read(ave, AVE_BANK_DPE, 0x3025c),
@@ -3383,7 +3383,7 @@ static int ave_session_process(struct ave_device *ave,
 		u32 want = lower_32_bits(luma_iova);
 
 		sess_info(bufs, ave->dev,
-			 "session: source reader 0x40D120010 = %#010x (want %#010x: %s) stride +0x14 %#x (want %#x) chroma +0x90 %#010x (want %#010x) fmt +0x0C %#010x mode +0x50 %#x +0xD0 %#x\n",
+			 "session: source reader DPE+0x20010 = %#010x (want %#010x: %s) stride +0x14 %#x (want %#x) chroma +0x90 %#010x (want %#010x) fmt +0x0C %#010x mode +0x50 %#x +0xD0 %#x\n",
 			 got, want,
 			 got == want ? "OUR BUFFER" :
 			 got ? "A DIFFERENT ADDRESS" : "NEVER PROGRAMMED",
@@ -3468,7 +3468,7 @@ static int ave_session_process(struct ave_device *ave,
 		 * 0x38b20). 0x40D110128 bit 0 is SRCDMAGO.
 		 */
 		sess_info(bufs, ave->dev,
-			 "session: diag 0x40D110140 %#010x (pipe done = bit 2) enable 0x40D11013C %#010x (want bit 2) SRCDMAGO 0x40D110128 %#010x srcdma cfg 0x40D120000 %#010x +4 %#010x scratch7 %#010x\n",
+			 "session: diag DPE+0x10140 %#010x (pipe done = bit 2) enable DPE+0x1013C %#010x (want bit 2) SRCDMAGO DPE+0x10128 %#010x srcdma cfg DPE+0x20000 %#010x +4 %#010x scratch7 %#010x\n",
 			 ave_read(ave, AVE_BANK_DPE, 0x10140),
 			 ave_read(ave, AVE_BANK_DPE, 0x1013c),
 			 ave_read(ave, AVE_BANK_DPE, 0x10128),
@@ -3480,7 +3480,7 @@ static int ave_session_process(struct ave_device *ave,
 
 			/* docs/58 7.0: currMbRow = 0x40D12002C >> 16; 44 = last of 45 rows */
 			sess_info(bufs, ave->dev,
-				 "session: diag srcdma 0x40D12002C %#010x -> currMbRow %u; AXI err 0x40D124000 %#010x 0x40D124004 %#010x 0x40D12C000 %#010x 0x40D134000 %#010x\n",
+				 "session: diag srcdma DPE+0x2002C %#010x -> currMbRow %u; AXI err DPE+0x24000 %#010x DPE+0x24004 %#010x DPE+0x2C000 %#010x DPE+0x34000 %#010x\n",
 				 prog, prog >> 16,
 				 ave_read(ave, AVE_BANK_DPE, 0x24000),
 				 ave_read(ave, AVE_BANK_DPE, 0x24004),
@@ -3503,7 +3503,7 @@ static int ave_session_process(struct ave_device *ave,
 
 			for (i = 0; i < ARRAY_SIZE(mcpu); i++)
 				n += scnprintf(line + n, sizeof(line) - n, " %llx:%x/%x",
-					       0x40D100000ULL + mcpu[i],
+					       (u64)ave->bank[AVE_BANK_DPE].phys + mcpu[i],
 					       ave_read(ave, AVE_BANK_DPE, mcpu[i] + 8),
 					       ave_read(ave, AVE_BANK_DPE, mcpu[i] + 4));
 			sess_info(bufs, ave->dev, "session: diag MCPU run/id%s\n", line);
@@ -4437,10 +4437,14 @@ int ave_enc_start(struct ave_device *ave, const struct ave_enc_cfg *cfg)
 	bufs->n_done = 0;
 	bufs->stream_len = 0;
 
+	/* The PMP clock vote, if pmp_vote asks for it per stream (docs/80) */
+	ave_pmp_stream_on(ave);
 	/* Codec 1 in the Open header for HEVC (docs/77 §1.2). */
 	ret = ave_session_open(ave, abi, bufs, AVE_SESS_CLIENT_ID);
-	if (ret)
+	if (ret) {
+		ave_pmp_stream_off(ave);
 		return ret;
+	}
 	ave->client_open = true;
 	ave_session_alloc_nbr(ave, bufs);
 	ave_session_alloc_entropy(ave, abi, bufs);
@@ -4531,5 +4535,7 @@ int ave_enc_stop(struct ave_device *ave)
 	bufs->stream_len = 0;
 	bufs->n_done = 0;
 	ave->dart_check_quiet = false;
+	/* After Close only: a stream that did not close keeps its clock. */
+	ave_pmp_stream_off(ave);
 	return 0;
 }

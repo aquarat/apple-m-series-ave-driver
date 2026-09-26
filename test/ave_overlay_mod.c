@@ -38,23 +38,32 @@ MODULE_PARM_DESC(pmp_venc,
 		 "also enable the PMP report entry pmp-venc-sys (report@10) for apple-ave pmp_report=1 (docs/75 R3, docs/78); needs a DT with the PMP running");
 
 /*
- * The dtbos carry literal phandles because the base tree has no
- * __symbols__. Those were taken from Fedora's stock t6001-j314c DT, and a
- * different base DT renumbers them: with the APPLE_USE_PMP build (docs/78)
- * ave0's list 0x1d 0xc2 0xc4 0xc3 0xc5 resolved to venc_sys, afnc2_lw0,
- * dispdfr_fe, disp0_fe and dispdfr_be (f89). So the list is rewritten at
- * load time to the phandles of the domains it named on the stock DT, by
- * label, in the same order. On the stock DT the rewrite changes nothing.
- * (The dtbo comments call these dma/pipe4/pipe5/me0; on the stock DT 0xc2
- * is pipe5 and 0xc5 is afnc4_ioa. This keeps what every run up to f88 had.)
- * The other two literals, 0x13 (AIC) and 0x1d (venc_sys, also on the DART
- * nodes), are checked, and the load is refused if they moved.
+ * The dtbos cannot say &aic or &ps_venc_sys: the base tree has no
+ * __symbols__. They used to carry the stock t6001-j314c DT's phandle
+ * numbers, which a different base DT renumbers (the APPLE_USE_PMP build,
+ * f89) and another SoC's DT never matches. So they carry sentinels,
+ * 0xa7e000NN with NN the old stock number, and each one is replaced here
+ * with the live phandle of the node it stands for, found by label or by
+ * compatible. Every sentinel the dtbo holds must be known and resolved, and
+ * none may be left over. On the stock t6001 DT the result is the old
+ * literals (0x13, 0x1d, 0xc2, 0xc4, 0xc3, 0xc5), which f1-f99 ran with.
+ *
+ * The domains keep what the stock numbers pointed at, not what the dtbo
+ * comments once called them: 0xc2 is venc_pipe5, 0xc5 afnc4_ioa.
  */
-static const u8 ave_ov_pd_stock[] = {
-	0, 0, 0, 0x1d, 0, 0, 0, 0xc2, 0, 0, 0, 0xc4, 0, 0, 0, 0xc3, 0, 0, 0, 0xc5,
-};
-static const char * const ave_ov_pd_labels[] = {
-	"venc_sys", "venc_pipe5", "venc_me0", "venc_pipe4", "afnc4_ioa",
+#define AVE_OV_SENTINEL(nn)	(0xa7e00000u | (nn))
+#define AVE_OV_SENTINEL_MASK	0xffffff00u
+
+static const struct {
+	u32		sentinel;
+	const char	*label;		/* a power domain's label, or NULL: the AIC */
+} ave_ov_refs[] = {
+	{ AVE_OV_SENTINEL(0x13), NULL },
+	{ AVE_OV_SENTINEL(0x1d), "venc_sys" },
+	{ AVE_OV_SENTINEL(0xc2), "venc_pipe5" },
+	{ AVE_OV_SENTINEL(0xc4), "venc_me0" },
+	{ AVE_OV_SENTINEL(0xc3), "venc_pipe4" },
+	{ AVE_OV_SENTINEL(0xc5), "afnc4_ioa" },
 };
 
 static int ave_ov_find_pd(const char *label, u32 *phandle)
@@ -84,76 +93,90 @@ static int ave_ov_find_pd(const char *label, u32 *phandle)
 	return 0;
 }
 
-static int ave_ov_check_phandle(u32 ph, const char *prop, const char *want)
-{
-	struct device_node *np = of_find_node_by_phandle(ph);
-	const char *l = NULL;
-	bool ok;
+/* AIC2 on t600x, AIC on t8103/t8112 (Asahi's apple,aic bindings) */
+static const struct of_device_id ave_ov_aic_match[] = {
+	{ .compatible = "apple,aic2" },
+	{ .compatible = "apple,aic" },
+	{}
+};
 
-	if (!np) {
-		pr_err("ave-overlay: phandle %#x is not in the live tree\n", ph);
-		return -ENODEV;
+static int ave_ov_find_aic(u32 *phandle)
+{
+	struct device_node *np = of_find_matching_node(NULL, ave_ov_aic_match);
+	int ret = 0;
+
+	if (!np || !of_property_read_bool(np, "interrupt-controller") ||
+	    !np->phandle) {
+		pr_err("ave-overlay: no apple,aic/aic2 interrupt controller with a phandle\n");
+		ret = -ENODEV;
+	} else {
+		*phandle = np->phandle;
 	}
-	if (want)
-		ok = !of_property_read_string(np, "label", &l) && !strcmp(l, want);
-	else
-		ok = of_property_read_bool(np, prop);
-	if (!ok)
-		pr_err("ave-overlay: phandle %#x is %pOF, not %s; refusing\n",
-		       ph, np, want ?: prop);
 	of_node_put(np);
-	return ok ? 0 : -EINVAL;
+	return ret;
 }
 
-/* Returns a fixed-up copy of fdt (kfree it), or an ERR_PTR. */
+/*
+ * Returns a fixed-up copy of fdt (kfree it), or an ERR_PTR. The sentinels
+ * are matched as whole big-endian cells on 4-byte boundaries: the structure
+ * block is cell-aligned, and 0xa7 0xe0 is not text, so the strings block
+ * cannot produce one.
+ */
 static void *ave_ov_fixup(const void *fdt, unsigned int len)
 {
-	const u8 *hit = NULL, *p = fdt, *end = p + len - sizeof(ave_ov_pd_stock);
-	__be32 cells[ARRAY_SIZE(ave_ov_pd_labels)];
+	unsigned int n[ARRAY_SIZE(ave_ov_refs)] = {};
+	__be32 live[ARRAY_SIZE(ave_ov_refs)];
+	unsigned int off;
 	bool changed = false;
 	u8 *copy;
 	int i, ret;
 
-	ret = ave_ov_check_phandle(0x13, "interrupt-controller", NULL) ?:
-	      ave_ov_check_phandle(0x1d, NULL, "venc_sys");
-	if (ret)
-		return ERR_PTR(ret);
-
-	for (; p <= end; p += 4) {
-		if (memcmp(p, ave_ov_pd_stock, sizeof(ave_ov_pd_stock)))
-			continue;
-		if (hit) {
-			pr_err("ave-overlay: power-domains list found twice in the dtbo\n");
-			return ERR_PTR(-EINVAL);
-		}
-		hit = p;
-	}
-	if (!hit) {
-		pr_err("ave-overlay: power-domains list not found in the dtbo\n");
-		return ERR_PTR(-EINVAL);
-	}
-
-	for (i = 0; i < ARRAY_SIZE(ave_ov_pd_labels); i++) {
+	for (i = 0; i < ARRAY_SIZE(ave_ov_refs); i++) {
 		u32 ph;
 
-		ret = ave_ov_find_pd(ave_ov_pd_labels[i], &ph);
+		ret = ave_ov_refs[i].label ?
+		      ave_ov_find_pd(ave_ov_refs[i].label, &ph) :
+		      ave_ov_find_aic(&ph);
 		if (ret)
 			return ERR_PTR(ret);
-		cells[i] = cpu_to_be32(ph);
-		if (memcmp(&cells[i], hit + 4 * i, 4)) {
-			pr_info("ave-overlay: power-domains[%d] %s: %#x (dtbo had %#x)\n",
-				i, ave_ov_pd_labels[i], ph,
-				be32_to_cpup((const __be32 *)(hit + 4 * i)));
+		live[i] = cpu_to_be32(ph);
+		if (ph != (ave_ov_refs[i].sentinel & ~AVE_OV_SENTINEL_MASK))
 			changed = true;
-		}
 	}
-	if (!changed)
-		pr_info("ave-overlay: power-domains match the stock DT, unchanged\n");
 
 	copy = kmemdup(fdt, len, GFP_KERNEL);
 	if (!copy)
 		return ERR_PTR(-ENOMEM);
-	memcpy(copy + (hit - (const u8 *)fdt), cells, sizeof(cells));
+	for (off = 0; off + 4 <= len; off += 4) {
+		u32 v = be32_to_cpup((const __be32 *)(copy + off));
+
+		if ((v & AVE_OV_SENTINEL_MASK) != AVE_OV_SENTINEL(0))
+			continue;
+		for (i = 0; i < ARRAY_SIZE(ave_ov_refs); i++)
+			if (v == ave_ov_refs[i].sentinel)
+				break;
+		if (i == ARRAY_SIZE(ave_ov_refs)) {
+			pr_err("ave-overlay: unknown sentinel %#x at dtbo offset %#x; refusing\n",
+			       v, off);
+			kfree(copy);
+			return ERR_PTR(-EINVAL);
+		}
+		memcpy(copy + off, &live[i], 4);
+		n[i]++;
+	}
+	/* The AIC and venc_sys are in every variant; a dtbo without them is stale. */
+	if (!n[0] || !n[1]) {
+		pr_err("ave-overlay: the dtbo has no AIC/venc_sys sentinels (built before docs/79 §3?); refusing\n");
+		kfree(copy);
+		return ERR_PTR(-EINVAL);
+	}
+	for (i = 0; i < ARRAY_SIZE(ave_ov_refs); i++)
+		if (n[i])
+			pr_info("ave-overlay: %s -> phandle %#x (x%u)\n",
+				ave_ov_refs[i].label ?: "aic",
+				be32_to_cpu(live[i]), n[i]);
+	if (!changed)
+		pr_info("ave-overlay: every phandle is the stock t6001 one\n");
 	return copy;
 }
 
@@ -239,11 +262,15 @@ static int __init ave_ov_init(void)
 	}
 
 	if (pmp_venc) {
-		struct device_node *np =
-			of_find_node_by_path("/soc/pmp@28e700000");
-		bool pmp_up = np && of_device_is_available(np);
+		struct device_node *soc = of_find_node_by_path("/soc");
+		struct device_node *np;
+		bool pmp_up = false;
 
-		of_node_put(np);
+		/* The PMP node, pmp@<unit>, whatever the SoC puts it at */
+		for_each_child_of_node(soc, np)
+			if (of_node_name_eq(np, "pmp") && of_device_is_available(np))
+				pmp_up = true;
+		of_node_put(soc);
 		if (!pmp_up) {
 			pr_err("ave-overlay: pmp_venc=1 but the PMP node is not enabled (docs/78); refusing\n");
 			return -ENODEV;
