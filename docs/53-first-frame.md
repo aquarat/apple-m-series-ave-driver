@@ -4190,3 +4190,19 @@ The host analysis of b4 ranked five hypotheses (docs/81 status).
   3, 3`, MbInput produced 21 consumed 6 (lag 15, source at MB row 2).
   **Any frame with a second reference stalls the pipe after two
   macroblocks.** B frames were only the first frames to need one.
+- **m2** (+ `session_src_bitdepth=10`: a P010 source, each sample
+  `v << 8`, stride x2, input_bitdepth 10; coded 8-bit Main): 4 frames,
+  no error, but **7 dB** and an IDR of 54 KB. The decoded rows repeat with
+  period 3 (`0 0 52 0 0 57 ...`): the firmware read the 16-bit samples as
+  **packed 10-bit, three to a 32-bit word** (Apple's p420).
+- **m2b** (m2 + `session_src_cfg=1`, i.e. pix_pck, wire 0xFCE8 = 1, as
+  macOS sends for every HEVC session): **byte-identical to m0h** (8-bit
+  NV12). pix_pck 1 selects 16-bit containers (P010), 0 packed. The driver
+  now sets it for a P010 source.
+- **m3** (P010 in, Main 10 out): Main 10, yuv420p10le, **byte-identical to
+  m1** (NV12 in). The firmware widens 8-bit input to exactly 4v.
+- **m3b** (one IDR at QP 12, P010 with `x & 3` in each luma sample's low
+  two bits, `session_src_lsb=1`): graded in 10 bits, **79.46 dB against
+  the picture with the low bits, 54.75 dB against it without**. Row 0
+  decodes to 64 65 66 67 64 65 70 71 68, exactly as written. **The 10-bit
+  path is real end to end.**

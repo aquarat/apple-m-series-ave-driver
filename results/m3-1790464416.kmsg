@@ -1,0 +1,1996 @@
+=== m3 2026-09-27T00:13:36+01:00 commit 3f9315c: insmod driver/apple-ave.ko session_selftest=1 session_codec=1 session_qp=30 session_dbg=0x20 session_frame=1 session_frames=4 session_src_bitdepth=10 session_hevc_bitdepth=10 ===
+[   14.905134] apple-pmgr-pwrstate 28e080000.power-management:power-controller@270: sync_state() pending due to 287080000.avd
+ SUBSYSTEM=platform
+ DEVICE=+platform:28e080000.power-management:power-cont
+[   14.905247] apple-pmp-report-entry 28e3c0000.pmp_report:report@11: sync_state() pending due to 287080000.avd
+ SUBSYSTEM=platform
+ DEVICE=+platform:28e3c0000.pmp_report:report@11
+=== applying overlay variant=4 ===
+[   15.299100] === applying overlay variant=4 ===
+[   15.330458] ave_overlay: loading out-of-tree module taints kernel.
+[   15.330470] ave_overlay: module verification failed: signature and/or required key missing - tainting kernel
+[   15.330913] ave-overlay: variant=4 - variant=3 with both DARTs in iommus (docs/56)
+[   15.331127] ave-overlay: aic -> phandle 0x13 (x3)
+[   15.331135] ave-overlay: venc_sys -> phandle 0x1d (x4)
+[   15.331140] ave-overlay: venc_pipe5 -> phandle 0xc7 (x1)
+[   15.331142] ave-overlay: venc_me0 -> phandle 0xc9 (x1)
+[   15.331144] ave-overlay: venc_pipe4 -> phandle 0xc8 (x1)
+[   15.331145] ave-overlay: afnc4_ioa -> phandle 0xca (x1)
+[   15.332002] apple-dart 40d040000.iommu: DART [pagesize 4000, 16 streams, bypass support: 1, bypass forced: 0, locked: 0, AS 32 -> 42] initialized
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d040000.iommu
+[   15.332315] apple-dart 40d030000.iommu: DART [pagesize 4000, 16 streams, bypass support: 0, bypass forced: 0, locked: 0, AS 32 -> 42] initialized
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d030000.iommu
+[   15.332586] platform 40d100000.video-encoder: Adding to iommu group 17
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   15.332920] ave-overlay: applied, ovcs_id=1
+=== overlay insmod returned rc=0 ===
+[   15.350086] === overlay insmod returned rc=0 ===
+=== insmod driver/apple-ave.ko session_selftest=1 session_codec=1 session_qp=30 session_dbg=0x20 session_frame=1 session_frames=4 session_src_bitdepth=10 session_hevc_bitdepth=10 ===
+[   15.372354] === insmod driver/apple-ave.ko session_selftest=1 session_codec=1 session_qp=30 session_dbg=0x20 session_frame=1 session_frames=4 session_src_bitdepth=10 session_hevc_bitdepth=10 ===
+[   15.396365] apple-ave 40d100000.video-encoder: probe: SoC row t6001 (encoder 0)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   15.396377] apple-ave 40d100000.video-encoder: probe: staged bring-up, stop_after=16 (max 16)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   15.396389] apple-ave 40d100000.video-encoder: OS firmware 13.5: using macOS 13.5 AVE ABI
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   15.396392] apple-ave 40d100000.video-encoder: stage 1 (map-banks): starting
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   15.396394] apple-ave 40d100000.video-encoder:   mapping bank 0 (dpe)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   15.396414] apple-ave 40d100000.video-encoder:   mapping bank 1 (asc)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   15.396421] apple-ave 40d100000.video-encoder:   mapping bank 2 (sve)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   15.396426] apple-ave 40d100000.video-encoder:   mapping bank 3 (unk3)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   15.396437] apple-ave 40d100000.video-encoder:   mapping bank 4 (axi2af)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   15.396470] apple-ave 40d100000.video-encoder: stage 1 (map-banks): OK
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   15.396471] apple-ave 40d100000.video-encoder: stage 2 (dma-mask): starting
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   15.396473] apple-ave 40d100000.video-encoder: stage 2 (dma-mask): OK
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   15.396475] apple-ave 40d100000.video-encoder: stage 3 (get-irq): starting
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   15.396532] apple-ave 40d100000.video-encoder:   irq = 131
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   15.396536] apple-ave 40d100000.video-encoder: stage 3 (get-irq): OK
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   15.396537] apple-ave 40d100000.video-encoder: stage 4 (request-irq): starting
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   15.396549] apple-ave 40d100000.video-encoder: stage 4 (request-irq): OK
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   15.396551] apple-ave 40d100000.video-encoder: stage 5 (power-attach): starting
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   15.396871] apple-ave 40d100000.video-encoder:   attached 5 power domain(s)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   15.396879] apple-ave 40d100000.video-encoder: stage 5 (power-attach): OK
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   15.396882] apple-ave 40d100000.video-encoder: stage 6 (power-on): starting
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   15.396887] apple-ave 40d100000.video-encoder:   resumed; left powered for inspection
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   15.396923] apple-ave 40d100000.video-encoder: me1: venc_me1 powered; PMGR PS ME1 = 0x000003ff
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   15.396926] apple-ave 40d100000.video-encoder: stage 6 (power-on): OK
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   15.396927] apple-ave 40d100000.video-encoder: stage 7 (write-sve-idle): starting
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   15.396929] apple-ave 40d100000.video-encoder:   writing 1 to SVE+0x38 (Apple's first access) ...
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   15.396930] apple-ave 40d100000.video-encoder:   write returned
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   15.396934] apple-ave 40d100000.video-encoder: dpe: [before] DC000 0x00000100 DC004 0x00000040 DC400 0x00002900 DC4A4 0x00000000 DC5B0 0x00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   15.397103] apple-ave 40d100000.video-encoder: dpe: [after] DC000 0x00000101 DC004 0x00001000 DC400 0x00032901 DC4A4 0x00000000 DC5B0 0x0000001d
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   15.397106] apple-ave 40d100000.video-encoder: dpe: Castor_6000 tunables applied (1+124+123) and enabled, read back OK
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   15.397108] apple-ave 40d100000.video-encoder: stage 7 (write-sve-idle): OK
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   15.397109] apple-ave 40d100000.video-encoder: stage 8 (read-asc-status): starting
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   15.397111] apple-ave 40d100000.video-encoder:   reading ASC+0x400048 (CPU_STATUS) ...
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   15.397112] apple-ave 40d100000.video-encoder:   ASC CPU_STATUS = 0x0000002a
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   15.397114] apple-ave 40d100000.video-encoder: stage 8 (read-asc-status): OK
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   15.397115] apple-ave 40d100000.video-encoder: stage 9 (ipc-alloc): starting
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   15.397501] apple-ave 40d100000.video-encoder: IPC (macOS 13.5): FwIPC surface 24, 7168 KiB at iova 0x00000000ff800000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   15.397509] apple-ave 40d100000.video-encoder: stage 9 (ipc-alloc): OK
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   15.397511] apple-ave 40d100000.video-encoder: stage 10 (fw-load): starting
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   15.403600] apple-ave 40d100000.video-encoder: firmware image: 2622936 bytes
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   15.403609] apple-ave 40d100000.video-encoder:   image spans 0x268000, allocating 0x268000 contiguous
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   15.407425] apple-ave 40d100000.video-encoder:   __TEXT       vm 0x0+0x134000 file 0x4000+0x134000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   15.407513] apple-ave 40d100000.video-encoder:   __DATA       vm 0x134000+0x134000 file 0x138000+0x134000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   15.612332] apple-ave 40d100000.video-encoder:   IOBA at image +0x1341fd: 0x0 -> 0x40c000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   15.612340] apple-ave 40d100000.video-encoder:   IOSZ at image +0x13420d: 0 -> 0x2000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   15.813800] apple-ave 40d100000.video-encoder:   fw-base register 0x102010000b28001 -> mapping image at IOVA 0xb28000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   15.813807] apple-ave 40d100000.video-encoder:   iova 0x00000000ff400000 -> phys 0x000001000a800000, mapping at IOVA 0xb28000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   15.813812] apple-ave 40d100000.video-encoder: STEP next: memremap + read iBoot TEXT literal
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   15.813840] apple-ave 40d100000.video-encoder:   iboot: RVBAR base 0x10000b28000, DATA literal 0x1f0000ec000 - placement as expected
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   15.813927] apple-ave 40d100000.video-encoder:   iboot DATA: 0x10001a90000+0x134000 is outside System RAM, /memory and /reserved-memory
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   15.813930] apple-ave 40d100000.video-encoder: STEP next: iommu_map iboot DATA dva 0xec000 -> phys 0x10001a90000 +0x134000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   15.813944] apple-ave 40d100000.video-encoder:   iboot DATA: DVA 0xec000 -> phys 0x10001a90000 +0x134000 RW, verified
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   15.813946] apple-ave 40d100000.video-encoder:   iboot TEXT: leaving DVA 0xb28000 UNMAPPED (discriminating run: a translated fetch must fault there)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   15.813981] apple-ave 40d100000.video-encoder:   fw_map_text=2: NOT mapping our image at IOVA 0xb28000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   15.813994] apple-ave 40d100000.video-encoder: stage 10 (fw-load): OK
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   15.814019] apple-ave 40d100000.video-encoder: stage 11 (boot-cfg): starting
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   15.814020] apple-ave 40d100000.video-encoder:   macOS 13.5: no boot cfg block; instance 0, DevID 14
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   15.814021] apple-ave 40d100000.video-encoder: STEP next: pre-start scratch writes
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   15.814023] apple-ave 40d100000.video-encoder:   scratch0=0x8042006 scratch1=0x0 scratch2=0xe
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   15.814024] apple-ave 40d100000.video-encoder: stage 11 (boot-cfg): OK
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   15.814024] apple-ave 40d100000.video-encoder: stage 12 (iop-config): starting
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   15.814026] apple-ave 40d100000.video-encoder:   ASC+0x50000 BEFORE any write = 0x102010000b28001  (base field 0x10000b28000)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   15.814027] apple-ave 40d100000.video-encoder:   13.5: Apple does not write RVBAR on this SoC; skipping
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   15.814028] apple-ave 40d100000.video-encoder: stage 12 (iop-config): OK
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   15.814029] apple-ave 40d100000.video-encoder: STEP stage 12 done; next: DAPF programming (if dapf_set)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   15.814030] apple-ave 40d100000.video-encoder: STEP DAPF step returned
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   15.814030] apple-ave 40d100000.video-encoder: stage 13 (asc-start): starting
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   15.814031] apple-ave 40d100000.video-encoder: STEP next: ASC start (core released)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   15.814033] apple-ave 40d100000.video-encoder: STEP ASC start returned
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   15.814034] apple-ave 40d100000.video-encoder: stage 13 (asc-start): OK
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   15.814034] apple-ave 40d100000.video-encoder: stage 14 (recv-msg): starting
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   15.814035] apple-ave 40d100000.video-encoder:   waiting up to 2s for the firmware to speak ...
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   15.823363] apple-ave 40d100000.video-encoder: IRQ: first firmware message, status 0x1, scratch 0x7 0x9bc0 0x100 0xc0000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   15.823984] apple-ave 40d100000.video-encoder:   message taken from the IRQ handler (status 0x1)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   15.823992] apple-ave 40d100000.video-encoder:   MSG 1: 0x00000007 0x00009bc0 0x00000100 0x000c0000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   15.823994] apple-ave 40d100000.video-encoder:   fw log: macOS 13.5 has no FwLog ring; its log comes over TERMINAL after the handshake
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   15.823996] apple-ave 40d100000.video-encoder:   firmware globals: skipped for macOS 13.5 - the running image is iBoot's, not our buffer (13.5 VAs 0x21a7b0/0x21a7b8/0xeefd0 in ave_ipc.c)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   15.824001] apple-ave 40d100000.video-encoder:   phys 0x0000010000b28000: first word 0x14000081 (not a Mach-O header)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   15.824004] ave phys: 00000000: 81 00 00 14 00 00 00 00 00 00 00 00 00 00 00 00  ................
+[   15.824007] apple-ave 40d100000.video-encoder:   branch target region (+0x200):
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   15.824009] ave +200: 00000000: 00 00 00 14 41 42 38 d5 21 0c 42 d3 3f 0c 00 f1  ....AB8.!.B.?...
+[   15.824011] ave +200: 00000010: c1 00 00 54 a1 00 00 10 21 40 1e d5 a1 78 80 d2  ...T....!@...x..
+[   15.824015] ave +200: 00000020: 01 40 1e d5 e0 03 9f d6 df 43 03 d5 e7 03 00 aa  .@.......C......
+[   15.824016] ave +200: 00000030: 80 ee ff 10 00 c0 18 d5 a0 00 38 d5 01 1c 40 d3  ..........8...@.
+[   15.824017] ave +200: 00000040: fa 03 01 aa 01 3c 48 d3 fb 03 01 aa 00 06 a0 d2  .....<H.........
+[   15.824018] ave +200: 00000050: 40 10 18 d5 df 3f 03 d5 eb 03 07 aa 01 10 38 d5  @....?........8.
+[   15.824018] ave +200: 00000060: 01 01 10 36 21 f8 7d 92 01 10 18 d5 df 3f 03 d5  ...6!.}......?..
+[   15.824019] ave +200: 00000070: 40 00 80 d2 00 04 80 9a 7a 13 00 94 43 01 00 94  @.......z...C...
+[   15.824020] ave +200: 00000080: c0 26 00 58 00 a2 18 d5 9f 40 00 d5 a0 eb ff 10  .&.X.....@......
+[   15.824020] ave +200: 00000090: f7 03 00 aa 21 30 00 58 21 8c 40 92 00 00 01 cb  ....!0.X!.@.....
+[   15.824021] ave +200: 000000a0: e9 03 00 aa 08 00 80 d2 40 07 00 f0 00 00 19 91  ........@.......
+[   15.824021] ave +200: 000000b0: 41 07 00 f0 21 00 19 91 1f 00 01 eb e0 01 00 54  A...!..........T
+[   15.824022] ave +200: 000000c0: 60 07 00 f0 00 00 29 91 00 20 00 91 42 01 00 94  `.....).. ..B...
+[   15.824023] ave +200: 000000d0: 03 24 40 92 68 c4 72 d3 21 00 a0 d2 01 00 01 8a  .$@.h.r.!.......
+[   15.824023] ave +200: 000000e0: 3f 00 00 f1 80 00 00 54 02 00 80 d2 42 00 08 8b  ?......T....B...
+[   15.824024] ave +200: 000000f0: 29 01 02 cb e0 03 09 aa 01 00 80 d2 2d 00 08 8b  )...........-...
+[   15.824024] ave +200: 00000100: 00 00 0d 8b 0c 00 08 cb a0 f9 01 10 00 04 40 29  ..............@)
+[   15.824025] ave +200: 00000110: 00 80 01 8b 1f 00 00 f1 61 00 00 54 60 07 00 90  ........a..T`...
+[   15.824026] ave +200: 00000120: 00 00 00 91 f6 03 00 aa 61 07 00 90 02 00 00 90  ........a.......
+[   15.824026] ave +200: 00000130: 23 00 02 cb 63 00 0d 8b 19 00 03 cb 60 0a 00 90  #...c.......`...
+[   15.824027] ave +200: 00000140: 00 60 0d 91 00 0c 1a 8b e2 03 00 aa 1a 01 00 94  .`..............
+[   15.824028] ave +200: 00000150: e3 03 00 aa 61 20 00 58 7f 00 01 eb 60 29 00 54  ....a .X....`).T
+[   15.824028] ave +200: 00000160: 41 20 00 58 7f 00 01 eb 20 00 80 d2 80 00 00 54  A .X.... ......T
+[   15.824029] ave +200: 00000170: e0 03 02 aa 14 01 00 94 00 00 80 d2 f8 03 00 aa  ................
+[   15.824029] ave +200: 00000180: 60 0a 00 90 00 00 00 91 0b 01 00 94 e7 03 00 aa  `...............
+[   15.824030] ave +200: 00000190: 02 08 80 d2 42 00 00 cb 60 0a 00 90 00 20 00 91  ....B...`.... ..
+[   15.824031] ave +200: 000001a0: 05 01 00 94 1f 0c 00 f1 e1 00 00 54 c2 04 80 d2  ...........T....
+[   15.824031] ave +200: 000001b0: 47 03 80 d2 42 00 60 91 42 00 04 91 25 03 80 d2  G...B.`.B...%...
+[   15.824032] ave +200: 000001c0: ef 03 05 aa 1f 08 00 f1 21 02 00 54 85 04 80 d2  ........!..T....
+[   15.824033] ave +200: 000001d0: ef 03 05 aa 42 bc 70 d3 04 10 80 d2 42 00 04 8b  ....B.p.....B...
+[   15.824033] ave +200: 000001e0: 04 20 a0 d2 42 00 04 8b 21 00 80 d2 e6 03 07 aa  . ..B...!.......
+[   15.824034] ave +200: 000001f0: 21 20 c6 9a 06 00 80 d2 c1 00 01 cb e6 03 0d aa  ! ..............
+[   15.824035] ave +200: 00000200: 21 00 06 8b ed 03 01 aa 39 03 0d cb 1f 04 00 f1  !.......9.......
+[   15.824035] ave +200: 00000210: a1 00 00 54 85 04 80 d2 ef 03 05 aa 42 00 60 91  ...T........B.`.
+[   15.824036] ave +200: 00000220: 42 00 04 91 e1 00 05 cb 23 00 80 d2 61 20 c1 9a  B.......#...a ..
+[   15.824036] ave +200: 00000230: ee 03 01 aa 01 07 38 d5 c0 19 00 58 00 00 02 aa  ......8....X....
+[   15.824037] ave +200: 00000240: 20 08 60 b3 40 20 18 d5 21 08 00 90 21 00 00 91   .`.@ ..!...!...
+[   15.824038] ave +200: 00000250: 62 08 00 90 42 00 00 91 42 00 01 cb e2 37 40 b3  b...B...B....7@.
+[   15.824038] ave +200: 00000260: ea 03 02 aa 62 07 00 90 21 00 02 cb 34 00 16 8b  ....b...!...4...
+[   15.824039] ave +200: 00000270: e0 03 14 aa e1 03 0a aa 00 00 01 8b 02 10 40 d1  ..............@.
+[   15.824039] ave +200: 00000280: f2 03 02 aa e2 03 0e aa 02 0c 02 cb f0 03 02 aa  ................
+[   15.824040] ave +200: 00000290: e0 03 0d aa 01 00 80 d2 21 00 08 8b 1f 00 01 eb  ........!.......
+[   15.824041] ave +200: 000002a0: 61 00 00 54 02 20 18 d5 02 00 00 14 22 20 18 d5  a..T. ......" ..
+[   15.824041] ave +200: 000002b0: e0 03 18 aa 1f 04 00 f1 80 04 00 54 e0 03 1a aa  ...........T....
+[   15.824042] ave +200: 000002c0: 40 04 00 b5 64 80 80 d2 00 00 80 d2 00 64 48 8b  @...d........dH.
+[   15.824042] ave +200: 000002d0: e1 03 0a aa 21 fc 4e d3 e2 03 10 aa e3 03 0f aa  ....!.N.........
+[   15.824043] ave +200: 000002e0: 7f 90 00 f1 c1 00 00 54 e5 03 12 aa a5 00 04 8b  .......T........
+[   15.824045] ave +200: 000002f0: 45 84 00 f8 21 04 00 d1 e2 03 12 aa 42 0c 00 8b  E...!.......B...
+[   15.824045] ave +200: 00000300: 43 0c 01 8b e5 03 14 aa a5 00 04 8b 45 84 00 f8  C...........E...
+[   15.824046] ave +200: 00000310: a5 10 40 91 5f 00 03 eb ab ff ff 54 64 90 80 d2  ..@._......Td...
+[   15.824047] ave +200: 00000320: e0 03 0d aa b4 00 00 94 e1 03 17 aa 21 a4 4e d3  ............!.N.
+[   15.824048] ave +200: 00000330: 24 6c 72 b3 04 84 00 f8 9f 3f 03 d5 84 10 40 91  $lr......?....@.
+[   15.824048] ave +200: 00000340: 04 00 00 f9 9f 3f 03 d5 c0 d5 01 10 00 00 17 cb  .....?..........
+[   15.824049] ave +200: 00000350: 00 00 0d 8b 00 c0 18 d5 90 00 00 94 00 10 38 d5  ..............8.
+[   15.824049] ave +200: 00000360: c1 10 00 58 00 00 01 aa 41 00 80 d2 00 00 21 8a  ...X....A.....!.
+[   15.824050] ave +200: 00000370: 00 10 18 d5 df 3f 03 d5 1f 87 0e d5 df 3f 03 d5  .....?.......?..
+[   15.824051] ave +200: 00000380: bf 40 00 d5 e0 03 1a aa e0 0b 00 b5 e0 03 0f aa  .@..............
+[   15.824051] ave +200: 00000390: 1f 90 00 f1 61 02 00 54 01 00 81 d2 21 64 48 cb  ....a..T....!dH.
+[   15.824052] ave +200: 000003a0: e0 03 0e aa 21 00 00 cb 02 00 80 d2 42 64 48 8b  ....!.......BdH.
+[   15.824052] ave +200: 000003b0: 03 00 80 d2 95 00 00 94 f5 03 00 aa 07 00 80 d2  ................
+[   15.824053] ave +200: 000003c0: 42 64 48 8b 22 00 07 8b 90 00 00 94 f3 03 00 aa  BdH."...........
+[   15.824054] ave +200: 000003d0: e3 03 02 aa 8d 00 00 94 f1 03 00 aa 11 00 00 14  ................
+[   15.824054] ave +200: 000003e0: e6 03 0e aa e0 03 0d aa 00 fc 59 d3 e1 03 00 aa  ..........Y.....
+[   15.824078] ave +200: 000003f0: c0 00 01 cb e1 03 0a aa 27 fc 43 d3 e1 00 00 cb  ........'.C.....
+[   15.824079] apple-ave 40d100000.video-encoder: stage 14 (recv-msg): OK
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   15.824080] apple-ave 40d100000.video-encoder: stage 15 (probe-state): starting
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.025977] apple-ave 40d100000.video-encoder:   CPU_STATUS 0x0000002c -> 0x0000002c
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.025997] apple-ave 40d100000.video-encoder:   scratch[0] 0x00000007 -> 0x00000007
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.026010] apple-ave 40d100000.video-encoder:   scratch[1] 0x00009bc0 -> 0x00009bc0
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.026015] apple-ave 40d100000.video-encoder:   scratch[2] 0x00000100 -> 0x00000100
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.026020] apple-ave 40d100000.video-encoder:   scratch[3] 0x000c0000 -> 0x000c0000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.026022] apple-ave 40d100000.video-encoder:   scratch[4] 0x00000000 -> 0x00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.026023] apple-ave 40d100000.video-encoder:   scratch[5] 0x00000000 -> 0x00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.026023] apple-ave 40d100000.video-encoder:   scratch[6] 0x00000000 -> 0x00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.026024] apple-ave 40d100000.video-encoder:   scratch[7] 0x00000000 -> 0x00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.026025] apple-ave 40d100000.video-encoder:   verdict: no observable activity - core may not be running
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.026026] apple-ave 40d100000.video-encoder:   [started] CPU_CONTROL = 0x10
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.257253] apple-ave 40d100000.video-encoder:   [started] CPU_STATUS: 2000 samples over 231 ms, 1 distinct
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.257294] apple-ave 40d100000.video-encoder:   [started]   0x002c x2000 IRQ_NOT_PEND? FIQ_NOT_PEND? IDLE
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.257320] apple-ave 40d100000.video-encoder: stage 15 (probe-state): OK
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.257334] apple-ave 40d100000.video-encoder:   msg1: nch=7 chanmem=0x9bc0 ver=0x100 heap=0xc0000   expect 7 0x9bc0 0x100 0xc0000 (macOS 13.5)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.257355] apple-ave 40d100000.video-encoder:   msg2: FwIPC iova 0x00000000ff800000 size 0x700000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.259399] apple-ave 40d100000.video-encoder:   message taken from the IRQ handler (status 0x1)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.259420] apple-ave 40d100000.video-encoder:   msg3: fw_base 0xffffffff80000000 (FwIPC iova 0x00000000ff800000)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.259638] apple-ave 40d100000.video-encoder:   fw heap (surface 23): 768 KiB at iova 0x00000000ff300000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.259662] apple-ave 40d100000.video-encoder:   msg4: info fw 0xffffffff80009bc0, chanmem fw 0xffffffff80000000 (0x9bc0 bytes), dev_type 11
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.261721] apple-ave 40d100000.video-encoder:   message taken from the IRQ handler (status 0x1)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.261742] apple-ave 40d100000.video-encoder:   msg5: desc fw 0xffffffff80000000, client buffer 0xb4000 (max 0x100000, expect 0xb4000)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.261759] apple-ave 40d100000.video-encoder:   desc[0] 'TERMINAL' id=4 dir=2 bit=0 nslots=512 slots_fw=0xffffffff80000700 (+0x700)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.261780] apple-ave 40d100000.video-encoder:   desc[1] 'IO' id=1 dir=0 bit=1 nslots=32 slots_fw=0xffffffff80008700 (+0x8700)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.261797] apple-ave 40d100000.video-encoder:   desc[2] 'DEBUG' id=5 dir=0 bit=1 nslots=8 slots_fw=0xffffffff80008f00 (+0x8f00)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.261814] apple-ave 40d100000.video-encoder:   desc[3] 'BUF_H2T' id=6 dir=0 bit=2 nslots=1 slots_fw=0xffffffff80009100 (+0x9100)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.261828] apple-ave 40d100000.video-encoder:   desc[4] 'BUF_T2H' id=7 dir=1 bit=3 nslots=1 slots_fw=0xffffffff80009140 (+0x9140)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.261845] apple-ave 40d100000.video-encoder:   desc[5] 'SHAREDMALLOC' id=3 dir=1 bit=3 nslots=8 slots_fw=0xffffffff80009180 (+0x9180)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.261858] apple-ave 40d100000.video-encoder:   desc[6] 'IO_T2H' id=2 dir=1 bit=3 nslots=32 slots_fw=0xffffffff80009380 (+0x9380)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.262267] apple-ave 40d100000.video-encoder:   macOS 13.5 handshake complete: 7 channel(s), heartbeat scratch7 0x0
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.262279] apple-ave 40d100000.video-encoder: coprocessor up, 7 IPC channel(s)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.262283] apple-ave 40d100000.video-encoder: Apple AVE video encoder ready
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.262293] apple-ave 40d100000.video-encoder: session: self-test start (ABI macOS 13.5), codec HEVC (docs/77)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.262312] apple-ave 40d100000.video-encoder: fw[0]| FW Cfg: prod, tag: AppleAVE2FW-6070.11.1, SHA: c86a10b71
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.262369] apple-ave 40d100000.video-encoder: session: Config: shmem IOVA 0x00000000ff2c0000 size 0x40000, dsid 0x0, reg_dart 0x0
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.262376] apple-ave 40d100000.video-encoder: session: Config: sending 112 bytes at IOVA 0x00000000ff819c40 on IO
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.264567] apple-ave 40d100000.video-encoder: session: Config: reply 64 bytes flags 0x40: id=0x0e01 cid=0x0 slot=0xffffffff status=0xee0000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.264595] session: reply: 00000000: 01 0e 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+[   16.264608] session: reply: 00000010: 00 00 00 00 00 00 00 00 00 00 00 00 ff ff ff ff
+[   16.264621] session: reply: 00000020: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+[   16.264633] session: reply: 00000030: 00 00 00 00 00 00 00 00 00 00 ee 00 00 00 00 00
+[   16.264646] apple-ave 40d100000.video-encoder: session: Config: ACCEPTED, status 0xee0000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.264662] apple-ave 40d100000.video-encoder: session: Open: client id 1
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.264673] apple-ave 40d100000.video-encoder: session: Open: sending 64 bytes at IOVA 0x00000000ff829cc0 on IO
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.264900] apple-ave 40d100000.video-encoder: session: Open: reply 64 bytes flags 0x40: id=0x0e02 cid=0x1 slot=0x3 status=0xee0000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.264924] session: reply: 00000000: 02 0e 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+[   16.264935] session: reply: 00000010: 01 00 00 00 00 00 00 00 00 00 00 00 03 00 00 00
+[   16.264944] session: reply: 00000020: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+[   16.264954] session: reply: 00000030: 00 00 00 00 00 00 00 00 00 00 ee 00 00 00 00 00
+[   16.264963] apple-ave 40d100000.video-encoder: session: Open: ACCEPTED, status 0xee0000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.264974] apple-ave 40d100000.video-encoder: session: SrcNeighbor slot 336 KiB (HEVC, docs/77 \xc2\xa79 formula)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.268088] apple-ave 40d100000.video-encoder: session: entropy: 2 x 4 buffers of 2160 KiB at 0xfc000000..0xfcec4000 (HEVC kext formula, larger K)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.268099] apple-ave 40d100000.video-encoder: session: recon planes for 1280x720: luma 1177600 + chroma 588800 = MSB 1766400; luma_meta 65536 + chroma_meta 16384 = LSB 81920; slot 0x1c4000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.268534] apple-ave 40d100000.video-encoder: session: LowResResult 4 surface(s) of 0xf400 bytes from 0x00000000fbb40000 (ALIGN(4*1280,128) * ceil(720/64) + 1024)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.268542] apple-ave 40d100000.video-encoder: session: DPB slot 0: recon 0x00000000fbc00000 LowResRef 0x00000000fbb80000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.268547] apple-ave 40d100000.video-encoder: session: DPB slot 1: recon 0x00000000fbdc4000 LowResRef 0x00000000fbbbc000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.268555] apple-ave 40d100000.video-encoder: session: DPB 2 slot(s): recon 0x00000000fbc00000 +0x1c4000 each; LowResRef 0x00000000fbb80000 +0x3c000 each, lr_stride 5120, 48 rows (AVE_CalcBufSizeOfLowResRef formula)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.269563] apple-ave 40d100000.video-encoder: session: HEVC_INIT: NEED_LSB_PLANES=1; slot 0 LSB 0x00000000fbc00000 MSB 0xfbc00000 (slot 0x1c4000 bytes)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.269571] apple-ave 40d100000.video-encoder: session: HEVC_INIT: macOS lambda block (docs/72); expect DPE+0x16A09C = DPE+0x16A0A0 = nQuant
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.269574] apple-ave 40d100000.video-encoder: session: HEVC_INIT: firmware debug bits 0x20 (wire 0xFCD8); fw log rate limit lifted - expect 'AVC COMMON:: QPY %d nQuant %d'
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.269578] apple-ave 40d100000.video-encoder: session: HEVC_INIT: entropy 2 x 4 at wire 0xf830, slot 0 0xfc000000, size 0x21c000 at wire 0xfa30
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.269618] apple-ave 40d100000.video-encoder: session: HEVC_INIT: colocated 2 slot(s) of 0xf000 bytes at wire 0xf6b0 (0x5A fill)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.269622] apple-ave 40d100000.video-encoder: session: colocated slot 0: 0xfafa0000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.269625] apple-ave 40d100000.video-encoder: session: colocated slot 1: 0xfaf90000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.269629] apple-ave 40d100000.video-encoder: session: HEVC_INIT: LowResResult 4 surface(s) at wire 0x3b8, [0] 0xfbb40000 - inert for I, required from the first P
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.270060] apple-ave 40d100000.video-encoder: session: HEVC_INIT: TranscodedData 2 x 0xd3000 at 0x00000000fad00000 0x00000000fac00000 (wire 0x5a8/0x5b0, size at 0x5b8); two transcoders
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.270067] apple-ave 40d100000.video-encoder: session: HEVC_INIT: ui32IdrPeriod 30, not 1: 1 makes the HEVC firmware all-intra and the first P frame hangs the pipe (docs/77 \xc2\xa716)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.270107] apple-ave 40d100000.video-encoder: session: HEVC_INIT: 1280x720 (coded 1280x720) QP 30, Main level 4.0 (idc 120), refs 1, SAO 1 WPP 1 TMVP(SPS) 1, 0xFEB4 0x10, fixed QP
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.270113] apple-ave 40d100000.video-encoder: session: HEVC_INIT: SliceHeader surface 0: 0x00000000faf40000 +0x40000 (256 x 0x400)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.270117] apple-ave 40d100000.video-encoder: session: HEVC_INIT: SliceHeader surface 1: 0x00000000faf00000 +0x40000 (256 x 0x400)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.270120] apple-ave 40d100000.video-encoder: session: HEVC_INIT: SliceHeader surface 2: 0x00000000faec0000 +0x40000 (256 x 0x400)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.270124] apple-ave 40d100000.video-encoder: session: HEVC_INIT: SliceHeader surface 3: 0x00000000fae80000 +0x40000 (256 x 0x400)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.270139] apple-ave 40d100000.video-encoder: session: HEVC_INIT: fw_client 0x00000000fba00000/0xb4000 mem 0x00000000fb900000/0x100000 coded[0] 0x00000000fb600000/0x1a6000 hdr[0] 0x00000000fb5c0000/0x23000 psets 0x00000000fafbc000/0x1000 (4 coded buffer(s), slots 21..24)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.270145] apple-ave 40d100000.video-encoder: session: HEVC_INIT: DPB slot 0: recon 0x00000000fbc00000 at wire 0x88, LowResRef 0x00000000fbb80000 at wire 0x2a8
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.270149] apple-ave 40d100000.video-encoder: session: HEVC_INIT: DPB slot 1: recon 0x00000000fbdc4000 at wire 0x98, LowResRef 0x00000000fbbbc000 at wire 0x2b0
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.270153] apple-ave 40d100000.video-encoder: session: HEVC_INIT: SrcNeighbor 4 entries/group at 0xfe800000 0xfe950000 0xfeaa0000 0xfebf0000 (+0 KiB each)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.270157] apple-ave 40d100000.video-encoder: session: HEVC_INIT: sending 208328 bytes at IOVA 0x00000000ff829d00 on IO
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.280378] apple-ave 40d100000.video-encoder: session: HEVC_INIT: reply 64 bytes flags 0x40: id=0x0e04 cid=0x1 slot=0x6 status=0xee0000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.280397] session: reply: 00000000: 04 0e 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+[   16.280401] session: reply: 00000010: 01 00 00 00 00 00 00 00 00 00 00 00 06 00 00 00
+[   16.280405] session: reply: 00000020: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+[   16.280408] session: reply: 00000030: 00 00 00 00 00 00 00 00 00 00 ee 00 00 00 00 00
+[   16.280411] apple-ave 40d100000.video-encoder: session: HEVC_INIT: ACCEPTED, status 0xee0000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.280525] apple-ave 40d100000.video-encoder: session: HEVC_INIT: param-sets buffer 75 bytes (back-scan), 3 NAL(s) type@offset: 32@0 33@27 34@64 (want 32 VPS, 33 SPS, 34 PPS)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.280529] session: psets: 00000000: 00 00 00 01 40 01 0c 01 ff ff 02 20 00 00 03 00
+[   16.280532] session: psets: 00000010: b0 00 00 03 00 00 03 00 78 ac 09 00 00 00 01 42
+[   16.280536] session: psets: 00000020: 01 01 02 20 00 00 03 00 b0 00 00 03 00 00 03 00
+[   16.280539] session: psets: 00000030: 78 a0 02 80 80 2d 13 65 ae e4 52 2a e5 cb 97 44
+[   16.280543] session: psets: 00000040: 00 00 00 01 44 01 c0 71 82 99 20
+[   16.280548] apple-ave 40d100000.video-encoder: session: chan [after Start_AVC] 40d130240: 800314b0 01000003 00080030 00000000 00000000 000700d1 00380008 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.280556] apple-ave 40d100000.video-encoder: session: chan [after Start_AVC] 40d130300: 800314c0 01000003 00400060 00000000 00000000 000700d1 00a00008 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.280563] apple-ave 40d100000.video-encoder: session: chan [after Start_AVC] 40d130380: 80030000 00a80008 03d00004 00000000 00000040 00000000 ffffffff 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.280570] apple-ave 40d100000.video-encoder: session: chan [after Start_AVC] 40d1303c0: 80030000 00b00010 03d40004 00000000 00000040 00000000 00000000 00000000 00000000 00000000 ffffffff 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.280576] apple-ave 40d100000.video-encoder: session: chan [after Start_AVC] 40d130400: 80030000 00c00010 03d80004 00000000 00000040 00000000 00000000 00000000 00000000 00000000 ffffffff 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.280582] apple-ave 40d100000.video-encoder: session: chan [after Start_AVC] 40d130440: 80030000 00d00010 03dc0004 00000000 00000040 00000000 00000000 00000000 00000000 00000000 ffffffff 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.280589] apple-ave 40d100000.video-encoder: session: chan [after Start_AVC] 40d130480: 80030000 00e00010 03e00004 00000000 00000040 00000000 00000000 00000000 00000000 00000000 ffffffff 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.280595] apple-ave 40d100000.video-encoder: session: chan [after Start_AVC] 40d130600: 80030000 01400008 03f80008 00000000 00000040 00000000 00000000 00000000 ffffffff 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.280601] apple-ave 40d100000.video-encoder: session: chan [after Start_AVC] 40d130640: 80030000 01480010 04000008 00000000 00000040 00000000 00000000 00000000 ffffffff 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.280607] apple-ave 40d100000.video-encoder: session: chan [after Start_AVC] 40d130700: 80030000 01680008 04100004 00000000 00000040 00000000 00000000 ffffffff 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.280613] apple-ave 40d100000.video-encoder: session: chan [after Start_AVC] 40d130780: 80030000 01800008 04240004 00000000 00000040 00000000 00000000 00000000 ffffffff 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.280620] apple-ave 40d100000.video-encoder: session: chan [after Start_AVC] 40d120bc0: 80030000 03c00010 03700004 00000000 00000040 00000000 00000002 ffffffff 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.280626] apple-ave 40d100000.video-encoder: session: chan [after Start_AVC] 40d120000: 80034044 000000c0 000000c0 00000000 00000000 00000000 00072065 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.280633] apple-ave 40d100000.video-encoder: session: chan [after Start_AVC] 40d120040: 00000000 00000000 00000000 00000000 00000000 00000002 ffffffff 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.280639] apple-ave 40d100000.video-encoder: session: chan [after Start_AVC] 40d120080: 80034054 00c00140 00c000c0 00000000 00000000 00000000 00072065 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.280645] apple-ave 40d100000.video-encoder: session: chan [after Start_AVC] 40d1200c0: 00000000 00000000 00000000 00000000 00000000 ffffffff 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.280651] apple-ave 40d100000.video-encoder: session: chan [after Start_AVC] 40d120100: 80034024 02000100 01800180 00000000 00000000 00000000 00072035 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.280657] apple-ave 40d100000.video-encoder: session: chan [after Start_AVC] 40d120140: 00000000 00000000 00000000 00000000 00000000 ffffffff 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.301634] apple-ave 40d100000.video-encoder: session: HEVC_ENCODE: POC lsb 0, SliceHeader slots 0x00000000faf40000.. (+0x400 each), slice RPS none
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.301653] apple-ave 40d100000.video-encoder: session: Process: 1280x720 coded, stride 2560, luma 0x00000000faa00000/0x1e0000 chroma 0x00000000fa900000/0xf0000, frame_type 3, slot 21
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.301666] apple-ave 40d100000.video-encoder: session: Process: coded 0x00000000fb600000/0x1a6000 hdr 0x00000000fb5c0000/0x23000 recon Y 0x00000000fa000000 UV 0x00000000fa0e1000 MV 0x00000000fa2a3000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.301670] apple-ave 40d100000.video-encoder: session: Process: LowResSrcLumaScaled 0xfbb80000 at PICMGMT+0xc20 - INERT, setRefPointers overwrites it from DPB slot 0 (fw 0x2c320); LowResResults left zero
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.301714] apple-ave 40d100000.video-encoder: dapf: mapped CPUDART 0x000000040d040000 and DAPF 0x000000040d044000 (not requested)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.301727] apple-ave 40d100000.video-encoder: dapf: mapped datapath DART 0x40d030000 (not requested)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.301732] apple-ave 40d100000.video-encoder: dart: [before Process] SID0 CPUDART TCR 0x80 TTBR 0x901a748c | DART1 TCR 0x80 TTBR 0x901a748c -> MATCH
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.301737] apple-ave 40d100000.video-encoder: session: Process: sending 26680 bytes at IOVA 0x00000000ff85cb00 on IO
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.309502] apple-ave 40d100000.video-encoder: fw[0]| HEVC_XCCONFIG0_PICSIZE + 0: 2d0050
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.309515] apple-ave 40d100000.video-encoder: fw[0]| SetTranscode, 0 1 fd:0
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.309529] apple-ave 40d100000.video-encoder: fw[0]| HEVC:: curr_bitstream_addr_dst:00000000fb600000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.309541] apple-ave 40d100000.video-encoder: fw[0]| HEVC:: tmp_bitstream_addr_dst[0]:00000000fad00000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.309558] apple-ave 40d100000.video-encoder: fw[0]| HEVC_XCCONFIG0_PICSIZE + 400: 2d0050
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.309562] apple-ave 40d100000.video-encoder: fw[0]| SetTranscode, 0 1 fd:0
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.309577] apple-ave 40d100000.video-encoder: fw[0]| HEVC:: curr_bitstream_addr_dst:00000000fb600000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.309590] apple-ave 40d100000.video-encoder: fw[0]| HEVC:: tmp_bitstream_addr_dst[1]:00000000fac00000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.309605] apple-ave 40d100000.video-encoder: fw[0]| HEVC:: XC SourceGo.all 3
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.310374] apple-ave 40d100000.video-encoder: session: Process: reply 72 bytes flags 0x48: id=0x0e06 cid=0x1 slot=0x15 status=0xee0000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.310384] session: reply: 00000000: 06 0e 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+[   16.310387] session: reply: 00000010: 01 00 00 00 00 00 00 00 00 00 00 00 15 00 00 00
+[   16.310390] session: reply: 00000020: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+[   16.310393] session: reply: 00000030: 00 00 00 00 00 00 00 00 00 00 ee 00 00 00 00 00
+[   16.310396] session: reply: 00000040: 00 00 00 00 00 00 00 00
+[   16.310399] apple-ave 40d100000.video-encoder: session: Process: ACCEPTED, status 0xee0000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.310404] apple-ave 40d100000.video-encoder: session: recon writer DPE+0x30240 = 0x800314b1 (want 0x800314b1 when programmed); +0x24c 0xfbc00000 +0x25c 0xfbdaf400 +0x31c 0xfbdbf400
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.310409] apple-ave 40d100000.video-encoder: session: source reader DPE+0x20010 = 0xfaa00000 (want 0xfaa00000: OUR BUFFER) stride +0x14 0xa00 (want 0xa00) chroma +0x90 0xfa900000 (want 0xfa900000) fmt +0x0C 0x00011500 mode +0x50 0x0 +0xD0 0x0
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.310415] apple-ave 40d100000.video-encoder: session: RESULT frame 0 (HEVC): counters I 14080 P 0 skip 0 - unit unknown (MBs or CTUs, docs/77 \xc2\xa74); 3600 MBs, 920 32x32 CTUs
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.310420] apple-ave 40d100000.video-encoder: session: RESULT frame 0: 4824 coded bytes, MB I 14080 P 0 skip 0 of 3600, FrameTypeReturned 3 (2709 has been the blank-frame signature)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.310425] apple-ave 40d100000.video-encoder: STEP frame result logged; next: post-frame diagnostics
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.310430] apple-ave 40d100000.video-encoder: session: diag PS DMA 0x000003ff PIPE4 0x000003ff PIPE5 0x000003ff ME0 0x000003ff ME1 0x000003ff
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.310434] apple-ave 40d100000.video-encoder: session: diag DPE+0x10140 0x00000000 (pipe done = bit 2) enable DPE+0x1013C 0x0000f063 (want bit 2) SRCDMAGO DPE+0x10128 0x00000000 srcdma cfg DPE+0x20000 0x80034045 +4 0x000000c0 scratch7 0x00000001
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.310440] apple-ave 40d100000.video-encoder: session: diag srcdma DPE+0x2002C 0x002d004f -> currMbRow 45; AXI err DPE+0x24000 0x00000000 DPE+0x24004 0x00000000 DPE+0x2C000 0x00000000 DPE+0x34000 0x00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.310444] apple-ave 40d100000.video-encoder: session: diag DPE DC000 0x00000101 DC004 0x00001000 DC400 0x00032901 DC4A4 0x00000000 DC5B0 0x0000001d
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.310454] apple-ave 40d100000.video-encoder: session: diag MCPU run/id 40d410000:1/4 40d450000:2/5 40d430000:1/6 40d470000:2/7 40d490000:2/8 40d4b0000:2/9 40d4d0000:2/a
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.310458] apple-ave 40d100000.video-encoder: session: diag MCPU IMem[0] MbInput 0x10004000 (want 0x10004000) IntraEst 0xe978a1c7 (0x10001000) CAVLC 0x06d86a0c (0x10001800)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.310462] apple-ave 40d100000.video-encoder: session: diag MCPU if MbInput 0x10000 0x0 IntraEst 0x0 0x0 CAVLC 0x0 0x0 | +8: 0x2601f 0x0 0x0
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.310467] apple-ave 40d100000.video-encoder: STEP diag: row0
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.310470] apple-ave 40d100000.video-encoder: session: diag MbInput produced 1441829 consumed 0 drain 0x0 lag 0; last src event 0x00170025 0x00000001 (y 23 x 37 last 0); IntraEst curMB 0x4858b885
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.310476] apple-ave 40d100000.video-encoder: session: diag hif MbInput     +0 0x00010000 +4 0x00000000 +c 0x00000000 +10 0x00000000 +14 0x00000028
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.310481] apple-ave 40d100000.video-encoder: session: diag hif IntraEst    +0 0x00000000 +4 0x00000000 +c 0x00000000 +10 0x00000000 +14 0x10000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.310485] apple-ave 40d100000.video-encoder: session: diag hif CAVLC       +0 0x00000000 +4 0x00000000 +c 0x00000000 +10 0x00000000 +14 0x10000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.310490] apple-ave 40d100000.video-encoder: session: diag hif MotionEst   +0 0x00008000 +4 0x00000000 +c 0x00000000 +10 0x00000000 +14 0x00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.310494] apple-ave 40d100000.video-encoder: session: diag hif ModeDec     +0 0x00000000 +4 0x00000000 +c 0x00000000 +10 0x00000000 +14 0x10000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.310498] apple-ave 40d100000.video-encoder: session: diag hif ReconLuma   +0 0x00000000 +4 0x00000000 +c 0x00000000 +10 0x00000000 +14 0x10000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.310503] apple-ave 40d100000.video-encoder: session: diag hif ReconChroma +0 0x00000000 +4 0x00000000 +c 0x00000000 +10 0x00000000 +14 0x10000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.310507] apple-ave 40d100000.video-encoder: session: diag hif MbInput     +8 0x0002601f
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.310510] apple-ave 40d100000.video-encoder: session: diag hif IntraEst    +8 0x00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.310513] apple-ave 40d100000.video-encoder: session: diag hif CAVLC       +8 0x00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.310516] apple-ave 40d100000.video-encoder: session: diag hif MotionEst   +8 0x0000601f
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.310520] apple-ave 40d100000.video-encoder: session: diag hif ModeDec     +8 0x00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.310523] apple-ave 40d100000.video-encoder: session: diag hif ReconLuma   +8 0x00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.310526] apple-ave 40d100000.video-encoder: session: diag hif ReconChroma +8 0x00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.310530] apple-ave 40d100000.video-encoder: session: diag nbr rd +0x00 80030001 03d00010 03740008 fe800000 | wr 80030001 01400008 03f80008 fe800000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.310535] apple-ave 40d100000.video-encoder: session: diag nbr rd +0x10 00014a00 00000000 00000000 00000000 | wr 00014a00 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.310540] apple-ave 40d100000.video-encoder: session: diag nbr rd +0x20 00000002 ffffffff 00000000 00000000 | wr ffffffff 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.310545] apple-ave 40d100000.video-encoder: session: diag nbr rd +0x30 00000000 00000000 00000000 00000000 | wr 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.310550] apple-ave 40d100000.video-encoder: session: diag nbr rd +0x40 80030001 03e00010 037c0008 fe950000 | wr 80030001 01480010 04000008 fe950000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.310554] apple-ave 40d100000.video-encoder: session: diag nbr rd +0x50 00037000 00000000 00000000 00000000 | wr 00037000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.310558] apple-ave 40d100000.video-encoder: STEP diag: mcpu (f33 died between its last line and the colocated scan)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.310562] apple-ave 40d100000.video-encoder: session: diag MCPU counters ModeDec entries 2000386359 ReconLuma granted 3406513881 CAVLC entries 2150933830
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.310567] apple-ave 40d100000.video-encoder: session: diag stack ModeDec   40d468f60: 3355804a 17ba015e 14bed53d 9c368539 f5819fff 5d091a1d e3f155bc 9af5c937
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.310572] apple-ave 40d100000.video-encoder: session: diag stack ModeDec   40d468f80: 3b203978 1f00294c 67580966 0d1a0116 a7bc3df6 d59fb1b1 d2dbff77 23be0d93
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.310577] apple-ave 40d100000.video-encoder: session: diag stack ModeDec   40d468fa0: 20301a96 d85281c0 06701446 0af82716 ba6b7a1a 1babbb72 fbbe4eff 60eeaff7
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.310582] apple-ave 40d100000.video-encoder: session: diag stack ModeDec   40d468fc0: 99590f59 c832334e 6595cd16 448efc8f 8997f568 894bb3ae 2bb675ff 3738fdf7
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.310587] apple-ave 40d100000.video-encoder: session: diag stack ModeDec   40d468fe0: 5b684f5a da171b44 7be5326c 6522f5c8 fba3fffe 4f1b3d35 cf16c73f ece3d7e1
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.310591] apple-ave 40d100000.video-encoder: session: diag stack ReconLuma 40d488f60: 4403db9d f4911ec4 87a798c5 2fe541b4 797f805d 01c762fb 5a14829e c36f5931
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.310596] apple-ave 40d100000.video-encoder: session: diag stack ReconLuma 40d488f80: 8d5e5bee c1b1e8e5 613d3ae3 090d412d 81ede1a4 03b1ea6c f87cf0ad 037b9320
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.310601] apple-ave 40d100000.video-encoder: session: diag stack ReconLuma 40d488fa0: 0e36f0c4 18a42660 de11bb03 332d83af 6cedda1d 77956f68 ef93a8fe 6fb71e26
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.310606] apple-ave 40d100000.video-encoder: session: diag stack ReconLuma 40d488fc0: ad1d459c 31f006b0 7b315e5c 4756cb3f d1bd4d7d a27b7975 5e7bcfff 3cd186fc
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.310611] apple-ave 40d100000.video-encoder: session: diag stack ReconLuma 40d488fe0: c1b0826c eec440bd 56d77882 43d48f4b 969b5ef1 d403b66e 5dfdd7a3 710f61fe
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.310616] apple-ave 40d100000.video-encoder: session: diag ModeDec ctx DPE+0x163000 58fdf79f +180 58fdf79f +184 18d40667 +228 4f7b3b37 go DPE+0x16A080 00000000 +084 00000000 | ReconLuma ctx DPE+0x183000 19e02b14 +180 19e02b14 +184 c006001d +228 64818650 go DPE+0x18A080 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.310621] apple-ave 40d100000.video-encoder: STEP diag: colocated scan (CPU read of 61440 bytes) - f33/f34 hung here
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.312228] apple-ave 40d100000.video-encoder: session: diag colocated slot 0: 29440 of 61440 bytes changed
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.312232] apple-ave 40d100000.video-encoder: STEP diag: costs (session_costs gated)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.312235] apple-ave 40d100000.video-encoder: STEP diag: channels
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.312239] apple-ave 40d100000.video-encoder: session: chan [timeout] 40d130240: 800314b1 01000003 00080030 fbc00000 0000c800 000700d1 00380008 fbdaf400 002c004e 00000001 00000001 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.312246] apple-ave 40d100000.video-encoder: session: chan [timeout] 40d130300: 800314c1 01000003 00400060 fbd1f800 00006400 000700d1 00a00008 fbdbf400 002c004e 00000001 00000001 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.312253] apple-ave 40d100000.video-encoder: session: chan [timeout] 40d130380: 80030001 00a80008 03d00004 fafa0000 0000e600 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.312259] apple-ave 40d100000.video-encoder: session: chan [timeout] 40d1303c0: 80030000 00b00010 03d40004 00000000 00000040 00000000 00000000 00000000 00000000 00000000 ffffffff 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.312265] apple-ave 40d100000.video-encoder: session: chan [timeout] 40d130400: 80030000 00c00010 03d80004 00000000 00000040 00000000 00000000 00000000 00000000 00000000 ffffffff 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.312271] apple-ave 40d100000.video-encoder: session: chan [timeout] 40d130440: 80030000 00d00010 03dc0004 00000000 00000040 00000000 00000000 00000000 00000000 00000000 ffffffff 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.312277] apple-ave 40d100000.video-encoder: session: chan [timeout] 40d130480: 80030000 00e00010 03e00004 00000000 00000040 00000000 00000000 00000000 00000000 00000000 ffffffff 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.312283] apple-ave 40d100000.video-encoder: session: chan [timeout] 40d130600: 80030001 01400008 03f80008 fe800000 00014a00 00000000 00000000 00000000 ffffffff 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.312289] apple-ave 40d100000.video-encoder: session: chan [timeout] 40d130640: 80030001 01480010 04000008 fe950000 00037000 00000000 00000000 00000000 ffffffff 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.312295] apple-ave 40d100000.video-encoder: session: chan [timeout] 40d130700: 80030000 01680008 04100004 00000000 00000040 00000000 00000000 ffffffff 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.312301] apple-ave 40d100000.video-encoder: session: chan [timeout] 40d130780: 80030000 01800008 04240004 00000000 00000040 00000000 00000000 00000000 ffffffff 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.312307] apple-ave 40d100000.video-encoder: session: chan [timeout] 40d120bc0: 80030000 03c00010 03700004 00000000 00000040 00000000 00000002 ffffffff 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.312313] apple-ave 40d100000.video-encoder: session: chan [timeout] 40d120000: 80034045 000000c0 000000c0 00011500 faa00000 00000a00 00072065 00000000 00000000 00000000 00000000 002d004f 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.312319] apple-ave 40d100000.video-encoder: session: chan [timeout] 40d120040: 00000000 00000000 00000000 00000000 00000000 00000002 ffffffff 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.312325] apple-ave 40d100000.video-encoder: session: chan [timeout] 40d120080: 80034055 00c00140 00c000c0 00011500 fa900000 00000a00 00072060 00000000 00000000 00000000 00000000 002d004f 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.312331] apple-ave 40d100000.video-encoder: session: chan [timeout] 40d1200c0: 00000000 00000000 00000000 00000000 00000000 ffffffff 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.312336] apple-ave 40d100000.video-encoder: session: chan [timeout] 40d120100: 80034025 02000100 01800180 00011500 faa00000 00000a00 44072035 00000000 00000000 00000000 00000000 002f004f 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.312343] apple-ave 40d100000.video-encoder: session: chan [timeout] 40d120140: 00000000 00000000 00000000 00000000 00000000 ffffffff 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.312347] apple-ave 40d100000.video-encoder: STEP diag: HEVC reference / low-res readers
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.312351] apple-ave 40d100000.video-encoder: session: diag HEVC ref luma[0] 40d128000: 84037f04 00000000 00000000 44072014 00000000 00000005 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.312357] apple-ave 40d100000.video-encoder: session: diag HEVC ref luma[1] 40d128040: 84037f04 00000000 00000000 44072014 00000000 00000005 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.312363] apple-ave 40d100000.video-encoder: session: diag HEVC ref luma[2] 40d128080: 84037f04 00000000 00000000 44072014 00000000 00000005 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.312369] apple-ave 40d100000.video-encoder: session: diag HEVC ref luma[3] 40d1280c0: 84037f04 00000000 00000000 44072014 00000000 00000005 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.312375] apple-ave 40d100000.video-encoder: session: diag HEVC ref chroma[0] 40d128200: 80037f70 00000000 00000000 04072084 00000000 00000005 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.312381] apple-ave 40d100000.video-encoder: session: diag HEVC ref chroma[1] 40d128240: 80037f70 00000000 00000000 04072084 00000000 00000005 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.312387] apple-ave 40d100000.video-encoder: session: diag HEVC ref chroma[2] 40d128280: 80037f70 00000000 00000000 04072084 00000000 00000005 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.312393] apple-ave 40d100000.video-encoder: session: diag HEVC ref chroma[3] 40d1282c0: 80037f70 00000000 00000000 04072084 00000000 00000005 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.312399] apple-ave 40d100000.video-encoder: session: diag HEVC lowres result[0] 40d120f80: 80030000 04300010 03940004 00000000 00000000 00000001 0000f000 00000000 00000000 00000000 00000000 00000000 ffffffff 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.312405] apple-ave 40d100000.video-encoder: session: diag HEVC lowres result[1] 40d120fc0: 80030000 04400010 03980004 00000000 00000000 00000001 0000f000 00000000 00000000 00000000 00000000 00000000 ffffffff 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.312411] apple-ave 40d100000.video-encoder: session: diag HEVC lowres result[2] 40d121000: 80030000 04500010 039c0004 00000000 00000000 00000001 0000f000 00000000 00000000 00000000 00000000 00000000 ffffffff 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.312417] apple-ave 40d100000.video-encoder: session: diag HEVC lowres result[3] 40d121040: 80030000 04600010 03a00004 00000000 00000000 00000001 0000f000 00000000 00000000 00000000 00000000 00000000 ffffffff 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.312422] apple-ave 40d100000.video-encoder: STEP diag: done
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.312426] session: coded_hdr: 00000000: 00003700 00000000 00000000 00000000
+[   16.312430] session: coded_hdr: 00000010: 00000000 00000000 00000000 00000000
+[   16.312434] session: coded_hdr: 00000020: 00000000 00000000 00000000 00000000
+[   16.312438] session: coded_hdr: 00000030: 00000000 00000000 00000000 00000000
+[   16.312441] session: slice0: 00000000: 000012b5 00000000 00000000 00000000
+[   16.312445] session: slice0: 00000010: 00000000 00000000 00000000 00000000
+[   16.312448] apple-ave 40d100000.video-encoder: session: frame 0: 4824 bytes in 1 slice(s) (written 4789 - trimmed 0), FrameTypeReturned 3, frame_num 0 (sent 0), SPS+PPS 600 bits, cabac_zero_words 0
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.312454] apple-ave 40d100000.video-encoder: session: frame 0: HEVC slice headers 35 bytes (slice 0: 35 bytes at 0xfaf40000, in this slot's surface), frame = coded 4789 + headers
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.312458] apple-ave 40d100000.video-encoder: session: frame 0: slice 0 header NAL type 20 (want 19/20 IDR, 1 TRAIL_R P)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.312461] session: slicehdr: 00000000: 00 00 00 01 28 01 af 08 85 c4 d6 19 cb e5 0c 69
+[   16.312465] session: slicehdr: 00000010: 6e bd 59 c7 16 8c 05 ac 61 66 bb 58 c5 d6 8c 25
+[   16.312468] apple-ave 40d100000.video-encoder: session: frame 0: HEVC counters I 14080 P 0 skip 0 = 14080 (3600 MBs, 920 CTUs; unit unknown, no check)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.312473] session: coded: 00000000: bd 32 08 00 6d 55 51 ef bf ef 8a 3f fc 7e 40 b0
+[   16.312476] session: coded: 00000010: 82 57 2d 38 8d 4c 63 2d e4 1e c1 4a 14 d1 61 ad
+[   16.312479] session: coded: 00000020: ba 0a 9e 0f 99 f4 49 80 bf 9f 13 09 55 5f d8 5a
+[   16.312483] session: coded: 00000030: d2 2d 83 30 1e 64 f3 ee 3f e3 33 85 f5 95 9b e4
+[   16.312580] apple-ave 40d100000.video-encoder: session: frame: parameter sets 75 bytes (firmware said 600 bits; back-scan says 75, agrees), first NAL type 32
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.312585] session: psets: 00000000: 00 00 00 01 40 01 0c 01 ff ff 02 20 00 00 03 00
+[   16.312588] session: psets: 00000010: b0 00 00 03 00 00 03 00 78 ac 09 00 00 00 01 42
+[   16.312591] session: psets: 00000020: 01 01 02 20 00 00 03 00 b0 00 00 03 00 00 03 00
+[   16.312594] session: psets: 00000030: 78 a0 02 80 80 2d 13 65 ae e4 52 2a e5 cb 97 44
+[   16.322415] apple-ave 40d100000.video-encoder: session: HEVC_ENCODE: POC lsb 1, SliceHeader slots 0x00000000faf00000.. (+0x400 each), slice RPS {sps set 0}
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.322427] apple-ave 40d100000.video-encoder: session: Process: 1280x720 coded, stride 2560, luma 0x00000000f9e00000/0x1e0000 chroma 0x00000000f9d00000/0xf0000, frame_type 1, slot 22
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.322432] apple-ave 40d100000.video-encoder: session: Process: coded 0x00000000fb400000/0x1a6000 hdr 0x00000000fb3c0000/0x23000 recon Y 0x00000000fa000000 UV 0x00000000fa0e1000 MV 0x00000000fa2a3000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.322437] apple-ave 40d100000.video-encoder: session: Process: LowResSrcLumaScaled 0xfbb80000 at PICMGMT+0xc20 - INERT, setRefPointers overwrites it from DPB slot 0 (fw 0x2c320); LowResResults left zero
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.322444] apple-ave 40d100000.video-encoder: dart: [before Process] SID0 CPUDART TCR 0x80 TTBR 0x901a748c | DART1 TCR 0x80 TTBR 0x901a748c -> MATCH
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.322449] apple-ave 40d100000.video-encoder: session: Process: sending 26680 bytes at IOVA 0x00000000ff863340 on IO
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.331988] apple-ave 40d100000.video-encoder: fw[0]| HEVC_XCCONFIG0_PICSIZE + 0: 2d0050
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.332004] apple-ave 40d100000.video-encoder: fw[0]| SetTranscode, 1 2 fd:1
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.332018] apple-ave 40d100000.video-encoder: fw[0]| HEVC:: curr_bitstream_addr_dst:00000000fb400000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.332028] apple-ave 40d100000.video-encoder: fw[0]| HEVC:: tmp_bitstream_addr_dst[0]:00000000fad00000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.332043] apple-ave 40d100000.video-encoder: fw[0]| HEVC_XCCONFIG0_PICSIZE + 400: 2d0050
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.332047] apple-ave 40d100000.video-encoder: fw[0]| SetTranscode, 1 2 fd:1
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.332063] apple-ave 40d100000.video-encoder: fw[0]| HEVC:: curr_bitstream_addr_dst:00000000fb400000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.332075] apple-ave 40d100000.video-encoder: fw[0]| HEVC:: tmp_bitstream_addr_dst[1]:00000000fac00000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.332093] apple-ave 40d100000.video-encoder: fw[0]| HEVC:: XC SourceGo.all 3
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.332739] apple-ave 40d100000.video-encoder: session: Process: reply 72 bytes flags 0x48: id=0x0e06 cid=0x1 slot=0x16 status=0xee0000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.332747] session: reply: 00000000: 06 0e 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+[   16.332750] session: reply: 00000010: 01 00 00 00 00 00 00 00 00 00 00 00 16 00 00 00
+[   16.332753] session: reply: 00000020: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+[   16.332756] session: reply: 00000030: 00 00 00 00 00 00 00 00 00 00 ee 00 00 00 00 00
+[   16.332758] session: reply: 00000040: 00 00 00 00 00 00 00 00
+[   16.332761] apple-ave 40d100000.video-encoder: session: Process: ACCEPTED, status 0xee0000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.332765] apple-ave 40d100000.video-encoder: session: recon writer DPE+0x30240 = 0x800314b1 (want 0x800314b1 when programmed); +0x24c 0xfbdc4000 +0x25c 0xfbf73400 +0x31c 0xfbf83400
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.332770] apple-ave 40d100000.video-encoder: session: source reader DPE+0x20010 = 0xf9e00000 (want 0xf9e00000: OUR BUFFER) stride +0x14 0xa00 (want 0xa00) chroma +0x90 0xf9d00000 (want 0xf9d00000) fmt +0x0C 0x00011500 mode +0x50 0x0 +0xD0 0x0
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.332775] apple-ave 40d100000.video-encoder: session: RESULT frame 1 (HEVC): counters I 469 P 193 skip 8438 - unit unknown (MBs or CTUs, docs/77 \xc2\xa74); 3600 MBs, 920 32x32 CTUs
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.332780] apple-ave 40d100000.video-encoder: session: RESULT frame 1: 1195 coded bytes, MB I 469 P 193 skip 8438 of 3600, FrameTypeReturned 1 (2709 has been the blank-frame signature)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.332784] apple-ave 40d100000.video-encoder: STEP frame result logged; next: post-frame diagnostics
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.332790] apple-ave 40d100000.video-encoder: session: diag PS DMA 0x000003ff PIPE4 0x000003ff PIPE5 0x000003ff ME0 0x000003ff ME1 0x000003ff
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.332794] apple-ave 40d100000.video-encoder: session: diag DPE+0x10140 0x00000000 (pipe done = bit 2) enable DPE+0x1013C 0x0000f063 (want bit 2) SRCDMAGO DPE+0x10128 0x00000006 srcdma cfg DPE+0x20000 0x80034045 +4 0x000000c0 scratch7 0x00000001
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.332799] apple-ave 40d100000.video-encoder: session: diag srcdma DPE+0x2002C 0x002d004f -> currMbRow 45; AXI err DPE+0x24000 0x00000000 DPE+0x24004 0x00000000 DPE+0x2C000 0x00000000 DPE+0x34000 0x00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.332804] apple-ave 40d100000.video-encoder: session: diag DPE DC000 0x00000101 DC004 0x00001000 DC400 0x00032901 DC4A4 0x00000000 DC5B0 0x0000001d
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.332813] apple-ave 40d100000.video-encoder: session: diag MCPU run/id 40d410000:1/4 40d450000:2/5 40d430000:1/6 40d470000:2/7 40d490000:2/8 40d4b0000:2/9 40d4d0000:2/a
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.332816] apple-ave 40d100000.video-encoder: session: diag MCPU IMem[0] MbInput 0x10004000 (want 0x10004000) IntraEst 0xe978a1c7 (0x10001000) CAVLC 0x06d86a0c (0x10001800)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.332821] apple-ave 40d100000.video-encoder: session: diag MCPU if MbInput 0x10000 0x0 IntraEst 0x0 0x0 CAVLC 0x0 0x0 | +8: 0x2601f 0x0 0x0
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.332825] apple-ave 40d100000.video-encoder: STEP diag: row0
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.332828] apple-ave 40d100000.video-encoder: session: diag MbInput produced 1441829 consumed 0 drain 0x0 lag 0; last src event 0x00170025 0x00000001 (y 23 x 37 last 0); IntraEst curMB 0x4858b885
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.332834] apple-ave 40d100000.video-encoder: session: diag hif MbInput     +0 0x00010000 +4 0x00000000 +c 0x00000000 +10 0x00000000 +14 0x00000028
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.332838] apple-ave 40d100000.video-encoder: session: diag hif IntraEst    +0 0x00000000 +4 0x00000000 +c 0x00000000 +10 0x00000000 +14 0x10000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.332843] apple-ave 40d100000.video-encoder: session: diag hif CAVLC       +0 0x00000000 +4 0x00000000 +c 0x00000000 +10 0x00000000 +14 0x10000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.332847] apple-ave 40d100000.video-encoder: session: diag hif MotionEst   +0 0x00008000 +4 0x00000000 +c 0x00000000 +10 0x00000000 +14 0x00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.332851] apple-ave 40d100000.video-encoder: session: diag hif ModeDec     +0 0x00000000 +4 0x00000000 +c 0x00000000 +10 0x00000000 +14 0x10000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.332855] apple-ave 40d100000.video-encoder: session: diag hif ReconLuma   +0 0x00000000 +4 0x00000000 +c 0x00000000 +10 0x00000000 +14 0x10000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.332859] apple-ave 40d100000.video-encoder: session: diag hif ReconChroma +0 0x00000000 +4 0x00000000 +c 0x00000000 +10 0x00000000 +14 0x10000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.332863] apple-ave 40d100000.video-encoder: session: diag hif MbInput     +8 0x0002601f
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.332867] apple-ave 40d100000.video-encoder: session: diag hif IntraEst    +8 0x00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.332870] apple-ave 40d100000.video-encoder: session: diag hif CAVLC       +8 0x00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.332873] apple-ave 40d100000.video-encoder: session: diag hif MotionEst   +8 0x0000601f
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.332876] apple-ave 40d100000.video-encoder: session: diag hif ModeDec     +8 0x00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.332886] apple-ave 40d100000.video-encoder: session: diag hif ReconLuma   +8 0x00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.332889] apple-ave 40d100000.video-encoder: session: diag hif ReconChroma +8 0x00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.332893] apple-ave 40d100000.video-encoder: session: diag nbr rd +0x00 80030001 03d00010 03740008 fe800000 | wr 80030001 01400008 03f80008 fe800000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.332899] apple-ave 40d100000.video-encoder: session: diag nbr rd +0x10 00014a00 00000000 00000000 00000000 | wr 00014a00 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.332903] apple-ave 40d100000.video-encoder: session: diag nbr rd +0x20 00000002 ffffffff 00000000 00000000 | wr ffffffff 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.332908] apple-ave 40d100000.video-encoder: session: diag nbr rd +0x30 00000000 00000000 00000000 00000000 | wr 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.332912] apple-ave 40d100000.video-encoder: session: diag nbr rd +0x40 80030001 03e00010 037c0008 fe950000 | wr 80030001 01480010 04000008 fe950000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.332917] apple-ave 40d100000.video-encoder: session: diag nbr rd +0x50 00037000 00000000 00000000 00000000 | wr 00037000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.332921] apple-ave 40d100000.video-encoder: STEP diag: mcpu (f33 died between its last line and the colocated scan)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.332925] apple-ave 40d100000.video-encoder: session: diag MCPU counters ModeDec entries 2000386359 ReconLuma granted 3406513881 CAVLC entries 2150933830
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.332929] apple-ave 40d100000.video-encoder: session: diag stack ModeDec   40d468f60: 3355804a 17ba015e 14bed53d 9c368539 f5819fff 5d091a1d e3f155bc 9af5c937
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.332936] apple-ave 40d100000.video-encoder: session: diag stack ModeDec   40d468f80: 3b203978 1f00294c 67580966 0d1a0116 a7bc3df6 d59fb1b1 d2dbff77 23be0d93
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.332941] apple-ave 40d100000.video-encoder: session: diag stack ModeDec   40d468fa0: 20301a96 d85281c0 06701446 0af82716 ba6b7a1a 1babbb72 fbbe4eff 60eeaff7
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.332946] apple-ave 40d100000.video-encoder: session: diag stack ModeDec   40d468fc0: 99590f59 c832334e 6595cd16 448efc8f 8997f568 894bb3ae 2bb675ff 3738fdf7
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.332951] apple-ave 40d100000.video-encoder: session: diag stack ModeDec   40d468fe0: 5b684f5a da171b44 7be5326c 6522f5c8 fba3fffe 4f1b3d35 cf16c73f ece3d7e1
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.332955] apple-ave 40d100000.video-encoder: session: diag stack ReconLuma 40d488f60: 4403db9d f4911ec4 87a798c5 2fe541b4 797f805d 01c762fb 5a14829e c36f5931
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.332960] apple-ave 40d100000.video-encoder: session: diag stack ReconLuma 40d488f80: 8d5e5bee c1b1e8e5 613d3ae3 090d412d 81ede1a4 03b1ea6c f87cf0ad 037b9320
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.332965] apple-ave 40d100000.video-encoder: session: diag stack ReconLuma 40d488fa0: 0e36f0c4 18a42660 de11bb03 332d83af 6cedda1d 77956f68 ef93a8fe 6fb71e26
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.332970] apple-ave 40d100000.video-encoder: session: diag stack ReconLuma 40d488fc0: ad1d459c 31f006b0 7b315e5c 4756cb3f d1bd4d7d a27b7975 5e7bcfff 3cd186fc
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.332975] apple-ave 40d100000.video-encoder: session: diag stack ReconLuma 40d488fe0: c1b0826c eec440bd 56d77882 43d48f4b 969b5ef1 d403b66e 5dfdd7a3 710f61fe
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.332980] apple-ave 40d100000.video-encoder: session: diag ModeDec ctx DPE+0x163000 58fdf79f +180 58fdf79f +184 18d40667 +228 4f7b3b37 go DPE+0x16A080 00000000 +084 00000000 | ReconLuma ctx DPE+0x183000 19e02b14 +180 19e02b14 +184 c006001d +228 64818650 go DPE+0x18A080 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.332985] apple-ave 40d100000.video-encoder: STEP diag: colocated scan (CPU read of 61440 bytes) - f33/f34 hung here
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.334610] apple-ave 40d100000.video-encoder: session: diag colocated slot 0: 29440 of 61440 bytes changed
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.334614] apple-ave 40d100000.video-encoder: STEP diag: costs (session_costs gated)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.334617] apple-ave 40d100000.video-encoder: STEP diag: channels
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.334621] apple-ave 40d100000.video-encoder: session: chan [timeout] 40d130240: 800314b1 01000003 00080030 fbdc4000 0000c800 000700d1 00380008 fbf73400 002c004e 00000001 00000001 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.334627] apple-ave 40d100000.video-encoder: session: chan [timeout] 40d130300: 800314c1 01000003 00400060 fbee3800 00006400 000700d1 00a00008 fbf83400 002c004e 00000001 00000001 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.334634] apple-ave 40d100000.video-encoder: session: chan [timeout] 40d130380: 80030001 00a80008 03d00004 faf90000 0000e600 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.334640] apple-ave 40d100000.video-encoder: session: chan [timeout] 40d1303c0: 80030000 00b00010 03d40004 00000000 00000040 00000000 00000000 00000000 00000000 00000000 ffffffff 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.334646] apple-ave 40d100000.video-encoder: session: chan [timeout] 40d130400: 80030000 00c00010 03d80004 00000000 00000040 00000000 00000000 00000000 00000000 00000000 ffffffff 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.334652] apple-ave 40d100000.video-encoder: session: chan [timeout] 40d130440: 80030000 00d00010 03dc0004 00000000 00000040 00000000 00000000 00000000 00000000 00000000 ffffffff 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.334658] apple-ave 40d100000.video-encoder: session: chan [timeout] 40d130480: 80030000 00e00010 03e00004 00000000 00000040 00000000 00000000 00000000 00000000 00000000 ffffffff 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.334664] apple-ave 40d100000.video-encoder: session: chan [timeout] 40d130600: 80030001 01400008 03f80008 fe800000 00014a00 00000000 00000000 00000000 ffffffff 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.334670] apple-ave 40d100000.video-encoder: session: chan [timeout] 40d130640: 80030001 01480010 04000008 fe950000 00037000 00000000 00000000 00000000 ffffffff 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.334676] apple-ave 40d100000.video-encoder: session: chan [timeout] 40d130700: 80030000 01680008 04100004 00000000 00000040 00000000 00000000 ffffffff 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.334682] apple-ave 40d100000.video-encoder: session: chan [timeout] 40d130780: 80030000 01800008 04240004 00000000 00000040 00000000 00000000 00000000 ffffffff 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.334688] apple-ave 40d100000.video-encoder: session: chan [timeout] 40d120bc0: 80030000 03c00010 03700004 00000000 00000040 00000000 00000002 ffffffff 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.334694] apple-ave 40d100000.video-encoder: session: chan [timeout] 40d120000: 80034045 000000c0 000000c0 00011500 f9e00000 00000a00 00072065 00000000 00000000 00000000 00000000 002d004f 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.334700] apple-ave 40d100000.video-encoder: session: chan [timeout] 40d120040: 00000000 00000000 00000000 00000000 00000000 00000002 ffffffff 00010101 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.334706] apple-ave 40d100000.video-encoder: session: chan [timeout] 40d120080: 80034055 00c00140 00c000c0 00011500 f9d00000 00000a00 00072060 00000000 00000000 00000000 00000000 002d004f 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.334712] apple-ave 40d100000.video-encoder: session: chan [timeout] 40d1200c0: 00000000 00000000 00000000 00000000 00000000 ffffffff 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.334718] apple-ave 40d100000.video-encoder: session: chan [timeout] 40d120100: 80034025 02000100 01800180 00011500 f9e00000 00000a00 44072035 00000000 00000000 00000000 00000000 002f004f 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.334724] apple-ave 40d100000.video-encoder: session: chan [timeout] 40d120140: 00000000 00000000 00000000 00000000 00000000 ffffffff 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.334729] apple-ave 40d100000.video-encoder: STEP diag: HEVC reference / low-res readers
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.334733] apple-ave 40d100000.video-encoder: session: diag HEVC ref luma[0] 40d128000: 84037f05 fbc00000 0000c800 44072015 fbdaf400 00000005 00300006 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.334739] apple-ave 40d100000.video-encoder: session: diag HEVC ref luma[1] 40d128040: 84037f04 00000000 00000000 44072014 00000000 00000005 00000006 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.334745] apple-ave 40d100000.video-encoder: session: diag HEVC ref luma[2] 40d128080: 84037f04 00000000 00000000 44072014 00000000 00000005 00000006 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.334751] apple-ave 40d100000.video-encoder: session: diag HEVC ref luma[3] 40d1280c0: 84037f04 00000000 00000000 44072014 00000000 00000005 00000006 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.334757] apple-ave 40d100000.video-encoder: session: diag HEVC ref chroma[0] 40d128200: 80037f75 fbd1f800 00006400 04072085 fbdbf400 00000005 002e004c 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.334764] apple-ave 40d100000.video-encoder: session: diag HEVC ref chroma[1] 40d128240: 80037f70 00000000 00000000 04072084 00000000 00000005 0000fffe 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.334770] apple-ave 40d100000.video-encoder: session: diag HEVC ref chroma[2] 40d128280: 80037f70 00000000 00000000 04072084 00000000 00000005 0000fffe 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.334776] apple-ave 40d100000.video-encoder: session: diag HEVC ref chroma[3] 40d1282c0: 80037f70 00000000 00000000 04072084 00000000 00000005 0000fffe 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.334782] apple-ave 40d100000.video-encoder: session: diag HEVC lowres result[0] 40d120f80: 80030001 04300010 03940004 fbb40000 00000000 00000001 0000f000 00000000 00000000 00000000 00000000 00000000 ffffffff 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.334788] apple-ave 40d100000.video-encoder: session: diag HEVC lowres result[1] 40d120fc0: 80030000 04400010 03980004 fbb4f400 00000000 00000001 0000f000 00000000 00000000 00000000 00000000 00000000 ffffffff 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.334794] apple-ave 40d100000.video-encoder: session: diag HEVC lowres result[2] 40d121000: 80030000 04500010 039c0004 fbb5e800 00000000 00000001 0000f000 00000000 00000000 00000000 00000000 00000000 ffffffff 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.334800] apple-ave 40d100000.video-encoder: session: diag HEVC lowres result[3] 40d121040: 80030000 04600010 03a00004 fbb6dc00 00000000 00000001 0000f000 00000000 00000000 00000000 00000000 00000000 ffffffff 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.334805] apple-ave 40d100000.video-encoder: STEP diag: done
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.334809] session: coded_hdr: 00000000: 000001d5 00000000 00000000 00000000
+[   16.334812] session: coded_hdr: 00000010: 000000c1 00000000 00000000 00000000
+[   16.334816] session: coded_hdr: 00000020: 000020f6 00000000 00000000 00000000
+[   16.334820] session: coded_hdr: 00000030: 0000299b 00000000 00000000 00000000
+[   16.334823] session: slice0: 00000000: 0000048b 00000000 00000000 00000000
+[   16.334827] session: slice0: 00000010: 00000000 00000000 00000000 00000000
+[   16.334830] apple-ave 40d100000.video-encoder: session: frame 1: 1195 bytes in 1 slice(s) (written 1163 - trimmed 0), FrameTypeReturned 1, frame_num 1 (sent 1), SPS+PPS 600 bits, cabac_zero_words 0
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.334835] apple-ave 40d100000.video-encoder: session: frame 1: HEVC slice headers 32 bytes (slice 0: 32 bytes at 0xfaf00000, in this slot's surface), frame = coded 1163 + headers
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.334839] apple-ave 40d100000.video-encoder: session: frame 1: slice 0 header NAL type 1 (want 19/20 IDR, 1 TRAIL_R P)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.334842] session: slicehdr: 00000000: 00 00 00 01 02 01 d0 0d 62 04 42 e7 bb 4a 4c 84
+[   16.334846] session: slicehdr: 00000010: c7 8e d1 48 70 e5 24 87 4e 50 48 70 e5 04 87 e0
+[   16.334849] apple-ave 40d100000.video-encoder: session: frame 1: HEVC counters I 469 P 193 skip 8438 = 9100 (3600 MBs, 920 CTUs; unit unknown, no check)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.334854] session: coded: 00000000: da fc 90 4b c4 cc 90 cb 2e 5b 0b 79 13 da e5 40
+[   16.334857] session: coded: 00000010: a1 5c 30 3b 38 10 4b ce 9b 09 7c 39 23 12 b3 0b
+[   16.334860] session: coded: 00000020: 94 f9 91 de c2 35 c9 a1 97 44 95 ae 8e 6f 47 7c
+[   16.334863] session: coded: 00000030: 33 8d 0c d8 33 20 cc 27 96 66 89 38 7f e8 3f 3b
+[   16.334967] apple-ave 40d100000.video-encoder: session: frame: parameter sets 75 bytes (firmware said 600 bits; back-scan says 75, agrees), first NAL type 32
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.334971] session: psets: 00000000: 00 00 00 01 40 01 0c 01 ff ff 02 20 00 00 03 00
+[   16.334975] session: psets: 00000010: b0 00 00 03 00 00 03 00 78 ac 09 00 00 00 01 42
+[   16.334978] session: psets: 00000020: 01 01 02 20 00 00 03 00 b0 00 00 03 00 00 03 00
+[   16.334981] session: psets: 00000030: 78 a0 02 80 80 2d 13 65 ae e4 52 2a e5 cb 97 44
+[   16.344512] apple-ave 40d100000.video-encoder: session: HEVC_ENCODE: POC lsb 2, SliceHeader slots 0x00000000faec0000.. (+0x400 each), slice RPS {sps set 0}
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.344522] apple-ave 40d100000.video-encoder: session: Process: 1280x720 coded, stride 2560, luma 0x00000000f9a00000/0x1e0000 chroma 0x00000000f9900000/0xf0000, frame_type 1, slot 23
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.344529] apple-ave 40d100000.video-encoder: session: Process: coded 0x00000000fb200000/0x1a6000 hdr 0x00000000fb1c0000/0x23000 recon Y 0x00000000fa000000 UV 0x00000000fa0e1000 MV 0x00000000fa2a3000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.344534] apple-ave 40d100000.video-encoder: session: Process: LowResSrcLumaScaled 0xfbb80000 at PICMGMT+0xc20 - INERT, setRefPointers overwrites it from DPB slot 0 (fw 0x2c320); LowResResults left zero
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.344539] apple-ave 40d100000.video-encoder: dart: [before Process] SID0 CPUDART TCR 0x80 TTBR 0x901a748c | DART1 TCR 0x80 TTBR 0x901a748c -> MATCH
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.344542] apple-ave 40d100000.video-encoder: session: Process: sending 26680 bytes at IOVA 0x00000000ff869b80 on IO
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.354061] apple-ave 40d100000.video-encoder: fw[0]| HEVC_XCCONFIG0_PICSIZE + 0: 2d0050
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.354080] apple-ave 40d100000.video-encoder: fw[0]| SetTranscode, 2 3 fd:2
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.354089] apple-ave 40d100000.video-encoder: fw[0]| HEVC:: curr_bitstream_addr_dst:00000000fb200000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.354105] apple-ave 40d100000.video-encoder: fw[0]| HEVC:: tmp_bitstream_addr_dst[0]:00000000fad00000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.354113] apple-ave 40d100000.video-encoder: fw[0]| HEVC_XCCONFIG0_PICSIZE + 400: 2d0050
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.354126] apple-ave 40d100000.video-encoder: fw[0]| SetTranscode, 2 3 fd:2
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.354138] apple-ave 40d100000.video-encoder: fw[0]| HEVC:: curr_bitstream_addr_dst:00000000fb200000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.354151] apple-ave 40d100000.video-encoder: fw[0]| HEVC:: tmp_bitstream_addr_dst[1]:00000000fac00000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.354166] apple-ave 40d100000.video-encoder: fw[0]| HEVC:: XC SourceGo.all 3
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.354790] apple-ave 40d100000.video-encoder: session: Process: reply 72 bytes flags 0x48: id=0x0e06 cid=0x1 slot=0x17 status=0xee0000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.354800] session: reply: 00000000: 06 0e 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+[   16.354806] session: reply: 00000010: 01 00 00 00 00 00 00 00 00 00 00 00 17 00 00 00
+[   16.354809] session: reply: 00000020: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+[   16.354810] session: reply: 00000030: 00 00 00 00 00 00 00 00 00 00 ee 00 00 00 00 00
+[   16.354812] session: reply: 00000040: 00 00 00 00 00 00 00 00
+[   16.354814] apple-ave 40d100000.video-encoder: session: Process: ACCEPTED, status 0xee0000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.354820] apple-ave 40d100000.video-encoder: session: recon writer DPE+0x30240 = 0x800314b1 (want 0x800314b1 when programmed); +0x24c 0xfbc00000 +0x25c 0xfbdaf400 +0x31c 0xfbdbf400
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.354824] apple-ave 40d100000.video-encoder: session: source reader DPE+0x20010 = 0xf9a00000 (want 0xf9a00000: OUR BUFFER) stride +0x14 0xa00 (want 0xa00) chroma +0x90 0xf9900000 (want 0xf9900000) fmt +0x0C 0x00011500 mode +0x50 0x0 +0xD0 0x0
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.354832] apple-ave 40d100000.video-encoder: session: RESULT frame 2 (HEVC): counters I 336 P 176 skip 200 - unit unknown (MBs or CTUs, docs/77 \xc2\xa74); 3600 MBs, 920 32x32 CTUs
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.354835] apple-ave 40d100000.video-encoder: session: RESULT frame 2: 1705 coded bytes, MB I 336 P 176 skip 200 of 3600, FrameTypeReturned 1 (2709 has been the blank-frame signature)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.354839] apple-ave 40d100000.video-encoder: STEP frame result logged; next: post-frame diagnostics
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.354843] apple-ave 40d100000.video-encoder: session: diag PS DMA 0x000003ff PIPE4 0x000003ff PIPE5 0x000003ff ME0 0x000003ff ME1 0x000003ff
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.354847] apple-ave 40d100000.video-encoder: session: diag DPE+0x10140 0x00000000 (pipe done = bit 2) enable DPE+0x1013C 0x0000f063 (want bit 2) SRCDMAGO DPE+0x10128 0x00000000 srcdma cfg DPE+0x20000 0x80034045 +4 0x000000c0 scratch7 0x00000001
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.354857] apple-ave 40d100000.video-encoder: session: diag srcdma DPE+0x2002C 0x002d004f -> currMbRow 45; AXI err DPE+0x24000 0x00000000 DPE+0x24004 0x00000000 DPE+0x2C000 0x00000000 DPE+0x34000 0x00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.354862] apple-ave 40d100000.video-encoder: session: diag DPE DC000 0x00000101 DC004 0x00001000 DC400 0x00032901 DC4A4 0x00000000 DC5B0 0x0000001d
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.354870] apple-ave 40d100000.video-encoder: session: diag MCPU run/id 40d410000:1/4 40d450000:2/5 40d430000:1/6 40d470000:2/7 40d490000:2/8 40d4b0000:2/9 40d4d0000:2/a
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.354873] apple-ave 40d100000.video-encoder: session: diag MCPU IMem[0] MbInput 0x10004000 (want 0x10004000) IntraEst 0xe978a1c7 (0x10001000) CAVLC 0x06d86a0c (0x10001800)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.354886] apple-ave 40d100000.video-encoder: session: diag MCPU if MbInput 0x10000 0x0 IntraEst 0x0 0x0 CAVLC 0x0 0x0 | +8: 0x2601f 0x0 0x0
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.354890] apple-ave 40d100000.video-encoder: STEP diag: row0
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.354892] apple-ave 40d100000.video-encoder: session: diag MbInput produced 1441829 consumed 0 drain 0x0 lag 0; last src event 0x00170025 0x00000001 (y 23 x 37 last 0); IntraEst curMB 0x4858b885
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.354896] apple-ave 40d100000.video-encoder: session: diag hif MbInput     +0 0x00010000 +4 0x00000000 +c 0x00000000 +10 0x00000000 +14 0x00000028
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.354901] apple-ave 40d100000.video-encoder: session: diag hif IntraEst    +0 0x00000000 +4 0x00000000 +c 0x00000000 +10 0x00000000 +14 0x10000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.354904] apple-ave 40d100000.video-encoder: session: diag hif CAVLC       +0 0x00000000 +4 0x00000000 +c 0x00000000 +10 0x00000000 +14 0x10000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.354908] apple-ave 40d100000.video-encoder: session: diag hif MotionEst   +0 0x00008000 +4 0x00000000 +c 0x00000000 +10 0x00000000 +14 0x00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.354912] apple-ave 40d100000.video-encoder: session: diag hif ModeDec     +0 0x00000000 +4 0x00000000 +c 0x00000000 +10 0x00000000 +14 0x10000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.354915] apple-ave 40d100000.video-encoder: session: diag hif ReconLuma   +0 0x00000000 +4 0x00000000 +c 0x00000000 +10 0x00000000 +14 0x10000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.354918] apple-ave 40d100000.video-encoder: session: diag hif ReconChroma +0 0x00000000 +4 0x00000000 +c 0x00000000 +10 0x00000000 +14 0x10000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.354922] apple-ave 40d100000.video-encoder: session: diag hif MbInput     +8 0x0002601f
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.354927] apple-ave 40d100000.video-encoder: session: diag hif IntraEst    +8 0x00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.354930] apple-ave 40d100000.video-encoder: session: diag hif CAVLC       +8 0x00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.354933] apple-ave 40d100000.video-encoder: session: diag hif MotionEst   +8 0x0000601f
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.354935] apple-ave 40d100000.video-encoder: session: diag hif ModeDec     +8 0x00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.354938] apple-ave 40d100000.video-encoder: session: diag hif ReconLuma   +8 0x00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.354941] apple-ave 40d100000.video-encoder: session: diag hif ReconChroma +8 0x00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.354945] apple-ave 40d100000.video-encoder: session: diag nbr rd +0x00 80030001 03d00010 03740008 fe800000 | wr 80030001 01400008 03f80008 fe800000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.354949] apple-ave 40d100000.video-encoder: session: diag nbr rd +0x10 00014a00 00000000 00000000 00000000 | wr 00014a00 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.354953] apple-ave 40d100000.video-encoder: session: diag nbr rd +0x20 00000002 ffffffff 00000000 00000000 | wr ffffffff 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.354957] apple-ave 40d100000.video-encoder: session: diag nbr rd +0x30 00000000 00000000 00000000 00000000 | wr 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.354960] apple-ave 40d100000.video-encoder: session: diag nbr rd +0x40 80030001 03e00010 037c0008 fe950000 | wr 80030001 01480010 04000008 fe950000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.354965] apple-ave 40d100000.video-encoder: session: diag nbr rd +0x50 00037000 00000000 00000000 00000000 | wr 00037000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.354968] apple-ave 40d100000.video-encoder: STEP diag: mcpu (f33 died between its last line and the colocated scan)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.354972] apple-ave 40d100000.video-encoder: session: diag MCPU counters ModeDec entries 2000386359 ReconLuma granted 3406513881 CAVLC entries 2150933830
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.354976] apple-ave 40d100000.video-encoder: session: diag stack ModeDec   40d468f60: 3355804a 17ba015e 14bed53d 9c368539 f5819fff 5d091a1d e3f155bc 9af5c937
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.354980] apple-ave 40d100000.video-encoder: session: diag stack ModeDec   40d468f80: 3b203978 1f00294c 67580966 0d1a0116 a7bc3df6 d59fb1b1 d2dbff77 23be0d93
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.354984] apple-ave 40d100000.video-encoder: session: diag stack ModeDec   40d468fa0: 20301a96 d85281c0 06701446 0af82716 ba6b7a1a 1babbb72 fbbe4eff 60eeaff7
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.354988] apple-ave 40d100000.video-encoder: session: diag stack ModeDec   40d468fc0: 99590f59 c832334e 6595cd16 448efc8f 8997f568 894bb3ae 2bb675ff 3738fdf7
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.354992] apple-ave 40d100000.video-encoder: session: diag stack ModeDec   40d468fe0: 5b684f5a da171b44 7be5326c 6522f5c8 fba3fffe 4f1b3d35 cf16c73f ece3d7e1
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.354996] apple-ave 40d100000.video-encoder: session: diag stack ReconLuma 40d488f60: 4403db9d f4911ec4 87a798c5 2fe541b4 797f805d 01c762fb 5a14829e c36f5931
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.355001] apple-ave 40d100000.video-encoder: session: diag stack ReconLuma 40d488f80: 8d5e5bee c1b1e8e5 613d3ae3 090d412d 81ede1a4 03b1ea6c f87cf0ad 037b9320
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.355005] apple-ave 40d100000.video-encoder: session: diag stack ReconLuma 40d488fa0: 0e36f0c4 18a42660 de11bb03 332d83af 6cedda1d 77956f68 ef93a8fe 6fb71e26
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.355009] apple-ave 40d100000.video-encoder: session: diag stack ReconLuma 40d488fc0: ad1d459c 31f006b0 7b315e5c 4756cb3f d1bd4d7d a27b7975 5e7bcfff 3cd186fc
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.355013] apple-ave 40d100000.video-encoder: session: diag stack ReconLuma 40d488fe0: c1b0826c eec440bd 56d77882 43d48f4b 969b5ef1 d403b66e 5dfdd7a3 710f61fe
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.355117] apple-ave 40d100000.video-encoder: session: diag ModeDec ctx DPE+0x163000 58fdf79f +180 58fdf79f +184 18d40667 +228 4f7b3b37 go DPE+0x16A080 00000000 +084 00000000 | ReconLuma ctx DPE+0x183000 19e02b14 +180 19e02b14 +184 c006001d +228 64818650 go DPE+0x18A080 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.355123] apple-ave 40d100000.video-encoder: STEP diag: colocated scan (CPU read of 61440 bytes) - f33/f34 hung here
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.357044] apple-ave 40d100000.video-encoder: session: diag colocated slot 0: 29440 of 61440 bytes changed
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.357051] apple-ave 40d100000.video-encoder: STEP diag: costs (session_costs gated)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.357057] apple-ave 40d100000.video-encoder: STEP diag: channels
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.357061] apple-ave 40d100000.video-encoder: session: chan [timeout] 40d130240: 800314b1 01000003 00080030 fbc00000 0000c800 000700d1 00380008 fbdaf400 002c004e 00000001 00000001 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.357067] apple-ave 40d100000.video-encoder: session: chan [timeout] 40d130300: 800314c1 01000003 00400060 fbd1f800 00006400 000700d1 00a00008 fbdbf400 002c004e 00000001 00000001 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.357074] apple-ave 40d100000.video-encoder: session: chan [timeout] 40d130380: 80030001 00a80008 03d00004 fafa0000 0000e600 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.357079] apple-ave 40d100000.video-encoder: session: chan [timeout] 40d1303c0: 80030000 00b00010 03d40004 00000000 00000040 00000000 00000000 00000000 00000000 00000000 ffffffff 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.357088] apple-ave 40d100000.video-encoder: session: chan [timeout] 40d130400: 80030000 00c00010 03d80004 00000000 00000040 00000000 00000000 00000000 00000000 00000000 ffffffff 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.357093] apple-ave 40d100000.video-encoder: session: chan [timeout] 40d130440: 80030000 00d00010 03dc0004 00000000 00000040 00000000 00000000 00000000 00000000 00000000 ffffffff 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.357098] apple-ave 40d100000.video-encoder: session: chan [timeout] 40d130480: 80030000 00e00010 03e00004 00000000 00000040 00000000 00000000 00000000 00000000 00000000 ffffffff 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.357103] apple-ave 40d100000.video-encoder: session: chan [timeout] 40d130600: 80030001 01400008 03f80008 fe800000 00014a00 00000000 00000000 00000000 ffffffff 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.357108] apple-ave 40d100000.video-encoder: session: chan [timeout] 40d130640: 80030001 01480010 04000008 fe950000 00037000 00000000 00000000 00000000 ffffffff 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.357116] apple-ave 40d100000.video-encoder: session: chan [timeout] 40d130700: 80030000 01680008 04100004 00000000 00000040 00000000 00000000 ffffffff 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.357121] apple-ave 40d100000.video-encoder: session: chan [timeout] 40d130780: 80030000 01800008 04240004 00000000 00000040 00000000 00000000 00000000 ffffffff 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.357126] apple-ave 40d100000.video-encoder: session: chan [timeout] 40d120bc0: 80030000 03c00010 03700004 00000000 00000040 00000000 00000002 ffffffff 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.357132] apple-ave 40d100000.video-encoder: session: chan [timeout] 40d120000: 80034045 000000c0 000000c0 00011500 f9a00000 00000a00 00072065 00000000 00000000 00000000 00000000 002d004f 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.357138] apple-ave 40d100000.video-encoder: session: chan [timeout] 40d120040: 00000000 00000000 00000000 00000000 00000000 00000002 ffffffff 00020202 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.357143] apple-ave 40d100000.video-encoder: session: chan [timeout] 40d120080: 80034055 00c00140 00c000c0 00011500 f9900000 00000a00 00072060 00000000 00000000 00000000 00000000 002d004f 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.357149] apple-ave 40d100000.video-encoder: session: chan [timeout] 40d1200c0: 00000000 00000000 00000000 00000000 00000000 ffffffff 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.357155] apple-ave 40d100000.video-encoder: session: chan [timeout] 40d120100: 80034025 02000100 01800180 00011500 f9a00000 00000a00 44072035 00000000 00000000 00000000 00000000 002f004f 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.357161] apple-ave 40d100000.video-encoder: session: chan [timeout] 40d120140: 00000000 00000000 00000000 00000000 00000000 ffffffff 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.357165] apple-ave 40d100000.video-encoder: STEP diag: HEVC reference / low-res readers
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.357168] apple-ave 40d100000.video-encoder: session: diag HEVC ref luma[0] 40d128000: 84037f05 fbdc4000 0000c800 44072015 fbf73400 00000005 00300006 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.357175] apple-ave 40d100000.video-encoder: session: diag HEVC ref luma[1] 40d128040: 84037f04 00000000 00000000 44072014 00000000 00000005 00000006 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.357180] apple-ave 40d100000.video-encoder: session: diag HEVC ref luma[2] 40d128080: 84037f04 00000000 00000000 44072014 00000000 00000005 00000006 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.357186] apple-ave 40d100000.video-encoder: session: diag HEVC ref luma[3] 40d1280c0: 84037f04 00000000 00000000 44072014 00000000 00000005 00000006 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.357191] apple-ave 40d100000.video-encoder: session: diag HEVC ref chroma[0] 40d128200: 80037f75 fbee3800 00006400 04072085 fbf83400 00000005 002e004c 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.357197] apple-ave 40d100000.video-encoder: session: diag HEVC ref chroma[1] 40d128240: 80037f70 00000000 00000000 04072084 00000000 00000005 0000fffe 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.357203] apple-ave 40d100000.video-encoder: session: diag HEVC ref chroma[2] 40d128280: 80037f70 00000000 00000000 04072084 00000000 00000005 0000fffe 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.357208] apple-ave 40d100000.video-encoder: session: diag HEVC ref chroma[3] 40d1282c0: 80037f70 00000000 00000000 04072084 00000000 00000005 0000fffe 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.357216] apple-ave 40d100000.video-encoder: session: diag HEVC lowres result[0] 40d120f80: 80030001 04300010 03940004 fbb40000 00000000 00000001 0000f000 00000000 00000000 00000000 00000000 00000000 ffffffff 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.357221] apple-ave 40d100000.video-encoder: session: diag HEVC lowres result[1] 40d120fc0: 80030000 04400010 03980004 fbb4f400 00000000 00000001 0000f000 00000000 00000000 00000000 00000000 00000000 ffffffff 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.357227] apple-ave 40d100000.video-encoder: session: diag HEVC lowres result[2] 40d121000: 80030000 04500010 039c0004 fbb5e800 00000000 00000001 0000f000 00000000 00000000 00000000 00000000 00000000 ffffffff 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.357232] apple-ave 40d100000.video-encoder: session: diag HEVC lowres result[3] 40d121040: 80030000 04600010 03a00004 fbb6dc00 00000000 00000001 0000f000 00000000 00000000 00000000 00000000 00000000 ffffffff 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.357236] apple-ave 40d100000.video-encoder: STEP diag: done
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.357238] session: coded_hdr: 00000000: 00000150 00000000 00000000 00000000
+[   16.357242] session: coded_hdr: 00000010: 000000b0 00000000 00000000 00000000
+[   16.357245] session: coded_hdr: 00000020: 000000c8 00000000 00000000 00000000
+[   16.357247] session: coded_hdr: 00000030: 00000d2f 00000000 00000000 00000000
+[   16.357250] session: slice0: 00000000: 00000689 00000000 00000000 00000000
+[   16.357252] session: slice0: 00000010: 00000000 00000000 00000000 00000000
+[   16.357255] apple-ave 40d100000.video-encoder: session: frame 2: 1705 bytes in 1 slice(s) (written 1673 - trimmed 0), FrameTypeReturned 1, frame_num 2 (sent 2), SPS+PPS 600 bits, cabac_zero_words 0
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.357266] apple-ave 40d100000.video-encoder: session: frame 2: HEVC slice headers 32 bytes (slice 0: 32 bytes at 0xfaec0000, in this slot's surface), frame = coded 1673 + headers
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.357270] apple-ave 40d100000.video-encoder: session: frame 2: slice 0 header NAL type 1 (want 19/20 IDR, 1 TRAIL_R P)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.357274] session: slicehdr: 00000000: 00 00 00 01 02 01 d0 16 62 04 42 e7 c7 8a f5 b9
+[   16.357277] session: slicehdr: 00000010: 31 62 4c 8d 0e 14 78 90 60 c8 87 02 04 58 4f e0
+[   16.357279] apple-ave 40d100000.video-encoder: session: frame 2: HEVC counters I 336 P 176 skip 200 = 712 (3600 MBs, 920 CTUs; unit unknown, no check)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.357283] session: coded: 00000000: da fc 89 48 85 9d c1 40 07 f2 db ae 14 b8 22 52
+[   16.357285] session: coded: 00000010: da 29 59 16 3f c4 27 b8 96 b7 47 63 3a 47 cc 2d
+[   16.357287] session: coded: 00000020: 7d 0e db 1e a4 f7 4d 50 b9 01 98 3f 69 ec e6 7b
+[   16.357290] session: coded: 00000030: 7f 03 52 07 a5 39 3c 2f 68 34 99 2c c6 c3 b2 15
+[   16.357442] apple-ave 40d100000.video-encoder: session: frame: parameter sets 75 bytes (firmware said 600 bits; back-scan says 75, agrees), first NAL type 32
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.357446] session: psets: 00000000: 00 00 00 01 40 01 0c 01 ff ff 02 20 00 00 03 00
+[   16.357449] session: psets: 00000010: b0 00 00 03 00 00 03 00 78 ac 09 00 00 00 01 42
+[   16.357451] session: psets: 00000020: 01 01 02 20 00 00 03 00 b0 00 00 03 00 00 03 00
+[   16.357453] session: psets: 00000030: 78 a0 02 80 80 2d 13 65 ae e4 52 2a e5 cb 97 44
+[   16.365794] apple-ave 40d100000.video-encoder: session: HEVC_ENCODE: POC lsb 3, SliceHeader slots 0x00000000fae80000.. (+0x400 each), slice RPS {sps set 0}
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.365810] apple-ave 40d100000.video-encoder: session: Process: 1280x720 coded, stride 2560, luma 0x00000000f9600000/0x1e0000 chroma 0x00000000f9500000/0xf0000, frame_type 1, slot 24
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.365816] apple-ave 40d100000.video-encoder: session: Process: coded 0x00000000fb000000/0x1a6000 hdr 0x00000000fafc0000/0x23000 recon Y 0x00000000fa000000 UV 0x00000000fa0e1000 MV 0x00000000fa2a3000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.365820] apple-ave 40d100000.video-encoder: session: Process: LowResSrcLumaScaled 0xfbb80000 at PICMGMT+0xc20 - INERT, setRefPointers overwrites it from DPB slot 0 (fw 0x2c320); LowResResults left zero
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.365826] apple-ave 40d100000.video-encoder: dart: [before Process] SID0 CPUDART TCR 0x80 TTBR 0x901a748c | DART1 TCR 0x80 TTBR 0x901a748c -> MATCH
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.365830] apple-ave 40d100000.video-encoder: session: Process: sending 26680 bytes at IOVA 0x00000000ff8703c0 on IO
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.375293] apple-ave 40d100000.video-encoder: fw[0]| HEVC_XCCONFIG0_PICSIZE + 0: 2d0050
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.375312] apple-ave 40d100000.video-encoder: fw[0]| SetTranscode, 3 4 fd:3
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.375325] apple-ave 40d100000.video-encoder: fw[0]| HEVC:: curr_bitstream_addr_dst:00000000fb000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.375338] apple-ave 40d100000.video-encoder: fw[0]| HEVC:: tmp_bitstream_addr_dst[0]:00000000fad00000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.375360] apple-ave 40d100000.video-encoder: fw[0]| HEVC_XCCONFIG0_PICSIZE + 400: 2d0050
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.375369] apple-ave 40d100000.video-encoder: fw[0]| SetTranscode, 3 4 fd:3
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.375373] apple-ave 40d100000.video-encoder: fw[0]| HEVC:: curr_bitstream_addr_dst:00000000fb000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.375380] apple-ave 40d100000.video-encoder: fw[0]| HEVC:: tmp_bitstream_addr_dst[1]:00000000fac00000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.375400] apple-ave 40d100000.video-encoder: fw[0]| HEVC:: XC SourceGo.all 3
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.376062] apple-ave 40d100000.video-encoder: session: Process: reply 72 bytes flags 0x48: id=0x0e06 cid=0x1 slot=0x18 status=0xee0000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.376075] session: reply: 00000000: 06 0e 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+[   16.376078] session: reply: 00000010: 01 00 00 00 00 00 00 00 00 00 00 00 18 00 00 00
+[   16.376081] session: reply: 00000020: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+[   16.376084] session: reply: 00000030: 00 00 00 00 00 00 00 00 00 00 ee 00 00 00 00 00
+[   16.376086] session: reply: 00000040: 00 00 00 00 00 00 00 00
+[   16.376089] apple-ave 40d100000.video-encoder: session: Process: ACCEPTED, status 0xee0000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.376093] apple-ave 40d100000.video-encoder: session: recon writer DPE+0x30240 = 0x800314b1 (want 0x800314b1 when programmed); +0x24c 0xfbdc4000 +0x25c 0xfbf73400 +0x31c 0xfbf83400
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.376097] apple-ave 40d100000.video-encoder: session: source reader DPE+0x20010 = 0xf9600000 (want 0xf9600000: OUR BUFFER) stride +0x14 0xa00 (want 0xa00) chroma +0x90 0xf9500000 (want 0xf9500000) fmt +0x0C 0x00011500 mode +0x50 0x0 +0xD0 0x0
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.376101] apple-ave 40d100000.video-encoder: session: RESULT frame 3 (HEVC): counters I 968 P 260 skip 2544 - unit unknown (MBs or CTUs, docs/77 \xc2\xa74); 3600 MBs, 920 32x32 CTUs
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.376104] apple-ave 40d100000.video-encoder: session: RESULT frame 3: 1763 coded bytes, MB I 968 P 260 skip 2544 of 3600, FrameTypeReturned 1 (2709 has been the blank-frame signature)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.376107] apple-ave 40d100000.video-encoder: STEP frame result logged; next: post-frame diagnostics
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.376112] apple-ave 40d100000.video-encoder: session: diag PS DMA 0x000003ff PIPE4 0x000003ff PIPE5 0x000003ff ME0 0x000003ff ME1 0x000003ff
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.376115] apple-ave 40d100000.video-encoder: session: diag DPE+0x10140 0x00000000 (pipe done = bit 2) enable DPE+0x1013C 0x0000f063 (want bit 2) SRCDMAGO DPE+0x10128 0x00000006 srcdma cfg DPE+0x20000 0x80034045 +4 0x000000c0 scratch7 0x00000001
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.376120] apple-ave 40d100000.video-encoder: session: diag srcdma DPE+0x2002C 0x002d004f -> currMbRow 45; AXI err DPE+0x24000 0x00000000 DPE+0x24004 0x00000000 DPE+0x2C000 0x00000000 DPE+0x34000 0x00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.376126] apple-ave 40d100000.video-encoder: session: diag DPE DC000 0x00000101 DC004 0x00001000 DC400 0x00032901 DC4A4 0x00000000 DC5B0 0x0000001d
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.376134] apple-ave 40d100000.video-encoder: session: diag MCPU run/id 40d410000:1/4 40d450000:2/5 40d430000:1/6 40d470000:2/7 40d490000:2/8 40d4b0000:2/9 40d4d0000:2/a
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.376137] apple-ave 40d100000.video-encoder: session: diag MCPU IMem[0] MbInput 0x10004000 (want 0x10004000) IntraEst 0xe978a1c7 (0x10001000) CAVLC 0x06d86a0c (0x10001800)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.376140] apple-ave 40d100000.video-encoder: session: diag MCPU if MbInput 0x10000 0x0 IntraEst 0x0 0x0 CAVLC 0x0 0x0 | +8: 0x2601f 0x0 0x0
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.376144] apple-ave 40d100000.video-encoder: STEP diag: row0
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.376146] apple-ave 40d100000.video-encoder: session: diag MbInput produced 1441829 consumed 0 drain 0x0 lag 0; last src event 0x00170025 0x00000001 (y 23 x 37 last 0); IntraEst curMB 0x4858b885
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.376151] apple-ave 40d100000.video-encoder: session: diag hif MbInput     +0 0x00010000 +4 0x00000000 +c 0x00000000 +10 0x00000000 +14 0x00000028
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.376155] apple-ave 40d100000.video-encoder: session: diag hif IntraEst    +0 0x00000000 +4 0x00000000 +c 0x00000000 +10 0x00000000 +14 0x10000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.376158] apple-ave 40d100000.video-encoder: session: diag hif CAVLC       +0 0x00000000 +4 0x00000000 +c 0x00000000 +10 0x00000000 +14 0x10000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.376161] apple-ave 40d100000.video-encoder: session: diag hif MotionEst   +0 0x00008000 +4 0x00000000 +c 0x00000000 +10 0x00000000 +14 0x00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.376165] apple-ave 40d100000.video-encoder: session: diag hif ModeDec     +0 0x00000000 +4 0x00000000 +c 0x00000000 +10 0x00000000 +14 0x10000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.376171] apple-ave 40d100000.video-encoder: session: diag hif ReconLuma   +0 0x00000000 +4 0x00000000 +c 0x00000000 +10 0x00000000 +14 0x10000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.376174] apple-ave 40d100000.video-encoder: session: diag hif ReconChroma +0 0x00000000 +4 0x00000000 +c 0x00000000 +10 0x00000000 +14 0x10000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.376177] apple-ave 40d100000.video-encoder: session: diag hif MbInput     +8 0x0002601f
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.376180] apple-ave 40d100000.video-encoder: session: diag hif IntraEst    +8 0x00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.376183] apple-ave 40d100000.video-encoder: session: diag hif CAVLC       +8 0x00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.376186] apple-ave 40d100000.video-encoder: session: diag hif MotionEst   +8 0x0000601f
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.376188] apple-ave 40d100000.video-encoder: session: diag hif ModeDec     +8 0x00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.376191] apple-ave 40d100000.video-encoder: session: diag hif ReconLuma   +8 0x00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.376194] apple-ave 40d100000.video-encoder: session: diag hif ReconChroma +8 0x00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.376196] apple-ave 40d100000.video-encoder: session: diag nbr rd +0x00 80030001 03d00010 03740008 fe800000 | wr 80030001 01400008 03f80008 fe800000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.376200] apple-ave 40d100000.video-encoder: session: diag nbr rd +0x10 00014a00 00000000 00000000 00000000 | wr 00014a00 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.376204] apple-ave 40d100000.video-encoder: session: diag nbr rd +0x20 00000002 ffffffff 00000000 00000000 | wr ffffffff 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.376208] apple-ave 40d100000.video-encoder: session: diag nbr rd +0x30 00000000 00000000 00000000 00000000 | wr 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.376211] apple-ave 40d100000.video-encoder: session: diag nbr rd +0x40 80030001 03e00010 037c0008 fe950000 | wr 80030001 01480010 04000008 fe950000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.376215] apple-ave 40d100000.video-encoder: session: diag nbr rd +0x50 00037000 00000000 00000000 00000000 | wr 00037000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.376218] apple-ave 40d100000.video-encoder: STEP diag: mcpu (f33 died between its last line and the colocated scan)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.376220] apple-ave 40d100000.video-encoder: session: diag MCPU counters ModeDec entries 2000386359 ReconLuma granted 3406513881 CAVLC entries 2150933830
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.376224] apple-ave 40d100000.video-encoder: session: diag stack ModeDec   40d468f60: 3355804a 17ba015e 14bed53d 9c368539 f5819fff 5d091a1d e3f155bc 9af5c937
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.376227] apple-ave 40d100000.video-encoder: session: diag stack ModeDec   40d468f80: 3b203978 1f00294c 67580966 0d1a0116 a7bc3df6 d59fb1b1 d2dbff77 23be0d93
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.376231] apple-ave 40d100000.video-encoder: session: diag stack ModeDec   40d468fa0: 20301a96 d85281c0 06701446 0af82716 ba6b7a1a 1babbb72 fbbe4eff 60eeaff7
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.376235] apple-ave 40d100000.video-encoder: session: diag stack ModeDec   40d468fc0: 99590f59 c832334e 6595cd16 448efc8f 8997f568 894bb3ae 2bb675ff 3738fdf7
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.376239] apple-ave 40d100000.video-encoder: session: diag stack ModeDec   40d468fe0: 5b684f5a da171b44 7be5326c 6522f5c8 fba3fffe 4f1b3d35 cf16c73f ece3d7e1
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.376242] apple-ave 40d100000.video-encoder: session: diag stack ReconLuma 40d488f60: 4403db9d f4911ec4 87a798c5 2fe541b4 797f805d 01c762fb 5a14829e c36f5931
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.376246] apple-ave 40d100000.video-encoder: session: diag stack ReconLuma 40d488f80: 8d5e5bee c1b1e8e5 613d3ae3 090d412d 81ede1a4 03b1ea6c f87cf0ad 037b9320
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.376250] apple-ave 40d100000.video-encoder: session: diag stack ReconLuma 40d488fa0: 0e36f0c4 18a42660 de11bb03 332d83af 6cedda1d 77956f68 ef93a8fe 6fb71e26
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.376254] apple-ave 40d100000.video-encoder: session: diag stack ReconLuma 40d488fc0: ad1d459c 31f006b0 7b315e5c 4756cb3f d1bd4d7d a27b7975 5e7bcfff 3cd186fc
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.376258] apple-ave 40d100000.video-encoder: session: diag stack ReconLuma 40d488fe0: c1b0826c eec440bd 56d77882 43d48f4b 969b5ef1 d403b66e 5dfdd7a3 710f61fe
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.376278] apple-ave 40d100000.video-encoder: session: diag ModeDec ctx DPE+0x163000 58fdf79f +180 58fdf79f +184 18d40667 +228 4f7b3b37 go DPE+0x16A080 00000000 +084 00000000 | ReconLuma ctx DPE+0x183000 19e02b14 +180 19e02b14 +184 c006001d +228 64818650 go DPE+0x18A080 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.376282] apple-ave 40d100000.video-encoder: STEP diag: colocated scan (CPU read of 61440 bytes) - f33/f34 hung here
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.378187] apple-ave 40d100000.video-encoder: session: diag colocated slot 0: 29440 of 61440 bytes changed
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.378196] apple-ave 40d100000.video-encoder: STEP diag: costs (session_costs gated)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.378199] apple-ave 40d100000.video-encoder: STEP diag: channels
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.378204] apple-ave 40d100000.video-encoder: session: chan [timeout] 40d130240: 800314b1 01000003 00080030 fbdc4000 0000c800 000700d1 00380008 fbf73400 002c004e 00000001 00000001 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.378210] apple-ave 40d100000.video-encoder: session: chan [timeout] 40d130300: 800314c1 01000003 00400060 fbee3800 00006400 000700d1 00a00008 fbf83400 002c004e 00000001 00000001 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.378217] apple-ave 40d100000.video-encoder: session: chan [timeout] 40d130380: 80030001 00a80008 03d00004 faf90000 0000e600 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.378222] apple-ave 40d100000.video-encoder: session: chan [timeout] 40d1303c0: 80030000 00b00010 03d40004 00000000 00000040 00000000 00000000 00000000 00000000 00000000 ffffffff 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.378227] apple-ave 40d100000.video-encoder: session: chan [timeout] 40d130400: 80030000 00c00010 03d80004 00000000 00000040 00000000 00000000 00000000 00000000 00000000 ffffffff 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.378232] apple-ave 40d100000.video-encoder: session: chan [timeout] 40d130440: 80030000 00d00010 03dc0004 00000000 00000040 00000000 00000000 00000000 00000000 00000000 ffffffff 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.378237] apple-ave 40d100000.video-encoder: session: chan [timeout] 40d130480: 80030000 00e00010 03e00004 00000000 00000040 00000000 00000000 00000000 00000000 00000000 ffffffff 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.378245] apple-ave 40d100000.video-encoder: session: chan [timeout] 40d130600: 80030001 01400008 03f80008 fe800000 00014a00 00000000 00000000 00000000 ffffffff 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.378250] apple-ave 40d100000.video-encoder: session: chan [timeout] 40d130640: 80030001 01480010 04000008 fe950000 00037000 00000000 00000000 00000000 ffffffff 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.378255] apple-ave 40d100000.video-encoder: session: chan [timeout] 40d130700: 80030000 01680008 04100004 00000000 00000040 00000000 00000000 ffffffff 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.378260] apple-ave 40d100000.video-encoder: session: chan [timeout] 40d130780: 80030000 01800008 04240004 00000000 00000040 00000000 00000000 00000000 ffffffff 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.378265] apple-ave 40d100000.video-encoder: session: chan [timeout] 40d120bc0: 80030000 03c00010 03700004 00000000 00000040 00000000 00000002 ffffffff 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.378269] apple-ave 40d100000.video-encoder: session: chan [timeout] 40d120000: 80034045 000000c0 000000c0 00011500 f9600000 00000a00 00072065 00000000 00000000 00000000 00000000 002d004f 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.378275] apple-ave 40d100000.video-encoder: session: chan [timeout] 40d120040: 00000000 00000000 00000000 00000000 00000000 00000002 ffffffff 00030303 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.378280] apple-ave 40d100000.video-encoder: session: chan [timeout] 40d120080: 80034055 00c00140 00c000c0 00011500 f9500000 00000a00 00072060 00000000 00000000 00000000 00000000 002d004f 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.378286] apple-ave 40d100000.video-encoder: session: chan [timeout] 40d1200c0: 00000000 00000000 00000000 00000000 00000000 ffffffff 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.378293] apple-ave 40d100000.video-encoder: session: chan [timeout] 40d120100: 80034025 02000100 01800180 00011500 f9600000 00000a00 44072035 00000000 00000000 00000000 00000000 002f004f 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.378299] apple-ave 40d100000.video-encoder: session: chan [timeout] 40d120140: 00000000 00000000 00000000 00000000 00000000 ffffffff 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.378302] apple-ave 40d100000.video-encoder: STEP diag: HEVC reference / low-res readers
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.378305] apple-ave 40d100000.video-encoder: session: diag HEVC ref luma[0] 40d128000: 84037f05 fbc00000 0000c800 44072015 fbdaf400 00000005 00300006 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.378310] apple-ave 40d100000.video-encoder: session: diag HEVC ref luma[1] 40d128040: 84037f04 00000000 00000000 44072014 00000000 00000005 00000006 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.378315] apple-ave 40d100000.video-encoder: session: diag HEVC ref luma[2] 40d128080: 84037f04 00000000 00000000 44072014 00000000 00000005 00000006 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.378320] apple-ave 40d100000.video-encoder: session: diag HEVC ref luma[3] 40d1280c0: 84037f04 00000000 00000000 44072014 00000000 00000005 00000006 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.378325] apple-ave 40d100000.video-encoder: session: diag HEVC ref chroma[0] 40d128200: 80037f75 fbd1f800 00006400 04072085 fbdbf400 00000005 002e004c 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.378330] apple-ave 40d100000.video-encoder: session: diag HEVC ref chroma[1] 40d128240: 80037f70 00000000 00000000 04072084 00000000 00000005 0000fffe 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.378372] apple-ave 40d100000.video-encoder: session: diag HEVC ref chroma[2] 40d128280: 80037f70 00000000 00000000 04072084 00000000 00000005 0000fffe 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.378377] apple-ave 40d100000.video-encoder: session: diag HEVC ref chroma[3] 40d1282c0: 80037f70 00000000 00000000 04072084 00000000 00000005 0000fffe 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.378386] apple-ave 40d100000.video-encoder: session: diag HEVC lowres result[0] 40d120f80: 80030001 04300010 03940004 fbb40000 00000000 00000001 0000f000 00000000 00000000 00000000 00000000 00000000 ffffffff 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.378391] apple-ave 40d100000.video-encoder: session: diag HEVC lowres result[1] 40d120fc0: 80030000 04400010 03980004 fbb4f400 00000000 00000001 0000f000 00000000 00000000 00000000 00000000 00000000 ffffffff 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.378396] apple-ave 40d100000.video-encoder: session: diag HEVC lowres result[2] 40d121000: 80030000 04500010 039c0004 fbb5e800 00000000 00000001 0000f000 00000000 00000000 00000000 00000000 00000000 ffffffff 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.378401] apple-ave 40d100000.video-encoder: session: diag HEVC lowres result[3] 40d121040: 80030000 04600010 03a00004 fbb6dc00 00000000 00000001 0000f000 00000000 00000000 00000000 00000000 00000000 ffffffff 00000000 00000000 00000000
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.378405] apple-ave 40d100000.video-encoder: STEP diag: done
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.378408] session: coded_hdr: 00000000: 000003c8 00000000 00000000 00000000
+[   16.378411] session: coded_hdr: 00000010: 00000104 00000000 00000000 00000000
+[   16.378413] session: coded_hdr: 00000020: 000009f0 00000000 00000000 00000000
+[   16.378416] session: coded_hdr: 00000030: 000015df 00000000 00000000 00000000
+[   16.378418] session: slice0: 00000000: 000006c0 00000000 00000000 00000000
+[   16.378421] session: slice0: 00000010: 00000000 00000000 00000000 00000000
+[   16.378423] apple-ave 40d100000.video-encoder: session: frame 3: 1763 bytes in 1 slice(s) (written 1728 - trimmed 0), FrameTypeReturned 1, frame_num 3 (sent 3), SPS+PPS 600 bits, cabac_zero_words 0
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.378427] apple-ave 40d100000.video-encoder: session: frame 3: HEVC slice headers 35 bytes (slice 0: 35 bytes at 0xfae80000, in this slot's surface), frame = coded 1728 + headers
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.378442] apple-ave 40d100000.video-encoder: session: frame 3: slice 0 header NAL type 1 (want 19/20 IDR, 1 TRAIL_R P)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.378445] session: slicehdr: 00000000: 00 00 00 01 02 01 d0 1f 62 04 42 e2 13 d1 50 dc
+[   16.378447] session: slicehdr: 00000010: 8c 48 ca a7 53 4f 97 d4 93 d1 d2 d3 52 91 11 d2
+[   16.378449] apple-ave 40d100000.video-encoder: session: frame 3: HEVC counters I 968 P 260 skip 2544 = 3772 (3600 MBs, 920 CTUs; unit unknown, no check)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.378453] session: coded: 00000000: db 9d 82 66 11 a5 be f9 99 78 c3 e6 67 f8 f2 00
+[   16.378455] session: coded: 00000010: df 2e 67 7a 2a 2f 10 6e 1e 22 63 ef f1 4d 4d 39
+[   16.378457] session: coded: 00000020: 9e df 99 da 76 4e df b7 f9 54 e4 68 fc 86 3e ab
+[   16.378460] session: coded: 00000030: 4e c9 21 68 4f 34 6d c6 a2 9d 6b 43 cd 7a dc fb
+[   16.378687] apple-ave 40d100000.video-encoder: session: frame: parameter sets 75 bytes (firmware said 600 bits; back-scan says 75, agrees), first NAL type 32
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.378690] session: psets: 00000000: 00 00 00 01 40 01 0c 01 ff ff 02 20 00 00 03 00
+[   16.378693] session: psets: 00000010: b0 00 00 03 00 00 03 00 78 ac 09 00 00 00 01 42
+[   16.378695] session: psets: 00000020: 01 01 02 20 00 00 03 00 b0 00 00 03 00 00 03 00
+[   16.378697] session: psets: 00000030: 78 a0 02 80 80 2d 13 65 ae e4 52 2a e5 cb 97 44
+[   16.492405] apple-ave 40d100000.video-encoder: session: frame: source crc 0xb3237e59 (226 distinct values, first 0 16 0 16), recon crc 0x666d01c9 (256 distinct, first 0 0 0 0) over 262144 bytes
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.492414] apple-ave 40d100000.video-encoder: session: frame: recon non-zero bytes 73062 of 262144
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.492460] apple-ave 40d100000.video-encoder: session: frame: /sys/kernel/debug/apple_ave/frame.h265 = 9562 bytes, 4 frame(s) (VPS+SPS+PPS on each IDR, then per slice header slot bytes + coded bytes; docs/77 \xc2\xa74)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+[   16.492464] apple-ave 40d100000.video-encoder: session: self-test encoded one frame OK (0)
+ SUBSYSTEM=platform
+ DEVICE=+platform:40d100000.video-encoder
+=== insmod returned rc=0 ===
+[   16.540711] e3-run heartbeat m3 t=0s
+=== insmod rc=0 ===
+=== saved debugfs to results/m3-1790464416-load1: coded1.bin coded2.bin coded3.bin coded.bin coded_hdr1.bin coded_hdr2.bin coded_hdr3.bin coded_hdr.bin frame.h265 input_luma.bin paramsets.bin recon_luma.bin slicehdr.bin  ===
+[   21.881294] === saved debugfs to results/m3-1790464416-load1: coded1.bin coded2.bin coded3.bin coded.bin coded_hdr1.bin coded_hdr2.bin coded_hdr3.bin coded_hdr.bin frame.h265 input_luma.bin paramsets.bin recon_luma.bin slicehdr.bin  ===
+=== e3-run done: m3 ===
+[   21.905645] === e3-run done: m3 ===
