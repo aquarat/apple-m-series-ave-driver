@@ -45,7 +45,7 @@ It is a stateful mem2mem encoder, NV12 in:
   ~48 fps (docs/78, docs/53 f95-f99; opt-in, `pmp_report=1
   pmp_vote=0x2000000300000003` with `OVERLAY_ARGS=pmp_venc=1`). Those
   figures were measured with the vote held from load. The driver now holds
-  it only while a stream is open (docs/80, not yet timed on hardware), and
+  it only while a stream is open, at the same speed (docs/80), and
   `pmp_vote_always=1` restores the load-time vote. Without a running PMP
   the options are ignored with a warning and the encoder runs at the boot
   clock.
