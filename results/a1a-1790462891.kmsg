@@ -1,0 +1,111 @@
+=== a1a 2026-09-26T23:48:11+01:00 commit 3f9315c: insmod driver/apple-ave.ko stop_after=6 ===
+[   17.086222] apple-pmgr-pwrstate 28e080000.power-management:power-controller@270: sync_state() pending due to 287080000.avd
+ SUBSYSTEM=platform
+ DEVICE=+platform:28e080000.power-management:power-cont
+[   17.086353] apple-pmp-report-entry 28e3c0000.pmp_report:report@11: sync_state() pending due to 287080000.avd
+ SUBSYSTEM=platform
+ DEVICE=+platform:28e3c0000.pmp_report:report@11
+=== applying overlay variant=6 ===
+[   17.760535] === applying overlay variant=6 ===
+[   17.792882] ave_overlay: loading out-of-tree module taints kernel.
+[   17.792894] ave_overlay: module verification failed: signature and/or required key missing - tainting kernel
+[   17.793289] ave-overlay: variant=6 - ave1, the second encoder, alone (docs/82); its DAPF is unprogrammed until m1n1 does it
+[   17.793494] ave-overlay: aic -> phandle 0x13 (x3)
+[   17.793501] ave-overlay: venc1_sys -> phandle 0x24 (x4)
+[   17.793507] ave-overlay: venc1_pipe5 -> phandle 0xd4 (x1)
+[   17.793509] ave-overlay: venc1_me0 -> phandle 0xd5 (x1)
+[   17.793511] ave-overlay: venc1_pipe4 -> phandle 0xd3 (x1)
+[   17.794403] apple-dart 507040000.iommu: DART [pagesize 4000, 16 streams, bypass support: 1, bypass forced: 0, locked: 0, AS 32 -> 42] initialized
+ SUBSYSTEM=platform
+ DEVICE=+platform:507040000.iommu
+[   17.794717] apple-dart 507030000.iommu: DART [pagesize 4000, 16 streams, bypass support: 0, bypass forced: 0, locked: 0, AS 32 -> 42] initialized
+ SUBSYSTEM=platform
+ DEVICE=+platform:507030000.iommu
+[   17.795091] platform 507100000.video-encoder: Adding to iommu group 17
+ SUBSYSTEM=platform
+ DEVICE=+platform:507100000.video-encoder
+[   17.795340] ave-overlay: applied, ovcs_id=1
+=== overlay insmod returned rc=0 ===
+[   17.820203] === overlay insmod returned rc=0 ===
+=== insmod driver/apple-ave.ko stop_after=6 ===
+[   17.841266] === insmod driver/apple-ave.ko stop_after=6 ===
+[   17.865644] apple-ave 507100000.video-encoder: probe: SoC row t6001-ave1 (encoder 1)
+ SUBSYSTEM=platform
+ DEVICE=+platform:507100000.video-encoder
+=== insmod returned rc=0 ===
+[   17.865656] apple-ave 507100000.video-encoder: probe: staged bring-up, stop_after=6 (max 16)
+ SUBSYSTEM=platform
+ DEVICE=+platform:507100000.video-encoder
+[   17.865667] apple-ave 507100000.video-encoder: OS firmware 13.5: using macOS 13.5 AVE ABI
+ SUBSYSTEM=platform
+ DEVICE=+platform:507100000.video-encoder
+[   17.865669] apple-ave 507100000.video-encoder: stage 1 (map-banks): starting
+ SUBSYSTEM=platform
+ DEVICE=+platform:507100000.video-encoder
+[   17.865671] apple-ave 507100000.video-encoder:   mapping bank 0 (dpe)
+ SUBSYSTEM=platform
+ DEVICE=+platform:507100000.video-encoder
+[   17.865689] apple-ave 507100000.video-encoder:   mapping bank 1 (asc)
+ SUBSYSTEM=platform
+ DEVICE=+platform:507100000.video-encoder
+[   17.865696] apple-ave 507100000.video-encoder:   mapping bank 2 (sve)
+ SUBSYSTEM=platform
+ DEVICE=+platform:507100000.video-encoder
+[   17.865699] apple-ave 507100000.video-encoder:   mapping bank 3 (unk3)
+ SUBSYSTEM=platform
+ DEVICE=+platform:507100000.video-encoder
+[   17.865702] apple-ave 507100000.video-encoder:   mapping bank 4 (axi2af)
+ SUBSYSTEM=platform
+ DEVICE=+platform:507100000.video-encoder
+[   17.865708] apple-ave 507100000.video-encoder: stage 1 (map-banks): OK
+ SUBSYSTEM=platform
+ DEVICE=+platform:507100000.video-encoder
+[   17.865709] apple-ave 507100000.video-encoder: stage 2 (dma-mask): starting
+ SUBSYSTEM=platform
+ DEVICE=+platform:507100000.video-encoder
+[   17.865710] apple-ave 507100000.video-encoder: stage 2 (dma-mask): OK
+ SUBSYSTEM=platform
+ DEVICE=+platform:507100000.video-encoder
+[   17.865711] apple-ave 507100000.video-encoder: stage 3 (get-irq): starting
+ SUBSYSTEM=platform
+ DEVICE=+platform:507100000.video-encoder
+[   17.865733] apple-ave 507100000.video-encoder:   irq = 131
+ SUBSYSTEM=platform
+ DEVICE=+platform:507100000.video-encoder
+[   17.865734] apple-ave 507100000.video-encoder: stage 3 (get-irq): OK
+ SUBSYSTEM=platform
+ DEVICE=+platform:507100000.video-encoder
+[   17.865735] apple-ave 507100000.video-encoder: stage 4 (request-irq): starting
+ SUBSYSTEM=platform
+ DEVICE=+platform:507100000.video-encoder
+[   17.865749] apple-ave 507100000.video-encoder: stage 4 (request-irq): OK
+ SUBSYSTEM=platform
+ DEVICE=+platform:507100000.video-encoder
+[   17.865750] apple-ave 507100000.video-encoder: stage 5 (power-attach): starting
+ SUBSYSTEM=platform
+ DEVICE=+platform:507100000.video-encoder
+[   17.865978] apple-ave 507100000.video-encoder:   attached 4 power domain(s)
+ SUBSYSTEM=platform
+ DEVICE=+platform:507100000.video-encoder
+[   17.865983] apple-ave 507100000.video-encoder: stage 5 (power-attach): OK
+ SUBSYSTEM=platform
+ DEVICE=+platform:507100000.video-encoder
+[   17.865984] apple-ave 507100000.video-encoder: stage 6 (power-on): starting
+ SUBSYSTEM=platform
+ DEVICE=+platform:507100000.video-encoder
+[   17.865989] apple-ave 507100000.video-encoder:   resumed; left powered for inspection
+ SUBSYSTEM=platform
+ DEVICE=+platform:507100000.video-encoder
+[   17.866018] apple-ave 507100000.video-encoder: me1: venc_me1 powered; PMGR PS ME1 = 0x000003ff
+ SUBSYSTEM=platform
+ DEVICE=+platform:507100000.video-encoder
+[   17.866020] apple-ave 507100000.video-encoder: stage 6 (power-on): OK
+ SUBSYSTEM=platform
+ DEVICE=+platform:507100000.video-encoder
+[   17.866021] apple-ave 507100000.video-encoder: stage 7 (write-sve-idle): SKIPPED (stop_after=6)
+ SUBSYSTEM=platform
+ DEVICE=+platform:507100000.video-encoder
+[   17.888303] e3-run heartbeat a1a t=0s
+=== insmod rc=0 ===
+=== e3-run done: a1a ===
+[   22.950688] === e3-run done: a1a ===

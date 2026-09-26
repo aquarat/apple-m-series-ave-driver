@@ -28,6 +28,7 @@
 #include "ave_overlay_e3_dtbo.h"
 #include "ave_overlay_e4_dtbo.h"
 #include "ave_overlay_e5_dtbo.h"
+#include "ave_overlay_e6_dtbo.h"
 #include "ave_overlay_pmp_venc_dtbo.h"
 
 static int ovcs_id, pmp_ovcs_id;
@@ -64,6 +65,11 @@ static const struct {
 	{ AVE_OV_SENTINEL(0xc4), "venc_me0" },
 	{ AVE_OV_SENTINEL(0xc3), "venc_pipe4" },
 	{ AVE_OV_SENTINEL(0xc5), "afnc4_ioa" },
+	/* ave1 (variant=6, docs/82); no stock numbers, NN just unused ones */
+	{ AVE_OV_SENTINEL(0xe1), "venc1_sys" },
+	{ AVE_OV_SENTINEL(0xe2), "venc1_pipe5" },
+	{ AVE_OV_SENTINEL(0xe4), "venc1_me0" },
+	{ AVE_OV_SENTINEL(0xe3), "venc1_pipe4" },
 };
 
 static int ave_ov_find_pd(const char *label, u32 *phandle)
@@ -126,27 +132,19 @@ static void *ave_ov_fixup(const void *fdt, unsigned int len)
 {
 	unsigned int n[ARRAY_SIZE(ave_ov_refs)] = {};
 	__be32 live[ARRAY_SIZE(ave_ov_refs)];
+	bool known[ARRAY_SIZE(ave_ov_refs)] = {};
 	unsigned int off;
 	bool changed = false;
 	u8 *copy;
 	int i, ret;
 
-	for (i = 0; i < ARRAY_SIZE(ave_ov_refs); i++) {
-		u32 ph;
-
-		ret = ave_ov_refs[i].label ?
-		      ave_ov_find_pd(ave_ov_refs[i].label, &ph) :
-		      ave_ov_find_aic(&ph);
-		if (ret)
-			return ERR_PTR(ret);
-		live[i] = cpu_to_be32(ph);
-		if (ph != (ave_ov_refs[i].sentinel & ~AVE_OV_SENTINEL_MASK))
-			changed = true;
-	}
-
 	copy = kmemdup(fdt, len, GFP_KERNEL);
 	if (!copy)
 		return ERR_PTR(-ENOMEM);
+	/*
+	 * Resolve only what this dtbo references: a DT without venc1 labels
+	 * must still take ave0's overlay, and the other way round.
+	 */
 	for (off = 0; off + 4 <= len; off += 4) {
 		u32 v = be32_to_cpup((const __be32 *)(copy + off));
 
@@ -158,17 +156,31 @@ static void *ave_ov_fixup(const void *fdt, unsigned int len)
 		if (i == ARRAY_SIZE(ave_ov_refs)) {
 			pr_err("ave-overlay: unknown sentinel %#x at dtbo offset %#x; refusing\n",
 			       v, off);
-			kfree(copy);
-			return ERR_PTR(-EINVAL);
+			ret = -EINVAL;
+			goto fail;
+		}
+		if (!known[i]) {
+			u32 ph;
+
+			ret = ave_ov_refs[i].label ?
+			      ave_ov_find_pd(ave_ov_refs[i].label, &ph) :
+			      ave_ov_find_aic(&ph);
+			if (ret)
+				goto fail;
+			live[i] = cpu_to_be32(ph);
+			known[i] = true;
+			if (ph != (ave_ov_refs[i].sentinel & ~AVE_OV_SENTINEL_MASK))
+				changed = true;
 		}
 		memcpy(copy + off, &live[i], 4);
 		n[i]++;
 	}
-	/* The AIC and venc_sys are in every variant; a dtbo without them is stale. */
-	if (!n[0] || !n[1]) {
+	/* The AIC and a venc*_sys are in every variant; without them it is stale. */
+	/* ave_ov_refs[]: 0 the AIC, 1 venc_sys, 6 venc1_sys */
+	if (!n[0] || (!n[1] && !n[6])) {
 		pr_err("ave-overlay: the dtbo has no AIC/venc_sys sentinels (built before docs/79 §3?); refusing\n");
-		kfree(copy);
-		return ERR_PTR(-EINVAL);
+		ret = -EINVAL;
+		goto fail;
 	}
 	for (i = 0; i < ARRAY_SIZE(ave_ov_refs); i++)
 		if (n[i])
@@ -178,6 +190,9 @@ static void *ave_ov_fixup(const void *fdt, unsigned int len)
 	if (!changed)
 		pr_info("ave-overlay: every phandle is the stock t6001 one\n");
 	return copy;
+fail:
+	kfree(copy);
+	return ERR_PTR(ret);
 }
 
 /*
@@ -201,6 +216,10 @@ static void *ave_ov_fixup(const void *fdt, unsigned int len)
  *                      reg entries. The DART is bound and translating; the
  *                      driver may program the DAPF (dapf_set=).
  *
+ * variant=6 (docs/82): ave1, the second encoder, alone, in variant=4's
+ *                      shape. Until m1n1 programs dart-ave1's DAPF its core
+ *                      cannot fetch; stop before the core starts.
+ *
  * variant=5 (docs/69): variant=4 plus stream 15 on both DARTs. The ADT
  *                      declares sids = 0x8001 - streams 0 and 15 - and
  *                      nothing has ever attached 15.
@@ -217,7 +236,7 @@ static void *ave_ov_fixup(const void *fdt, unsigned int len)
 static int variant;
 module_param(variant, int, 0444);
 MODULE_PARM_DESC(variant,
-		 "0 = with DART (default), 1 = no IOMMU: preserves iBoot's DART config, NO backstop, 2 = 1 + cpudart/dapf regs (E2), 3 = 0 + cpudart/dapf regs (E3), 4 = 3 with both DARTs in iommus (docs/56)");
+		 "0 = with DART (default), 1 = no IOMMU: preserves iBoot's DART config, NO backstop, 2 = 1 + cpudart/dapf regs (E2), 3 = 0 + cpudart/dapf regs (E3), 4 = 3 with both DARTs in iommus (docs/56), 5 = 4 + stream 15 (docs/69), 6 = ave1 alone (docs/82)");
 
 static int __init ave_ov_init(void)
 {
@@ -251,13 +270,18 @@ static int __init ave_ov_init(void)
 		len = ave_overlay_e4_dtbo_len;
 		pr_warn("ave-overlay: variant=4 - variant=3 with both DARTs in iommus (docs/56)\n");
 		break;
+	case 6:
+		fdt = ave_overlay_e6_dtbo;
+		len = ave_overlay_e6_dtbo_len;
+		pr_warn("ave-overlay: variant=6 - ave1, the second encoder, alone (docs/82); its DAPF is unprogrammed until m1n1 does it\n");
+		break;
 	case 5:
 		fdt = ave_overlay_e5_dtbo;
 		len = ave_overlay_e5_dtbo_len;
 		pr_warn("ave-overlay: variant=5 - variant=4 plus stream 15, which the ADT declares (sids 0x8001) and nothing has attached (docs/69)\n");
 		break;
 	default:
-		pr_err("ave-overlay: variant=%d is not 0-5; refusing\n", variant);
+		pr_err("ave-overlay: variant=%d is not 0-6; refusing\n", variant);
 		return -EINVAL;
 	}
 
