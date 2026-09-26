@@ -29,7 +29,10 @@ ffmpeg -i input.mp4 -pix_fmt nv12 -c:v hevc_v4l2m2m -b:v 4M out.mp4
 
 It is a stateful mem2mem encoder, NV12 in:
 - **H.264:** High with CABAC by default; Main and Baseline selectable.
-- **HEVC:** Main, CTU 32, SAO and WPP on. The CAPTURE format selects the codec.
+- **HEVC:** Main and **Main 10** (from NV12 or 10-bit P010 input), CTU 32,
+  SAO and WPP on. The CAPTURE format selects the codec; P010 on OUTPUT, or
+  the HEVC profile control, selects Main 10 (docs/83). GStreamer
+  negotiates it by itself. ffmpeg's V4L2 wrapper cannot send P010.
 - **Both:** P frames, periodic and forced IDRs, and fixed QP or rate
   control (`-b:v`). Rate control lands within 1-2% of the target: HEVC gave
   2016 kbit/s for 2M and 4017 for 4M.
@@ -49,8 +52,12 @@ It is a stateful mem2mem encoder, NV12 in:
   `pmp_vote_always=1` restores the load-time vote. Without a running PMP
   the options are ignored with a warning and the encoder runs at the boot
   clock.
-- **Not yet:** B frames, HEVC Main 10, the second encoder instance (ave1),
-  and reloading the module without a reboot.
+- **Not yet:**
+  - **B frames.** The firmware reorders as designed, but any frame with a
+    second reference stalls the pipe (docs/81, docs/53 bs1/bs2).
+  - **The second encoder, ave1.** It binds and powers up; it needs an m1n1
+    change to fetch its firmware (docs/82).
+  - Reloading the module without a reboot.
 - **Porting:** another Apple Silicon machine takes a per-SoC table row and
   an overlay (docs/79). Fedora's own ffmpeg has no HEVC *decoder*, so check
   HEVC output elsewhere, or with a full ffmpeg build.
