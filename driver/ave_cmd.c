@@ -623,6 +623,9 @@ int ave_cmd_build_start_avc(const struct ave_cmd_abi *abi, u8 *buf, size_t len,
 		return -EINVAL;
 	if (s->scaling_flat && abi->sps.scaling_4x4 == AVE_OFF_NONE)
 		return -EINVAL;
+	if ((s->poc_type0 && abi->sps.log2_max_poc_lsb_m4 == AVE_OFF_NONE) ||
+	    s->max_refs > 4)
+		return -EINVAL;
 
 	ret = ave_cmd_begin(abi, AVE_OP_START_AVC, buf, len, ctx, 0, &w);
 	if (ret < 0)
@@ -644,8 +647,11 @@ int ave_cmd_build_start_avc(const struct ave_cmd_abi *abi, u8 *buf, size_t len,
 	wr32(&w, sps->bit_depth_luma_minus8, 0);	/* 8-bit */
 	wr32(&w, sps->bit_depth_chroma_minus8, 0);
 	wr32(&w, sps->log2_max_frame_num_minus4, 0);
-	wr32(&w, sps->pic_order_cnt_type, 2);		/* 1 unusable (docs/37 §5.6) */
-	wr32(&w, sps->max_num_ref_frames, 1);
+	/* 1 unusable (docs/37 §5.6); 0 for B frames (docs/81) */
+	wr32(&w, sps->pic_order_cnt_type, s->poc_type0 ? 0 : 2);
+	if (s->poc_type0)
+		wr32(&w, sps->log2_max_poc_lsb_m4, 4);	/* 8-bit lsb */
+	wr32(&w, sps->max_num_ref_frames, s->max_refs ? s->max_refs : 1);
 	wr8(&w, sps->gaps_in_frame_num_allowed, 0);
 	wr32(&w, sps->pic_width_in_mbs_minus1, cw / AVE_MB_SIZE - 1);
 	wr32(&w, sps->pic_height_in_map_units_minus1, ch / AVE_MB_SIZE - 1);

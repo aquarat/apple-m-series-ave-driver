@@ -174,7 +174,10 @@ def main() -> int:
                   f"{sps['mbs_wide']}x{sps['map_units_high']} MBs "
                   f"({sps['mbs_wide'] * 16}x{sps['map_units_high'] * 16}), "
                   f"{sps['mbs_wide'] * sps['map_units_high']} total, "
-                  f"max_num_ref_frames {sps.get('max_num_ref_frames')}")
+                  f"max_num_ref_frames {sps.get('max_num_ref_frames')}, "
+                  f"poc_type {sps.get('poc_type')}"
+                  + (f" (lsb {sps['log2_max_poc_lsb']} bits)"
+                     if sps.get('poc_type') == 0 else ""))
         elif typ == 8:
             pps = parse_pps(rbsp)
             print(f"PPS: pic_init_qp {pps['pic_init_qp']} "
@@ -186,7 +189,9 @@ def main() -> int:
             nslice += 1
             print(f"slice {nslice}: {sl['slice_type']}"
                   f"{' IDR' if typ == 5 else ''} first_mb {sl['first_mb']} "
-                  f"frame_num {sl['frame_num']} nal_ref_idc {ref_idc} "
+                  f"frame_num {sl['frame_num']} "
+                  + (f"poc_lsb {sl['poc_lsb']} " if 'poc_lsb' in sl else "")
+                  + f"nal_ref_idc {ref_idc} "
                   f"**slice_qp {sl['slice_qp']}** ({len(rbsp)} RBSP bytes)")
     if not nslice:
         print("no slice NAL found")

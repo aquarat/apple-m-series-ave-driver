@@ -4085,3 +4085,16 @@ pmp_vote=0x2000000300000003`, `v4l2-test.sh 60 ctl` at 1080p, 4K, 1080p, 4K
   after the write.
 - **v9:** streaming votes are written and not read back. The check moves to
   stream end.
+
+## b1-b2 (2026-09-26): B-frame groundwork (docs/81)
+
+H.264 through V4L2 (`v4l2-test.sh 60 ctl`, 1920x1088 crop 1080, QP 30/26),
+no PMP. Plan from host-side analysis: firmware reorders (docs/81).
+- **b1** `session_poc0=1`: SPS pic_order_cnt_type **0**, lsb 8 bits;
+  `poc_lsb` 0..59 on the 60 slices (the firmware fills it from
+  frameNumber, fw 0x20ee8). 60 frames decode, Y **44.686854** dB (the
+  type-2 baseline, identical).
+- **b2** + `session_dpb=3`: SPS max_num_ref_frames **2**, three DPB slots
+  published. No firmware complaint; **all 60 slice NALs byte-identical to
+  b1** (RefSpacing 0 keeps one reference, as predicted). Round trip 15.9
+  ms against b1's 17.4 (not investigated; no PMP loaded in either).
