@@ -74,7 +74,8 @@ struct ave_enc_cfg {
 	u32	fps_num;		/* integer Hz (wire 0xFF4C); 0 = 30 */
 	u32	fps_den;		/* wire 0xFF48, the non-droppable rate, NOT a divisor (docs/76); 0 = 1 */
 	u32	slots;			/* coded slots */
-	u32	profile_idc;		/* H.264 66, 77, 100; HEVC 0 or 1 (Main) */
+	u32	profile_idc;		/* H.264 66, 77, 100; HEVC 0/1 Main, 2 Main 10 */
+	u32	src_bitdepth;		/* 10 = P010 (HEVC only; docs/83); else NV12 */
 	/*
 	 * A floor; the size may need more. 0 = none. H.264 level_idc (10..52);
 	 * HEVC general_level_idc, 30 x level (Table A.8 values only).

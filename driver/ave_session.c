@@ -4827,13 +4827,15 @@ int ave_enc_start(struct ave_device *ave, const struct ave_enc_cfg *cfg)
 		return -EINVAL;
 	if (hevc && !ave_sess_hevc_ok(abi))
 		return -EOPNOTSUPP;
-	/* HEVC: Main only (the builder writes general_profile_idc 1). */
-	if (hevc && cfg->profile_idc > 1)
+	/* HEVC: Main (0/1) or Main 10 (2); P010 only with HEVC (docs/83). */
+	if ((hevc && cfg->profile_idc > 2) ||
+	    (cfg->src_bitdepth == 10 && !hevc))
 		return -EINVAL;
 
 	bufs->codec = cfg->codec;
-	bufs->bit_depth = 0;	/* V4L2 is Main/8-bit until docs/83 m5 */
-	bufs->src_bitdepth = 0;
+	/* docs/83: Main 10 by profile; P010 input by format (m1-m3b) */
+	bufs->bit_depth = hevc && cfg->profile_idc == 2 ? 10 : 0;
+	bufs->src_bitdepth = cfg->src_bitdepth == 10 ? 10 : 0;
 	bufs->width = cfg->width;
 	bufs->height = cfg->height;
 	bufs->crop_w = cfg->crop_w;
