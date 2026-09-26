@@ -186,6 +186,7 @@ struct ave_device {
 	 * ave_remove(), after the block is powered off.
 	 */
 	void			*session_bufs;
+	void			*sess_rx;	/* ave_session.c reply capture, per device */
 	struct ave_v4l2		*v4l2;		/* ave_v4l2.c, v4l2=1 */
 	bool			dart_check_quiet; /* streaming: log DART mismatches only */
 

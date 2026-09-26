@@ -605,10 +605,11 @@ static int ave_power_me1_on(struct ave_device *ave)
 	if (!args.np)
 		return dev_err_probe(ave->dev, -ENODEV, "me1: no %s\n", ave->soc->me1_node);
 	if (of_property_read_string(args.np, "label", &label) ||
-	    strcmp(label, "venc_me1")) {
+	    strcmp(label, ave->soc->me1_label)) {
 		of_node_put(args.np);
 		return dev_err_probe(ave->dev, -ENODEV,
-				     "me1: %s is not venc_me1; refusing\n", ave->soc->me1_node);
+				     "me1: %s is not %s; refusing\n", ave->soc->me1_node,
+				     ave->soc->me1_label);
 	}
 
 	vdev = kzalloc(sizeof(*vdev), GFP_KERNEL);
@@ -1343,11 +1344,22 @@ static int ave_probe_stages(struct platform_device *pdev)
 		return -ENOMEM;
 
 	ave->dev = dev;
-	ave->soc = of_device_get_match_data(dev);
-	if (!ave->soc)
-		return dev_err_probe(dev, -ENODEV,
-				     "no SoC table for %pOF: its compatible needs a row in ave_soc.c (docs/79)\n",
-				     dev->of_node);
+	{
+		const struct ave_soc_set *set = of_device_get_match_data(dev);
+		struct resource *r = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+
+		if (!set)
+			return dev_err_probe(dev, -ENODEV,
+					     "no SoC table for %pOF: its compatible needs a row in ave_soc.c (docs/79)\n",
+					     dev->of_node);
+		ave->soc = r ? ave_soc_pick(set, r->start) : NULL;
+		if (!ave->soc)
+			return dev_err_probe(dev, -ENODEV,
+					     "%pOF: no row in ave_soc.c for an encoder whose first reg is %pa (docs/79)\n",
+					     dev->of_node, r ? &r->start : NULL);
+		dev_info(dev, "probe: SoC row %s (encoder %u)\n",
+			 ave->soc->name, ave->soc->inst);
+	}
 	platform_set_drvdata(pdev, ave);
 	dev_info(dev, "probe: staged bring-up, stop_after=%d (max %d)\n",
 		 stop_after, AVE_STAGE_MAX);
@@ -2143,7 +2155,7 @@ static void ave_remove(struct platform_device *pdev)
  * so the refusal in probe can say what is missing (no data = no row).
  */
 static const struct of_device_id ave_of_match[] = {
-	{ .compatible = "apple,t6001-ave", .data = &ave_soc_t6001 },
+	{ .compatible = "apple,t6001-ave", .data = &ave_soc_set_t6001 },
 	{ .compatible = "apple,ave" },
 	{}
 };

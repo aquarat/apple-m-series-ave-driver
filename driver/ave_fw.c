@@ -547,6 +547,12 @@ static int ave_fw_check_iboot_placement(struct ave_device *ave)
 	u64 lit;
 	void *p;
 
+	if (!ave->soc->iboot.text_phys) {
+		dev_err(ave->dev,
+			"  iboot: REFUSING - %s has no known iBoot placement (ave_soc.c); RVBAR %#llx\n",
+			ave->soc->name, fwreg);
+		return -EINVAL;
+	}
 	if (base != ave->soc->iboot.text_phys) {
 		dev_err(ave->dev,
 			"  iboot: REFUSING - RVBAR %#llx base %#llx, constants assume %#llx\n",
@@ -747,6 +753,11 @@ static int ave_fw_load_pristine(struct ave_device *ave)
 		return 0;
 
 	path = fw_restore_path ?: ave->soc->fw_pristine_name;
+	if (!path) {
+		dev_err(ave->dev, "fw restore: no pristine DATA known for %s; refusing\n",
+			ave->soc->name);
+		return -EINVAL;
+	}
 	ret = request_firmware(&fw, path, ave->dev);
 	if (ret) {
 		dev_err(ave->dev,
