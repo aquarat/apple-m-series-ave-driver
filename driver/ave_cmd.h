@@ -325,6 +325,15 @@ struct ave_hevc_session {
 	 * SPS". 0 fails CHEVCController_H13C.cpp:5118. macOS: 16. */
 	u32	input_format_word;
 	/*
+	 * Main 10 (docs/83). bit_depth: the SPS depth, 8 or 10 (0 = 8); 10
+	 * writes general_profile_idc 2 with compat[2] only, as macOS does (US
+	 * 0x74628). input_bitdepth: the source's depth, wire 0xFD20, 8 or 10
+	 * (0 = 8); the firmware forms the source format code from it alone
+	 * (fw 0x83e2c: 8 -> 20, 10 -> 21), so NV12 in, Main 10 out is legal.
+	 */
+	u8	bit_depth;
+	u8	input_bitdepth;
+	/*
 	 * References: wire 0xFD2C (numRefs of the firmware's HEVC
 	 * ProvideReferenceFrames - DPB slots 0..this are copied, so n_recon
 	 * must exceed it) and the VPS/SPS max_dec_pic_buffering_minus1.

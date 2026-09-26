@@ -642,6 +642,15 @@ MODULE_PARM_DESC(session_hevc_xc,
  * context says for what we send. On: bEnableQPMod (wire 0xFF70) 1 with
  * cu_qp_delta 1 / depth 2, macOS's HEVC defaults. Fixed QP ignores it.
  */
+/*
+ * docs/83 m1: HEVC coded as Main 10 (SPS depth 10) from the same 8-bit
+ * source. 8 (default) or 10.
+ */
+static unsigned int session_hevc_bitdepth = 8;
+module_param(session_hevc_bitdepth, uint, 0444);
+MODULE_PARM_DESC(session_hevc_bitdepth,
+	"HEVC self-test: SPS bit depth, 8 (Main, default) or 10 (Main 10; docs/83)");
+
 static bool session_hevc_qpmod;
 module_param(session_hevc_qpmod, bool, 0444);
 MODULE_PARM_DESC(session_hevc_qpmod,
@@ -900,6 +909,7 @@ struct ave_sess_bufs {
 	u32		codec;		/* AVE_SESS_CODEC_* */
 	struct { void *cpu; dma_addr_t iova; u32 size; } slice_hdr[AVE_SESS_FRAMES_MAX];
 	u32		hevc_refs;	/* 0 = intra only: every frame an IDR */
+	u8		bit_depth;	/* HEVC SPS depth, 8 or 10 (0 = 8); docs/83 */
 	bool		hevc_single_xc;	/* PICMGMT+0xF65 = 1 per frame */
 	/* TranscodedData: the two transcoders' outputs, session-wide. */
 	dma_addr_t	transcoded[2];
@@ -1376,11 +1386,15 @@ static int ave_session_open(struct ave_device *ave,
  * 3840x2160. Comfortably above the firmware's own CodedBufSize > 3*W*H/4
  * check (fw 0x58358), and above CAVLC's 3200-bit/MB ceiling.
  */
-static size_t ave_session_coded_size(u32 cw, u32 ch)
+static size_t ave_session_coded_size(u32 cw, u32 ch, u32 bd)
 {
 	size_t base = (size_t)cw * ch * 3 / 2;
 	size_t sz = base >= AVE_SESS_CODED_FLOOR
 		  ? base : min(2 * base, (size_t)AVE_SESS_CODED_FLOOR);
+
+	/* x5/4 above 8 bits (AVE_CalcBufSizeOfCodedData, kext ...ea4de0) */
+	if (bd > 8)
+		sz = sz * 5 / 4;
 
 	if (session_coded_kb)
 		sz = (size_t)session_coded_kb << 10;
@@ -1410,15 +1424,23 @@ static u32 ave_npo2(u32 n)
 	return n <= 1 ? 1 : 1u << (32 - __builtin_clz(n - 1));
 }
 
-static void ave_recon_planes(u32 w, u32 h, struct ave_recon_planes *p)
+/*
+ * @bd: 10 scales the data planes by 10/8 (kext ...ea52a0, and the firmware's
+ * DPB constructor 0x2e418-0x2e434 the same way); the metadata planes do
+ * not change (docs/83 §3). setRefPointers puts UV at Y + this luma size,
+ * so it must be exact: a wrong size corrupts chroma with no assert.
+ */
+static void ave_recon_planes(u32 w, u32 h, u32 bd, struct ave_recon_planes *p)
 {
 	u32 cols   = DIV_ROUND_UP(w, 32);
 	u32 rows   = (h + 35) >> 5;		/* ceil((h + 4) / 32) */
 	u32 cols_c = DIV_ROUND_UP(w / 2, 16);
 	u32 rows_c = ((h / 2) + 19) >> 4;
 
-	p->luma        = 1024u * cols * rows;
-	p->chroma      = ALIGN(512u * cols_c * rows_c, 128);
+	if (bd != 10)
+		bd = 8;
+	p->luma        = 1024u * cols * bd / 8 * rows;
+	p->chroma      = ALIGN(512u * cols_c * bd / 8 * rows_c, 128);
 	p->luma_meta   = ALIGN(32u * ave_npo2(cols)   * ave_npo2(rows),   128);
 	p->chroma_meta = ALIGN(8u  * ave_npo2(cols_c) * ave_npo2(rows_c), 128);
 	p->msb_span    = ALIGN(p->luma + p->chroma, 128);
@@ -1480,7 +1502,7 @@ static void ave_session_alloc_dpb(struct ave_device *ave,
 	 * is the docs/38 over-estimate this driver has used since Start_AVC was
 	 * first accepted.
 	 */
-	ave_recon_planes(cw, ch, &pl);
+	ave_recon_planes(cw, ch, bufs->bit_depth, &pl);
 	recon_slot = ALIGN((size_t)pl.msb_span + (session_lsb ? pl.lsb_span : 0),
 			   SZ_4K);
 	dev_info(ave->dev,
@@ -1706,7 +1728,7 @@ static int ave_session_start_prep(struct ave_device *ave,
 	 * dma_alloc_coherent is page-aligned, which covers HEVC's 128
 	 * (SetTranscode :7597/:7598).
 	 */
-	coded_size = ave_session_coded_size(cw, ch);
+	coded_size = ave_session_coded_size(cw, ch, bufs->bit_depth);
 	n = clamp_t(u32, bufs->req_slots, 1, AVE_SESS_FRAMES_MAX);
 	if (n > abi->start_avc.coded_max)
 		n = abi->start_avc.coded_max;
@@ -2184,6 +2206,8 @@ static int ave_session_start_hevc(struct ave_device *ave,
 	h->level_idc = max_t(u32, ave_hevc_level_for(st.cw, st.ch),
 			     bufs->level_floor);
 	h->input_format_word = AVE_SESS_HEVC_INPUT_FMT;
+	h->bit_depth = bufs->bit_depth;		/* docs/83; 0 = 8 */
+	h->input_bitdepth = 8;			/* NV12 */
 	h->max_num_ref_frames = bufs->hevc_refs;
 	h->log2_max_poc_lsb_minus4 = AVE_SESS_HEVC_POC_LSB_M4;
 	h->sao = session_hevc_sao;
@@ -2369,9 +2393,10 @@ static size_t ave_session_entropy_size(u32 cw, u32 ch)
  * 0xfffffe0008ea5c0c): 2304 * cW32 * (flag ? cH64 : 4) for 8-bit; the flag
  * is not pinned, so the larger. 1080 KiB each at 1280x720.
  */
-static size_t ave_session_hevc_entropy_size(u32 cw, u32 ch)
+static size_t ave_session_hevc_entropy_size(u32 cw, u32 ch, u32 bd)
 {
-	return (size_t)2304 * DIV_ROUND_UP(cw, 32) *
+	/* x2 above 8 bits (kext ...ea5c0c, cmp w4,#8; cinc) - docs/83 §3 */
+	return (size_t)2304 * (bd > 8 ? 2 : 1) * DIV_ROUND_UP(cw, 32) *
 	       max_t(u32, 4, DIV_ROUND_UP(ch, 64));
 }
 
@@ -2407,7 +2432,7 @@ static void ave_session_alloc_entropy(struct ave_device *ave,
 
 	each = session_entropy_kb ? (size_t)session_entropy_kb << 10
 		: bufs->codec == AVE_SESS_CODEC_HEVC
-			? ave_session_hevc_entropy_size(cw, ch)
+			? ave_session_hevc_entropy_size(cw, ch, bufs->bit_depth)
 			: ave_session_entropy_size(cw, ch);
 	if (!each || each > SZ_64M) {
 		dev_warn(ave->dev,
@@ -4155,6 +4180,7 @@ int ave_session_selftest(struct ave_device *ave)
 	bufs->fps_num = session_fps;
 	bufs->fps_den = session_fps_div;
 	bufs->codec = session_codec;
+	bufs->bit_depth = session_codec ? session_hevc_bitdepth : 0;
 	ave_session_release(ave);	/* a previous run's, if any */
 	ave->session_bufs = bufs;
 
@@ -4735,6 +4761,7 @@ int ave_enc_start(struct ave_device *ave, const struct ave_enc_cfg *cfg)
 		return -EINVAL;
 
 	bufs->codec = cfg->codec;
+	bufs->bit_depth = 0;	/* V4L2 is Main/8-bit until docs/83 m5 */
 	bufs->width = cfg->width;
 	bufs->height = cfg->height;
 	bufs->crop_w = cfg->crop_w;
