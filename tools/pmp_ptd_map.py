@@ -10,22 +10,28 @@ Reads only the ADT. Computes, for ave0 and ave1 on t6001:
 
 Every rule below is cited to docs/75 (macOS 13.5 kernelcache VAs). The script
 refuses to print results unless its controls pass:
-  C1  VENC_SYS PS register == 0x28e5803b0 (Linux DT, known good)
+  C1  VENC_SYS PS register == the Linux DT's venc_sys reg (t6001: 0x28e5803b0,
+      known good; --venc-ps ADDR for another SoC, docs/79 §3)
   C2  PS-REQ/ACK/STATUS offsets == Asahi pmp-report t600x constants
       (0xf80, 0x107c0, 0x1000, 0x10), derived independently
   C3  /arm-io/pmp reg[ptd-update-reg-index] - 0x10000 == pmgr reg[41]
       (RegMap 8 -> ADT reg 0x29, AppleT6001PMGR 0xfffffe0009b8ad78)
   C4  soc-device names at the computed indices are AVE0 / AVE1
 
-Usage: python3 tools/pmp_ptd_map.py [adt.bin]
+Usage: python3 tools/pmp_ptd_map.py [adt.bin] [--venc-ps ADDR]
 """
-import os, struct, sys
+import argparse, os, struct, sys
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(REPO, "m1n1-src/proxyclient"))
 from m1n1.adt import load_adt  # noqa: E402
 
-adt_path = sys.argv[1] if len(sys.argv) > 1 else os.path.join(REPO, "data/blobs/macos-13.5/adt.bin")
+ap = argparse.ArgumentParser()
+ap.add_argument("adt", nargs="?", default=os.path.join(REPO, "data/blobs/macos-13.5/adt.bin"))
+ap.add_argument("--venc-ps", type=lambda v: int(v, 0), default=0x28e5803b0,
+                help="the Linux DT's venc_sys power-controller address (C1); default t6001's")
+args = ap.parse_args()
+adt_path = args.adt
 adt = load_adt(open(adt_path, "rb").read())
 pmgr = adt["/arm-io/pmgr"]
 pmp = adt["/arm-io/pmp"]
@@ -72,7 +78,7 @@ def rd(idx): return ptd_rd + idx * 16
 def wr(idx): return ptd_wr + idx * 8
 
 print("controls")
-check("C1", ps_addr(byname["VENC_SYS"]) == 0x28e5803b0, f"VENC_SYS PS {ps_addr(byname['VENC_SYS']):#x}")
+check("C1", ps_addr(byname["VENC_SYS"]) == args.venc_ps, f"VENC_SYS PS {ps_addr(byname['VENC_SYS']):#x}")
 got = (ptd["SOC-DEV-PS-REQ"][1] * 16, ptd["SOC-DEV-PS-REQ"][1] * 8 + 0x10000,
        ptd["SOC-DEV-PS-ACK"][1] * 16, ptd["PMP-STATUS"][1] * 16)
 check("C2", got == (0xf80, 0x107c0, 0x1000, 0x10), "PS-REQ rd/wr, PS-ACK, STATUS = " + ", ".join(hex(x) for x in got))

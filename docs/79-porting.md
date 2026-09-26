@@ -74,13 +74,21 @@ Static first, on the host, with the new Mac's IPSW:
    - the DART nodes and their shared IRQ
    - the stream IDs from the ADT `sids`
 
-   `test/ave_overlay_mod.c` resolves the power domains by **label** at load
-   time (venc_sys, venc_pipe5, venc_me0, venc_pipe4, afnc4_ioa). Check the
-   t8103 DT has those labels (Asahi `t8103-pmgr.dtsi`). afnc4_ioa is a
-   t6001 fabric domain that happened to be listed; its t8103 counterpart,
-   if any, is a question for the ADT's `ave0` `power-gates`. The module's
-   AIC (0x13) and venc_sys (0x1d) phandle checks are stock-t6001 numbers
-   and must become label lookups, or the new DT's numbers.
+   The overlay carries **no phandle numbers**. It uses sentinels,
+   `0xa7e000NN`, and `test/ave_overlay_mod.c` replaces each at load time
+   with the live phandle:
+   - `0x13`: the AIC, by compatible `apple,aic2` or `apple,aic`
+   - `0x1d`: `venc_sys`, by label (power-domains and resets)
+   - `0xc2`, `0xc4`, `0xc3`, `0xc5`: `venc_pipe5`, `venc_me0`,
+     `venc_pipe4` and `afnc4_ioa`, by label
+
+   An unknown or unresolved sentinel refuses the load. Check the t8103 DT
+   has those labels (Asahi `t8103-pmgr.dtsi`). afnc4_ioa is a t6001 fabric
+   domain that happened to be listed. Whether t8103 has a counterpart is a
+   question for the ADT's `ave0` `power-gates`. If it doesn't, drop the
+   sentinel from the t8103 overlay and its entry from `ave_ov_refs`.
+   Mapped back to the stock numbers, every t6001 dtbo is byte-identical to
+   the literal-phandle one every run up to f99 used.
 6. **m1n1.** The DAPF patch walks the ADT (`/arm-io/dart-ave0`, reg index 3,
    TEXT entry from `/arm-io/ave0`). Check those names and indices exist on
    t8103. Build it, keep `boot.bin.pre-ave` and a restore script on the
@@ -100,7 +108,8 @@ Then on hardware, one step per boot, as docs/53 did:
 ## 4. Performance (the PMP)
 
 On t6001 the encoder's clock follows a vote to the PMP coprocessor
-(docs/75, docs/78, f95-f99: 2.4-2.6x). That needs:
+(docs/75, docs/78, f95-f99: 2.4-2.6x). The vote is held only while a stream
+is open (docs/80). That needs:
 - Asahi's PMP driver running on that SoC
 - a `pmp-report` entry for VENC
 - the vote's dashboard address
@@ -124,13 +133,14 @@ write is an SError (f93/f94).
 
 ## 5. Still t6001-specific outside the table
 
-- `test/ave-overlay-*.dts` and the phandle checks in `test/ave_overlay_mod.c`
-  (§3 step 5), and its `pmp_venc` path `/soc/pmp@28e700000`.
-- Log strings in `driver/ave_session.c` that print t6001 addresses (e.g.
-  `0x40D130240`) next to bank-relative reads. They are cosmetic, and the
-  reads themselves use the DT banks.
-- `tools/pmp_ptd_map.py` control C1 compares against t6001's VENC_SYS PS
-  address.
-- `AVE_ARM_IO_BUS_OFFSET` in `ave_hw.h` (unused; t6001's `/arm-io` offset).
+- `test/ave-overlay-*.dts`: the addresses, IRQs, DART stream IDs and
+  `ave-overlay-pmp-venc.dts`'s `target-path` (`report@10` under
+  `pmp_report@28e3c0000`). Per SoC by nature (§3 step 5). The phandles are
+  no longer t6001's. The `pmp_venc` guard looks for any `/soc/pmp@…`
+  node.
 - The overlay's variants 0-3 and 5 exist for history and are not needed on
   a new machine.
+- Comments across `driver/` cite t6001 AP addresses (`0x40D1…`), as the
+  docs do. Log lines print DPE offsets (`DPE+0x30240`), or the DPE bank's
+  real base plus the offset. `tools/pmp_ptd_map.py --venc-ps ADDR` takes
+  the SoC's venc_sys PS address for its C1 control.

@@ -158,6 +158,7 @@ struct ave_device {
 	struct device		*me1_dev;	/* venc_me1 holder, power_me1=1 */
 	struct device		*pmp_dev;	/* pmp-venc-sys holder, pmp_report=1 */
 	bool			pmp_voted;	/* pmp_vote written, not yet released */
+	bool			pmp_vote_streaming; /* vote only while a stream is open */
 
 	/*
 	 * Firmware. We load it ourselves rather than adopting an iBoot
@@ -282,6 +283,8 @@ static inline void ave_write64(struct ave_device *ave, unsigned int bank,
 
 /* ave_fw.c */
 int ave_fw_load(struct ave_device *ave);
+void ave_pmp_stream_on(struct ave_device *ave);
+void ave_pmp_stream_off(struct ave_device *ave);
 void ave_fw_unload(struct ave_device *ave);
 int ave_fw_map_text_mode(void);
 int ave_fw_restore_data(struct ave_device *ave);
