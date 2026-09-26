@@ -68,6 +68,14 @@ are missing, ask the operator.
 - Every new register read must be shown to lie inside a real block, with a
   citation. A read of AP `0x40D348000`, which is in no block, was an SError
   and a reset (f38).
+- **The target never sleeps** (2026-09-26). A lid close suspended it
+  (s2idle) and the USB-C NIC carrying netconsole did not come back on
+  resume. The sleep targets are masked and
+  `/etc/systemd/logind.conf.d/90-ave-lab-nosleep.conf` ignores the lid and
+  the suspend key; logind's `CanSuspend` answers `no`, which KDE's idle
+  suspend also honours. The undo is in that file's header. If the wired
+  address stops answering anyway, the target is on Wi-Fi too
+  (`lab.local.md`).
 
 ### How a run goes
 
