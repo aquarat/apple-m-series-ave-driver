@@ -43,7 +43,12 @@ It is a stateful mem2mem encoder, NV12 in:
   DT (no PMP; ~57/16 fps with the PMP running but no vote). **With a VMAX
   vote,** 1080p ~170 fps and 4K
   ~48 fps (docs/78, docs/53 f95-f99; opt-in, `pmp_report=1
-  pmp_vote=0x2000000300000003` with `OVERLAY_ARGS=pmp_venc=1`).
+  pmp_vote=0x2000000300000003` with `OVERLAY_ARGS=pmp_venc=1`). Those
+  figures were measured with the vote held from load. The driver now holds
+  it only while a stream is open (docs/80, not yet timed on hardware), and
+  `pmp_vote_always=1` restores the load-time vote. Without a running PMP
+  the options are ignored with a warning and the encoder runs at the boot
+  clock.
 - **Not yet:** B frames, HEVC Main 10, the second encoder instance (ave1),
   and reloading the module without a reboot.
 - **Porting:** another Apple Silicon machine takes a per-SoC table row and
