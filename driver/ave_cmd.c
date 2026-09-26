@@ -624,7 +624,8 @@ int ave_cmd_build_start_avc(const struct ave_cmd_abi *abi, u8 *buf, size_t len,
 	if (s->scaling_flat && abi->sps.scaling_4x4 == AVE_OFF_NONE)
 		return -EINVAL;
 	if ((s->poc_type0 && abi->sps.log2_max_poc_lsb_m4 == AVE_OFF_NONE) ||
-	    s->max_refs > 4)
+	    s->max_refs > 4 ||
+	    (s->ref_spacing_p && abi->start_avc.ref_spacing == AVE_OFF_NONE))
 		return -EINVAL;
 
 	ret = ave_cmd_begin(abi, AVE_OP_START_AVC, buf, len, ctx, 0, &w);
@@ -638,6 +639,8 @@ int ave_cmd_build_start_avc(const struct ave_cmd_abi *abi, u8 *buf, size_t len,
 	/* High: the 8x8 transform, matching PPS transform_8x8_mode_flag. */
 	if (s->profile_idc >= 100)
 		wr32_opt(&w, l->mode_8x8, 2);
+	if (s->ref_spacing_p)
+		wr32(&w, l->ref_spacing, s->ref_spacing_p);
 
 	/* ---- SPS ---- */
 	wr32(&w, sps->profile, sps->enum_profile_level ? (u32)prof : s->profile_idc);

@@ -325,6 +325,12 @@ MODULE_PARM_DESC(session_dpb,
  * a reordered picture; with 0 the firmware writes pic_order_cnt_lsb from
  * frameNumber - frameNumber at the last IDR (fw 0x20ee8, 0x21164).
  */
+/* docs/81 bs1: RefSpacingP; 2 gives P frames two L0 references */
+static unsigned int session_ref_spacing_p;
+module_param(session_ref_spacing_p, uint, 0444);
+MODULE_PARM_DESC(session_ref_spacing_p,
+	"H.264 Start_AVC RefSpacingP (wire 0x10574); 2 = two L0 references per P, needs session_dpb=3 (docs/81)");
+
 static bool session_poc0;
 module_param(session_poc0, bool, 0444);
 MODULE_PARM_DESC(session_poc0,
@@ -2042,6 +2048,7 @@ static int ave_session_start_avc(struct ave_device *ave,
 			      10, 52);
 	s.cabac = bufs->cabac;			/* never with Baseline (builder refuses) */
 	s.poc_type0 = session_poc0;
+	s.ref_spacing_p = min_t(u32, session_ref_spacing_p, 255);
 	/* The firmware reads max_num_ref_frames + 1 slots (see session_dpb) */
 	s.max_refs = bufs->n_dpb > 2 ? bufs->n_dpb - 1 : 1;
 

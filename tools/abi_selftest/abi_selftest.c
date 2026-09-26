@@ -728,6 +728,12 @@ static void test_start_13_5(void)
 	E32(buf, 0x109d4, 4, "log2_max_poc_lsb_minus4 (ue [x8,#1060] 0x197f0)");
 	E32(buf, 0x109d8, 0, "0x109d8 (type 1's offset_for_non_ref_pic, 0x19800) untouched");
 	E32(buf, 0x109dc, 2, "max_num_ref_frames (0x19860)");
+	E32(buf, 0x10574, 0, "RefSpacingP 0 unless asked");
+	s.ref_spacing_p = 2;
+	memset(buf, 0, sizeof(buf));
+	expect_int(ave_cmd_build_start_avc(a, buf, sizeof(buf), &CTX, &s), 0x10e10, "size, RefSpacingP 2");
+	E32(buf, 0x10574, 2, "RefSpacingP (ldr [x27,#1604] fw 0x5da74)");
+	E32(buf, 0x10578, 0, "RefSpacingB0 untouched");
 }
 
 static void test_start_26_6(void)

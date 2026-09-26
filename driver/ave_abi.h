@@ -1257,6 +1257,13 @@ struct ave_start_avc_layout {
 	 * the same range check. docs/62 §6.5.
 	 */
 	u32	num_views[2];		/* u32 each; AVE_OFF_NONE = not located */
+	/*
+	 * RefSpacingP, B0, B1: three u32 at RC+0x644 (ldr [x27,#1604..1612]
+	 * fw 0x5da74-0x5da84 -> rc+812..820). A list gets a second reference
+	 * only at >= 2 (fw 0x436bc, 0x438c8); 0 and 1 build the same lists.
+	 * macOS sends 1/1/1. docs/81 §1.2.
+	 */
+	u32	ref_spacing;
 	/* parameter-set blocks */
 	u32	sps_block, sps_block_size;
 	u32	pps_block, pps_block_size;
@@ -1936,6 +1943,7 @@ const struct ave_cmd_abi ave_cmd_abi_13_5 = {
 		.lambda_idx_tab	= 0x10090,	/* RC+0x160 */
 		.lambda_rec_tab	= 0x10160,	/* RC+0x230, ends 0x10574 */
 		.num_views	= { 0xff24, 0xff28 },	/* kext 0xec9078 rejects 0 */
+		.ref_spacing	= 0x10574,		/* RC+0x644, fw 0x5da74 */
 		.sps_block	= 0x105b0,	/* memcpy 0x6ac from payload+0x10550 0x5ce68-90 */
 		.sps_block_size	= 0x6ac,
 		.pps_block	= 0x10c5c,	/* memcpy 0x184 from payload+0x10bfc 0x5ce94-ac */
@@ -2450,6 +2458,7 @@ const struct ave_cmd_abi ave_cmd_abi_26_6 = {
 		.lambda_idx_tab	= AVE_OFF_NONE,
 		.lambda_rec_tab	= AVE_OFF_NONE,
 		.num_views	= { AVE_OFF_NONE, AVE_OFF_NONE },
+		.ref_spacing	= AVE_OFF_NONE,
 		.sps_block	= AVE_START_SPS_OFF,
 		.sps_block_size	= AVE_START_SPS_SIZE,
 		.pps_block	= AVE_START_PPS_OFF,
