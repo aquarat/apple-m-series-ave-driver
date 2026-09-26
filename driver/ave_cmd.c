@@ -701,6 +701,7 @@ int ave_cmd_build_start_avc(const struct ave_cmd_abi *abi, u8 *buf, size_t len,
 /* ------------------------------------------------------------------------ */
 
 #define AVE_HEVC_PROFILE_MAIN	1	/* general_profile_idc */
+#define AVE_HEVC_PROFILE_MAIN10	2
 /* Short-term sets the builder writes at most; the IPPP selector needs 4. */
 #define AVE_HEVC_ST_RPS_MAX	4
 
@@ -718,13 +719,16 @@ static bool ave_hevc_level_ok(u8 idc)
 	return false;
 }
 
-/* profile_tier_level() for Main, general_tier 0 (docs/77 §2.3, §5). */
+/* profile_tier_level(), general_tier 0 (docs/77 §2.3, §5; docs/83 §2) */
 static void ave_hevc_ptl(struct ave_wr *w, const struct ave_hevc_ps_layout *p,
-			 u32 ptl, u8 level_idc)
+			 u32 ptl, u8 level_idc, bool main10)
 {
-	wr32(w, ptl + p->ptl_profile_idc, AVE_HEVC_PROFILE_MAIN);
-	/* Main is also Main 10 compatible: compat[1] and compat[2]. */
-	wr8(w, ptl + p->ptl_compat + 1, 1);
+	wr32(w, ptl + p->ptl_profile_idc,
+	     main10 ? AVE_HEVC_PROFILE_MAIN10 : AVE_HEVC_PROFILE_MAIN);
+	/* Main is also Main 10 compatible: compat[1] and compat[2]. Main 10
+	 * sets compat[2] only (macOS US 0x74628). */
+	if (!main10)
+		wr8(w, ptl + p->ptl_compat + 1, 1);
 	wr8(w, ptl + p->ptl_compat + 2, 1);
 	wr8(w, ptl + p->ptl_progressive, 1);
 	wr8(w, ptl + p->ptl_non_packed, 1);
@@ -802,10 +806,17 @@ int ave_cmd_build_start_hevc(const struct ave_cmd_abi *abi, u8 *buf,
 	const struct ave_avc_session *s;
 	u32 vps, sps, pps, rps, cw, ch, dw, dh, align, fmt, i;
 	struct ave_wr w;
+	bool main10;
 	int ret;
 
 	if (!abi || !h)
 		return -EINVAL;
+	/* 8 or 10 only, each (0 = 8); docs/83 §2 */
+	if ((h->bit_depth && h->bit_depth != 8 && h->bit_depth != 10) ||
+	    (h->input_bitdepth && h->input_bitdepth != 8 &&
+	     h->input_bitdepth != 10))
+		return -EINVAL;
+	main10 = h->bit_depth == 10;
 	l = &abi->start_avc;
 	hl = &abi->start_hevc;
 	p = &abi->hps;
@@ -887,7 +898,7 @@ int ave_cmd_build_start_hevc(const struct ave_cmd_abi *abi, u8 *buf,
 	/* SAO: hardware and syntax together (docs/77 §2.6). */
 	wr32(&w, hl->sao_enb_config, h->sao ? 0xffff : 0);
 	wr32(&w, hl->sao_eo_bo, 0xffffffff);		/* firmware default */
-	wr32(&w, hl->input_bitdepth, 8);
+	wr32(&w, hl->input_bitdepth, h->input_bitdepth ? h->input_bitdepth : 8);
 	wr32(&w, hl->max_num_ref_frames, h->max_num_ref_frames);
 	wr32(&w, hl->slice_map_height, ch);
 	for (i = 0; i < h->n_transcoded; i++)
@@ -901,7 +912,7 @@ int ave_cmd_build_start_hevc(const struct ave_cmd_abi *abi, u8 *buf,
 	wr8(&w, vps + p->vps_base_internal, 1);
 	wr8(&w, vps + p->vps_base_available, 1);
 	wr8(&w, vps + p->vps_temporal_nesting, 1);
-	ave_hevc_ptl(&w, p, vps + p->ptl, h->level_idc);
+	ave_hevc_ptl(&w, p, vps + p->ptl, h->level_idc, main10);
 	wr8(&w, vps + p->vps_sublayer_info, 1);
 	wr32(&w, vps + p->vps_max_dec_pic_buf_m1, h->max_num_ref_frames);
 	/* num_hrd_parameters, timing, extension: all 0 (0x1d50c) */
@@ -909,8 +920,11 @@ int ave_cmd_build_start_hevc(const struct ave_cmd_abi *abi, u8 *buf,
 	/* ---- SPS[0] (seq_parameter_set_rbsp 0x1e380) ---- */
 	sps = hl->sps_block[0];
 	wr8(&w, sps + p->sps_temporal_nesting, 1);	/* :756 */
-	ave_hevc_ptl(&w, p, sps + p->ptl, h->level_idc);
+	ave_hevc_ptl(&w, p, sps + p->ptl, h->level_idc, main10);
 	wr32(&w, sps + p->chroma_format_idc, 1);
+	/* 0 or 2 only: the firmware's internal depth is binary (fw 0x83acc) */
+	wr32(&w, sps + p->bit_depth_luma_m8, main10 ? 2 : 0);
+	wr32(&w, sps + p->bit_depth_chroma_m8, main10 ? 2 : 0);
 	wr32(&w, sps + p->pic_width, cw);
 	wr32(&w, sps + p->pic_height, ch);
 	wr32(&w, sps + p->ctb_cols, (cw + 31) >> 5);

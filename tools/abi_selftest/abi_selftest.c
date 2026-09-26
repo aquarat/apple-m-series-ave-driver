@@ -1499,6 +1499,66 @@ static void test_start_hevc_13_5(void)
 }
 
 /* The refusals docs/77 §8.1.2 asks for, and the post-build check. */
+/* docs/83: Main 10 in HEVC_INIT - PTL, SPS depths, input depth */
+static void test_start_hevc_main10(void)
+{
+	const struct ave_cmd_abi *a = ave_cmd_abi_get(AVE_ABI_MACOS_13_5);
+	const struct ave_hevc_ps_layout *p = &a->hps;
+	u32 vptl = a->start_hevc.vps_block + p->ptl;
+	u32 sptl = a->start_hevc.sps_block[0] + p->ptl;
+	u32 sps = a->start_hevc.sps_block[0];
+	struct ave_hevc_session h = hevc_720p();
+	static u8 ref[0x40000];
+	int n8, n10;
+
+	begin("13.5 start_hevc Main 10");
+	expect_int(vptl + p->ptl_profile_idc, 0x105d0, "VPS general_profile_idc at 0x105D0 (docs/83 §2)");
+	expect_int(sptl + p->ptl_profile_idc, 0x246ac, "SPS general_profile_idc at 0x246AC");
+	expect_int(sps + p->bit_depth_luma_m8, 0x248f4, "SPS bit_depth_luma_minus8 at 0x248F4");
+	expect_int(sps + p->bit_depth_chroma_m8, 0x248f8, "SPS bit_depth_chroma_minus8 at 0x248F8");
+
+	/* control: 0 and 8 are today's command, byte for byte */
+	memset(buf, 0, sizeof(buf));
+	n8 = ave_cmd_build_start_hevc(a, buf, sizeof(buf), &CTX, &h);
+	memcpy(ref, buf, sizeof(ref) < (size_t)n8 ? sizeof(ref) : (size_t)n8);
+	E32(buf, 0x105d0, 1, "Main: VPS profile 1");
+	E8(buf, 0x105d5, 1, "Main: VPS compat[1]");
+	E8(buf, 0x246b1, 1, "Main: SPS compat[1]");
+	E32(buf, 0x248f4, 0, "Main: luma depth - 8 = 0");
+	h.bit_depth = 8;
+	h.input_bitdepth = 8;
+	memset(buf, 0, sizeof(buf));
+	expect_int(ave_cmd_build_start_hevc(a, buf, sizeof(buf), &CTX, &h), n8, "explicit 8/8 size");
+	expect_int(memcmp(buf, ref, n8 < (int)sizeof(ref) ? n8 : (int)sizeof(ref)), 0,
+		   "explicit 8/8 is byte-identical to the default");
+
+	h.bit_depth = 10;
+	memset(buf, 0, sizeof(buf));
+	n10 = ave_cmd_build_start_hevc(a, buf, sizeof(buf), &CTX, &h);
+	expect_int(n10, n8, "Main 10 size");
+	E32(buf, 0x105d0, 2, "VPS general_profile_idc 2");
+	E32(buf, 0x246ac, 2, "SPS general_profile_idc 2");
+	E8(buf, 0x105d5, 0, "VPS compat[1] 0 (macOS US 0x74628)");
+	E8(buf, 0x105d6, 1, "VPS compat[2] 1");
+	E8(buf, 0x246b1, 0, "SPS compat[1] 0");
+	E8(buf, 0x246b2, 1, "SPS compat[2] 1");
+	E32(buf, 0x248f4, 2, "bit_depth_luma_minus8 2");
+	E32(buf, 0x248f8, 2, "bit_depth_chroma_minus8 2");
+	E32(buf, 0xfd20, 8, "input_bitdepth 8: NV12 in (fw 0x83e2c code 20)");
+	h.input_bitdepth = 10;
+	memset(buf, 0, sizeof(buf));
+	ave_cmd_build_start_hevc(a, buf, sizeof(buf), &CTX, &h);
+	E32(buf, 0xfd20, 10, "input_bitdepth 10: P010 in (code 21)");
+
+	h.bit_depth = 9;
+	expect_int(ave_cmd_build_start_hevc(a, buf, sizeof(buf), &CTX, &h), -EINVAL, "depth 9");
+	h.bit_depth = 12;
+	expect_int(ave_cmd_build_start_hevc(a, buf, sizeof(buf), &CTX, &h), -EINVAL, "depth 12");
+	h.bit_depth = 10;
+	h.input_bitdepth = 12;
+	expect_int(ave_cmd_build_start_hevc(a, buf, sizeof(buf), &CTX, &h), -EINVAL, "input depth 12");
+}
+
 static void test_start_hevc_refusals(void)
 {
 	const struct ave_cmd_abi *a = ave_cmd_abi_get(AVE_ABI_MACOS_13_5);
@@ -1883,6 +1943,7 @@ int main(void)
 	test_negative_control();
 	test_start_hevc_13_5();
 	test_start_hevc_refusals();
+	test_start_hevc_main10();
 	test_process_hevc_13_5();
 	test_hevc_simple();
 	test_coded_length_hevc();

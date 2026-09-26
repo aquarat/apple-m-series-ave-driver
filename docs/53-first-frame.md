@@ -4162,3 +4162,17 @@ Plan: docs/82 (host analysis of the 13.5 ADT/kext/firmware).
   and ranges; the DART ERROR register holds a stale stream-7 write). It is
   uninitialised SRAM that nothing programmed, so ave1's core cannot fetch
   until m1n1 programs it (docs/82 M1).
+
+## m0h, m1 (2026-09-27): HEVC Main 10 (docs/83)
+
+HEVC self-test, h3h's parameters (`session_codec=1 session_qp=30
+session_frame=1 session_frames=4`), 1280x720.
+- **m0h** (the 8-bit control on the build with the bit-depth plumbing):
+  `frame.h265` **byte-identical to h3h**.
+- **m1** (+ `session_hevc_bitdepth=10`: SPS depth 10, profile 2 with
+  compat[2] only, input_bitdepth 8, so NV12 in; recon data x1.25,
+  entropy x2, coded x5/4): 4 frames, IDR + 3 P, no assert or hang.
+  ffprobe: **HEVC Main 10, yuv420p10le**. Decodes. Y **54.0 / 53.8 / 53.8
+  / 53.6 dB** against the ramp, against m0h's 51.0 / 50.1 / 50.0 / 50.1
+  (at the same host QP the 10-bit slice QP is 12 lower, QpBdOffset, fw
+  0x66fdc).
