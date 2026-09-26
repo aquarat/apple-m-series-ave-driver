@@ -426,6 +426,7 @@ static void test_start_13_5(void)
 	E32(buf, 0x109cc, 0, "log2_max_frame_num_minus4 (0x197c4)");
 	E32(buf, 0x109d0, 2, "pic_order_cnt_type (0x197d0)");
 	E32(buf, 0x109dc, 1, "max_num_ref_frames (0x19860)");
+	E32(buf, 0x109d4, 0, "log2_max_poc_lsb_minus4 untouched for type 2");
 	E8(buf, 0x109e0, 0, "gaps_in_frame_num (0x19870)");
 	E32(buf, 0x109e4, 119, "pic_width_in_mbs_minus1 (0x1987c)");
 	E32(buf, 0x109e8, 67, "pic_height_in_map_units_minus1 (0x19888)");
@@ -711,6 +712,22 @@ static void test_start_13_5(void)
 	s.frame_rate = 0;
 	expect_int(ave_cmd_build_start_avc(a, buf, sizeof(buf), &CTX, &s), -EINVAL,
 		   "frame rate 0");
+	s = session_1080p(true);
+	s.max_refs = 5;
+	expect_int(ave_cmd_build_start_avc(a, buf, sizeof(buf), &CTX, &s), -EINVAL,
+		   "max_refs 5 (AVE_SESS_DPB_MAX 4 slots)");
+
+	/* docs/81 b1/b2: POC type 0 and two references */
+	begin("13.5 start_avc POC type 0, 2 refs");
+	s = session_1080p(true);
+	s.poc_type0 = true;
+	s.max_refs = 2;
+	memset(buf, 0, sizeof(buf));
+	expect_int(ave_cmd_build_start_avc(a, buf, sizeof(buf), &CTX, &s), 0x10e10, "size");
+	E32(buf, 0x109d0, 0, "pic_order_cnt_type 0 (0x197d0)");
+	E32(buf, 0x109d4, 4, "log2_max_poc_lsb_minus4 (ue [x8,#1060] 0x197f0)");
+	E32(buf, 0x109d8, 0, "0x109d8 (type 1's offset_for_non_ref_pic, 0x19800) untouched");
+	E32(buf, 0x109dc, 2, "max_num_ref_frames (0x19860)");
 }
 
 static void test_start_26_6(void)
@@ -718,6 +735,11 @@ static void test_start_26_6(void)
 	const struct ave_cmd_abi *a = ave_cmd_abi_get(AVE_ABI_MACOS_26_6);
 	struct ave_avc_session s = session_1080p(false);
 	int ret;
+
+	s.poc_type0 = true;
+	expect_int(ave_cmd_build_start_avc(a, buf, sizeof(buf), &CTX, &s), -EINVAL,
+		   "26.6 POC type 0: lsb offset not traced");
+	s.poc_type0 = false;
 
 	begin("26.6 start_avc");
 	memset(buf, 0, sizeof(buf));

@@ -320,6 +320,17 @@ MODULE_PARM_DESC(session_dpb,
 	"DPB slots published at Start_AVC: recon + LowResRef surfaces (default 2 = max_num_ref_frames+1)");
 
 /*
+ * B-frame groundwork (docs/81 b1): SPS pic_order_cnt_type 0 with an 8-bit
+ * lsb instead of 2. Type 2 derives the POC from frame_num and cannot code
+ * a reordered picture; with 0 the firmware writes pic_order_cnt_lsb from
+ * frameNumber - frameNumber at the last IDR (fw 0x20ee8, 0x21164).
+ */
+static bool session_poc0;
+module_param(session_poc0, bool, 0444);
+MODULE_PARM_DESC(session_poc0,
+	"H.264 SPS pic_order_cnt_type 0 (8-bit POC lsb) instead of 2 (docs/81)");
+
+/*
  * The source-path experiment knobs (docs/62 §6). Nothing here is known-good:
  * every run up to F17 sent zero for both, and the kext passes both through
  * from user space without ever writing or checking them, so there is no value
@@ -1935,6 +1946,9 @@ static int ave_session_start_avc(struct ave_device *ave,
 	s.level_idc = clamp_t(u32, max(ave_level_for(st.cw, st.ch), bufs->level_floor),
 			      10, 52);
 	s.cabac = bufs->cabac;			/* never with Baseline (builder refuses) */
+	s.poc_type0 = session_poc0;
+	/* The firmware reads max_num_ref_frames + 1 slots (see session_dpb) */
+	s.max_refs = bufs->n_dpb > 2 ? bufs->n_dpb - 1 : 1;
 
 	ret = ave_cmd_build_start_avc(abi, st.cmd, st.cmd_len, &ctx, &s);
 	if (ret < 0) {
@@ -1942,10 +1956,11 @@ static int ave_session_start_avc(struct ave_device *ave,
 		return ret;
 	}
 	dev_info(ave->dev,
-		 "session: Start_AVC: %ux%u (coded %ux%u) QP %u, profile %u level %u %s, %s\n",
+		 "session: Start_AVC: %ux%u (coded %ux%u) QP %u, profile %u level %u %s, %s, POC type %u, %u ref\n",
 		 bufs->width, bufs->height, st.cw, st.ch, bufs->qp, s.profile_idc,
 		 s.level_idc, s.cabac ? "CABAC" : "CAVLC",
-		 s.rc_enable ? "rate control" : "fixed QP");
+		 s.rc_enable ? "rate control" : "fixed QP",
+		 s.poc_type0 ? 0 : 2, s.max_refs);
 	ave_session_start_log(ave, abi, bufs, "Start_AVC", &st, &s);
 
 	return ave_session_cmd(ave, abi, AVE_OP_START_AVC, "Start_AVC",

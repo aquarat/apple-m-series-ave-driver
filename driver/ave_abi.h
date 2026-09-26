@@ -1324,6 +1324,8 @@ struct ave_sps_layout {
 	u32	bit_depth_chroma_minus8;
 	u32	log2_max_frame_num_minus4;
 	u32	pic_order_cnt_type;
+	/* ue, coded only for pic_order_cnt_type 0 (fw 0x197f0) */
+	u32	log2_max_poc_lsb_m4;
 	u32	max_num_ref_frames;
 	u32	gaps_in_frame_num_allowed;	/* u8 */
 	u32	pic_width_in_mbs_minus1;
@@ -1942,6 +1944,7 @@ const struct ave_cmd_abi ave_cmd_abi_13_5 = {
 		.bit_depth_chroma_minus8	= 0x105e4,	/* [x8,#52]   0x195e8 */
 		.log2_max_frame_num_minus4	= 0x109cc,	/* [x8,#1052] 0x197c4 */
 		.pic_order_cnt_type		= 0x109d0,	/* [x8,#1056] 0x197d0 */
+		.log2_max_poc_lsb_m4		= 0x109d4,	/* [x8,#1060] 0x197f0 */
 		.max_num_ref_frames		= 0x109dc,	/* [x8,#1068] 0x19860 */
 		.gaps_in_frame_num_allowed	= 0x109e0,	/* ldrb #1072 0x19870 */
 		.pic_width_in_mbs_minus1	= 0x109e4,	/* [x8,#1076] 0x1987c */
@@ -2454,6 +2457,7 @@ const struct ave_cmd_abi ave_cmd_abi_26_6 = {
 		.bit_depth_chroma_minus8	= AVE_SPS_BIT_DEPTH_CHROMA_M8,
 		.log2_max_frame_num_minus4	= AVE_SPS_LOG2_MAX_FRAME_NUM_M4,
 		.pic_order_cnt_type		= AVE_SPS_POC_TYPE,
+		.log2_max_poc_lsb_m4		= AVE_OFF_NONE,	/* not traced */
 		.max_num_ref_frames		= AVE_START_MAX_REF,
 		.gaps_in_frame_num_allowed	= AVE_SPS_GAPS_IN_FRAME_NUM,
 		.pic_width_in_mbs_minus1	= AVE_SPS_PIC_WIDTH_MBS_M1,

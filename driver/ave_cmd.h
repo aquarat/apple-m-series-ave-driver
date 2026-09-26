@@ -97,6 +97,15 @@ struct ave_avc_session {
 	u8	profile_idc;		/* 66, 77 or 100 */
 	u8	level_idc;		/* 10..62 (not 1b) */
 	bool	cabac;			/* entropy_coding_mode_flag; not with 66 */
+	/*
+	 * B-frame groundwork (docs/81). poc_type0: SPS pic_order_cnt_type 0
+	 * with an 8-bit POC lsb, which the firmware fills from frameNumber
+	 * (fw 0x20ee8); false keeps type 2, every run to date. max_refs:
+	 * SPS max_num_ref_frames, 0 = 1; the session publishes max_refs + 1
+	 * DPB slots (ave_session.c, session_dpb).
+	 */
+	bool	poc_type0;
+	u8	max_refs;
 
 	u64	fw_client_addr;		/* per-client firmware buffer */
 	u32	fw_client_size;
