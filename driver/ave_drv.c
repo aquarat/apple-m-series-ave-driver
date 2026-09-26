@@ -789,6 +789,13 @@ static int ave_pmp_report_on(struct ave_device *ave)
  * @hold: 200 ms around each access, so each marker leaves the machine
  * before the next one (f93-f99, docs/75 §10). The streaming votes skip it:
  * they run inside STREAMON and STREAMOFF.
+ *
+ * Without the hold there is no read-back either. Reading the entry while
+ * the PMP still has the write pending (status +8 bit 1) makes the PMP take
+ * it as handled without applying it: docs/80 v1-v8, every streaming vote
+ * read straight back ran at the no-vote clock, and the same vote unread
+ * ran at the voted one. The hold path reads 400 ms after the write, by
+ * which time the bit has cleared. ave_pmp_stream_off() checks the vote.
  */
 static int ave_pmp_vote(struct ave_device *ave, u64 val, bool hold)
 {
@@ -823,6 +830,12 @@ static int ave_pmp_vote(struct ave_device *ave, u64 val, bool hold)
 		msleep(200);
 		dev_info(ave->dev, "pmp: vote written, alive 200 ms later; reading back\n");
 		msleep(200);
+	}
+	if (!hold) {
+		iounmap(wr);
+		iounmap(rd);
+		dev_info(ave->dev, "pmp: AVE0 DVFS vote %#018llx written\n", val);
+		return 0;
 	}
 	back = readq(rd);
 	st = readq(rd + 8);
@@ -864,6 +877,7 @@ static int ave_pmp_vote_setup(struct ave_device *ave)
 	return ave->pmp_voted ? 0 : -ENOMEM;
 }
 
+
 static void ave_pmp_vote_off(struct ave_device *ave, bool hold)
 {
 	if (!ave->pmp_voted)
@@ -885,8 +899,24 @@ void ave_pmp_stream_on(struct ave_device *ave)
 
 void ave_pmp_stream_off(struct ave_device *ave)
 {
-	if (ave->pmp_vote_streaming)
-		ave_pmp_vote_off(ave, false);
+	if (!ave->pmp_vote_streaming)
+		return;
+	/*
+	 * The vote's read-back, deferred to here: the PMP has long taken it
+	 * up (status +8 bit 1 clear, v3), so reading cannot cancel it.
+	 */
+	if (ave->pmp_voted) {
+		void __iomem *rd = ioremap_np(ave->soc->pmp_dvfs_rd, 16);
+
+		if (rd) {
+			u64 back = readq(rd), st = readq(rd + 8);
+
+			dev_info(ave->dev, "pmp: at stream end, AVE0 DVFS %#018llx (+8 %#018llx)%s\n",
+				 back, st, back == pmp_vote ? "" : " - MISMATCH");
+			iounmap(rd);
+		}
+	}
+	ave_pmp_vote_off(ave, false);
 }
 
 static void ave_pmp_report_off(struct ave_device *ave)

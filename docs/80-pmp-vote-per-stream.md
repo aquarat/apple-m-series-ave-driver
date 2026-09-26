@@ -40,22 +40,32 @@ load rather than the first STREAMON.
   firmware may still be encoding into the stream's buffers, so the clock
   is left alone. Power-off releases it.
 
-## 3. What a hardware run has to show (v1, not yet run)
+## 3. Results (docs/53 v1-v9)
 
-Load with `pmp_report=1 pmp_vote=0x2000000300000003` and
-`OVERLAY_ARGS=pmp_venc=1`, then run `tools/v4l2-test.sh` at 1080p and 4K, twice
-each.
+**Held per stream, VMax + FAB0 VMax runs at 5.81 ms per 1080p frame and
+21.0 ms per 4K frame**, the same as the probe-time vote (f99). One finding
+changed the design on the way:
 
-- **Yes:**
-  - one vote line and one release line per stream, both read back
-    without MISMATCH
-  - per-frame times at the f99 figures, 1080p 5.8 ms and 4K 21.0 ms,
-    from the first stream on
-- **No:**
-  - frame times at the no-vote figures (17.4 ms / 63.9 ms): the PMP needs
-    time to act on the vote, or the release of the previous stream wins
-  - an SError, or a reset at STREAMON: the missing holds mattered
+**Never read the entry back while the PMP has the write pending.** The
+read side's status word (`+8`) has bit 1 set from the write until the PMP
+takes the value up. Reading the entry in that window makes the PMP treat
+the request as handled without applying it: the status clears, the value
+reads back correctly, and the clock stays at the no-vote level (v1, v3,
+v7: 17.4 ms/64 ms). The same vote with no read runs at full speed (v8). The
+probe-time path always read 400 ms after its write, which is why f95-f99
+never saw it. macOS never reads the entry after `_writePTD` (docs/75 §1.4).
 
-If the first frames of each stream are slow and the rest fast, the PMP
-takes time to raise the clock. The fix would be to vote at `open()` rather
-than at STREAMON, not to bring back the holds.
+So a streaming vote is a write only. `ave_pmp_stream_off()` reads the
+entry at stream end, when bit 1 has long cleared, and logs `MISMATCH` if it
+is not the vote. The release (`1 << 61`) is written and not read.
+
+Ruled out on the way:
+- a PS-REQ transition (v4: pulsing the report after the vote changes
+  nothing)
+- the vote having to precede the firmware boot or Config (v5, v6: both
+  run at full speed)
+- a slow PMP ramp (v7: 10 s streams stay slow)
+
+**Not measured:** that the release lowers the clock between streams. It is
+the same write-only path as the vote, which v8/v9 show the PMP applies.
+Reading the PMP's DVFS-STATE while idle (`perf_dump`) would show it.
