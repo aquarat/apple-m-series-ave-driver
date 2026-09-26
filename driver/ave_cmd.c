@@ -625,7 +625,9 @@ int ave_cmd_build_start_avc(const struct ave_cmd_abi *abi, u8 *buf, size_t len,
 		return -EINVAL;
 	if ((s->poc_type0 && abi->sps.log2_max_poc_lsb_m4 == AVE_OFF_NONE) ||
 	    s->max_refs > 4 ||
-	    (s->ref_spacing_p && abi->start_avc.ref_spacing == AVE_OFF_NONE))
+	    (s->ref_spacing_p && abi->start_avc.ref_spacing == AVE_OFF_NONE) ||
+	    s->search_range > 2 ||
+	    (s->search_range && abi->start_avc.search_range == AVE_OFF_NONE))
 		return -EINVAL;
 
 	ret = ave_cmd_begin(abi, AVE_OP_START_AVC, buf, len, ctx, 0, &w);
@@ -641,6 +643,8 @@ int ave_cmd_build_start_avc(const struct ave_cmd_abi *abi, u8 *buf, size_t len,
 		wr32_opt(&w, l->mode_8x8, 2);
 	if (s->ref_spacing_p)
 		wr32(&w, l->ref_spacing, s->ref_spacing_p);
+	if (s->search_range)
+		wr16(&w, l->search_range, s->search_range);
 
 	/* ---- SPS ---- */
 	wr32(&w, sps->profile, sps->enum_profile_level ? (u32)prof : s->profile_idc);

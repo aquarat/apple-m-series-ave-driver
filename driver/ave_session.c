@@ -331,6 +331,12 @@ module_param(session_ref_spacing_p, uint, 0444);
 MODULE_PARM_DESC(session_ref_spacing_p,
 	"H.264 Start_AVC RefSpacingP (wire 0x10574); 2 = two L0 references per P, needs session_dpb=3 (docs/81)");
 
+/* docs/81 bs2: Start_AVC search_range (wire 0xFCE0); 0 = widest */
+static unsigned int session_search_range;
+module_param(session_search_range, uint, 0444);
+MODULE_PARM_DESC(session_search_range,
+	"H.264 Start_AVC search_range: 0 = +-192x96 (default, macOS), 1 = +-128x64, 2 = +-64x32 (docs/81)");
+
 static bool session_poc0;
 module_param(session_poc0, bool, 0444);
 MODULE_PARM_DESC(session_poc0,
@@ -2072,6 +2078,7 @@ static int ave_session_start_avc(struct ave_device *ave,
 	s.cabac = bufs->cabac;			/* never with Baseline (builder refuses) */
 	s.poc_type0 = session_poc0;
 	s.ref_spacing_p = min_t(u32, session_ref_spacing_p, 255);
+	s.search_range = min_t(u32, session_search_range, 255);
 	/* The firmware reads max_num_ref_frames + 1 slots (see session_dpb) */
 	s.max_refs = bufs->n_dpb > 2 ? bufs->n_dpb - 1 : 1;
 
@@ -4101,7 +4108,8 @@ static int ave_session_process(struct ave_device *ave,
 		ave_session_diag_costs(ave);
 		ave_step(ave, "diag: channels");
 		ave_session_diag_channels(ave, "timeout");
-		if (hevc) {
+		/* the reference readers for AVC too (docs/81 bs2) */
+		if (hevc || session_ref_spacing_p >= 2) {
 			ave_step(ave, "diag: HEVC reference / low-res readers");
 			ave_session_diag_hevc_inter(ave);
 		}

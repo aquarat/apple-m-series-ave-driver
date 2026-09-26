@@ -108,6 +108,7 @@ struct ave_avc_session {
 	u8	max_refs;
 	/* RefSpacingP (docs/81 bs1): 2 gives a P frame two L0 references */
 	u8	ref_spacing_p;
+	u8	search_range;		/* 0 widest (default) .. 2 (docs/81 bs2) */
 
 	u64	fw_client_addr;		/* per-client firmware buffer */
 	u32	fw_client_size;

@@ -4223,3 +4223,11 @@ H.264 resets OUTPUT to NV12. One boot, `tools/v4l2-test.sh`, 1280x720,
   10 bits** (avg 54.52, min 54.32). The regressions in the same boot:
   NV12 -> HEVC Main 44.27 dB (as h4) and NV12 -> H.264 1080p **44.686854**
   (as always).
+- **bs2** (bs1 + `session_search_range=2`, Start_AVC wire 0xFCE0 = 2,
+  ±64x32 instead of the widest ±192x96 that macOS also sends): **frame 1,
+  a P with ONE reference, now hangs** (`PIPE HANG: 2, 2`, MbInput produced
+  25 consumed 11, source row 2). L0 luma reader 0 is programmed (slot 0)
+  but its progress stops at 6; chroma reader 0 has started (0x3fff9). At
+  search_range 0 the same frame completes (bs1). So the stall is not a
+  missing per-reference buffer: the reference fetch / motion search works
+  in exactly one configuration, the widest window with one reference.
