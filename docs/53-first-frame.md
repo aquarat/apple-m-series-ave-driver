@@ -4133,3 +4133,17 @@ Self-test, 1280x720, `session_poc0=1 session_dpb=3`.
   direct mode is not the cause.
 
 Open: what the B pipe waits for at MB 2 (static analysis next).
+
+## A0, S0 (2026-09-26): toward ave1, the second encoder
+
+Plan: docs/82 (host analysis of the 13.5 ADT/kext/firmware).
+- **A0** (read-only, live DT): `power-management@28e680000` has
+  `power-controller@260/8000/8008/8010/8018/8020` = **venc1_sys,
+  venc1_dma, venc1_pipe4, venc1_pipe5, venc1_me0, venc1_me1**, all off
+  (pm_genpd_summary), and no node at ave1's `0x507…` addresses. The plan's
+  labels hold.
+- **S0** (ave0 control on the per-instance driver: one `ave_soc` row per
+  encoder, picked by the node's DPE address; the reply-capture context
+  per device; per-instance debugfs/V4L2 names, encoder 0 unchanged):
+  `probe: SoC row t6001 (encoder 0)`, and the b1 configuration gives a
+  **byte-identical 60-frame stream** (Y 44.686854 dB).

@@ -737,17 +737,32 @@ struct ave_sess_rx {
 };
 
 /*
- * A single device is bound in practice and the self-test runs once at the end
- * of probe under the caller's serialisation, so a file-static capture context
- * is adequate. It is published to the IRQ via ave->ipc_rx (an ordered store)
- * before the first send and cleared after the last reply.
+ * One capture context per device (two encoders each take their own replies;
+ * docs/81 ave1 plan). Allocated on first use, re-armed before each session
+ * like the file-static one it replaces, and published to the IRQ via
+ * ave->ipc_rx (an ordered store) before the first send.
  */
-static struct ave_sess_rx ave_sess_rx;
+static struct ave_sess_rx *ave_sess_rx_init(struct ave_device *ave)
+{
+	struct ave_sess_rx *rx = ave->sess_rx;
+
+	if (!rx) {
+		rx = devm_kzalloc(ave->dev, sizeof(*rx), GFP_KERNEL);
+		if (!rx)
+			return NULL;
+		ave->sess_rx = rx;
+	}
+	init_completion(&rx->done);
+	return rx;
+}
 
 static void ave_session_ipc_rx(struct ave_device *ave, u32 chan_id,
 			       void *buf, u32 size, u32 flags)
 {
-	struct ave_sess_rx *rx = &ave_sess_rx;
+	struct ave_sess_rx *rx = ave->sess_rx;
+
+	if (!rx)
+		return;
 
 	/*
 	 * Two different messages come back per command, and only one is the
@@ -1168,7 +1183,7 @@ static int ave_session_cmd(struct ave_device *ave, const struct ave_cmd_abi *abi
 	/* Streaming (V4L2): the per-command lines would be ~4 per frame. */
 	const bool quiet = ave->session_bufs &&
 		((struct ave_sess_bufs *)ave->session_bufs)->quiet;
-	struct ave_sess_rx *rx = &ave_sess_rx;
+	struct ave_sess_rx *rx = ave->sess_rx;
 	unsigned long left;
 	u32 status = 0;
 	int ret;
@@ -2517,7 +2532,7 @@ static void ave_session_publish_psets(struct ave_device *ave,
 {
 	if (!bufs->psets_cpu || bufs->dbg_dir)
 		return;
-	bufs->dbg_dir = debugfs_create_dir("apple_ave", NULL);
+	bufs->dbg_dir = debugfs_create_dir(ave->soc->inst ? "apple_ave1" : "apple_ave", NULL);
 	if (IS_ERR(bufs->dbg_dir)) {
 		dev_warn(ave->dev, "session: debugfs dir failed: %pe\n",
 			 bufs->dbg_dir);
@@ -2547,7 +2562,7 @@ static void ave_session_publish(struct ave_device *ave,
 
 	(void)psets_len;
 
-	bufs->dbg_dir = debugfs_create_dir("apple_ave", NULL);
+	bufs->dbg_dir = debugfs_create_dir(ave->soc->inst ? "apple_ave1" : "apple_ave", NULL);
 	if (IS_ERR(bufs->dbg_dir)) {
 		dev_warn(ave->dev, "session: debugfs dir failed: %pe\n",
 			 bufs->dbg_dir);
@@ -3673,7 +3688,7 @@ static int ave_session_process_batch(struct ave_device *ave,
 {
 	const bool hevc = bufs->codec == AVE_SESS_CODEC_HEVC;
 	const enum ave_op op = hevc ? AVE_OP_PROCESS_HEVC : AVE_OP_PROCESS_AVC;
-	struct ave_sess_rx *rx = &ave_sess_rx;
+	struct ave_sess_rx *rx = ave->sess_rx;
 	struct ave_sess_job job[AVE_SESS_RX_Q];
 	bool done[AVE_SESS_RX_Q] = {};
 	char order[48];
@@ -4143,7 +4158,8 @@ int ave_session_selftest(struct ave_device *ave)
 	ave_session_release(ave);	/* a previous run's, if any */
 	ave->session_bufs = bufs;
 
-	init_completion(&ave_sess_rx.done);
+	if (!ave_sess_rx_init(ave))
+		return -ENOMEM;
 
 	/* Publish the capturing hook to the IRQ handler before the first send. */
 	prev_rx = ave->ipc_rx;
@@ -4358,7 +4374,8 @@ int ave_session_close_client(struct ave_device *ave)
 	 * same class of mistake as polling a scratch word without clearing it
 	 * first.
 	 */
-	init_completion(&ave_sess_rx.done);
+	if (!ave_sess_rx_init(ave))
+		return -ENOMEM;
 	prev_rx = ave->ipc_rx;
 	smp_store_release(&ave->ipc_rx, ave_session_ipc_rx);
 
@@ -4657,7 +4674,8 @@ int ave_enc_init(struct ave_device *ave)
 	ave_session_release(ave);
 	ave->session_bufs = bufs;
 
-	init_completion(&ave_sess_rx.done);
+	if (!ave_sess_rx_init(ave))
+		return -ENOMEM;
 	smp_store_release(&ave->ipc_rx, ave_session_ipc_rx);
 
 	ret = ave_session_config(ave, abi, bufs);

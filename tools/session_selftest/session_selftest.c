@@ -532,12 +532,17 @@ static void test_abi(enum ave_fw_abi which, const char *name)
 		      "builder accepted a ZERO coded-header address");
 		f.coded_hdr_addr = IOVA_CODEDHDR;
 
-		/* P (1) is legal now; B (2) still is not - no reference list
-		 * is built for it - and 5 is not an IMG_FRAME_TYPE at all. */
+		/* P (1) and B (2) are legal - the firmware builds a B's lists
+		 * (docs/81 §0) - 7 (reference B) is not, and 5 is not an
+		 * IMG_FRAME_TYPE at all. */
 		f.frame_type = 2;
 		CHECK(ave_cmd_build_process_avc(abi, cmdbuf, sizeof(cmdbuf), &c,
+						SESS_PROCESS_SLOT, &f) > 0,
+		      "builder refused a B frame (docs/81)");
+		f.frame_type = 7;
+		CHECK(ave_cmd_build_process_avc(abi, cmdbuf, sizeof(cmdbuf), &c,
 						SESS_PROCESS_SLOT, &f) == -EINVAL,
-		      "builder accepted a B frame with no reference list");
+		      "builder accepted type 7 outside the pyramid (docs/81 R12)");
 		f.frame_type = 5;
 		CHECK(ave_cmd_build_process_avc(abi, cmdbuf, sizeof(cmdbuf), &c,
 						SESS_PROCESS_SLOT, &f) == -EINVAL,

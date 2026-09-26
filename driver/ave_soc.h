@@ -30,6 +30,13 @@ struct ave_soc_range {
 
 struct ave_soc {
 	const char	*name;		/* "t6001" */
+	/*
+	 * Which encoder of the SoC this row is. The compatible names the SoC;
+	 * the node's first reg (the DPE bank) picks the row (ave_soc_pick).
+	 * inst 0 keeps the names every tool knows (apple_ave, apple-ave-enc).
+	 */
+	phys_addr_t	dpe_phys;
+	u8		inst;
 
 	/* Firmware images for request_firmware() (docs/09) */
 	const char	*fw_name;
@@ -67,6 +74,7 @@ struct ave_soc {
 
 	/* Power domains the DT cannot hand to the node (docs/57 #3, docs/78) */
 	const char	*me1_node;		/* venc_me1 */
+	const char	*me1_label;		/* checked before use */
 	const char	*pmp_report_node;	/* pmp-venc-sys, report@10 */
 
 	/* PMP and PMGR (docs/75); 0 = not known for this SoC, feature refused */
@@ -77,6 +85,17 @@ struct ave_soc {
 	phys_addr_t	pmgr_perf_blk;		/* PMGR perf block 9 (perf_dump) */
 };
 
+/* The rows of one SoC, one per encoder instance */
+struct ave_soc_set {
+	const struct ave_soc *const	*rows;
+	unsigned int			n;
+};
+
 extern const struct ave_soc ave_soc_t6001;
+extern const struct ave_soc ave_soc_t6001_ave1;
+extern const struct ave_soc_set ave_soc_set_t6001;
+
+const struct ave_soc *ave_soc_pick(const struct ave_soc_set *set,
+				   phys_addr_t dpe_phys);
 
 #endif /* __AVE_SOC_H__ */
