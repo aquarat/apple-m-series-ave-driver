@@ -4176,3 +4176,17 @@ session_frame=1 session_frames=4`), 1280x720.
   / 53.6 dB** against the ramp, against m0h's 51.0 / 50.1 / 50.0 / 50.1
   (at the same host QP the 10-bit slice QP is 12 lower, QpBdOffset, fw
   0x66fdc).
+
+## b6c, bs1 (2026-09-27): the stall is the second reference, not B
+
+The host analysis of b4 ranked five hypotheses (docs/81 status).
+- **b6c** (b4 + `session_cabac=1`): the same hang, so CAVLC B slices are
+  not the cause.
+- **bs1** (IPP, 3 frames, one command at a time, `session_poc0=1
+  session_dpb=3 session_profile=77` + **`session_ref_spacing_p=2`**, Start_AVC
+  wire 0x10574; a P frame then gets two L0 references, fw 0x436bc): frame 1
+  (P, one reference available) completes. **Frame 2 (P, two L0 references)
+  hangs exactly as B1 did**: ModeDec/ReconLuma/CAVLC entries 2, `PIPE HANG
+  3, 3`, MbInput produced 21 consumed 6 (lag 15, source at MB row 2).
+  **Any frame with a second reference stalls the pipe after two
+  macroblocks.** B frames were only the first frames to need one.
