@@ -657,6 +657,21 @@ module_param(session_hevc_bitdepth, uint, 0444);
 MODULE_PARM_DESC(session_hevc_bitdepth,
 	"HEVC self-test: SPS bit depth, 8 (Main, default) or 10 (Main 10; docs/83)");
 
+/* docs/83 m2: the HEVC self-test's source as P010 (10) instead of NV12 (8) */
+static unsigned int session_src_bitdepth = 8;
+module_param(session_src_bitdepth, uint, 0444);
+MODULE_PARM_DESC(session_src_bitdepth,
+	"HEVC self-test source: 8 = NV12 (default), 10 = P010 (docs/83)");
+
+/*
+ * docs/83 m3b: put x & 3 in the two low bits of each P010 luma sample, so
+ * a 10-bit encode that uses them decodes nearer the 10-bit picture than
+ * the 8-bit one.
+ */
+static bool session_src_lsb;
+module_param(session_src_lsb, bool, 0444);
+MODULE_PARM_DESC(session_src_lsb, "P010 self-test source: luma low bits = x & 3 (docs/83 m3b)");
+
 static bool session_hevc_qpmod;
 module_param(session_hevc_qpmod, bool, 0444);
 MODULE_PARM_DESC(session_hevc_qpmod,
@@ -916,6 +931,7 @@ struct ave_sess_bufs {
 	struct { void *cpu; dma_addr_t iova; u32 size; } slice_hdr[AVE_SESS_FRAMES_MAX];
 	u32		hevc_refs;	/* 0 = intra only: every frame an IDR */
 	u8		bit_depth;	/* HEVC SPS depth, 8 or 10 (0 = 8); docs/83 */
+	u8		src_bitdepth;	/* HEVC source: 10 = P010 (0 = 8, NV12) */
 	bool		hevc_single_xc;	/* PICMGMT+0xF65 = 1 per frame */
 	/* TranscodedData: the two transcoders' outputs, session-wide. */
 	dma_addr_t	transcoded[2];
@@ -1803,6 +1819,13 @@ static int ave_session_start_prep(struct ave_device *ave,
 	s->crop_height = bufs->crop_h;
 	s->src_mode = (u16)session_src_mode;
 	s->src_cfg_byte = (u8)session_src_cfg;
+	/*
+	 * P010 needs pix_pck (wire 0xFCE8) = 1: with 0 the firmware reads the
+	 * 16-bit samples as packed 10-bit, three to a word (docs/53 m2 vs
+	 * m2b). macOS sends 1 for every HEVC session (docs/83 §1e).
+	 */
+	if (!session_src_cfg && bufs->src_bitdepth == 10)
+		s->src_cfg_byte = 1;
 	s->src_go_bit3 = (u8)session_src_bit3;
 	s->src_go_bits = (u8)session_src_go;
 	s->dbg_bits = session_dbg;
@@ -2214,7 +2237,7 @@ static int ave_session_start_hevc(struct ave_device *ave,
 			     bufs->level_floor);
 	h->input_format_word = AVE_SESS_HEVC_INPUT_FMT;
 	h->bit_depth = bufs->bit_depth;		/* docs/83; 0 = 8 */
-	h->input_bitdepth = 8;			/* NV12 */
+	h->input_bitdepth = bufs->src_bitdepth == 10 ? 10 : 8;	/* P010 : NV12 */
 	h->max_num_ref_frames = bufs->hevc_refs;
 	h->log2_max_poc_lsb_minus4 = AVE_SESS_HEVC_POC_LSB_M4;
 	h->sao = session_hevc_sao;
@@ -2525,6 +2548,41 @@ static void ave_session_fill_input(u8 *luma, u8 *chroma, u32 stride,
 		}
 		if (stride > w)
 			memset(row + w, 0, stride - w);
+	}
+}
+
+/*
+ * docs/83 m2: the same picture as ave_session_fill_input(), as P010 - each
+ * 8-bit value v in the top ten bits of a little-endian u16 as the 10-bit
+ * value 4v, i.e. v << 8. An 8-bit encode of it must then decode to exactly
+ * the 8-bit ramp (tools/ramp_psnr.py unchanged); a misread layout cannot.
+ * @stride is in bytes.
+ */
+static void ave_session_fill_input_p010(u8 *luma, u8 *chroma, u32 stride,
+					u32 w, u32 h, u32 shift)
+{
+	u32 x, y;
+
+	for (y = 0; y < h; y++) {
+		__le16 *row = (__le16 *)(luma + (size_t)y * stride);
+
+		for (x = 0; x < w; x++)
+			row[x] = cpu_to_le16(((session_flat_luma ? (u8)session_flat_luma :
+				 (u8)(16 + ((((x + shift) % (w ? w : 1)) * 219) / (w ? w : 1)) +
+				      ((y / AVE_MB_SIZE) & 7))) << 8) |
+				 (session_src_lsb ? (x & 3) << 6 : 0));
+		if (stride > 2 * w)
+			memset(row + w, 0, stride - 2 * w);
+	}
+	for (y = 0; y < h / 2; y++) {
+		__le16 *row = (__le16 *)(chroma + (size_t)y * stride);
+
+		for (x = 0; x < w; x += 2) {
+			row[x] = cpu_to_le16(128 << 8);
+			row[x + 1] = cpu_to_le16((u8)(128 + ((x / 32) & 15) - 8) << 8);
+		}
+		if (stride > 2 * w)
+			memset(row + w, 0, stride - 2 * w);
 	}
 }
 
@@ -3237,6 +3295,9 @@ static int ave_session_process_build(struct ave_device *ave,
 	 * width is already a multiple of 16; round it to 64.
 	 */
 	stride = ALIGN(cw, AVE_STRIDE_ALIGN);
+	/* P010: two bytes a sample (docs/83 m2) */
+	if (bufs->src_bitdepth == 10)
+		stride *= 2;
 	luma_bytes = stride * ave_src_luma_rows(ch);
 	chroma_bytes = stride * ave_src_chroma_rows(ch);
 	/*
@@ -3281,7 +3342,9 @@ static int ave_session_process_build(struct ave_device *ave,
 	 * read its own source is indistinguishable from one that did - which
 	 * is exactly the ambiguity F16 and F17 left us in.
 	 */
-	if (luma)
+	if (luma && bufs->src_bitdepth == 10)
+		ave_session_fill_input_p010(luma, chroma, stride, cw, ch, n * 8);
+	else if (luma)
 		ave_session_fill_input(luma, chroma, stride, cw, ch, n * 8);
 	if (session_flat_luma)
 		sess_info(bufs, ave->dev,
@@ -4188,6 +4251,7 @@ int ave_session_selftest(struct ave_device *ave)
 	bufs->fps_den = session_fps_div;
 	bufs->codec = session_codec;
 	bufs->bit_depth = session_codec ? session_hevc_bitdepth : 0;
+	bufs->src_bitdepth = session_codec ? session_src_bitdepth : 0;
 	ave_session_release(ave);	/* a previous run's, if any */
 	ave->session_bufs = bufs;
 
@@ -4769,6 +4833,7 @@ int ave_enc_start(struct ave_device *ave, const struct ave_enc_cfg *cfg)
 
 	bufs->codec = cfg->codec;
 	bufs->bit_depth = 0;	/* V4L2 is Main/8-bit until docs/83 m5 */
+	bufs->src_bitdepth = 0;
 	bufs->width = cfg->width;
 	bufs->height = cfg->height;
 	bufs->crop_w = cfg->crop_w;
