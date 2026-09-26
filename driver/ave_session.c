@@ -495,6 +495,16 @@ MODULE_PARM_DESC(session_coded_kb,
 static unsigned int session_frames = 1;
 
 /*
+ * docs/81 b3: after the IDR, send the P frames session_batch at a time,
+ * back to back, and collect the completions afterwards. 0/1 = one at a
+ * time (default). At most min(session_frames, 4).
+ */
+static unsigned int session_batch;
+module_param(session_batch, uint, 0444);
+MODULE_PARM_DESC(session_batch,
+	"P frames in flight at once after the IDR (docs/81 b3); 0/1 = one at a time");
+
+/*
  * docs/68 §6 item 9: sessions per module load. After the first session's
  * frames, N-1 more rounds of Stop + Close, then Open + Start_AVC + Process
  * on freshly allocated buffers, with the firmware left running and Config
@@ -630,6 +640,7 @@ MODULE_PARM_DESC(session_hevc_qpmod,
 #define AVE_SESS_CLIENT_ID	1u	/* host-assigned; RegisterClient(cid) */
 
 #define AVE_SESS_REPLY_MAX	0x80	/* replies are 0x40 / 0x48 */
+#define AVE_SESS_RX_Q		4	/* Process replies a batch can queue */
 
 /* Config shared-memory region: >= 4 x carve set; a dedicated buffer so the
  * firmware's AddSharedMemory carve cannot land on the live channel rings. */
@@ -690,6 +701,15 @@ struct ave_sess_rx {
 	u16			want_id;
 	u32			other_id;
 	unsigned int		other_count;
+	/*
+	 * Batch mode (docs/81 b3): several Process commands in flight. Each
+	 * wanted completion is queued, in arrival order, and completes `done`
+	 * once, so the waiter takes them one by one.
+	 */
+	bool			batch;
+	unsigned int		nq;
+	u8			qbuf[AVE_SESS_RX_Q][AVE_SESS_REPLY_MAX];
+	u32			qsize[AVE_SESS_RX_Q];
 };
 
 /*
@@ -738,6 +758,19 @@ static void ave_session_ipc_rx(struct ave_device *ave, u32 chan_id,
 			rx->other_count++;
 			return;		/* not ours: keep waiting */
 		}
+	}
+
+	if (rx->batch) {
+		if (rx->nq < AVE_SESS_RX_Q) {
+			u32 n = min_t(u32, size, AVE_SESS_REPLY_MAX);
+
+			if (buf && n)
+				memcpy(rx->qbuf[rx->nq], buf, n);
+			rx->qsize[rx->nq] = buf ? n : 0;
+		}
+		rx->nq++;
+		complete(&rx->done);
+		return;
 	}
 
 	rx->flags = flags;
@@ -3599,6 +3632,113 @@ static int ave_session_process_result(struct ave_device *ave,
 				      frame_type == AVE_FRAME_TYPE_IDR);
 }
 
+/*
+ * docs/81 b3/b4: send @count Process commands back to back - frame
+ * numbers @ns, types @types, in the order given - then collect as many
+ * completions, in whatever order the firmware finishes them, and append
+ * each frame to the stream in that (decode) order. Each reply names its
+ * Process slot (+0x1C), which names the frame; the coded header's
+ * frameNumber is cross-checked by the result path.
+ */
+static int ave_session_process_batch(struct ave_device *ave,
+				     const struct ave_cmd_abi *abi,
+				     struct ave_sess_bufs *bufs, u64 client_id,
+				     const u32 *ns, const int *types, u32 count)
+{
+	const bool hevc = bufs->codec == AVE_SESS_CODEC_HEVC;
+	const enum ave_op op = hevc ? AVE_OP_PROCESS_HEVC : AVE_OP_PROCESS_AVC;
+	struct ave_sess_rx *rx = &ave_sess_rx;
+	struct ave_sess_job job[AVE_SESS_RX_Q];
+	bool done[AVE_SESS_RX_Q] = {};
+	char order[48];
+	int len = 0;
+	u32 k, j;
+	u64 t0;
+	int ret;
+
+	if (!count || count > AVE_SESS_RX_Q || count > bufs->n_coded)
+		return -EINVAL;
+	for (k = 0; k < count; k++) {
+		ret = ave_session_process_build(ave, abi, bufs, client_id,
+						ns[k], types[k], &job[k]);
+		if (ret)
+			return ret;
+		for (j = 0; j < k; j++)
+			if (job[j].idx == job[k].idx)
+				return -EINVAL;	/* two frames in one slot */
+	}
+
+	reinit_completion(&rx->done);
+	rx->nq = 0;
+	rx->other_id = 0;
+	rx->other_count = 0;
+	rx->ack_seen = false;
+	rx->want_id = abi->cmd[op].reply_id;
+	rx->batch = true;
+
+	t0 = ktime_get_ns();
+	for (k = 0; k < count; k++) {
+		ret = ave_ipc_send(ave, AVE_CH_IO, job[k].cmd_iova,
+				   job[k].cmd_len, 0);
+		if (ret) {
+			dev_err(ave->dev, "session: batch: send of frame %u failed: %d (%u of %u sent)\n",
+				ns[k], ret, k, count);
+			count = k;	/* collect what is in flight */
+			break;
+		}
+	}
+
+	for (k = 0; k < count; k++) {
+		u32 status = 0, slot;
+		const u8 *r;
+
+		if (!wait_for_completion_timeout(&rx->done,
+				msecs_to_jiffies(AVE_SESS_TIMEOUT_MS))) {
+			dev_err(ave->dev,
+				"session: batch: TIMEOUT after %d ms waiting for completion %u of %u (IO ack %s; %u other completion(s), last %#06x)\n",
+				AVE_SESS_TIMEOUT_MS, k + 1, count,
+				rx->ack_seen ? "seen" : "not seen",
+				rx->other_count, rx->other_id);
+			ret = -ETIMEDOUT;
+			goto out;
+		}
+		r = rx->qbuf[k];
+		ret = ave_cmd_check_reply(abi, op, r, rx->qsize[k], client_id,
+					  &status);
+		if (ret) {
+			dev_err(ave->dev,
+				"session: batch: completion %u rejected (%d), status %#x (%s)\n",
+				k + 1, ret, status, ave_session_status_name(status));
+			goto out;
+		}
+		slot = rx->qsize[k] >= 0x20 ? get_unaligned_le32(r + 0x1c) : 0;
+		for (j = 0; j < count; j++)
+			if (!done[j] && AVE_SESS_PROCESS_SLOT + job[j].idx == slot)
+				break;
+		if (j == count) {
+			dev_err(ave->dev,
+				"session: batch: completion %u names slot %u, which no frame in flight uses\n",
+				k + 1, slot);
+			ret = -EPROTO;
+			goto out;
+		}
+		done[j] = true;
+		len += scnprintf(order + len, sizeof(order) - len, "%s%u",
+				 k ? "," : "", ns[j]);
+		ret = ave_session_process_result(ave, abi, bufs, &job[j]);
+		if (ret)
+			goto out;
+	}
+	t0 = ktime_get_ns() - t0;
+	bufs->t_cmd += t0;
+	bufs->t_max_cmd = max(bufs->t_max_cmd, t0);
+	sess_info(bufs, ave->dev, "session: batch of %u: completed in order %s\n",
+		  count, order);
+out:
+	rx->batch = false;
+	return ret;
+}
+
 static int ave_session_process(struct ave_device *ave,
 			       const struct ave_cmd_abi *abi,
 			       struct ave_sess_bufs *bufs, u64 client_id,
@@ -4013,15 +4153,33 @@ int ave_session_selftest(struct ave_device *ave)
 	 * tables into the firmware's DPB context once, at Start, and the
 	 * firmware indexes its own copy per frame (docs/64 §2).
 	 */
-	for (frame = 0; frame < bufs->n_frames; frame++) {
-		ret = ave_session_process(ave, abi, bufs, AVE_SESS_CLIENT_ID,
-					  frame);
+	for (frame = 0; frame < bufs->n_frames; ) {
+		u32 k = frame ? min3(max(session_batch, 1U),
+				     bufs->n_frames - frame, bufs->n_coded) : 1;
+		u32 ns[AVE_SESS_RX_Q];
+		int types[AVE_SESS_RX_Q];
+		u32 i;
+
+		k = min_t(u32, k, AVE_SESS_RX_Q);
+		if (k > 1) {
+			for (i = 0; i < k; i++) {
+				ns[i] = frame + i;
+				types[i] = AVE_FRAME_TYPE_P;
+			}
+			ret = ave_session_process_batch(ave, abi, bufs,
+							AVE_SESS_CLIENT_ID,
+							ns, types, k);
+		} else {
+			ret = ave_session_process(ave, abi, bufs,
+						  AVE_SESS_CLIENT_ID, frame);
+		}
 		if (ret) {
 			dev_err(ave->dev,
 				"session: frame %u of %u failed: %d\n",
 				frame, bufs->n_frames, ret);
 			break;
 		}
+		frame += k;
 	}
 	{
 		u32 k, nrep = clamp_t(u32, session_repeat, 1, 8);
