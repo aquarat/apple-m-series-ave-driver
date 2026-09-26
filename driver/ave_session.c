@@ -3079,10 +3079,29 @@ static int ave_sess_stream_append(struct ave_sess_bufs *b, u32 idx, bool first)
 	return 0;
 }
 
-static int ave_session_process(struct ave_device *ave,
-			       const struct ave_cmd_abi *abi,
-			       struct ave_sess_bufs *bufs, u64 client_id,
-			       u32 n)
+/*
+ * One frame in flight: what ave_session_process_build() set up and what
+ * sending, collecting and ave_session_process_result() need (docs/81 b3).
+ */
+struct ave_sess_job {
+	u32		n;		/* frameNumber: the display index */
+	u32		idx;		/* coded slot index; Process slot 21 + idx */
+	u32		frame_type;	/* as sent */
+	dma_addr_t	cmd_iova;
+	size_t		cmd_len;
+	dma_addr_t	luma_iova, chroma_iova;
+	u32		stride;
+};
+
+/*
+ * Build frame @n's Process command in its slot (@type: an AVE_FRAME_TYPE_*,
+ * or -1 for the IDR-then-P default), after the datapath DART check. Nothing
+ * is sent.
+ */
+static int ave_session_process_build(struct ave_device *ave,
+				     const struct ave_cmd_abi *abi,
+				     struct ave_sess_bufs *bufs, u64 client_id,
+				     u32 n, int type, struct ave_sess_job *job)
 {
 	struct ave_cmd_ctx ctx = { .count = 4 + n, .client_id = client_id };
 	const bool hevc = bufs->codec == AVE_SESS_CODEC_HEVC;
@@ -3090,17 +3109,14 @@ static int ave_session_process(struct ave_device *ave,
 	const u32 idx = bufs->n_coded ? n % bufs->n_coded : 0;
 	const u32 slot = AVE_SESS_PROCESS_SLOT + idx;
 	struct ave_avc_frame f = {};
-	/* In bufs, not on the stack: ~0.4 KiB since HEVC's per-slice headers. */
-	struct ave_coded_info *const info = &bufs->coded_info;
 	struct ave_sess_arena recon = {};
 	dma_addr_t cmd_iova, luma_iova, chroma_iova;
 	dma_addr_t ry, ruv, ry_lsb, ruv_lsb, rmv;
 	u32 cw, ch, stride, luma_bytes, chroma_bytes, mb_w, mb_h;
-	size_t cmd_len, psets_len, scan_len;
+	size_t cmd_len;
 	u8 *luma, *chroma;
 	void *cmd;
 	int ret;
-	u64 t0;
 
 	if (!bufs->n_coded || !bufs->coded[idx].cpu)
 		return -EINVAL;
@@ -3227,8 +3243,11 @@ static int ave_session_process(struct ave_device *ave,
 	 * (jump table fw 0xcef80: 1 = P). session_frame_type still chooses
 	 * what frame 0 is, so the I-vs-IDR bisect it exists for still works.
 	 */
-	f.frame_type = bufs->force_idr ? AVE_FRAME_TYPE_IDR :
-		       n ? AVE_FRAME_TYPE_P : session_frame_type;
+	if (type >= 0)
+		f.frame_type = type;
+	else
+		f.frame_type = bufs->force_idr ? AVE_FRAME_TYPE_IDR :
+			       n ? AVE_FRAME_TYPE_P : session_frame_type;
 	/* HEVC with no reference slot (session_dpb=1): intra only. */
 	if (hevc && f.frame_type == AVE_FRAME_TYPE_P && !bufs->hevc_refs)
 		f.frame_type = AVE_FRAME_TYPE_IDR;
@@ -3364,6 +3383,248 @@ static int ave_session_process(struct ave_device *ave,
 		sess_info(bufs, ave->dev, "session: SVE +0x%x <- 0 (clock gating off) for Process\n",
 			 AVE_SVE_IDLE);
 	}
+	job->n = n;
+	job->idx = idx;
+	job->frame_type = f.frame_type;
+	job->cmd_iova = cmd_iova;
+	job->cmd_len = cmd_len;
+	job->luma_iova = luma_iova;
+	job->chroma_iova = chroma_iova;
+	job->stride = stride;
+	return 0;
+}
+
+/*
+ * Frame @job's completion is in: decode its coded header and append its
+ * bytes to the stream.
+ */
+static int ave_session_process_result(struct ave_device *ave,
+				      const struct ave_cmd_abi *abi,
+				      struct ave_sess_bufs *bufs,
+				      const struct ave_sess_job *job)
+{
+	const bool hevc = bufs->codec == AVE_SESS_CODEC_HEVC;
+	const u32 n = job->n, idx = job->idx;
+	const u32 cw = ave_mb_align(bufs->width), ch = ave_mb_align(bufs->height);
+	struct ave_coded_info *const info = &bufs->coded_info;
+	u32 frame_type = job->frame_type;
+	size_t psets_len, scan_len;
+	int ret;
+
+	dma_rmb();
+	if (!bufs->quiet)
+		print_hex_dump(KERN_INFO, "session: coded_hdr: ", DUMP_PREFIX_OFFSET,
+		       16, 4, bufs->coded_hdr[idx].cpu, 0x40, false);
+	if (!bufs->quiet)
+		print_hex_dump(KERN_INFO, "session: slice0: ", DUMP_PREFIX_OFFSET,
+		       16, 4,
+		       (u8 *)bufs->coded_hdr[idx].cpu + abi->coded_hdr.slice_bytes_written,
+		       0x20, false);
+
+	ret = ave_cmd_coded_length_codec(abi, bufs->coded_hdr[idx].cpu,
+					 bufs->coded_hdr[idx].size,
+					 bufs->coded[idx].size, hevc,
+					 abi->process_hevc.hdr_slot_bytes, info);
+	if (ret) {
+		dev_err(ave->dev,
+			"session: frame: cannot decode the coded header: %d\n",
+			ret);
+		return ret;
+	}
+	sess_info(bufs, ave->dev,
+		 "session: frame %u: %u bytes in %u slice(s) (written %u - trimmed %u), FrameTypeReturned %u, frame_num %u (sent %u), SPS+PPS %u bits, cabac_zero_words %u\n",
+		 n, info->bytes, info->slices, info->span, info->bytes_removed,
+		 info->frame_type, info->frame_num, n, info->sps_pps_bits,
+		 info->cabac_zero_words);
+	if (hevc) {
+		/*
+		 * docs/77 §8.2 H2: the header slot should begin 00 00 00 01
+		 * 28 01 (IDR_N_LP) on an IDR, 00 00 00 01 02 01 (TRAIL_R) on
+		 * a P. Logged for the first frame, and whenever the header is
+		 * not where this slot published it.
+		 */
+		const struct ave_coded_slice *e = &info->slice[0];
+		bool mine = info->n_slice && e->hdr_iova >= bufs->slice_hdr[idx].iova &&
+			    e->hdr_iova - bufs->slice_hdr[idx].iova + e->hdr_len <=
+				bufs->slice_hdr[idx].size;
+
+		sess_info(bufs, ave->dev,
+			  "session: frame %u: HEVC slice headers %u bytes (slice 0: %u bytes at %#llx, %s), frame = coded %u + headers\n",
+			  n, info->hdr_bytes, info->n_slice ? e->hdr_len : 0,
+			  info->n_slice ? e->hdr_iova : 0,
+			  mine ? "in this slot's surface" : "NOT in this slot's surface",
+			  info->bytes - info->hdr_bytes);
+		if (mine && (!n || !bufs->quiet)) {
+			const u8 *hb = (const u8 *)bufs->slice_hdr[idx].cpu +
+				       (e->hdr_iova - bufs->slice_hdr[idx].iova);
+
+			dma_rmb();
+			dev_info(ave->dev,
+				 "session: frame %u: slice 0 header NAL type %d (want 19/20 IDR, 1 TRAIL_R P)\n",
+				 n, ave_session_hevc_nal_type(hb, e->hdr_len));
+			print_hex_dump(KERN_INFO, "session: slicehdr: ",
+				       DUMP_PREFIX_OFFSET, 16, 1, hb,
+				       min_t(u32, e->hdr_len, 32), false);
+		}
+		if (!info->hdr_bytes)
+			dev_warn(ave->dev,
+				 "session: frame %u: no slice header reported (record+0x218 = 0); the stream will not decode\n",
+				 n);
+		/*
+		 * The header is the firmware's, so it says what the frame is.
+		 * A stream gets IdrPeriod 30 (docs/77 §16) while the host picks
+		 * its IDRs; if the firmware ever makes one we did not ask for,
+		 * follow it - parameter sets in front, POC count restarted -
+		 * rather than emit a stream that disagrees with its headers.
+		 * h3h's frames were all what was asked, so a no-op so far.
+		 */
+		if (mine && frame_type != AVE_FRAME_TYPE_IDR) {
+			const u8 *hb = (const u8 *)bufs->slice_hdr[idx].cpu +
+				       (e->hdr_iova - bufs->slice_hdr[idx].iova);
+			int nt;
+
+			dma_rmb();
+			nt = ave_session_hevc_nal_type(hb, e->hdr_len);
+			if (nt == 19 || nt == 20) {
+				dev_warn(ave->dev,
+					 "session: frame %u: sent as type %u, the firmware coded an IDR (NAL %d); treating it as one\n",
+					 n, frame_type, nt);
+				frame_type = AVE_FRAME_TYPE_IDR;
+				bufs->last_idr = n;
+			}
+		}
+	}
+
+	/*
+	 * FrameTypeReturned == 4 means the firmware DROPPED the frame
+	 * (fw 0x13340 / 0x5c930, tested at 0x14bc0). Without naming it, a
+	 * dropped frame and a dead pipe look identical from here. docs/67 §5.
+	 */
+	if (info->frame_type == AVE135_FRAME_TYPE_DROPPED) {
+		dev_err(ave->dev,
+			"session: frame %u: the firmware DROPPED this frame (FrameTypeReturned 4)\n",
+			n);
+		return -ENODATA;
+	}
+	if (info->frame_num != n)
+		dev_warn(ave->dev,
+			 "session: frame %u: the firmware echoed frameNumber %u, not %u - the field may not be reaching it\n",
+			 n, info->frame_num, n);
+	/*
+	 * Every macroblock must be accounted for by exactly one of the
+	 * counters. This is the direct test for F16 and F17's failure shape -
+	 * a frame that "completed" having encoded nothing - and it is cheap.
+	 */
+	{
+		u32 mbs = (cw / AVE_MB_SIZE) * (ch / AVE_MB_SIZE);
+		const u8 *h = bufs->coded_hdr[idx].cpu;
+		u32 k, i_mb = 0, p_mb = 0, skip_mb = 0;
+
+		for (k = 0; k < 4; k++) {
+			i_mb += get_unaligned_le32(h + abi->coded_hdr.i_mb_cnt + 4 * k);
+			p_mb += get_unaligned_le32(h + abi->coded_hdr.p_mb_cnt + 4 * k);
+			skip_mb += get_unaligned_le32(h + abi->coded_hdr.skip_mb_cnt + 4 * k);
+		}
+		if (hevc)
+			/* Whether these count MBs or CTUs is unknown (docs/77 §4). */
+			sess_info(bufs, ave->dev,
+				  "session: frame %u: HEVC counters I %u P %u skip %u = %u (%u MBs, %u CTUs; unit unknown, no check)\n",
+				  n, i_mb, p_mb, skip_mb, i_mb + p_mb + skip_mb, mbs,
+				  DIV_ROUND_UP(cw, 32) * DIV_ROUND_UP(ch, 32));
+		else
+			sess_info(bufs, ave->dev,
+				  "session: frame %u: MB counts I %u P %u skip %u = %u of %u expected%s\n",
+				  n, i_mb, p_mb, skip_mb, i_mb + p_mb + skip_mb, mbs,
+				  i_mb + p_mb + skip_mb == mbs ? "" : " - MISMATCH");
+	}
+
+	if (!info->bytes) {
+		dev_err(ave->dev,
+			"session: frame: the firmware reported ZERO coded bytes - the encode did not produce a bitstream\n");
+		return -ENODATA;
+	}
+	/* Coded-buffer bytes only: HEVC's headers live in the header slots. */
+	if (info->bytes - info->hdr_bytes > bufs->coded[idx].size) {
+		dev_err(ave->dev,
+			"session: frame: reported length %u exceeds the coded buffer (%u); header is not what we think it is\n",
+			info->bytes, bufs->coded[idx].size);
+		return -EPROTO;
+	}
+
+	if (!bufs->quiet)
+		print_hex_dump(KERN_INFO, "session: coded: ", DUMP_PREFIX_OFFSET,
+		       16, 1, bufs->coded[idx].cpu, min_t(u32, info->bytes, 64),
+		       false);
+
+	/*
+	 * ui32_SPSPPSHeaderBits is exact: it is literally sps_bits + pps_bits,
+	 * the two memcpy lengths the firmware shifted back up (fw 0x5df48 /
+	 * 0x5df70 / 0x5df9c). Use it, and keep the back-scan only as a
+	 * cross-check - the scan is wrong by construction the moment a second,
+	 * shorter Start_AVC leaves a longer parameter set's tail behind.
+	 * docs/67 §4.
+	 */
+	scan_len = ave_session_psets_len(bufs->psets_cpu, bufs->psets_size);
+	if (info->sps_pps_bits % 8)
+		dev_warn(ave->dev,
+			 "session: frame: SPS+PPS is %u bits, not a whole number of bytes\n",
+			 info->sps_pps_bits);
+	psets_len = info->sps_pps_bits / 8;
+	if (!psets_len || psets_len > bufs->psets_size) {
+		dev_warn(ave->dev,
+			 "session: frame: SPS+PPS length %zu is unusable; falling back to the back-scan (%zu)\n",
+			 psets_len, scan_len);
+		psets_len = scan_len;
+	}
+	sess_info(bufs, ave->dev,
+		 "session: frame: parameter sets %zu bytes (firmware said %u bits; back-scan says %zu%s), first NAL type %d\n",
+		 psets_len, info->sps_pps_bits, scan_len,
+		 scan_len == psets_len ? ", agrees" : " - DISAGREES",
+		 hevc ? ave_session_hevc_nal_type(bufs->psets_cpu, psets_len)
+		      : ave_session_nal_type(bufs->psets_cpu, psets_len));
+	if (!bufs->quiet)
+		print_hex_dump(KERN_INFO, "session: psets: ", DUMP_PREFIX_OFFSET,
+		       16, 1, bufs->psets_cpu, min_t(size_t, psets_len, 64),
+		       false);
+
+	bufs->coded[idx].len = info->bytes;
+	bufs->coded[idx].span = info->span;
+	bufs->coded[idx].cabac_zero_words = info->cabac_zero_words;
+	bufs->coded[idx].n_slice = min_t(u32, info->n_slice, AVE_CODED_SLICE_MAX);
+	memcpy(bufs->coded[idx].slice, info->slice,
+	       bufs->coded[idx].n_slice * sizeof(info->slice[0]));
+	bufs->psets_len = psets_len;
+	bufs->n_done = n + 1;
+	return ave_sess_stream_append(bufs, idx,
+				      frame_type == AVE_FRAME_TYPE_IDR);
+}
+
+static int ave_session_process(struct ave_device *ave,
+			       const struct ave_cmd_abi *abi,
+			       struct ave_sess_bufs *bufs, u64 client_id,
+			       u32 n)
+{
+	const bool hevc = bufs->codec == AVE_SESS_CODEC_HEVC;
+	const enum ave_op op = hevc ? AVE_OP_PROCESS_HEVC : AVE_OP_PROCESS_AVC;
+	struct ave_coded_info *const info = &bufs->coded_info;
+	struct ave_sess_job job;
+	dma_addr_t cmd_iova, luma_iova, chroma_iova;
+	u32 cw, ch, stride, idx;
+	size_t cmd_len;
+	int ret;
+	u64 t0;
+
+	ret = ave_session_process_build(ave, abi, bufs, client_id, n, -1, &job);
+	if (ret)
+		return ret;
+	idx = job.idx;
+	cmd_iova = job.cmd_iova;
+	cmd_len = job.cmd_len;
+	luma_iova = job.luma_iova;
+	chroma_iova = job.chroma_iova;
+	stride = job.stride;
+	cw = ave_mb_align(bufs->width);
+	ch = ave_mb_align(bufs->height);
 
 	t0 = ktime_get_ns();
 	ret = ave_session_cmd(ave, abi, op, "Process",
@@ -3566,192 +3827,7 @@ static int ave_session_process(struct ave_device *ave,
 	 * The completion says nothing about the length; everything comes out
 	 * of the coded-header buffer (docs/53 §3).
 	 */
-	dma_rmb();
-	if (!bufs->quiet)
-		print_hex_dump(KERN_INFO, "session: coded_hdr: ", DUMP_PREFIX_OFFSET,
-		       16, 4, bufs->coded_hdr[idx].cpu, 0x40, false);
-	if (!bufs->quiet)
-		print_hex_dump(KERN_INFO, "session: slice0: ", DUMP_PREFIX_OFFSET,
-		       16, 4,
-		       (u8 *)bufs->coded_hdr[idx].cpu + abi->coded_hdr.slice_bytes_written,
-		       0x20, false);
-
-	ret = ave_cmd_coded_length_codec(abi, bufs->coded_hdr[idx].cpu,
-					 bufs->coded_hdr[idx].size,
-					 bufs->coded[idx].size, hevc,
-					 abi->process_hevc.hdr_slot_bytes, info);
-	if (ret) {
-		dev_err(ave->dev,
-			"session: frame: cannot decode the coded header: %d\n",
-			ret);
-		return ret;
-	}
-	sess_info(bufs, ave->dev,
-		 "session: frame %u: %u bytes in %u slice(s) (written %u - trimmed %u), FrameTypeReturned %u, frame_num %u (sent %u), SPS+PPS %u bits, cabac_zero_words %u\n",
-		 n, info->bytes, info->slices, info->span, info->bytes_removed,
-		 info->frame_type, info->frame_num, n, info->sps_pps_bits,
-		 info->cabac_zero_words);
-	if (hevc) {
-		/*
-		 * docs/77 §8.2 H2: the header slot should begin 00 00 00 01
-		 * 28 01 (IDR_N_LP) on an IDR, 00 00 00 01 02 01 (TRAIL_R) on
-		 * a P. Logged for the first frame, and whenever the header is
-		 * not where this slot published it.
-		 */
-		const struct ave_coded_slice *e = &info->slice[0];
-		bool mine = info->n_slice && e->hdr_iova >= bufs->slice_hdr[idx].iova &&
-			    e->hdr_iova - bufs->slice_hdr[idx].iova + e->hdr_len <=
-				bufs->slice_hdr[idx].size;
-
-		sess_info(bufs, ave->dev,
-			  "session: frame %u: HEVC slice headers %u bytes (slice 0: %u bytes at %#llx, %s), frame = coded %u + headers\n",
-			  n, info->hdr_bytes, info->n_slice ? e->hdr_len : 0,
-			  info->n_slice ? e->hdr_iova : 0,
-			  mine ? "in this slot's surface" : "NOT in this slot's surface",
-			  info->bytes - info->hdr_bytes);
-		if (mine && (!n || !bufs->quiet)) {
-			const u8 *hb = (const u8 *)bufs->slice_hdr[idx].cpu +
-				       (e->hdr_iova - bufs->slice_hdr[idx].iova);
-
-			dma_rmb();
-			dev_info(ave->dev,
-				 "session: frame %u: slice 0 header NAL type %d (want 19/20 IDR, 1 TRAIL_R P)\n",
-				 n, ave_session_hevc_nal_type(hb, e->hdr_len));
-			print_hex_dump(KERN_INFO, "session: slicehdr: ",
-				       DUMP_PREFIX_OFFSET, 16, 1, hb,
-				       min_t(u32, e->hdr_len, 32), false);
-		}
-		if (!info->hdr_bytes)
-			dev_warn(ave->dev,
-				 "session: frame %u: no slice header reported (record+0x218 = 0); the stream will not decode\n",
-				 n);
-		/*
-		 * The header is the firmware's, so it says what the frame is.
-		 * A stream gets IdrPeriod 30 (docs/77 §16) while the host picks
-		 * its IDRs; if the firmware ever makes one we did not ask for,
-		 * follow it - parameter sets in front, POC count restarted -
-		 * rather than emit a stream that disagrees with its headers.
-		 * h3h's frames were all what was asked, so a no-op so far.
-		 */
-		if (mine && f.frame_type != AVE_FRAME_TYPE_IDR) {
-			const u8 *hb = (const u8 *)bufs->slice_hdr[idx].cpu +
-				       (e->hdr_iova - bufs->slice_hdr[idx].iova);
-			int nt;
-
-			dma_rmb();
-			nt = ave_session_hevc_nal_type(hb, e->hdr_len);
-			if (nt == 19 || nt == 20) {
-				dev_warn(ave->dev,
-					 "session: frame %u: sent as type %u, the firmware coded an IDR (NAL %d); treating it as one\n",
-					 n, f.frame_type, nt);
-				f.frame_type = AVE_FRAME_TYPE_IDR;
-				bufs->last_idr = n;
-			}
-		}
-	}
-
-	/*
-	 * FrameTypeReturned == 4 means the firmware DROPPED the frame
-	 * (fw 0x13340 / 0x5c930, tested at 0x14bc0). Without naming it, a
-	 * dropped frame and a dead pipe look identical from here. docs/67 §5.
-	 */
-	if (info->frame_type == AVE135_FRAME_TYPE_DROPPED) {
-		dev_err(ave->dev,
-			"session: frame %u: the firmware DROPPED this frame (FrameTypeReturned 4)\n",
-			n);
-		return -ENODATA;
-	}
-	if (info->frame_num != n)
-		dev_warn(ave->dev,
-			 "session: frame %u: the firmware echoed frameNumber %u, not %u - the field may not be reaching it\n",
-			 n, info->frame_num, n);
-	/*
-	 * Every macroblock must be accounted for by exactly one of the
-	 * counters. This is the direct test for F16 and F17's failure shape -
-	 * a frame that "completed" having encoded nothing - and it is cheap.
-	 */
-	{
-		u32 mbs = (cw / AVE_MB_SIZE) * (ch / AVE_MB_SIZE);
-		const u8 *h = bufs->coded_hdr[idx].cpu;
-		u32 k, i_mb = 0, p_mb = 0, skip_mb = 0;
-
-		for (k = 0; k < 4; k++) {
-			i_mb += get_unaligned_le32(h + abi->coded_hdr.i_mb_cnt + 4 * k);
-			p_mb += get_unaligned_le32(h + abi->coded_hdr.p_mb_cnt + 4 * k);
-			skip_mb += get_unaligned_le32(h + abi->coded_hdr.skip_mb_cnt + 4 * k);
-		}
-		if (hevc)
-			/* Whether these count MBs or CTUs is unknown (docs/77 §4). */
-			sess_info(bufs, ave->dev,
-				  "session: frame %u: HEVC counters I %u P %u skip %u = %u (%u MBs, %u CTUs; unit unknown, no check)\n",
-				  n, i_mb, p_mb, skip_mb, i_mb + p_mb + skip_mb, mbs,
-				  DIV_ROUND_UP(cw, 32) * DIV_ROUND_UP(ch, 32));
-		else
-			sess_info(bufs, ave->dev,
-				  "session: frame %u: MB counts I %u P %u skip %u = %u of %u expected%s\n",
-				  n, i_mb, p_mb, skip_mb, i_mb + p_mb + skip_mb, mbs,
-				  i_mb + p_mb + skip_mb == mbs ? "" : " - MISMATCH");
-	}
-
-	if (!info->bytes) {
-		dev_err(ave->dev,
-			"session: frame: the firmware reported ZERO coded bytes - the encode did not produce a bitstream\n");
-		return -ENODATA;
-	}
-	/* Coded-buffer bytes only: HEVC's headers live in the header slots. */
-	if (info->bytes - info->hdr_bytes > bufs->coded[idx].size) {
-		dev_err(ave->dev,
-			"session: frame: reported length %u exceeds the coded buffer (%u); header is not what we think it is\n",
-			info->bytes, bufs->coded[idx].size);
-		return -EPROTO;
-	}
-
-	if (!bufs->quiet)
-		print_hex_dump(KERN_INFO, "session: coded: ", DUMP_PREFIX_OFFSET,
-		       16, 1, bufs->coded[idx].cpu, min_t(u32, info->bytes, 64),
-		       false);
-
-	/*
-	 * ui32_SPSPPSHeaderBits is exact: it is literally sps_bits + pps_bits,
-	 * the two memcpy lengths the firmware shifted back up (fw 0x5df48 /
-	 * 0x5df70 / 0x5df9c). Use it, and keep the back-scan only as a
-	 * cross-check - the scan is wrong by construction the moment a second,
-	 * shorter Start_AVC leaves a longer parameter set's tail behind.
-	 * docs/67 §4.
-	 */
-	scan_len = ave_session_psets_len(bufs->psets_cpu, bufs->psets_size);
-	if (info->sps_pps_bits % 8)
-		dev_warn(ave->dev,
-			 "session: frame: SPS+PPS is %u bits, not a whole number of bytes\n",
-			 info->sps_pps_bits);
-	psets_len = info->sps_pps_bits / 8;
-	if (!psets_len || psets_len > bufs->psets_size) {
-		dev_warn(ave->dev,
-			 "session: frame: SPS+PPS length %zu is unusable; falling back to the back-scan (%zu)\n",
-			 psets_len, scan_len);
-		psets_len = scan_len;
-	}
-	sess_info(bufs, ave->dev,
-		 "session: frame: parameter sets %zu bytes (firmware said %u bits; back-scan says %zu%s), first NAL type %d\n",
-		 psets_len, info->sps_pps_bits, scan_len,
-		 scan_len == psets_len ? ", agrees" : " - DISAGREES",
-		 hevc ? ave_session_hevc_nal_type(bufs->psets_cpu, psets_len)
-		      : ave_session_nal_type(bufs->psets_cpu, psets_len));
-	if (!bufs->quiet)
-		print_hex_dump(KERN_INFO, "session: psets: ", DUMP_PREFIX_OFFSET,
-		       16, 1, bufs->psets_cpu, min_t(size_t, psets_len, 64),
-		       false);
-
-	bufs->coded[idx].len = info->bytes;
-	bufs->coded[idx].span = info->span;
-	bufs->coded[idx].cabac_zero_words = info->cabac_zero_words;
-	bufs->coded[idx].n_slice = min_t(u32, info->n_slice, AVE_CODED_SLICE_MAX);
-	memcpy(bufs->coded[idx].slice, info->slice,
-	       bufs->coded[idx].n_slice * sizeof(info->slice[0]));
-	bufs->psets_len = psets_len;
-	bufs->n_done = n + 1;
-	return ave_sess_stream_append(bufs, idx,
-				      f.frame_type == AVE_FRAME_TYPE_IDR);
+	return ave_session_process_result(ave, abi, bufs, &job);
 }
 
 /* ------------------------------------------------------------------------ */
