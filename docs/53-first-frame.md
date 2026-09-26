@@ -4046,3 +4046,42 @@ H.264 on the same test (f85): 2M 98% / 40.8 dB, 4M 99% / 47.0 dB. The
 default stays off. GStreamer `v4l2h265enc` (`v4l2-test.sh 60 gst`): 60
 frames, Y 44.27 dB, as with v4l2-ctl. **HEVC through V4L2 is done: H1-H4
 pass.**
+
+## v1-v9 (2026-09-26): the PMP vote per stream (docs/80)
+
+`624716d` moved `pmp_vote` from probe to `ave_enc_start()`/`ave_enc_stop()`
+and changed the overlay to sentinel phandles (docs/79 §3). Every run:
+PMP boot, `OVERLAY_ARGS=pmp_venc=1 pmp_report=1
+pmp_vote=0x2000000300000003`, `v4l2-test.sh 60 ctl` at 1080p, 4K, 1080p, 4K
+(per-frame Process round trip).
+
+- **Overlay:** the sentinels resolve on the PMP DT to what the old
+  fixup produced: aic 0x13 (x3), venc_sys 0x1d (x4), pipe5/me0/pipe4/afnc4_ioa
+  0xc7/0xc9/0xc8/0xca, then the overlay applies. PSNR is the same as before
+  (44.69/44.70 dB).
+
+| run | change | 1080p | 4K |
+|---|---|---|---|
+| v1 | per stream, as committed | 17.40 ms | 63.8 ms |
+| v2 | `pmp_vote_always=1` (control, same build) | **5.81** | **21.0** |
+| v3 | v1 plus a status read at stream end | 17.37 | 63.8 |
+| v4 | v3 plus a report off/on pulse after the vote | 17.33 | 63.8 |
+| v5 | always, but voted after the core starts, before Config | **5.81** | **21.0** |
+| v6 | always, voted after Config | **5.83** | **21.0** |
+| v7 | v3 with 600-frame streams (10 s) | 17.44 | - |
+| v8 | v3 without the immediate read-back | **5.80** | **21.0** |
+| v9 | the fix, no experiment switches | **5.81** | **21.0** |
+
+- **v1:** each vote reads back exactly, with no SError, but it runs at the
+  no-vote clock (f97: 17.4/63.9).
+- **v2:** reproduces f99, so the regression is in the streaming path.
+- **v3:** the status word at +8 has bit 1 set when read straight after the
+  write, and clear at stream end with the same timestamp. The PMP took the
+  entry up but did not apply it.
+- **v4-v7:** rule out a PS-REQ transition, the firmware boot, Config, and
+  a slow PMP ramp.
+- **v8:** the cause. **Reading the entry while bit 1 is pending cancels
+  the request.** The probe-time path only worked because it reads 400 ms
+  after the write.
+- **v9:** streaming votes are written and not read back. The check moves to
+  stream end.
