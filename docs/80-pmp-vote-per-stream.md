@@ -31,9 +31,10 @@ load rather than the first STREAMON.
 - **No 200 ms holds.** The probe-time path waits 200 ms around each
   access, so each netconsole marker leaves the machine before the next
   access (f93-f99). The streaming path skips them, since they would add
-  800 ms to every STREAMON and STREAMOFF. Each vote still logs one line,
-  `pmp: AVE0 DVFS vote V, read back R`, with `MISMATCH` appended when the
-  read-back differs.
+  800 ms to every STREAMON and STREAMOFF. It also skips the read-back (§3): each
+  vote logs `pmp: AVE0 DVFS vote V written`, and stream end logs
+  `pmp: at stream end, AVE0 DVFS V (+8 S)`, with `MISMATCH` appended if
+  the entry is not the vote.
 - **A failed vote does not fail the stream.** It only costs speed, and the
   stream runs at whatever clock the PMP chooses.
 - **A stream that did not close keeps its vote.** If Close fails, the
