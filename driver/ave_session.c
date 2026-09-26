@@ -505,6 +505,30 @@ MODULE_PARM_DESC(session_batch,
 	"P frames in flight at once after the IDR (docs/81 b3); 0/1 = one at a time");
 
 /*
+ * docs/81 b4: after the IDR, {B(n), P(n+1)} pairs sent in display order
+ * as one batch; the firmware holds the B until P is coded. Needs
+ * session_poc0=1, session_dpb=3 and a Main or High profile.
+ */
+static bool session_bframes;
+module_param(session_bframes, bool, 0444);
+MODULE_PARM_DESC(session_bframes,
+	"H.264 self-test: IDR then {B, P} pairs (docs/81 b4); needs session_poc0=1 session_dpb=3 and profile >= 77");
+
+/*
+ * docs/81 R9: a B frame's colocated read starts 20 * 64 bytes below the
+ * L1 slot's published pointer (asserts 6860/6861/6873/6874, docs/65
+ * §3.2), so with B frames each slot is published this far into its
+ * buffer.
+ */
+#define AVE_SESS_COLOC_PAD	1280
+
+/* docs/81 b5: B frames with spatial rather than temporal direct */
+static bool session_direct_spatial;
+module_param(session_direct_spatial, bool, 0444);
+MODULE_PARM_DESC(session_direct_spatial,
+	"H.264 B frames: direct_spatial_mv_pred_flag 1 (Process wire 0x7C) instead of temporal (docs/81 b5)");
+
+/*
  * docs/68 §6 item 9: sessions per module load. After the first session's
  * frames, N-1 more rounds of Stop + Close, then Open + Start_AVC + Process
  * on freshly allocated buffers, with the firmware left running and Config
@@ -1862,19 +1886,20 @@ static int ave_session_start_prep(struct ave_device *ave,
 			? ALIGN((size_t)128 * DIV_ROUND_UP(cw, 32) *
 				DIV_ROUND_UP(ch, 64), SZ_4K)
 			: ALIGN((size_t)128 * (cw / 16) * (ch / 16), SZ_4K);
+		const size_t pad = !hevc && session_bframes ? AVE_SESS_COLOC_PAD : 0;
 
 		for (i = 0; i < bufs->n_dpb; i++) {
 			dma_addr_t iova;
-			void *cpu = ave_sess_dma_alloc(bufs, sz, &iova);
+			u8 *cpu = ave_sess_dma_alloc(bufs, ALIGN(sz + pad, SZ_4K), &iova);
 
 			if (!cpu) {
 				dev_warn(ave->dev, "session: colocated slot %u allocation failed; table dropped\n", i);
 				bufs->coloc_size = 0;
 				break;
 			}
-			memset(cpu, 0x5a, sz);
-			bufs->coloc[i] = iova;
-			bufs->coloc_cpu[i] = cpu;
+			memset(cpu, 0x5a, ALIGN(sz + pad, SZ_4K));
+			bufs->coloc[i] = iova + pad;
+			bufs->coloc_cpu[i] = cpu + pad;
 			bufs->coloc_size = sz;
 		}
 		if (bufs->coloc_size) {
@@ -3290,6 +3315,7 @@ static int ave_session_process_build(struct ave_device *ave,
 	 * below m_iFirstFrameNumber and spins on "b ." if it is (fw 0x2d350).
 	 */
 	f.frame_num = n;
+	f.direct_spatial = session_direct_spatial;
 	f.in_luma_addr = luma_iova;
 	f.in_luma_stride = stride;
 	f.in_luma_size = luma_bytes;
@@ -3699,6 +3725,16 @@ static int ave_session_process_batch(struct ave_device *ave,
 				AVE_SESS_TIMEOUT_MS, k + 1, count,
 				rx->ack_seen ? "seen" : "not seen",
 				rx->other_count, rx->other_id);
+			/*
+			 * Read-only, as the sync path's timeout: where the
+			 * pipe stopped, and what the reference readers were
+			 * given - the L1 reader for a B (docs/81 b4 (e)).
+			 */
+			if (session_diag) {
+				ave_session_diag_channels(ave, "batch timeout");
+				ave_session_diag_hevc_inter(ave);
+				ave_session_diag_mcpu(ave, bufs);
+			}
 			ret = -ETIMEDOUT;
 			goto out;
 		}
@@ -3725,6 +3761,12 @@ static int ave_session_process_batch(struct ave_device *ave,
 		done[j] = true;
 		len += scnprintf(order + len, sizeof(order) - len, "%s%u",
 				 k ? "," : "", ns[j]);
+		/* docs/81 b4e: the readers after a frame that did complete */
+		if (session_diag && session_bframes) {
+			dev_info(ave->dev, "session: batch: readers after frame %u (type %u) completed:\n",
+				 ns[j], job[j].frame_type);
+			ave_session_diag_hevc_inter(ave);
+		}
 		ret = ave_session_process_result(ave, abi, bufs, &job[j]);
 		if (ret)
 			goto out;
@@ -4076,6 +4118,13 @@ int ave_session_selftest(struct ave_device *ave)
 	 * would unmap live IOVAs and invite the fault storm docs/31 measured.
 	 * ave_remove() frees them after ave_power_off(). (Review finding 2.)
 	 */
+	if (session_bframes &&
+	    (session_codec || session_profile < 77 || !session_poc0 ||
+	     session_dpb < 3)) {
+		dev_err(ave->dev,
+			"session: session_bframes needs H.264, profile >= 77, session_poc0=1 and session_dpb>=3 (docs/81); not running\n");
+		return -EINVAL;
+	}
 	bufs = kzalloc(sizeof(*bufs), GFP_KERNEL);
 	if (!bufs)
 		return -ENOMEM;
@@ -4161,10 +4210,14 @@ int ave_session_selftest(struct ave_device *ave)
 		u32 i;
 
 		k = min_t(u32, k, AVE_SESS_RX_Q);
+		/* {B, P}: the pair, or a lone trailing frame as P */
+		if (session_bframes && frame)
+			k = min_t(u32, 2, bufs->n_frames - frame);
 		if (k > 1) {
 			for (i = 0; i < k; i++) {
 				ns[i] = frame + i;
-				types[i] = AVE_FRAME_TYPE_P;
+				types[i] = session_bframes && i < k - 1 ?
+					   AVE_FRAME_TYPE_B : AVE_FRAME_TYPE_P;
 			}
 			ret = ave_session_process_batch(ave, abi, bufs,
 							AVE_SESS_CLIENT_ID,

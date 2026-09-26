@@ -1390,6 +1390,13 @@ struct ave_process_avc_layout {
 	u32	out_index;		/* u32 */
 	u32	out_coded;		/* u64 */
 	u32	out_coded_hdr;		/* u64 */
+	/*
+	 * u8 direct_spatial_mv_pred_flag, absolute (the slice block at
+	 * cmd+0x40, +60). PipePrepareParam tests it for a B frame and takes
+	 * the temporal-direct path on 0 (fw 0x48c58 -> 0x49048); the slice
+	 * writer codes it (0x1a07c). docs/81 §1.1.
+	 */
+	u32	direct_spatial;
 	u32	out_coded_size;		/* u32 */
 	u32	recon_y;		/* u64 sRecon.Y_MSB */
 	u32	recon_uv;		/* u64 sRecon.UV_MSB */
@@ -2002,6 +2009,7 @@ const struct ave_cmd_abi ave_cmd_abi_13_5 = {
 		.out_index	= 0xc04,	/* kext str w26,[x3,#3076] 0xfffffe0008eb0520 */
 		.out_coded	= 0xc08,	/* kext 0xfffffe0008eb0548; fw 0x58384 */
 		.out_coded_hdr	= 0xc10,	/* kext 0xfffffe0008eb05a0 */
+		.direct_spatial	= 0x7c,		/* ldrb [x25,#60] fw 0x48c58 */
 		.out_coded_size	= 0xc18,	/* kext 0xfffffe0008eb0554; fw 0x58364 */
 		.recon_y	= 0x898,	/* setRefPointers 0x2c338; fw 0x3c0c4 is
 						 * CHEVCController::DebugEncode, right
@@ -2505,6 +2513,7 @@ const struct ave_cmd_abi ave_cmd_abi_26_6 = {
 		.out_index	= AVE_PIC_OUT_INDEX,
 		.out_coded	= AVE_PIC_OUT_CODED,
 		.out_coded_hdr	= AVE_PIC_OUT_CODED_HDR,
+		.direct_spatial	= AVE_OFF_NONE,	/* not traced */
 		.out_coded_size	= AVE_PIC_OUT_CODED_SIZE,
 		.recon_y	= AVE_PIC_RECON_Y_MSB,
 		.recon_uv	= AVE_PIC_RECON_UV_MSB,

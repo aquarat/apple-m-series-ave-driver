@@ -219,7 +219,8 @@ struct ave_avc_session {
 };
 
 struct ave_avc_frame {
-	u32	frame_type;		/* AVE_FRAME_TYPE_{I,P,IDR} */
+	u32	frame_type;		/* AVE_FRAME_TYPE_{I,P,B,IDR} */
+	bool	direct_spatial;		/* B only: spatial direct (docs/81 b5) */
 	/*
 	 * frameInfo.frameNumber: a monotone per-client counter the firmware
 	 * keys its queue on, not the H.264 frame_num syntax element (which

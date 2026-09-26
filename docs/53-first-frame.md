@@ -4098,3 +4098,38 @@ no PMP. Plan from host-side analysis: firmware reorders (docs/81).
   published. No firmware complaint; **all 60 slice NALs byte-identical to
   b1** (RefSpacing 0 keeps one reference, as predicted). Round trip 15.9
   ms against b1's 17.4 (not investigated; no PMP loaded in either).
+
+## b3-b5 (2026-09-26): frames in flight, the first B frame
+
+Self-test, 1280x720, `session_poc0=1 session_dpb=3`.
+- **b3c/b3** (5 frames): `session_batch=2` sends the P frames in pairs
+  (`ave_session_process_batch`: send both, collect the completions from a
+  reply queue, match each by its reply slot word +0x1C). Completions come
+  in order 1,2 and 3,4; **the stream is byte-identical** to the
+  one-at-a-time control b3c. Y 49.3-49.7 dB.
+- **b4** (`session_bframes=1 session_profile=77`, 3 frames: IDR0, then
+  {B1, P2} as one batch): **the firmware reorders** as docs/81 predicted.
+  P2 completes first (FrameTypeReturned 1, frame_num 2) while B1 is held.
+  Then B1's pipe hangs: `PIPE HANG: 3, 3`, `StartCount 3-3-3-2`,
+  `Idle 1-1-0-1` (LRME ran three times, the pipe started three times, the
+  transcoder finished two). The machine survives.
+- **b4d/b4e** (b4 plus read-only dumps at the batch timeout, and after
+  each completed frame as the control):
+  - The B's references are right. L0 luma/chroma readers point at DPB
+    slot 0 (the IDR) and L1 at slot 2 (P2). The colocated reader
+    (DPE+0x20BC0) points at slot 2's colocated buffer (the published
+    pointer, padded 1280 B per docs/65 §3.2), and B1's colocated writer
+    at slot 1. The third reader channel (DPE+0x20100, never active
+    before) re-reads B1's source.
+  - **The pipe stops at the third macroblock:** ModeDec entries 2,
+    ReconLuma granted 2, CAVLC entries 2. Luma readers L0/L1 progress
+    +0x18 = 0x20 / 0x6. **Neither chroma reader has started (0xfffe).**
+    The main source reader is at MB row 2. The LowResResult readers
+    [0],[1] have 0xEC00 of 0xF000.
+  - The control, P2 completed: luma reader progress 0x00300006, chroma
+    0x002d004d (the whole frame).
+- **b5** (b4 + `session_direct_spatial=1`, Process wire 0x7C = 1; fw
+  0x48c58 branches on it for B): the same hang at the same place. The
+  direct mode is not the cause.
+
+Open: what the B pipe waits for at MB 2 (static analysis next).

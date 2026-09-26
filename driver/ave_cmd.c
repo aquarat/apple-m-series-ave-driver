@@ -1001,12 +1001,14 @@ static int ave_pic_check(const struct ave_cmd_abi *abi,
 	const struct ave_process_avc_layout *l = &abi->process_avc;
 
 	/*
-	 * I, P and IDR. B is left out deliberately: it needs a reference list
-	 * the session does not build yet, and the firmware's enum accepts it
-	 * (2 and 7) without that being a reason to send it. docs/64 §1.3.
+	 * I, P, IDR and B (2). The firmware holds a B until the next anchor
+	 * and builds its lists itself (docs/81 §0); the session must send the
+	 * anchor in the same batch. 7 (reference B) is for the pyramid only
+	 * and stays refused (docs/81 R12).
 	 */
 	if (f->frame_type != AVE_FRAME_TYPE_I &&
 	    f->frame_type != AVE_FRAME_TYPE_P &&
+	    f->frame_type != AVE_FRAME_TYPE_B &&
 	    f->frame_type != AVE_FRAME_TYPE_IDR)
 		return -EINVAL;
 	if (!f->in_luma_addr || (f->in_luma_addr & (AVE_STRIDE_ALIGN - 1)) ||
@@ -1191,6 +1193,11 @@ int ave_cmd_build_process_avc(const struct ave_cmd_abi *abi, u8 *buf,
 	if (ret < 0)
 		return ret;
 	ave_pic_fill(&w, &abi->process_avc, abi->process_avc.picmgmt, f);
+	if (f->frame_type == AVE_FRAME_TYPE_B && f->direct_spatial) {
+		if (abi->process_avc.direct_spatial == AVE_OFF_NONE)
+			return -EINVAL;
+		wr8(&w, abi->process_avc.direct_spatial, 1);
+	}
 	return ave_cmd_end(&w);
 }
 
@@ -1220,6 +1227,9 @@ int ave_cmd_build_process_hevc(const struct ave_cmd_abi *abi, u8 *buf,
 	ret = ave_pic_check(abi, &hf->pic, align);
 	if (ret)
 		return ret;
+	/* HEVC B needs the RPS sets with positive pictures (docs/81 §1.3) */
+	if (hf->pic.frame_type == AVE_FRAME_TYPE_B)
+		return -EINVAL;
 	/* SetTranscode :7597/:7598 */
 	if (hf->pic.coded_addr & (align - 1))
 		return -EINVAL;

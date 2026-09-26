@@ -984,8 +984,18 @@ static void test_process_13_5(void)
 	expect_int(ave_cmd_build_process_avc(a, buf, sizeof(buf), &CTX, 21, &f), 0x1940,
 		   "P frame accepted");
 	f.frame_type = AVE_FRAME_TYPE_B;
+	expect_int(ave_cmd_build_process_avc(a, buf, sizeof(buf), &CTX, 21, &f), 0x1940,
+		   "B frame accepted: the firmware builds its lists (docs/81 §0)");
+	E32(buf, 0x1674, 2, "IMG_FRAME_TYPE 2 at PICMGMT+0xCAC (docs/81 §1.1)");
+	E8(buf, 0x7c, 0, "direct_spatial 0 (temporal) unless asked");
+	f.direct_spatial = true;
+	expect_int(ave_cmd_build_process_avc(a, buf, sizeof(buf), &CTX, 21, &f), 0x1940,
+		   "B frame, spatial direct");
+	E8(buf, 0x7c, 1, "direct_spatial_mv_pred_flag (ldrb [x25,#60] fw 0x48c58)");
+	f.direct_spatial = false;
+	f.frame_type = 7;
 	expect_int(ave_cmd_build_process_avc(a, buf, sizeof(buf), &CTX, 21, &f), -EINVAL,
-		   "B frame still refused: no reference list is built");
+		   "7 (reference B, pyramid only) refused (docs/81 R12)");
 	f.frame_type = 5;
 	expect_int(ave_cmd_build_process_avc(a, buf, sizeof(buf), &CTX, 21, &f), -EINVAL,
 		   "5 is not an IMG_FRAME_TYPE the firmware accepts");
