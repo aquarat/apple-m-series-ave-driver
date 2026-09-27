@@ -4275,3 +4275,14 @@ Host analysis 3 found search_range 2 is not a t6001 mode (the kext's
 colocated, SrcNeighbor and entropy sizes; search range; direct mode; CAVLC;
 the PMP clock; DART stream 15; B-specific paths. B frames are parked here
 (docs/81).
+
+## Stability campaign, R1, R2, R2b (2026-09-27): docs/84
+
+- `tools/stress.sh`, 2 h 16 min: **0 FAIL** (6055 byte-identical soak
+  streams, 60 000-frame H.264 and HEVC streams, 300 cycles, 150 random
+  configurations, 40 SIGKILLs, 20 contention rounds).
+- **R1** (`session_recover=1` after bs1's hang): Stop acked but never
+  completed, the next Open not even acked. A hang wedges the firmware.
+- **R2** (`dapf_set=same`, non-posted): 16 DAPF slots written back, no
+  SError. **R2b** (`dapf_set=probe`): slot 15 cleared and reads back 0.
+  docs/49's "Linux cannot write the DAPF" was the posted mapping.

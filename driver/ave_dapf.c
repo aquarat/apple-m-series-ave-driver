@@ -764,6 +764,40 @@ static int ave_dapf_rewrite_same(struct ave_device *ave)
 	return bad ? -EIO : 0;
 }
 
+/*
+ * docs/84 R2b: does a Linux write CHANGE a slot? Clear slot 15 - unused
+ * uninitialised garbage on this machine, outside m1n1's entries 0..2 - to
+ * a disabled all-zero entry and read it back.
+ */
+static int ave_dapf_probe_slot15(struct ave_device *ave)
+{
+	struct ave_dapf_entry before, after;
+	void __iomem *b;
+	int ret;
+
+	ret = ave_dapf_check_power(ave);
+	if (ret)
+		return ret;
+	ret = ave_dapf_map(ave);
+	if (ret)
+		return ret;
+	b = ave->dapf + DAPF_ENTRY(AVE_DAPF_MAX_ENTRIES - 1);
+	ave_dapf_slot_read(ave, AVE_DAPF_MAX_ENTRIES - 1, &before);
+	ave_step(ave, "dapf probe: clearing slot 15 (docs/84 R2b)");
+	writel(0, b + DAPF_R0);		/* disable first, then the range */
+	writel(0, b + DAPF_R4);
+	writeq(0, b + DAPF_START);
+	writeq(0, b + DAPF_END);
+	ave_dapf_slot_read(ave, AVE_DAPF_MAX_ENTRIES - 1, &after);
+	dev_info(ave->dev,
+		 "dapf probe: slot 15 r0 %#x r4 %#x %#llx-%#llx -> r0 %#x r4 %#x %#llx-%#llx: %s\n",
+		 before.r0, before.r4, before.start, before.end,
+		 after.r0, after.r4, after.start, after.end,
+		 !after.r0 && !after.r4 && !after.start && !after.end ?
+		 "WRITES TAKE EFFECT" : "the write did not stick");
+	return 0;
+}
+
 int ave_dapf_program(struct ave_device *ave,
 		     const struct ave_dapf_entry *ent, unsigned int n,
 		     bool preclear)
@@ -852,9 +886,9 @@ int ave_dapf_program(struct ave_device *ave,
 
 bool ave_dapf_program_requested(void)
 {
-	/* "same" rewrites what is there: no TEXT policy needed (docs/84 R2) */
+	/* same/probe touch no admitting entry: no TEXT policy (docs/84 R2) */
 	return dapf_set && *dapf_set && !sysfs_streq(dapf_set, "off") &&
-	       !sysfs_streq(dapf_set, "same");
+	       !sysfs_streq(dapf_set, "same") && !sysfs_streq(dapf_set, "probe");
 }
 
 /*
@@ -975,6 +1009,8 @@ int ave_dapf_program_selected(struct ave_device *ave)
 	/* docs/84 R2: can Linux write this DAPF at all, non-posted? */
 	if (sysfs_streq(dapf_set, "same"))
 		return ave_dapf_rewrite_same(ave);
+	if (sysfs_streq(dapf_set, "probe"))
+		return ave_dapf_probe_slot15(ave);
 	if (sysfs_streq(dapf_set, "control"))
 		want_text = false;
 	else if (sysfs_streq(dapf_set, "text"))
