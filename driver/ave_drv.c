@@ -957,6 +957,45 @@ static void ave_pmp_report_abandon(struct ave_device *ave)
 	ave->pmp_dev = NULL;
 }
 
+/*
+ * docs/84 §5: after a firmware hang, re-probe the device from a work item -
+ * remove() (an unclean teardown) and probe() (which finds the drifted DATA,
+ * resets the core and restores it, R7). The work item is not part of the
+ * device, which remove() frees.
+ */
+struct ave_recover {
+	struct work_struct	work;
+	struct device		*dev;
+};
+
+static void ave_recover_fn(struct work_struct *work)
+{
+	struct ave_recover *r = container_of(work, struct ave_recover, work);
+	int ret;
+
+	dev_warn(r->dev, "recover: re-probing after a firmware hang\n");
+	ret = device_reprobe(r->dev);
+	if (ret)
+		dev_err(r->dev, "recover: re-probe failed: %d\n", ret);
+	put_device(r->dev);
+	kfree(r);
+}
+
+void ave_schedule_recover(struct ave_device *ave)
+{
+	struct ave_recover *r;
+
+	if (ave->recover_scheduled)
+		return;
+	r = kzalloc(sizeof(*r), GFP_KERNEL);
+	if (!r)
+		return;
+	ave->recover_scheduled = true;
+	INIT_WORK(&r->work, ave_recover_fn);
+	r->dev = get_device(ave->dev);
+	schedule_work(&r->work);
+}
+
 static void ave_power_off(struct ave_device *ave, const char *why)
 {
 	if (!ave->powered)

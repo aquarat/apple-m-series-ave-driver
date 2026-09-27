@@ -58,7 +58,12 @@ It is a stateful mem2mem encoder, NV12 in:
     the pipe, in H.264 and HEVC alike (docs/81; docs/53 bs1-bs6, hb3).
   - **The second encoder, ave1.** It binds and powers up; it needs an m1n1
     change to fetch its firmware (docs/82).
-  - Reloading the module without a reboot.
+  - System suspend/resume (untested; suspend is masked on the lab machine).
+- **Stability (docs/84):** a 2-hour campaign (6055 byte-identical streams,
+  60 000-frame streams, 300 open/close cycles, 150 random configurations,
+  killed and competing clients) passed with no failure. The module reloads
+  in the same boot, and a firmware hang recovers by itself when the stream
+  is closed.
 - **Porting:** another Apple Silicon machine takes a per-SoC table row and
   an overlay (docs/79). Fedora's own ffmpeg has no HEVC *decoder*, so check
   HEVC output elsewhere, or with a full ffmpeg build.

@@ -73,3 +73,32 @@ is how s2-9 pulsed a cold core.
 boot, default parameters): load 1 "cold", loads 2-5 reset and restore.
 **Every load: H.264 44.308053 dB, HEVC byte-identical.** `ave-load.sh` no
 longer refuses a second load.
+
+## 5. A hung firmware recovers without a reboot
+
+- **R7** (hang with bs1's two references, `ave-load.sh unload`, load with
+  defaults): the unclean teardown leaks its mappings on purpose, and the
+  first attempt refused the next load ("DVA 0xec000 is already mapped").
+  A range that maps page for page to exactly iBoot's DATA/TEXT is this
+  driver's own leftover; once stage 7 has reset the core, it is reused.
+  Then the reload encodes at the identical PSNR.
+- **In the driver:**
+  - A Process timeout marks the firmware hung (`fw_hung`).
+  - The stream fails at once (`vb2_queue_error`, EPOLLERR); later encodes
+    and STREAMONs fail fast with EIO, not after 2 s timeouts.
+  - When the last file handle closes, a work item re-probes the device
+    (`device_reprobe`: an unclean remove, then probe's automatic reset and
+    restore). Not earlier: unregistering the V4L2 device under an open
+    handle would be a use-after-free.
+- **R8** (V4L2, RefSpacingP 2 set at runtime to force the hang): the hung
+  stream ends in 2.6 s; on close the device re-probes itself, resets and
+  restores; the next H.264 stream is identical (44.308053) and the next
+  HEVC stream byte-identical to R6's.
+
+## 6. Still open
+
+- **System suspend/resume.** The driver has no PM ops. Suspend is masked
+  on the lab machine (the USB NIC does not survive s2idle), so it is
+  untested. The building blocks now exist: core reset, DATA restore, and
+  Linux writes to the DAPF (if venc_sys loses power in suspend).
+- **`.shutdown`.** Not needed for a reboot, which cold-starts the block.

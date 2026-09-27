@@ -4293,3 +4293,9 @@ the PMP clock; DART stream 15; B-specific paths. B frames are parked here
   DATA has drifted from pristine): five load/encode/unload cycles in one
   boot, defaults only, identical H.264 PSNR and byte-identical HEVC each
   time.
+- **R7**: hang (bs1), unload, reload with defaults: first refused (the
+  unclean teardown's leaked DATA mapping); now reused when it maps exactly
+  iBoot's DATA and the core was reset. Identical PSNR.
+- **R8**: a V4L2 hang (RefSpacingP 2 at runtime) fails the stream in
+  2.6 s; the last close re-probes the device, which resets and restores;
+  the next H.264 and HEVC streams are identical to before. docs/84 §5.

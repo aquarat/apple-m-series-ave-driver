@@ -610,6 +610,24 @@ static int ave_fw_map_one(struct ave_device *ave, struct iommu_domain *domain,
 			what, dva, size);
 		return -EINVAL;
 	}
+	/*
+	 * docs/84 R7: an unclean teardown (after a firmware hang) leaks its
+	 * mappings on purpose, and the domain outlives the driver. A range
+	 * that already maps page for page to exactly this physical range is
+	 * that leftover; once stage 7 has reset the core (recover_halted),
+	 * nothing uses it, so reuse it. Anything else is still refused.
+	 */
+	if (iommu_iova_to_phys(domain, dva) == phys && ave->recover_halted) {
+		for (off = 0; off < size; off += pgsz)
+			if (iommu_iova_to_phys(domain, dva + off) != phys + off)
+				break;
+		if (off >= size) {
+			dev_info(ave->dev,
+				 "  %s: DVA %#llx -> phys %#llx +%#llx is already mapped by an earlier load of this driver; reusing it\n",
+				 what, dva, phys, size);
+			return 0;
+		}
+	}
 	for (off = 0; off < size; off += pgsz) {
 		if (iommu_iova_to_phys(domain, dva + off)) {
 			dev_err(ave->dev,
