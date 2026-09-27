@@ -128,8 +128,9 @@ the handler addresses from `0x41243180` (§4.2). Per macroblock it:
    byte `0x10000000` is set, entry `0x412 + QP` of a table in the MCPU image,
    shifted left 4, to `0x4124A1CC` (nQuant / λ).
 6. **Applies three more DMem tests** (from image `0x26a`):
-   - word `0x10000000` `& 0x08000001` == `0x08000001`: patches bit 0 of
-     `0x4124A1D4`;
+   - word `0x10000000` `& 0x00080001` == `0x00080001`: patches bit 0 of
+     `0x4124A1D4`. Bit 19 is set only for `chroma_format_idc == 0`, so this
+     is dead code for 4:2:0 (mask corrected by [73](73-modedec-costs.md) §5.2);
    - word `0x10000000` bit 12: writes `0x4124A1D0`, `0x4124A1D4` and
      `0x4124A1D8`;
    - byte `0x10000002` bit 2: saves/restores `0x4124A1D4`/`0x4124A1D8` in DMem.
