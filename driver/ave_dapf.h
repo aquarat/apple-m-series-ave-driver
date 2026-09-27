@@ -80,6 +80,14 @@ int ave_dapf_early(void);
 int ave_dapf_program_selected(struct ave_device *ave);
 
 /*
+ * docs/86 system sleep: capture every slot (read-only) at probe, and after
+ * resume compare and, if s2idle changed them, write them back. Both need
+ * the "cpudart"/"dapf" reg entries and the stage 6 power reference.
+ */
+int ave_dapf_capture(struct ave_device *ave);
+int ave_dapf_pm_restore(struct ave_device *ave);
+
+/*
  * 0 if the datapath DART's SID-0 TCR/TTBR match the CPUDART's, -EIO if not,
  * -ENODEV if no second DART is attached. Reads only. See ave_dapf.c.
  */
