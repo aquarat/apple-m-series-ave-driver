@@ -273,7 +273,9 @@ register work at all. For the others, holding the device's locks
 3. only if the new level is 15: configure the DPE
    (`_configureDPEWithoutPMP(regmap, psRegOffset, 0, die)`, vtable `+0x10e0`),
    configure the fabric bridges (`_initDeviceBridges(dev, die)`), and set the
-   perf state (`_setPerfState(perfDomain[15], dev->id1, die)`).
+   perf state (`_setPerfState(perfDomain[15], dev->id1, die)`). On 13.5 this
+   call is made only for nub-managed perf domains (ANE), so not for VENC
+   ([75](75-ave-perf-state.md) §3.3 corrects this step).
 
 **Down** (`0xfffffe00097f9194` onward), per entry, in reverse, under the same
 locks:
@@ -308,7 +310,7 @@ to three read-modify-writes, each built on the value before it:
 
 | write | when | value | then wait: mask, value, timeout |
 |---|---|---|---|
-| **1** disarm auto-PM | only if bit 28 is set. If `PS_TARGET != 0xf` at that point it **panics** instead (cold path, `.cold.3`) | `v & 0xEFFFFCFF`: `AUTO_ENABLE` and `WAS_*` cleared | `0xf0`, `0xf0`, `0x2ee00`: `PS_ACTUAL == 15` |
+| **1** disarm auto-PM | only if bit 28 is set. If `PS_TARGET != 0xf` at that point it **panics** instead (the cold path `_setPSLevel.cold.5`, `0xfffffe000981e23c`, as §1 cites it) | `v & 0xEFFFFCFF`: `AUTO_ENABLE` and `WAS_*` cleared | `0xf0`, `0xf0`, `0x2ee00`: `PS_ACTUAL == 15` |
 | **2** level change | always | `(v & 0xFFFFFCF0) \| level`: new `PS_TARGET`, `WAS_*` 0, then `\| 0x300` (`WAS_CLKGATED \| WAS_PWRGATED`) if level ≤ 14 | `0xf0`, `level << 4`, `0x2ee00`: `PS_ACTUAL == level` |
 | **3** re-arm auto-PM | only if level is 15 **and** `autoPmEn` | write 2's value `& 0xFFFFFCFF` (`WAS_*` written 0, W1C) `\| BIT28` | none |
 

@@ -627,10 +627,10 @@ The other resolutions are in the same shapes; regenerate with the formulas in
   `AVE_CalcBufSizeOf*` family (`Recon`, `Colocated`, `LFSRef`, `MCTFOutput`,
   `MBStats`, `EntropyCoding`, …, all around `0xfffffe0008b5eee4`–`0xfffffe0008b63280`).
   These size the kernel-allocated internal surfaces and are untouched here.
-  `AVE_CalcBufSizeOfCodedData` (`0xfffffe0008b5f58c`) — the output bitstream
-  buffer size — was read only far enough to fix `Linear`'s argument order; it
-  scales the frame size by double-precision constants loaded from
-  `0xfffffe000723e9f0`/`0xfffffe000723ea00` that were not decoded.
+  `AVE_CalcBufSizeOfCodedData` (`0xfffffe0008b5f58c`), the output bitstream
+  buffer size, was read here only far enough to fix `Linear`'s argument order.
+  It has since been decoded in full, double-precision constants included, in
+  [18](18-coded-data-sizing.md) §3–§4.
 - **The HTPC `k` argument.** Always 0 from the dispatcher; no other caller
   exists, so the non-zero behaviour is unexercised.
 - **The `kind` field in the resolution min/max entries** (§7) and the 6th
