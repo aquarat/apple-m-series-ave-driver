@@ -729,6 +729,110 @@ int ave_dapf_dump(struct ave_device *ave)
 }
 
 /*
+ * docs/86: system sleep. Read-only capture of all 16 slots once the core is
+ * about to start (stage 8, after ave1's own programming), so resume can
+ * tell whether s2idle took the DAPF with venc_sys - which nothing has
+ * shown either way - and put back exactly what the core last ran with.
+ */
+int ave_dapf_capture(struct ave_device *ave)
+{
+	unsigned int i;
+	bool admits;
+	int ret;
+
+	BUILD_BUG_ON(AVE_DAPF_SLOTS != AVE_DAPF_MAX_ENTRIES);
+	ave->dapf_boot_valid = false;
+	ret = ave_dapf_check_power(ave);
+	if (ret)
+		return ret;
+	ret = ave_dapf_map(ave);
+	if (ret)
+		return ret;
+	for (i = 0; i < AVE_DAPF_MAX_ENTRIES; i++) {
+		struct ave_dapf_entry e = {};
+
+		ave_dapf_slot_read(ave, i, &e);
+		ave->dapf_boot[i] = (struct ave_dapf_slot){
+			.r0 = e.r0, .r4 = e.r4, .start = e.start, .end = e.end,
+		};
+	}
+	ave->dapf_boot_fp = ave_dapf_fingerprint(ave, &admits);
+	ave->dapf_boot_valid = true;
+	dev_info(ave->dev, "pm: DAPF captured for resume: fingerprint %#018llx, TEXT fetch %s\n",
+		 ave->dapf_boot_fp, admits ? "admitted" : "NOT ADMITTED");
+	return 0;
+}
+
+/*
+ * docs/86: after resume, before the core is reset or started. Read-only
+ * when the DAPF survived (the expected case: it survived Linux's boot-time
+ * gating of venc_sys, docs/50). Otherwise put back what probe captured,
+ * non-posted, in m1n1's order (r4, start, end, r0 last) - the sequence R2
+ * showed Linux can write (docs/84 §3) - or, for an instance whose DAPF the
+ * driver owns, program it the way probe does. Either must read back to the
+ * probe-time fingerprint, or the core is not started.
+ */
+int ave_dapf_pm_restore(struct ave_device *ave)
+{
+	unsigned int i;
+	bool admits;
+	u64 fp;
+	int ret;
+
+	if (!ave->dapf_boot_valid)
+		return -ENODATA;
+	ret = ave_dapf_check_power(ave);
+	if (ret)
+		return ret;
+	ret = ave_dapf_map(ave);
+	if (ret)
+		return ret;
+
+	fp = ave_dapf_fingerprint(ave, &admits);
+	if (fp == ave->dapf_boot_fp) {
+		dev_info(ave->dev, "pm: resume: DAPF fingerprint %#018llx SURVIVED the sleep, TEXT fetch %s; nothing written\n",
+			 fp, admits ? "admitted" : "NOT ADMITTED");
+		return 0;
+	}
+	dev_warn(ave->dev, "pm: resume: DAPF fingerprint %#018llx, was %#018llx at probe: CHANGED across the sleep (TEXT fetch %s); writing it back\n",
+		 fp, ave->dapf_boot_fp, admits ? "admitted" : "NOT ADMITTED");
+	ave_dapf_dump_entries(ave, "resume, before restore");
+
+	if (readl(ave->cpudart + DART_DAPF_LOCK) & DART_DAPF_LOCK_BIT) {
+		dev_err(ave->dev, "pm: resume: DAPF_LOCK is set; cannot restore the DAPF\n");
+		return -EPERM;
+	}
+
+	if (ave->soc->dapf_by_driver) {
+		ret = ave_dapf_program_instance(ave);
+		if (ret)
+			return ret;
+	} else {
+		ave_step(ave, "pm: resume: first DAPF write (slot 0 r4, captured values)");
+		for (i = 0; i < AVE_DAPF_MAX_ENTRIES; i++) {
+			void __iomem *b = ave->dapf + DAPF_ENTRY(i);
+			const struct ave_dapf_slot *c = &ave->dapf_boot[i];
+
+			writel(c->r4, b + DAPF_R4);
+			writeq(c->start, b + DAPF_START);
+			writeq(c->end, b + DAPF_END);
+			writel(c->r0, b + DAPF_R0);
+		}
+	}
+
+	fp = ave_dapf_fingerprint(ave, &admits);
+	ave_dapf_dump_entries(ave, "resume, after restore");
+	if (fp != ave->dapf_boot_fp || !admits) {
+		dev_err(ave->dev, "pm: resume: DAPF restore read back %#018llx (want %#018llx), TEXT fetch %s; not starting the core\n",
+			fp, ave->dapf_boot_fp, admits ? "admitted" : "NOT ADMITTED");
+		return -EIO;
+	}
+	dev_info(ave->dev, "pm: resume: DAPF restored from Linux and read back: fingerprint %#018llx\n",
+		 fp);
+	return 0;
+}
+
+/*
  * docs/84 R2: write every slot back with exactly what it holds, in m1n1's
  * order (r4, start, end, r0 last), then read it back. No entry changes, so
  * the core's fetches are unaffected; the only question is whether a write
