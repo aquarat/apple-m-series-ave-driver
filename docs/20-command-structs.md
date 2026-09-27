@@ -67,7 +67,7 @@ firmware proves it in two independent handlers:
 
 `0x401c8` is `__ZN17CAVEPriorityQueue17SetClientPriorityEyi`
 (`CAVEPriorityQueue::SetClientPriority(unsigned long long, int)`), from
-`data/derived/symbols.txt`. In `Process_AVC` the call is guarded by a compare
+`data/blobs/derived/symbols.txt`. In `Process_AVC` the call is guarded by a compare
 against the queue's current priority (`0x2ae7c`–`0x2ae88`), i.e. it is only
 re-applied when it changed. **Confirmed.** The default 200 that
 Open/Close/Start/Stop carry is simply a default priority.

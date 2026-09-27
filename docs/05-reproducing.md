@@ -1,7 +1,10 @@
 # Reproducing this from scratch
 
-Everything in `data/derived/` can be regenerated on any Linux machine with
-network access. Hardware access is **not** required for the static phase — the
+Everything in `data/derived/`, and the symbol tables in the gitignored
+`data/blobs/derived/` that `tools/disas.py` and the other analysis tools read,
+can be regenerated on any Linux machine with network access. The symbol tables
+are not committed: generate them once, with the commands in §4 and §5.
+Hardware access is **not** required for the static phase — the
 M1 Max in question was used only to confirm what a booted Asahi system does and
 does not expose.
 
@@ -68,8 +71,12 @@ The ADT is ~341 KB of raw Apple device tree; the firmware is a 2.6 MB Mach-O.
 ```sh
 ./.venv/bin/python tools/adt_dump.py data/blobs/adt.bin --grep 'ave|avd'
 python3 tools/macho_info.py data/blobs/ave_h13c.bin
-python3 tools/extract_protocol.py data/blobs/ave_h13c.bin
+python3 tools/extract_protocol.py data/blobs/ave_h13c.bin   # -> data/blobs/derived/
 ```
+
+`extract_protocol.py` writes the firmware's symbol table (`symbols.txt`) and
+the tables recovered from it (`commands.txt`, `pipeline-states.txt`,
+`types.txt`, `source-paths.txt`) to `data/blobs/derived/`.
 
 `file` will misidentify the raw ADT as thermal-camera data; that is a magic-byte
 collision and harmless.
@@ -88,8 +95,15 @@ The kernelcache from the same IPSW carries `AppleAVE2.kext`. See
 ```sh
 ./.venv/bin/pyimg4 im4p extract -i data/blobs/kernelcache.release.mac13j -o data/blobs/kc.macho
 python3 tools/kext_extract.py data/blobs/kc.macho --list --grep ave
-python3 tools/kext_classmap.py data/derived/kext-symbols.txt
+python3 tools/kext_extract.py data/blobs/kc.macho --symbols com.apple.driver.AppleAVE2 \
+                              -o data/blobs/derived/kext-symbols.txt
+python3 tools/kext_classmap.py data/blobs/derived/kext-symbols.txt
 ```
+
+Symbols for other kexts in the fileset (for example the PMGR and platform
+kexts [26](26-macos-pmgr-sequence.md) reads) come the same way: pass that
+kext's bundle id to `--symbols`. For macOS 13.5 the same commands write to
+`data/blobs/macos-13.5/derived/` ([43](43-macos-13.5-firmware.md) §2).
 
 For raw disassembly of kext code, `llvm-objdump` will not resolve
 `__TEXT_EXEC` addresses in the fileset; compute the file offset by hand

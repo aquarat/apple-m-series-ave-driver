@@ -197,7 +197,7 @@ _AVE_Log_Uninit()                                     0xae50
 There is no `AVE_Log_Default`, `AVE_Log_CheckConsole` or `AVE_Log_GetLevelStr`
 in the firmware — those three are **kext** symbols
 (`0xfffffe0008c46390`, `0xfffffe0008c463c8`); the firmware has only the four
-above. (Checked against `data/derived/symbols.txt`, which lists every
+above. (Checked against `data/blobs/derived/symbols.txt`, which lists every
 `AVE_Log*` symbol in the image.)
 
 ### `AVE_Log_CheckLevel` — the gate

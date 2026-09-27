@@ -22,7 +22,7 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # (kernelcache, firmware, kext symbols, firmware symbols) per macOS build.
 BUILDS = {
     "26.6.2": ("data/blobs/kc.macho", "data/blobs/ave_h13c.bin",
-               "data/derived/kext-symbols.txt", "data/derived/symbols.txt"),
+               "data/blobs/derived/kext-symbols.txt", "data/blobs/derived/symbols.txt"),
     "13.5":   ("data/blobs/macos-13.5/kc.macho", "data/blobs/macos-13.5/ave_h13c.bin",
                "data/blobs/macos-13.5/derived/kext-symbols.txt",
                "data/blobs/macos-13.5/derived/symbols.txt"),

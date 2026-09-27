@@ -151,8 +151,8 @@ python3 tools/fw_dump_compare.py $B/ave_h13c.bin data/blobs/iboot-window-16m.bin
 python3 tools/fw_dump_compare.py data/blobs/ave_h13c.bin data/blobs/iboot-window-16m.bin   # control
 ```
 
-`kext_extract.py --symbols` on the 26.6.2 `kc.macho` reproduces the tracked
-`data/derived/kext-symbols.txt` **byte-for-byte** (checked with `cmp`), so the
+`kext_extract.py --symbols` on the 26.6.2 `kc.macho` reproduced the 26.6.2
+`kext-symbols.txt` (then committed, now `data/blobs/derived/`) **byte-for-byte** (checked with `cmp`), so the
 13.5 file is generated the same way the old one was. **Confirmed.**
 
 Route B instead of A:

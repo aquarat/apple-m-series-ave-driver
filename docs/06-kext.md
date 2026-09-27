@@ -14,7 +14,7 @@ The kernelcache is a member of the same IPSW, per SoC family. M1 Pro/Max is
 ./.venv/bin/pyimg4 im4p extract -i data/blobs/kernelcache.release.mac13j \
                                 -o data/blobs/kc.macho
 python3 tools/kext_extract.py data/blobs/kc.macho --list --grep ave
-python3 tools/kext_classmap.py data/derived/kext-symbols.txt
+python3 tools/kext_classmap.py data/blobs/derived/kext-symbols.txt
 ```
 
 The unwrapped kernelcache is a 118 MB `MH_FILESET` (filetype 12) with 349
@@ -130,5 +130,5 @@ Note `GGM` and `MSC` — two engines not visible in the firmware strings.
 - `AVE_MD_SVE` / `AVE_SVEDPB` (58 + 22 methods) — a second scalable/multi-layer
   encode path.
 
-Full map: `data/derived/kext-classmap.txt`, raw symbols
-`data/derived/kext-symbols.txt`.
+Full map: `data/blobs/derived/kext-classmap.txt`, raw symbols
+`data/blobs/derived/kext-symbols.txt`.

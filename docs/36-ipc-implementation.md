@@ -90,8 +90,8 @@ logs `"PlatformIOPIPCManager %s AVE%d InitMboxInit Done status = 0x%x"`
 2):
 
 ```sh
-grep -cE 'ailbox|RTKit|rtkit|ndpoint|RTK_' data/derived/symbols.txt       # 131
-grep -cE 'ailbox|RTKit|rtkit|ndpoint|RTK_' data/derived/kext-symbols.txt  #   0
+grep -cE 'ailbox|RTKit|rtkit|ndpoint|RTK_' data/blobs/derived/symbols.txt       # 131
+grep -cE 'ailbox|RTKit|rtkit|ndpoint|RTK_' data/blobs/derived/kext-symbols.txt  #   0
 ```
 
 The firmware returns **131** symbols, `AppleAVE2.kext` returns **zero**. The
