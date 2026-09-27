@@ -10,12 +10,13 @@ and no hypervisor -- just the kernelcache from any IPSW for the target Mac.
 Usage:
   kext_extract.py <kernelcache.macho> --list
   kext_extract.py <kernelcache.macho> --extract com.apple.driver.AppleAVE2 -o out.macho
-  kext_extract.py <kernelcache.macho> --symbols com.apple.driver.AppleAVE2 -o kext-symbols.txt
+  kext_extract.py <kernelcache.macho> --symbols com.apple.driver.AppleAVE2 -o data/blobs/derived/kext-symbols.txt
 
 --symbols writes the kext's LC_SYMTAB as "<va>  <name>" lines sorted by (va, name),
-the format of data/derived/kext-symbols.txt and what tools/disas.py --kext reads.
+the format of data/blobs/derived/kext-symbols.txt and what tools/disas.py --kext reads.
+Symbol tables are generated locally and not committed (docs/05).
 """
-import argparse, struct, sys
+import argparse, os, struct, sys
 
 LC_REQ_DYLD = 0x80000000
 LC_SEGMENT_64, LC_SYMTAB, LC_FILESET_ENTRY = 0x19, 0x02, 0x35
@@ -56,6 +57,7 @@ def write_symbols(d, kext_off, out):
         name = d[stroff+n_strx:end].decode("utf-8", "replace")
         if name:
             syms.append((n_value, name))
+    os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
     with open(out, "w") as f:
         for v, name in sorted(syms):
             f.write(f"{v:#018x}  {name}\n")

@@ -10,9 +10,9 @@ datum it came from. Anything not read out of an image is marked **inferred** or
 **No hardware was touched to produce this document.** The proposals in
 [§9](#9-proposals-for-the-human-operator-only) are proposals, not results.
 
-Symbols for these kexts are not in `data/derived/kext-symbols.txt` (which is
+Symbols for these kexts are not in `data/blobs/derived/kext-symbols.txt` (which is
 `AppleAVE2`-only). They were extracted from each fileset entry's `LC_SYMTAB`;
-the pattern is the same as `data/derived/t6000-symbols.txt`.
+the pattern is the same as `data/blobs/derived/t6000-symbols.txt`.
 
 ---
 

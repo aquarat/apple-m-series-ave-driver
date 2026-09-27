@@ -433,7 +433,7 @@ the hardware's chroma-format input.
                                    ;   bool, bool, unsigned)
 ```
 
-**Confirmed** (symbol read from `data/derived/symbols.txt`).
+**Confirmed** (symbol read from `data/blobs/derived/symbols.txt`).
 
 **Practical consequence.** `AVC_SPS::seq_parameter_set_rbsp` emits
 `chroma_format_idc` only for profile enums `{1,6,7,8,9}` (docs/37 §3). With

@@ -168,9 +168,11 @@ will be looked at promptly.
 **No Apple firmware is committed to this repository, and none may be.**
 `data/blobs/` is gitignored. `tools/fetch_firmware.py` extracts the blobs
 locally from Apple's own distribution; each user fetches their own copy for
-hardware they own. Only *derived facts* — symbol names, register addresses,
-node properties — live in `data/derived/`, since those are interoperability
-information rather than redistributed code.
+hardware they own. The symbol tables the analysis tools read are generated
+the same way, into the gitignored `data/blobs/derived/`, rather than
+committed. Only device-tree facts (node properties, the board-to-firmware
+map) live in `data/derived/`; register addresses and the rest are in the
+documents.
 
 ## Licence
 
@@ -214,7 +216,9 @@ python3 tools/extract_protocol.py data/blobs/ave_h13c.bin
 
 # host side: pull AppleAVE2.kext out of the kernelcache
 python3 tools/kext_extract.py data/blobs/kc.macho --list --grep ave
-python3 tools/kext_classmap.py data/derived/kext-symbols.txt
+python3 tools/kext_extract.py data/blobs/kc.macho --symbols com.apple.driver.AppleAVE2 \
+                              -o data/blobs/derived/kext-symbols.txt
+python3 tools/kext_classmap.py data/blobs/derived/kext-symbols.txt
 ```
 
 Full reproduction steps, including why the ADT cannot simply be read from a
@@ -250,6 +254,7 @@ docs/            findings, methodology and the driver plan
 driver/          C headers of confirmed constants
 dts/             device tree binding and node fragments
 tools/           extraction and analysis scripts
-data/derived/    committed: symbols, command tables, ADT dumps (facts)
-data/blobs/      gitignored: Apple proprietary firmware and device tree
+data/derived/    committed: ADT dumps and the board-to-firmware map (facts)
+data/blobs/      gitignored: Apple proprietary firmware and device tree, and
+                 derived/, the symbol tables generated from them
 ```

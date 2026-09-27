@@ -97,7 +97,7 @@ read directly out of an instruction is marked **inferred** or **unknown**.
 
 ## 1. Function inventory
 
-Everything matching `Coded` in `data/derived/kext-symbols.txt` that is a sizing
+Everything matching `Coded` in `data/blobs/derived/kext-symbols.txt` that is a sizing
 or counting routine:
 
 | VA | Symbol | Shape |
