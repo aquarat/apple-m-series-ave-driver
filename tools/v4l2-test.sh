@@ -61,11 +61,13 @@ with open(src, 'rb') as f, open(dst, 'wb') as o:
 PY
     IN=$PAD
 fi
+# NODE=apple-ave1-enc for the second encoder (docs/82)
+NODE=${NODE:-apple-ave-enc}
 DEV=
 for n in /sys/class/video4linux/video*/name; do
-    grep -q apple-ave-enc "$n" && DEV=/dev/$(basename "$(dirname "$n")")
+    grep -qx "$NODE" "$n" && DEV=/dev/$(basename "$(dirname "$n")")
 done
-[ -n "$DEV" ] || { echo "no apple-ave-enc node"; exit 1; }
+[ -n "$DEV" ] || { echo "no $NODE node"; exit 1; }
 echo "node $DEV codec $CODEC"
 v4l2-ctl -d "$DEV" --info | head -8
 v4l2-ctl -d "$DEV" --list-formats-out --list-formats | grep -E "\[|NV12|P010|H264|HEVC"

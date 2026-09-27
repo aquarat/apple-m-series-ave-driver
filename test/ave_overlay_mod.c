@@ -29,6 +29,7 @@
 #include "ave_overlay_e4_dtbo.h"
 #include "ave_overlay_e5_dtbo.h"
 #include "ave_overlay_e6_dtbo.h"
+#include "ave_overlay_e7_dtbo.h"
 #include "ave_overlay_pmp_venc_dtbo.h"
 
 static int ovcs_id, pmp_ovcs_id;
@@ -236,7 +237,7 @@ fail:
 static int variant;
 module_param(variant, int, 0444);
 MODULE_PARM_DESC(variant,
-		 "0 = with DART (default), 1 = no IOMMU: preserves iBoot's DART config, NO backstop, 2 = 1 + cpudart/dapf regs (E2), 3 = 0 + cpudart/dapf regs (E3), 4 = 3 with both DARTs in iommus (docs/56), 5 = 4 + stream 15 (docs/69), 6 = ave1 alone (docs/82)");
+		 "0 = with DART (default), 1 = no IOMMU: preserves iBoot's DART config, NO backstop, 2 = 1 + cpudart/dapf regs (E2), 3 = 0 + cpudart/dapf regs (E3), 4 = 3 with both DARTs in iommus (docs/56), 5 = 4 + stream 15 (docs/69), 6 = ave1 alone, 7 = both encoders (docs/82)");
 
 static int __init ave_ov_init(void)
 {
@@ -270,6 +271,11 @@ static int __init ave_ov_init(void)
 		len = ave_overlay_e4_dtbo_len;
 		pr_warn("ave-overlay: variant=4 - variant=3 with both DARTs in iommus (docs/56)\n");
 		break;
+	case 7:
+		fdt = ave_overlay_e7_dtbo;
+		len = ave_overlay_e7_dtbo_len;
+		pr_warn("ave-overlay: variant=7 - both encoders, ave0 (variant=4) and ave1 (variant=6) (docs/82)\n");
+		break;
 	case 6:
 		fdt = ave_overlay_e6_dtbo;
 		len = ave_overlay_e6_dtbo_len;
@@ -281,7 +287,7 @@ static int __init ave_ov_init(void)
 		pr_warn("ave-overlay: variant=5 - variant=4 plus stream 15, which the ADT declares (sids 0x8001) and nothing has attached (docs/69)\n");
 		break;
 	default:
-		pr_err("ave-overlay: variant=%d is not 0-6; refusing\n", variant);
+		pr_err("ave-overlay: variant=%d is not 0-7; refusing\n", variant);
 		return -EINVAL;
 	}
 

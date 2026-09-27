@@ -82,7 +82,8 @@ const struct ave_soc ave_soc_t6001_ave1 = {
 	.dpe_phys		= 0x507100000ULL,
 	.inst			= 1,
 	.fw_name		= "apple/ave_h13c.bin",
-	.fw_pristine_name	= NULL,
+	/* the same blob; ave1's copy gets its own tags (iboot.tag_*) */
+	.fw_pristine_name	= "apple/ave-13.5-data-pristine.bin",
 
 	.dev = {
 		[AVE_ABI_MACOS_13_5] = { .dev_id = 14, .dev_type = 11, .chip_type = 8 },
@@ -99,6 +100,26 @@ const struct ave_soc ave_soc_t6001_ave1 = {
 	.dapf_mmio_own		= { 0x507050000ULL, 0x507c69000ULL },
 	/* dart-ave1's ADT entry 1 admits ave0's SVE..ASC (the peer window) */
 	.dapf_mmio_adt		= { 0x40d050000ULL, 0x40dc69000ULL },
+	.dapf_by_driver		= true,
+
+	/*
+	 * docs/82 A2: ave1's RVBAR is 0x102010000b28001 - iBoot points it at
+	 * ave0's TEXT, which is read-only and shared. DATA is ours: the
+	 * pristine blob with CpAd/WrAd/IOBA (DATA+0x3bbb/0x3bcb/0x3be4) set to
+	 * ave1's ASC, ASC+0x400000 and axi2af.
+	 */
+	.iboot = {
+		.text_phys	= 0x10000b28000ULL,
+		.text_size	= 0xec000ULL,
+		.text_dva	= 0xb28000ULL,
+		.data_size	= 0x134000ULL,
+		.data_dva	= 0xec000ULL,
+		.data_literal	= 0x1f0000ec000ULL,
+		.data_owned	= true,
+		.tag_cpad	= 0x507800000ULL,
+		.tag_wrad	= 0x507c00000ULL,
+		.tag_ioba	= 0x506000000ULL,
+	},
 
 	.me1_node		= "/soc/power-management@28e680000/power-controller@8020",
 	.me1_label		= "venc1_me1",
