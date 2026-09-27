@@ -343,6 +343,17 @@ module_param(session_search_range, uint, 0444);
 MODULE_PARM_DESC(session_search_range,
 	"H.264 Start_AVC search_range: 0 = +-192x96 (default, macOS), 1 = +-128x64, 2 = +-64x32 (docs/81)");
 
+/*
+ * docs/85: send what a plain macOS VideoToolbox H.264 session sends, one
+ * group of fields per bit (enum ave_macos_group; docs/85 §2 lists every
+ * field). 0 = none: the command bytes every run to date sent. H.264 only,
+ * both the self-test and V4L2 (latched per stream at Start_AVC, so 0644).
+ */
+static unsigned int session_macos;
+module_param(session_macos, uint, 0644);
+MODULE_PARM_DESC(session_macos,
+	"H.264: bitmask of macOS-equivalence groups (docs/85): 0 PARAMS 1 GOP 2 SH 3 RC 4 ME 5 ADAPTB 6 PIC 7 SPS 8 BUFS 9 QPMOD; 0x3ff = all; 0 = none (default)");
+
 static bool session_poc0;
 module_param(session_poc0, bool, 0444);
 MODULE_PARM_DESC(session_poc0,
@@ -957,6 +968,8 @@ struct ave_sess_bufs {
 	u32		codec;		/* AVE_SESS_CODEC_* */
 	struct { void *cpu; dma_addr_t iova; u32 size; } slice_hdr[AVE_SESS_FRAMES_MAX];
 	u32		hevc_refs;	/* 0 = intra only: every frame an IDR */
+	/* docs/85: session_macos, latched at Start_AVC for the whole stream */
+	u32		macos;
 	u8		bit_depth;	/* HEVC SPS depth, 8 or 10 (0 = 8); docs/83 */
 	u8		src_bitdepth;	/* HEVC source: 10 = P010 (0 = 8, NV12) */
 	bool		hevc_single_xc;	/* PICMGMT+0xF65 = 1 per frame */
@@ -1713,6 +1726,62 @@ static u32 ave_level_for(u32 cw, u32 ch)
 }
 
 /*
+ * docs/85 group ME: the level macOS picks, the smallest H.264 Annex A level
+ * whose MaxFS and MaxMBPS hold the stream (AVE_ManageSessionSettings,
+ * "restrict based on number of macroblocks per second", US 0x365fc; docs/72
+ * §4.1: 1280x720 at 30 fps is 3.1). The table is Annex A's. It matters to
+ * the firmware beyond the SPS: H264VideoEncoderDPB sizes its DPB as
+ * MaxDpbMbs(level) / frame MBs (fw 0x2d018; docs/66 §4.2), 5 at 3.1 and 9
+ * at our 4.0 for 720p.
+ */
+static u32 ave_level_macos(u32 cw, u32 ch, u32 fps_num, u32 fps_den)
+{
+	static const struct { u8 idc; u32 max_fs, max_mbps; } lv[] = {
+		{ 30, 1620, 40500 },	{ 31, 3600, 108000 },
+		{ 32, 5120, 216000 },	{ 40, 8192, 245760 },
+		{ 42, 8704, 522240 },	{ 50, 22080, 589824 },
+		{ 51, 36864, 983040 },	{ 52, 36864, 2073600 },
+	};
+	u32 fs = (cw / AVE_MB_SIZE) * (ch / AVE_MB_SIZE), i;
+	u64 mbps = div_u64((u64)fs * (fps_num ? fps_num : 30),
+			   fps_den ? fps_den : 1);
+
+	for (i = 0; i < ARRAY_SIZE(lv); i++)
+		if (fs <= lv[i].max_fs && mbps <= lv[i].max_mbps)
+			return lv[i].idc;
+	return 52;
+}
+
+/* docs/85: "SH PIC GOP ..." for the Start line. */
+static const char *const ave_macos_group_name[AVE_MACOS_G_COUNT] = {
+	[AVE_MACOS_G_BUFS]	= "BUFS",
+	[AVE_MACOS_G_SH]	= "SH",
+	[AVE_MACOS_G_PIC]	= "PIC",
+	[AVE_MACOS_G_GOP]	= "GOP",
+	[AVE_MACOS_G_ADAPTB]	= "ADAPTB",
+	[AVE_MACOS_G_ME]	= "ME",
+	[AVE_MACOS_G_PARAMS]	= "PARAMS",
+	[AVE_MACOS_G_RC]	= "RC",
+	[AVE_MACOS_G_SPS]	= "SPS",
+	[AVE_MACOS_G_QPMOD]	= "QPMOD",
+};
+
+static noinline_for_stack void ave_macos_log(struct ave_device *ave, u32 groups)
+{
+	char line[128];
+	int n = 0, i;
+
+	line[0] = 0;
+	for (i = 0; i < AVE_MACOS_G_COUNT; i++)
+		if (groups & (1u << i))
+			n += scnprintf(line + n, sizeof(line) - n, " %s",
+				       ave_macos_group_name[i]);
+	dev_info(ave->dev,
+		 "session: Start_AVC: session_macos %#x: macOS groups applied:%s (docs/85)\n",
+		 groups, n ? line : " none");
+}
+
+/*
  * What AVC_INIT and HEVC_INIT publish the same way: the client buffers, the
  * coded tables, the DPB, entropy, SrcNbr and low-res tables and the VP/RC
  * scalars (docs/77 §2.2, §2.7). Everything but the session struct itself,
@@ -2096,6 +2165,39 @@ static int ave_session_start_avc(struct ave_device *ave,
 	s.profile_idc = bufs->profile ? bufs->profile : 66;
 	s.level_idc = clamp_t(u32, max(ave_level_for(st.cw, st.ch), bufs->level_floor),
 			      10, 52);
+	/* docs/85: latched here for the whole stream, frames included */
+	BUILD_BUG_ON(AVE_MACOS_G_COUNT > 16);	/* ave_avc_frame.macos is u16 */
+	bufs->macos = session_macos & AVE_MACOS_ALL;
+	s.macos = bufs->macos;
+	if (s.macos & (1u << AVE_MACOS_G_ME))
+		s.level_idc = clamp_t(u32, max(ave_level_macos(st.cw, st.ch,
+							       s.frame_rate,
+							       s.frame_rate_div),
+					       bufs->level_floor), 10, 52);
+	if (s.macos & (1u << AVE_MACOS_G_BUFS)) {
+		/*
+		 * docs/85 BUFS: what AVE_CalcSurfaceInfo gives a plain AVC
+		 * session and we otherwise do not: two TranscodedData
+		 * surfaces of align4K(CodedData / 2) (kext 0xea5b14), and
+		 * one entropy column instead of four (SetNum 1, kext
+		 * 0xea5b88; the per-frame table follows in process_build).
+		 */
+		u32 tsz = ALIGN(bufs->coded[0].size / 2, SZ_4K), i;
+
+		for (i = 0; i < abi->start_avc.transcoded_max && i < 2; i++)
+			if (!ave_sess_dma_alloc(bufs, tsz, &bufs->transcoded[i]))
+				return -ENOMEM;
+		for (i = 0; i < abi->start_avc.transcoded_max && i < 2; i++)
+			s.transcoded[i] = bufs->transcoded[i];
+		s.n_transcoded = abi->start_avc.transcoded_max;
+		s.transcoded_size = tsz;
+		if (s.n_entropy)
+			s.n_entropy_cols = 1;
+		dev_info(ave->dev,
+			 "session: Start_AVC: macOS BUFS: TranscodedData %pad %pad (%#x each) at wire %#x, entropy 1 column\n",
+			 &bufs->transcoded[0], &bufs->transcoded[1], tsz,
+			 abi->start_avc.transcoded_set);
+	}
 	s.cabac = bufs->cabac;			/* never with Baseline (builder refuses) */
 	s.poc_type0 = session_poc0;
 	s.ref_spacing_p = min_t(u32, session_ref_spacing_p, 255);
@@ -2115,6 +2217,11 @@ static int ave_session_start_avc(struct ave_device *ave,
 		 s.level_idc, s.cabac ? "CABAC" : "CAVLC",
 		 s.rc_enable ? "rate control" : "fixed QP",
 		 s.poc_type0 ? 0 : 2, s.max_refs);
+	if (session_macos & ~AVE_MACOS_ALL)
+		dev_warn(ave->dev,
+			 "session: Start_AVC: session_macos %#x has unknown bits; only %#x applied\n",
+			 session_macos, AVE_MACOS_ALL);
+	ave_macos_log(ave, s.macos);
 	ave_session_start_log(ave, abi, bufs, "Start_AVC", &st, &s);
 
 	return ave_session_cmd(ave, abi, AVE_OP_START_AVC, "Start_AVC",
@@ -3498,6 +3605,8 @@ static int ave_session_process_build(struct ave_device *ave,
 	 */
 	f.frame_num = n;
 	f.direct_spatial = session_direct_spatial;
+	/* docs/85: the groups Start_AVC latched; AVC only */
+	f.macos = hevc ? 0 : bufs->macos;
 	f.in_luma_addr = luma_iova;
 	f.in_luma_stride = stride;
 	f.in_luma_size = luma_bytes;
@@ -3546,6 +3655,9 @@ static int ave_session_process_build(struct ave_device *ave,
 		memcpy(f.entropy, bufs->entropy, sizeof(f.entropy));
 		f.n_entropy = bufs->n_entropy;
 		f.n_entropy_cols = bufs->n_entropy_cols;
+		/* docs/85 BUFS: one column, as the kext fills (SetNum 1) */
+		if (!hevc && (bufs->macos & (1u << AVE_MACOS_G_BUFS)))
+			f.n_entropy_cols = 1;
 	}
 
 	if (bufs->n_nbr && abi->process_avc.src_nbr_max) {

@@ -82,6 +82,47 @@ static void wr32_opt(struct ave_wr *w, u32 off, u32 v)
 		wr32(w, off, v);
 }
 
+/*
+ * docs/85: the macOS-equivalence groups. Unknown bits, or any bit on an ABI
+ * with no table (26.6.2), are refused rather than silently ignored: a run
+ * that believes it sent macOS's fields must have sent them.
+ */
+static int ave_macos_check(const struct ave_macos_patch *p, u32 n, u32 groups)
+{
+	if (groups & ~AVE_MACOS_ALL)
+		return -EINVAL;
+	if (groups && (!p || !n))
+		return -EINVAL;
+	return 0;
+}
+
+/* Write every constant of @groups; called last, so a patch wins. */
+static void ave_macos_apply(struct ave_wr *w, const struct ave_macos_patch *p,
+			    u32 n, u32 groups)
+{
+	u32 i;
+
+	for (i = 0; groups && i < n; i++) {
+		if (p[i].group >= AVE_MACOS_G_COUNT ||
+		    !(groups & (1u << p[i].group)))
+			continue;
+		switch (p[i].width) {
+		case 1:
+			wr8(w, p[i].off, (u8)p[i].val);
+			break;
+		case 2:
+			wr16(w, p[i].off, (u16)p[i].val);
+			break;
+		case 4:
+			wr32(w, p[i].off, p[i].val);
+			break;
+		default:
+			w->err = -EINVAL;	/* a table bug */
+			break;
+		}
+	}
+}
+
 /* IEEE-754 binary64 bit pattern of an unsigned integer, without FP. */
 static u64 ave_u32_to_f64_bits(u32 v)
 {
@@ -161,6 +202,13 @@ static int ave_cmd_end(struct ave_wr *w)
 		return w->err;
 	}
 	return (int)w->size;
+}
+
+/* Abandon a command half-built: zero it and fail. */
+static int ave_cmd_end_err(struct ave_wr *w)
+{
+	w->err = -EINVAL;
+	return ave_cmd_end(w);
 }
 
 int ave_cmd_build_hdr(const struct ave_cmd_abi *abi, enum ave_op op,
@@ -630,6 +678,31 @@ int ave_cmd_build_start_avc(const struct ave_cmd_abi *abi, u8 *buf, size_t len,
 	    (s->max_mvs_per_2mb && abi->start_avc.max_mvs_per_2mb == AVE_OFF_NONE) ||
 	    (s->search_range && abi->start_avc.search_range == AVE_OFF_NONE))
 		return -EINVAL;
+	ret = ave_macos_check(abi->macos_start_avc, abi->n_macos_start_avc,
+			      s->macos);
+	if (ret)
+		return ret;
+	if (s->n_transcoded) {
+		u32 i;
+
+		if (l->transcoded_set == AVE_OFF_NONE ||
+		    s->n_transcoded != l->transcoded_max ||
+		    s->n_transcoded > ARRAY_SIZE(s->transcoded) ||
+		    !s->transcoded_size)
+			return -EINVAL;
+		for (i = 0; i < s->n_transcoded; i++)
+			if (!s->transcoded[i] ||
+			    (s->transcoded[i] & (AVE_STRIDE_ALIGN - 1)))
+				return -EINVAL;
+	}
+	if (s->macos && (l->bframes == AVE_OFF_NONE ||
+			 l->adapt_b == AVE_OFF_NONE ||
+			 l->max_sub_mb_rect == AVE_OFF_NONE ||
+			 l->slice_map_end == AVE_OFF_NONE ||
+			 l->ref_spacing == AVE_OFF_NONE ||
+			 l->max_mvs_per_2mb == AVE_OFF_NONE ||
+			 sps->log2_max_poc_lsb_m4 == AVE_OFF_NONE))
+		return -EINVAL;
 
 	ret = ave_cmd_begin(abi, AVE_OP_START_AVC, buf, len, ctx, 0, &w);
 	if (ret < 0)
@@ -702,6 +775,51 @@ int ave_cmd_build_start_avc(const struct ave_cmd_abi *abi, u8 *buf, size_t len,
 	wr8(&w, pps->constrained_intra_pred, 0);
 	wr8(&w, pps->transform_8x8_mode, s->profile_idc >= 100);
 	wr8(&w, pps->fw_creates_header, 1);
+
+	/*
+	 * docs/85: macOS's values for the fields that depend on the session,
+	 * then its constants. Every one is behind its group bit, so
+	 * macos == 0 leaves the command exactly as above.
+	 */
+	if (s->macos & (1u << AVE_MACOS_G_GOP)) {
+		/* US 0x29b60: 30, the client's key interval if it set one */
+		if (s->key_interval <= 1)
+			wr32(&w, l->key_interval, 30);
+		/* US 0x3b51c-0x3b540: 1 B with reordering on; 0 for Baseline */
+		wr32(&w, l->bframes, s->profile_idc == 66 ? 0 : 1);
+		/* US 0x29ca4: RefSpacingP 1, unless the run asked for more */
+		if (!s->ref_spacing_p)
+			wr32(&w, l->ref_spacing, 1);
+	}
+	if (s->macos & (1u << AVE_MACOS_G_ADAPTB))
+		/* US 0x29a84; Baseline cleared at 0x3b760 */
+		wr8(&w, l->adapt_b, s->profile_idc == 66 ? 0 : 1);
+	if (s->macos & (1u << AVE_MACOS_G_ME)) {
+		/* US 0x374f4-0x37534: 16 at level >= 3.1, 32 at 3.0, else 64 */
+		if (!s->max_mvs_per_2mb)
+			wr32(&w, l->max_mvs_per_2mb, s->level_idc >= 31 ? 16 :
+				  s->level_idc == 30 ? 32 : 64);
+		/* US 0x37518-0x37550: Baseline below 3.1 only */
+		wr32(&w, l->max_sub_mb_rect,
+		     s->profile_idc == 66 && s->level_idc < 31 ? 576 : 0);
+	}
+	if (s->macos & (1u << AVE_MACOS_G_PARAMS))
+		/* sSliceMap slice 0 = {0, height} (US 0x29abc/0x29ac4) */
+		wr32(&w, l->slice_map_end, dh);
+	if (s->n_transcoded) {
+		/* docs/85 BUFS: the kext's AVC TranscodedData pair */
+		u32 i;
+
+		for (i = 0; i < s->n_transcoded; i++)
+			wr64(&w, l->transcoded_set + i * l->transcoded_stride,
+			     s->transcoded[i]);
+		wr32(&w, l->transcoded_size, s->transcoded_size);
+	}
+	if ((s->macos & (1u << AVE_MACOS_G_SPS)) && s->poc_type0)
+		/* US 0x29dc4 (const 0x115fa0): 6-bit POC lsb */
+		wr32(&w, sps->log2_max_poc_lsb_m4, 2);
+	ave_macos_apply(&w, abi->macos_start_avc, abi->n_macos_start_avc,
+			s->macos);
 
 	return ave_cmd_end(&w);
 }
@@ -1225,6 +1343,10 @@ int ave_cmd_build_process_avc(const struct ave_cmd_abi *abi, u8 *buf,
 	ret = ave_pic_check(abi, f, AVE_STRIDE_ALIGN);
 	if (ret)
 		return ret;
+	ret = ave_macos_check(abi->macos_process_avc, abi->n_macos_process_avc,
+			      f->macos);
+	if (ret)
+		return ret;
 
 	ret = ave_cmd_begin(abi, AVE_OP_PROCESS_AVC, buf, len, ctx, slot, &w);
 	if (ret < 0)
@@ -1235,6 +1357,43 @@ int ave_cmd_build_process_avc(const struct ave_cmd_abi *abi, u8 *buf,
 			return -EINVAL;
 		wr8(&w, abi->process_avc.direct_spatial, 1);
 	}
+	if (f->macos & (1u << AVE_MACOS_G_PIC)) {
+		const struct ave_process_avc_layout *l = &abi->process_avc;
+		u32 b = l->picmgmt, i, j, g;
+
+		if (l->first_process == AVE_OFF_NONE)
+			return ave_cmd_end_err(&w);
+		/* 1 on the first Process of the session only (kext 0xeab8f8) */
+		wr8(&w, b + l->first_process, f->frame_num == 0);
+		/*
+		 * macOS leaves every pointer setRefPointers rebuilds at zero: a
+		 * type-5 session returns from AVE_CHM_SetDataInfo_FwBuf before
+		 * the recon, SrcNbr, entropy and LowRes groups (kext
+		 * 0xeb0bcc-0xeb0bd4). The firmware refills them (fw 0x2c320,
+		 * 0x2c98c-0x2cc0c); +0x8B8 survives only if its match fails.
+		 */
+		wr64(&w, b + l->recon_y, 0);
+		wr64(&w, b + l->recon_uv, 0);
+		wr64(&w, b + l->recon_mv, 0);
+		if (l->recon_y_lsb != AVE_OFF_NONE)
+			wr64(&w, b + l->recon_y_lsb, 0);
+		if (l->recon_uv_lsb != AVE_OFF_NONE)
+			wr64(&w, b + l->recon_uv_lsb, 0);
+		if (l->low_res_src != AVE_OFF_NONE)
+			wr64(&w, b + l->low_res_src, 0);
+		for (i = 0; i < f->n_entropy; i++)
+			for (j = 0; j < AVE_ENTROPY_COLS; j++)
+				wr64(&w, b + l->entropy_set +
+				     l->entropy_stride_i * i +
+				     l->entropy_stride_j * j, 0);
+		for (i = 0; i < f->n_src_nbr; i++)
+			for (g = 0; g < AVE_SRC_NBR_GROUPS; g++)
+				if (l->src_nbr_set[g] != AVE_OFF_NONE)
+					wr64(&w, b + l->src_nbr_set[g] + i * 8, 0);
+	}
+	/* docs/85: macOS's per-frame constants, last */
+	ave_macos_apply(&w, abi->macos_process_avc, abi->n_macos_process_avc,
+			f->macos);
 	return ave_cmd_end(&w);
 }
 

@@ -110,6 +110,23 @@ struct ave_avc_session {
 	u8	ref_spacing_p;
 	u8	search_range;		/* 0 widest (default) .. 2 (docs/81 bs2) */
 	u8	max_mvs_per_2mb;	/* 0 = not sent (default); macOS 16 (bs7) */
+	/*
+	 * docs/85: bitmask of enum ave_macos_group - send what a plain macOS
+	 * VideoToolbox session sends, one group of fields per bit. 0 (the
+	 * default) builds exactly the command every run to date sent. The
+	 * builder refuses unknown bits and any bit on an ABI without the
+	 * tables (26.6.2).
+	 */
+	u32	macos;
+	/*
+	 * docs/85 group BUFS: AVC_INIT's TranscodedData pair, as the kext
+	 * publishes it for AVC too. 0 (every run to date) or exactly
+	 * start_avc.transcoded_max, non-zero and 64-aligned, with one size.
+	 * AVC only: an HEVC session uses ave_hevc_session.transcoded.
+	 */
+	u64	transcoded[2];
+	u32	n_transcoded;
+	u32	transcoded_size;
 
 	u64	fw_client_addr;		/* per-client firmware buffer */
 	u32	fw_client_size;
@@ -225,6 +242,9 @@ struct ave_avc_session {
 struct ave_avc_frame {
 	u32	frame_type;		/* AVE_FRAME_TYPE_{I,P,B,IDR} */
 	bool	direct_spatial;		/* B only: spatial direct (docs/81 b5) */
+	/* docs/85: the session's macOS groups (ave_avc_session.macos); 0 = none.
+	 * u16 (AVE_MACOS_G_COUNT <= 16) so it sits in the padding above. */
+	u16	macos;
 	/*
 	 * frameInfo.frameNumber: a monotone per-client counter the firmware
 	 * keys its queue on, not the H.264 frame_num syntax element (which

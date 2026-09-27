@@ -339,6 +339,35 @@ static void test_abi(enum ave_fw_abi which, const char *name)
 			s.n_low_res_ref = SESS_DPB;
 		}
 
+		/*
+		 * docs/85 session_macos: 0 must be the command above, byte for
+		 * byte; every group must build on 13.5 with the session's own
+		 * parameters, and be refused on 26.6.2 (no tables there).
+		 */
+		{
+			static u8 base_cmd[0x20000];
+			u32 grp;
+
+			s.macos = 0;
+			ret = ave_cmd_build_start_avc(abi, cmdbuf, sizeof(cmdbuf), &c, &s);
+			memcpy(base_cmd, cmdbuf, want);
+			ret = ave_cmd_build_start_avc(abi, cmdbuf, sizeof(cmdbuf), &c, &s);
+			CHECK(ret == (int)want && !memcmp(base_cmd, cmdbuf, want),
+			      "session_macos=0 is not deterministic (ret %d)", ret);
+			for (grp = 0; grp <= AVE_MACOS_G_COUNT; grp++) {
+				s.macos = grp < AVE_MACOS_G_COUNT ? 1u << grp : AVE_MACOS_ALL;
+				ret = ave_cmd_build_start_avc(abi, cmdbuf, sizeof(cmdbuf), &c, &s);
+				if (which == AVE_ABI_MACOS_13_5)
+					CHECK(ret == (int)want,
+					      "session_macos %#x refused on 13.5 (ret %d)", s.macos, ret);
+				else
+					CHECK(ret == -EINVAL,
+					      "session_macos %#x accepted on an ABI without tables (ret %d)",
+					      s.macos, ret);
+			}
+			s.macos = 0;
+		}
+
 		/* The coded-header buffer must satisfy the builder's minimum. */
 		coded_hdr.size = abi->start_avc.coded_hdr_bytes - 1;
 		ret = ave_cmd_build_start_avc(abi, cmdbuf, sizeof(cmdbuf), &c, &s);
@@ -387,6 +416,17 @@ static void test_abi(enum ave_fw_abi which, const char *name)
 		ret = ave_cmd_build_process_avc(abi, cmdbuf, sizeof(cmdbuf), &c,
 						SESS_PROCESS_SLOT, &f);
 		CHECK(ret == (int)want, "build_process ret %d want %zu", ret, want);
+		/* docs/85: every per-frame group builds on 13.5, none on 26.6.2 */
+		for (g = 0; g <= AVE_MACOS_G_COUNT; g++) {
+			f.macos = g < AVE_MACOS_G_COUNT ? 1u << g : AVE_MACOS_ALL;
+			ret = ave_cmd_build_process_avc(abi, cmdbuf, sizeof(cmdbuf), &c,
+							SESS_PROCESS_SLOT, &f);
+			CHECK(which == AVE_ABI_MACOS_13_5 ? ret == (int)want : ret == -EINVAL,
+			      "Process with session_macos %#x: ret %d", f.macos, ret);
+		}
+		f.macos = 0;
+		ret = ave_cmd_build_process_avc(abi, cmdbuf, sizeof(cmdbuf), &c,
+						SESS_PROCESS_SLOT, &f);
 		CHECK(get_unaligned_le16(cmdbuf) == abi->cmd[AVE_OP_PROCESS_AVC].id,
 		      "process id %#x", get_unaligned_le16(cmdbuf));
 		CHECK(get_unaligned_le32(cmdbuf + h->slot) == SESS_PROCESS_SLOT,
