@@ -319,29 +319,22 @@ both sides).
 (kext `0xfffffe0008ec4e38`) is the consumer, and it is where the byte count
 comes from:
 
-```c
-/* x20 = hdr, x19 = stats, x25 = hdr, x0 = total, x8 = trimmed */
-stats->frame_type = hdr[272];                       /* 0xec4e94-98 */
-for (i = 0; i < 0x100; i++) {                       /* 0xec4f00      */
-    n = *(u32 *)(x25 + 384);                        /* 0xec4ec0      */
-    if (n == 0) break;                              /* 0xec4ec4      */
-    stats->slices++;                                /* 0xec4ecc-d0   */
-    total += n;                                     /* 0xec4ed4      */
-    if (codec == 1 /* HEVC */) total += *(u32 *)(x25 + 920);  /* 0xec4ee0 */
-    trim = *(s8 *)(x25 + 908);                      /* 0xec4ee8      */
-    if (trim < 0) { log; return 0; }                /* 0xec4eec      */
-    trimmed += trim;                                /* 0xec4ef4      */
-    x25 += 0x220;                                   /* 0xec4efc      */
-}
-stats->bytes = total - trimmed;                     /* 0xec4f08-10   */
-```
+| from `CODED_DATA_HDR` | into the stats |
+|---|---|
+| `FrameTypeReturned` (`0x110`) | frame type |
+| `ui32BytesWritten` (`0x180` of record *i*, u32) | added to the byte count; each counted record adds 1 to the slice count |
+| `0x398` (`+920`) of record *i*, u32 | added to the byte count only when the codec argument is 1 (HEVC) |
+| `ui32BytesToRemove…` (`0x38C` of record *i*, read as s8) | subtracted from the byte count; a negative value is an error (logged, returns 0, no byte count stored) |
+
+Records *i* = 0 … `0xFF` (stride `0x220`) are taken in order, stopping before
+the first whose `ui32BytesWritten` is 0.
 
 **So: `frame length = Σ ui32BytesWritten − Σ ui32BytesToRemove…`, over the
 slice records, stopping at the first zero byte count.** The AVC path skips the
 `+920` term (it is taken only when the codec argument is 1). **C.**
 
-`driver/ave_cmd.c:ave_cmd_coded_length()` is a transcription of that loop, with
-the bounds checks the kext does not need, and
+`driver/ave_cmd.c:ave_cmd_coded_length()` implements that rule, with the
+bounds checks the kext does not need, and
 `tools/session_selftest` exercises it with negative controls.
 
 ### 3.3 Where the bytes are

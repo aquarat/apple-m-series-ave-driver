@@ -102,17 +102,17 @@ used by `_enableDevice` is `waitReg32`, called through vtable `+0x1060` from
 
 ## 3. The register, as macOS uses it
 
-`_setPSLevel` computes the address as
+`_setPSLevel` addresses the register as follows:
 
-```
-group  = deviceData->psreg            _getDevicePsRegGroup  0xfffffe00097d81ac (ldrb [x0,#11] @ ...81d8)
-index  = deviceData->psidx            _getDevicePsRegIndex  0xfffffe00097d8200 (ldrb [x0,#10] @ ...822c)
-regmap = psRegGroups[group].word0     0xfffffe00097d87b0
-base   = psRegGroups[group].word1     0xfffffe00097d87b0
-offset = base + index*8               0xfffffe00097d87b4   (add w24, w8, w24, lsl #3)
-```
+| quantity | source | read by |
+|---|---|---|
+| group | `DeviceData` byte `+11` (`psreg`) | `_getDevicePsRegGroup`, `0xfffffe00097d81ac` |
+| index | `DeviceData` byte `+10` (`psidx`) | `_getDevicePsRegIndex`, `0xfffffe00097d8200` |
+| regmap | word 0 of `psRegGroups[group]` | `_setPSLevel` |
+| base | word 1 of `psRegGroups[group]` | `_setPSLevel` |
+| offset | `base + index*8` | `_setPSLevel` |
 
-which is exactly Linux's `ps-regs[psreg].offset + psidx*8`, confirming
+That is exactly Linux's `ps-regs[psreg].offset + psidx*8`, confirming
 `0x28e5803b0` for `VENC_SYS` (`psreg = 10` → window 2 `+0x300`, `psidx = 22`).
 
 Fields, with the bit numbers Asahi uses and what macOS is seen doing with each:
@@ -169,60 +169,59 @@ times is corroboration.)
 
 ---
 
-## 4. The power-up sequence, as pseudocode
+## 4. The power-up sequence, step by step
+
+Each subsection gives the function's entry address, so it can be followed in
+the disassembly, and states what the function does that a driver can see or
+must reproduce: register values, waits, locks, and the order of the calls to
+other agents. It is not a transcript of the function.
 
 ### 4.1 `ApplePMGR::_enableDevice(deviceID, on, flag, die)` — `0xfffffe00097f82f4`
 
-```
-0xfffffe00097f8318  assert die < this->numDies                 // [this+0x631c]
-0xfffffe00097f8394  kernel_debug(0x2700c001, deviceID, on!=0, 0, die, 0)   // trace only
-0xfffffe00097f83e8  commandGate->runAction(_enableDeviceGated, deviceID, on, flag, die)
-0xfffffe00097f8484  kernel_debug(0x2700c002, ...)              // trace only
-```
+It checks `die < numDies` (the count at `this+0x631c`) and runs
+`_enableDeviceGated(deviceID, on, flag, die)` through the command gate's
+`runAction`. kdebug trace points bracket the call (`0x2700c001` before, with
+`deviceID`, `on != 0` and `die`; `0x2700c002` after); they are telemetry only.
 
 Everything real happens under the command gate, i.e. **serialised across all
 PMGR devices on the machine**.
 
 ### 4.2 `ApplePMGR::_enableDeviceGated(deviceID, on, flag, die)` — `0xfffffe00097f848c`
 
-```
-0xfffffe00097f84f4  dev   = _deviceIDToDeviceData(deviceID)
-0xfffffe00097f850c  assert die < numDies
-0xfffffe00097f852c  if ((dev->flags & 0x30) == 0x30) return    // no_ps AND perf -> nothing to do
-0xfffffe00097f8548  level = on ? 15 : (flag & 1 ? 4 : 0)
+It looks up the device's `DeviceData` (`_deviceIDToDeviceData`, §7), checks
+`die < numDies`, and turns `(on, flag)` into the level (§3). Then, in this
+order:
 
-0xfffffe00097f8564  if (_checkNotifyPMP(deviceID))
-0xfffffe00097f859c      this->_waitForPMPReadyAction(this[0x1bdc] & 1 ? die : 0) // vptr+0xac0
-0xfffffe00097f85b0  _waitForClusterPowerUp(dev, die)
-0xfffffe00097f85c0  if (_checkNotifyXNUForClusterPowerGating(deviceID, &out))
-0xfffffe00097f85cc      _waitForXNUClusterPowerGatingThreadCall()
-
-0xfffffe00097f85f4  old = desired[die*800 + deviceID]          // byte cache at this+0x3e7d4
-0xfffffe00097f85fc  if (old == level) return                   // idempotent, no register touched
-0xfffffe00097f8600  desired[die*800 + deviceID] = level
-
-0xfffffe00097f861c  if (level != 0) _syncDevicePerfDomainRequirement({deviceID,die}, 1)
-0xfffffe00097f8640  _updateDeviceStatus(deviceID, level, old, list, &n, die)   // §4.3
-0xfffffe00097f8648  if (n == 0) goto done
-
-  /* ---- pre-transition notifications ---- */
-0xfffffe00097f8690  if (level <= 4) for each nub: _notifyDeviceStatusChange(false, list, n)
-0xfffffe00097f8764  for each entry with dev->flags.notify_pmp: _sendPMPCommand(14|15, ...)
-0xfffffe00097f87c4  for each entry: _notifyPMC(deviceID, on, ...)
-0xfffffe00097f8808  if (level != 0) _notifyXNUForClusterPowerGating(cluster, true, die)
-
-0xfffffe00097f8930  lck_spin_lock(this->psLock)                // interrupts off
-0xfffffe00097f8940  _syncDeviceStatusChange(list, n)           // §4.4  <-- ALL register work
-0xfffffe00097f8958  lck_spin_unlock
-
-  /* ---- post-transition notifications ---- */
-0xfffffe00097f899c  if (level == 0) _notifyXNUForClusterPowerGating(cluster, false, die)
-0xfffffe00097f89b4  if (dev[13] & 2) _triggerPostPowerOffActions(dev, die)
-0xfffffe00097f89f0  if (on)         for each nub: _notifyDeviceStatusChange(true, list, n)
-0xfffffe00097f8ab0  for each entry with notify_pmp: _sendPMPCommand(14, ...)
-0xfffffe00097f8b1c  for each entry: _notifyPMC(...)
-0xfffffe00097f8bc4  IOStateReporter::setChannelState(...)      // telemetry
-```
+1. **Virtual perf devices stop here.** A device with both `no_ps` and `perf`
+   set (`flags & 0x30 == 0x30`) has nothing to do; no register is touched.
+2. **Wait for the other agents.**
+   - If `_checkNotifyPMP(deviceID)` (§7: `notify_pmp` together with `b7`),
+     wait for the PMP with `_waitForPMPReadyAction` (vtable `+0xac0`). Its die
+     argument is `die` when bit 0 of `this[0x1bdc]` is set, otherwise 0.
+   - `_waitForClusterPowerUp(dev, die)`.
+   - If `_checkNotifyXNUForClusterPowerGating(deviceID, …)` says so,
+     `_waitForXNUClusterPowerGatingThreadCall()`.
+3. **Idempotence.** The last level requested for each device is cached per die
+   (a byte array at `this+0x3e7d4`, indexed `die*800 + deviceID`). A request
+   for the cached level returns here, and no register is touched. Otherwise the
+   new level is cached and the call goes on.
+4. If the level is not 0, `_syncDevicePerfDomainRequirement({deviceID, die}, 1)`.
+5. **Build the change list** with `_updateDeviceStatus` (§4.3). An empty list
+   ends the call.
+6. **Pre-transition notifications**, in this order:
+   - level ≤ 4: every PMGR nub gets `_notifyDeviceStatusChange(false, list)`;
+   - every list entry whose device has `notify_pmp`: `_sendPMPCommand` 14 or 15;
+   - every list entry: `_notifyPMC(deviceID, on, …)`;
+   - level ≠ 0: `_notifyXNUForClusterPowerGating(cluster, true, die)`.
+7. **The register transaction.** Take `psLock` with `lck_spin_lock`
+   (interrupts off), apply the whole list with `_syncDeviceStatusChange`
+   (§4.4), release. **All** of the register work is in this step.
+8. **Post-transition notifications**, in this order:
+   - level 0: `_notifyXNUForClusterPowerGating(cluster, false, die)`;
+   - bit 1 of `DeviceData` byte 13 set: `_triggerPostPowerOffActions(dev, die)`;
+   - `on`: every nub gets `_notifyDeviceStatusChange(true, list)`;
+   - every `notify_pmp` entry: `_sendPMPCommand` 14;
+   - every entry: `_notifyPMC`.
 
 Note the shape: notifications bracket the register work on **both** sides, and
 the whole register transaction runs under a spinlock with interrupts disabled.
@@ -230,26 +229,21 @@ the whole register transaction runs under a spinlock with interrupts disabled.
 ### 4.3 `ApplePMGR::_updateDeviceStatus(deviceID, newLevel, oldLevel, list, &n, die)` — `0xfffffe00097db160`
 
 This is the dependency walker. It builds the ordered list that
-`_syncDeviceStatusChange` then applies.
+`_syncDeviceStatusChange` then applies. For the device it is called on:
 
-```
-0xfffffe00097db25c  parentActiveRefs[die][deviceID]++   /  --     // byte arrays at this+0xd320,
-0xfffffe00097db29c  parentClkRefs   [die][deviceID]++   /  --     // 800 entries each, per die
-0xfffffe00097db368  if (parentActiveRefs != 0) level = 15         // a child still needs ACTIVE
-0xfffffe00097db374  if (parentClkRefs    != 0) level = max(level, 4)
-0xfffffe00097db384  if (dev->flags & BIT3 /* critical */) level = 15
-0xfffffe00097db3ac  if (_debugEnabled(deviceID, ...))    level = 15
-
-0xfffffe00097db678  for (i = 0; i < 4; i++) {                     // 0xfffffe00097db6a4
-0xfffffe00097db678      p = _getDeviceParentsID(dev, i)
-0xfffffe00097db67c      if (!p) break
-0xfffffe00097db69c      _updateDeviceStatus(p, level, ..., list, &n, die)   // RECURSE FIRST
-                    }
-0xfffffe00097db6e8  intended[deviceID] = level
-0xfffffe00097db720  if (dev->flags & BIT4 /* no_ps */) skip register entry
-0xfffffe00097db748  if (_getPSLevel(group, index, die) != level)
-                        list[n++] = { u16 deviceID; u8 level; u8 pad; u32 die; }
-```
+1. **Refcount.** Two per-die software refcounts per device — "children that
+   need it ACTIVE" and "children that need it at least CLKGATE" (byte arrays at
+   `this+0xd320`, 800 entries per die) — go up or down with the transition.
+2. **Resolve the level.** The requested level is raised to 15 if the ACTIVE
+   count is non-zero, to at least 4 if the CLKGATE count is non-zero, to 15 if
+   the device is `critical` (flags bit 3), and to 15 if `_debugEnabled` is true
+   for it.
+3. **Parents first.** Each parent from `_getDeviceParentsID` (up to four slots,
+   stopping at the first empty one) is walked, recursively, with the resolved
+   level, before anything is recorded for this device.
+4. **Then this device.** It gets a list entry unless it is `no_ps` (flags bit 4),
+   and only if its current `PS_TARGET` (`_getPSLevel`) differs from the
+   resolved level. An entry is `{ u16 deviceID; u8 level; u8 pad; u32 die; }`.
 
 Parents are appended **before** the device itself, so the list is already in
 power-up order.
@@ -264,40 +258,31 @@ at `0xfffffe00097d9100`; neither applies here.)
 ### 4.4 `ApplePMGR::_syncDeviceStatusChange(list, n)` — `0xfffffe00097f9088`
 
 Direction is decided from the *first* entry
-(`0xfffffe00097f9580`–`0xfffffe00097f9598`):
+(`0xfffffe00097f9580`–`0xfffffe00097f9598`): if that device's current
+`PS_TARGET` is already ≥ the entry's level, the change is **down** and the list
+is applied in reverse (children first); otherwise it is **up** and the list is
+applied forward (parents first).
 
-```
-if (_getPSLevel(first) >= first->level)  -> DOWN: iterate list in REVERSE
-else                                     -> UP:   iterate list FORWARD
-```
+**Up** (`0xfffffe00097f9638` onward), per entry. A `no_ps` device gets no
+register work at all. For the others, holding the device's locks
+(`_acquireDeviceLocks` … `_releaseDeviceLocks`):
 
-**UP branch** (`0xfffffe00097f9638` onward), per entry:
+1. unless flags bit 2 is set, program `PS_MIN` from `ps_cfg16 & 0xf`
+   (`_setPSAutoMinLevel`, §4.6);
+2. change the level with `_setPSLevel` (§4.5), `autoPmEn` = "flags bit 2 clear";
+3. only if the new level is 15: configure the DPE
+   (`_configureDPEWithoutPMP(regmap, psRegOffset, 0, die)`, vtable `+0x10e0`),
+   configure the fabric bridges (`_initDeviceBridges(dev, die)`), and set the
+   perf state (`_setPerfState(perfDomain[15], dev->id1, die)`).
 
-```
-0xfffffe00097f97ec  if (dev->flags & BIT4 /* no_ps */) skip register work entirely
-0xfffffe00097f9800  _acquireDeviceLocks(dev, die)
-0xfffffe00097f9808  if (!(dev->flags & BIT2))
-0xfffffe00097f9820      _setPSAutoMinLevel(group, index, dev->ps_cfg16 & 0xf, die)   // PS_MIN
-0xfffffe00097f9828  autoPmEn = !(dev->flags & BIT2)
-0xfffffe00097f9848  _setPSLevel(group, index, deviceID, entry->level, autoPmEn, die)
-0xfffffe00097f9850  if (entry->level == 15) {
-0xfffffe00097f98b0      this->_configureDPEWithoutPMP(regmap, offset, 0, die)   // vptr+0x10e0
-0xfffffe00097f991c      _initDeviceBridges(dev, die)
-0xfffffe00097f994c      _setPerfState(perfDomain[15], dev->id1, die)
-                    }
-0xfffffe00097f9960  _releaseDeviceLocks(dev, die, token)
-```
+**Down** (`0xfffffe00097f9194` onward), per entry, in reverse, under the same
+locks:
 
-**DOWN branch** (`0xfffffe00097f9194` onward), per entry, reverse order:
-
-```
-0xfffffe00097f9248  cur = _getPSLevel(group, index, die)
-0xfffffe00097f9264  if (cur == 15) _tearDownDeviceBridges(dev, die)
-0xfffffe00097f92b4  if (cur == 15) this->_cleanupDPEWithoutPMP(regmap, offset, 0, die) // vptr+0x10e8
-0xfffffe00097f93a0  _setPerfState(...)
-0xfffffe00097f93c0  _setPSLevel(group, index, deviceID, entry->level, /*autoPmEn=*/0, die)
-0xfffffe00097f93d4  _releaseDeviceLocks(dev, die)
-```
+1. only if the device's current `PS_TARGET` is 15: tear down the bridges
+   (`_tearDownDeviceBridges(dev, die)`), then clean up the DPE
+   (`_cleanupDPEWithoutPMP(regmap, psRegOffset, 0, die)`, vtable `+0x10e8`);
+2. `_setPerfState`;
+3. change the level with `_setPSLevel`, `autoPmEn = 0`.
 
 Note the asymmetry: on the way **down** `autoPmEn` is hard-coded `0`
 (`0xfffffe00097f93bc`) and `PS_MIN` is not touched; on the way **up** both come
@@ -308,70 +293,48 @@ from the ADT.
 Signature confirmed by the log format at `0xfffffe000760e521`:
 `"ApplePMGR: [Die %u] %s: %s_PS: %#x: MANUAL_PS=%d, AUTO_PM_EN=%s"`.
 
-```
-0xfffffe00097d8704  assert group < numPsRegGroups                  // [this+0x60c8]
-0xfffffe00097d8730  assert index < _getMaxDevicePsRegSize()
-0xfffffe00097d873c  assert (psRegGroups[group].validRegsMask >> index) & 1   // ADT ps-regs mask
-0xfffffe00097d879c  assert die < numDies
-0xfffffe00097d87b4  offset = psRegGroups[group].base + index*8
+**Checks.** It asserts, and panics on failure, that `group` is below the group
+count (`this+0x60c8`), that `index` is below `_getMaxDevicePsRegSize()`, that
+bit `index` of the group's ADT `ps-regs` valid mask is set, and that `die` is
+in range. The register is at `base + index*8` (§3).
 
-0xfffffe00097d89a8  v = readReg32(regmap, offset, die)
-0xfffffe00097d89c4  if ((v & 0xf) == level && (v & 0x40000400) == 0) {   // bits 30 and 10 clear
-0xfffffe00097d8ae0      if (((v >> 28) & 1) == autoPmEn) return          // nothing to do at all
-                    }
+**Fast path.** It reads the register once. If `PS_TARGET` already equals
+`level`, bits 30 and 10 are both clear (`v & 0x40000400 == 0`), and
+`AUTO_ENABLE` (bit 28) already equals `autoPmEn`, it returns without writing.
 
-0xfffffe00097d89f0  pd = _deviceIDToPowerDomainData(deviceID)      // ADT `power-domains`, by dev->pd
+**Otherwise** it looks up the device's power domain
+(`_deviceIDToPowerDomainData`: ADT `power-domains`, by `dev->pd`) and does up
+to three read-modify-writes, each built on the value before it:
 
-  /* ---- WRITE 1: tear down auto-PM before touching the level ---- */
-0xfffffe00097d89f8  if (v & BIT28) {
-0xfffffe00097d8a00      assert (v & 0xf) == 0xf                    // else panic (cold.3)
-0xfffffe00097d8a0c      v &= 0xEFFFFCFF                            // clear AUTO_ENABLE + WAS_*
-0xfffffe00097d8a3c      writeReg32(regmap, offset, v, die)
-0xfffffe00097d8a94      waitReg32(regmap, offset, 0xf0, 0xf0, 0x2ee00, die)   // PS_ACTUAL == 15
-                    }
+| write | when | value | then wait: mask, value, timeout |
+|---|---|---|---|
+| **1** disarm auto-PM | only if bit 28 is set. If `PS_TARGET != 0xf` at that point it **panics** instead (cold path, `.cold.3`) | `v & 0xEFFFFCFF`: `AUTO_ENABLE` and `WAS_*` cleared | `0xf0`, `0xf0`, `0x2ee00`: `PS_ACTUAL == 15` |
+| **2** level change | always | `(v & 0xFFFFFCF0) \| level`: new `PS_TARGET`, `WAS_*` 0, then `\| 0x300` (`WAS_CLKGATED \| WAS_PWRGATED`) if level ≤ 14 | `0xf0`, `level << 4`, `0x2ee00`: `PS_ACTUAL == level` |
+| **3** re-arm auto-PM | only if level is 15 **and** `autoPmEn` | write 2's value `& 0xFFFFFCFF` (`WAS_*` written 0, W1C) `\| BIT28` | none |
 
-  /* ---- WRITE 2: the level change ---- */
-0xfffffe00097d8a9c  v &= 0xFFFFFCF0                                // clear PS_TARGET + WAS_*
-0xfffffe00097d8aa0  v |= level
-0xfffffe00097d8aa8  if (level <= 14) {
-0xfffffe00097d8aac      v |= 0x300                                 // set WAS_CLKGATED|WAS_PWRGATED
-0xfffffe00097d8b70      if (pd && pd->flags & 1) _setPwrGateSleepDepth(pd[7], pd[6], deviceID, 3, die)
-0xfffffe00097d8b98      else if (pd && pd->flags & 4) _setPwrGateRetention(..., enable=0, ...)
-0xfffffe00097d8ad0      else _setPwrGateRetentionV2(deviceID, false, die)
-                    }
-0xfffffe00097d8bc8  writeReg32(regmap, offset, v, die)
-0xfffffe00097d8c20  waitReg32(regmap, offset, 0xf0, level << 4, 0x2ee00, die)  // PS_ACTUAL == level
+Retention and sleep depth (the ADT `pwrgate-regs` file) are programmed around
+the level change:
 
-  /* ---- WRITE 3: re-arm auto-PM, only when fully on ---- */
-0xfffffe00097d8c24  if (level == 15) {
-0xfffffe00097d8c4c      _setPwrGateRetentionV2(deviceID, true, die)   // or SleepDepth/Retention
-0xfffffe00097d8c98      w = v & 0xFFFFFCFF                            // clear WAS_* (W1C)
-0xfffffe00097d8ca0      if (autoPmEn) {
-0xfffffe00097d8ca4          w |= BIT28
-0xfffffe00097d8cd4          writeReg32(regmap, offset, w, die)
-                        }
-                    }
-```
+- **level ≤ 14, before write 2:** `_setPwrGateSleepDepth(pd[7], pd[6], deviceID, 3, die)`
+  if the power domain has flag bit 0; else `_setPwrGateRetention(…, enable = 0, …)`
+  if it has flag bit 2; else `_setPwrGateRetentionV2(deviceID, false, die)`.
+- **level 15, after write 2's wait and before write 3:**
+  `_setPwrGateRetentionV2(deviceID, true, die)` (or the SleepDepth /
+  Retention variant). This happens whether or not write 3 does.
 
 ### 4.6 `ApplePMGR::_setPSAutoMinLevel(group, index, level, die)` — `0xfffffe00097d84dc`
 
-```
-0xfffffe00097d8538  assert (psRegGroups[group].mask >> index) & 1
-0xfffffe00097d85d8  v = readReg32(regmap, offset, die)
-0xfffffe00097d85dc  if (((v >> 16) & 0xf) == level) return
-0xfffffe00097d8610  v &= 0xFFF0FCFF               // clear PS_MIN (19:16) and WAS_* (9:8)
-0xfffffe00097d8614  v |= level << 16
-0xfffffe00097d8670  writeReg32(regmap, offset, v, die)   // tail call, vptr+0x1058
-```
+It asserts the same `ps-regs` mask bit and reads the register. If `PS_MIN`
+(19:16) already equals `level` it returns. Otherwise it makes one write through
+`writeReg32` (vtable `+0x1058`): the value read with `PS_MIN` replaced and
+`WAS_*` (9:8) written 0, i.e. `(v & 0xFFF0FCFF) | level << 16`.
 
 ### 4.7 `ApplePMGR::waitReg32(regmap, offset, mask, value, timeout, die)` — `0xfffffe00097e851c`
 
-```
-0xfffffe00097e8590  deadline = mach_absolute_time() + timeout      // RAW TICKS, not µs
-0xfffffe00097e8594  do { v = readReg32(...) } while ((v & mask) != value && now <= deadline)
-0xfffffe00097e861c  on expiry: one more read, then a diagnostic path that formats the
-                    device name and register map (0xfffffe00097e8670 onward)
-```
+It polls `readReg32` until `(v & mask) == value`, against a deadline of
+`mach_absolute_time() + timeout`: the timeout is in **raw ticks, not µs**. On
+expiry it reads once more and then takes a diagnostic path that formats the
+device name and register map (`0xfffffe00097e8670` onward).
 
 `AppleT6001PMGR::waitReg32` (`0xfffffe0009ba849c`) overrides it with two chip
 quirks before tail-calling the base:
@@ -400,20 +363,18 @@ it walks a 10-entry table `workaroundPSRegsForceWakeUP`
 struct { u32 regmap; u32 offset; u32 forceWakeB; u32 forceWakeA; } [10];
 ```
 
-```
-0xfffffe0009ba85b8  if (entry.offset != offset) continue
-0xfffffe0009ba85c4  if (entry.regmap != regmap) continue
-0xfffffe0009ba8600  cur = readReg32(regmap, offset, die) & 0xf
-0xfffffe0009ba8604  if ((newValue & 0xf) != 0) continue          // only on the way DOWN
-0xfffffe0009ba8608  if (cur == 0)             continue
-0xfffffe0009ba8654  if (A) writeReg32(regmap, A, read(A) | BIT29, die)
-0xfffffe0009ba86d0         writeReg32(regmap, B, read(B) | BIT29, die)
-0xfffffe0009ba86f8         writeReg32(regmap, offset, newValue, die)    // the real write
-0xfffffe0009ba8750         waitReg32(regmap, offset, 0x800, 0, 0x2ee00, die)   // BIT11 == 0
-0xfffffe0009ba87ac         waitReg32(regmap, offset, 0x00f0, 0, 0x2ee00, die)  // PS_ACTUAL == 0
-0xfffffe0009ba87cc         writeReg32(regmap, B, valB & ~BIT29, die)
-0xfffffe0009ba87ec  if (A) writeReg32(regmap, A, valA & ~BIT29, die)
-```
+A write whose `(regmap, offset)` matches an entry is wrapped in a force-wake
+only when it takes the register **down to PS 0** (`newValue & 0xf == 0`) from a
+non-zero current `PS_TARGET` (read first, `& 0xf`). Every other write goes
+through unchanged. The wrapped sequence, where A and B are offsets in the same
+regmap:
+
+1. set bit 29 (read-modify-write) on register A, if the entry has one, then on
+   register B;
+2. perform the requested write;
+3. wait for bit 11 == 0 (mask `0x800`), then for `PS_ACTUAL == 0` (mask
+   `0xf0`), each with the `0x2ee00` timeout;
+4. clear bit 29 on B, then on A if present: the reverse of step 1.
 
 Table contents (T6001 and T6000 are byte-identical):
 
@@ -462,25 +423,21 @@ confirms that VENC and AVD are handled as members of the same class.
 `0xfffffe00097eccb4`. Relevant because `reset_control_reset()` on `venc_sys`
 also hung ([25-bringup-results.md](25-bringup-results.md) stage 7c).
 
-```
-0xfffffe00097ecdb4  v = readReg32(...)
-0xfffffe00097ecdd4  if (v & BIT28)                                  // auto-PM armed
-0xfffffe00097ecdf4      _setPSLevel(group, index, deviceID, 15, /*autoPmEn=*/0, die)
-0xfffffe00097ece2c  w = v & 0xFFFFFCFF                              // clear WAS_*
-0xfffffe00097ece74  writeReg32(w | 0x400)                           // DEV_DISABLE
-0xfffffe00097ecea0  if (adt "reset-noaccess-poll")
-0xfffffe00097eceb4      waitReg32(mask 0x800, value 0, 0x2d0, die)  // BIT11 == 0
-0xfffffe00097ecec0  IODelay(1)
-0xfffffe00097ecef8  writeReg32(w | 0x80000400)                      // RESET | DEV_DISABLE
-0xfffffe00097ecf38  waitReg32(mask 0x80000000, value 1, 0x2d0, die) // see note
-0xfffffe00097ecf40  IODelay(1)
-0xfffffe00097ecf8c  writeReg32(w | 0x400)                           // RESET deasserted
-0xfffffe00097ecfe0  waitReg32(mask 0x80000000, value 0, 0x2d0, die) // RESET == 0
-0xfffffe00097ecfec  IODelay(1)
-0xfffffe00097ed064  waitReg32(mask 0x800, value 0, 0x2d0, die)      // BIT11 == 0
-0xfffffe00097ed068  if (original had BIT28)
-0xfffffe00097ed088      _setPSLevel(group, index, deviceID, 15, /*autoPmEn=*/1, die)
-```
+Every write below is built from the register value read on entry, with
+`WAS_*` written 0 (`w = v & 0xFFFFFCFF`). All waits use the `0x2d0` timeout
+(30 µs at 24 MHz, §3).
+
+1. **Disarm auto-PM.** If `AUTO_ENABLE` (bit 28) is set, first call
+   `_setPSLevel(…, 15, autoPmEn = 0)` (§4.5).
+2. **Disable.** Write `w | 0x400` (`DEV_DISABLE`). If the ADT has
+   `reset-noaccess-poll`, wait for bit 11 == 0 (mask `0x800`). `IODelay(1)`.
+3. **Assert reset.** Write `w | 0x80000400` (`RESET | DEV_DISABLE`). Then
+   `waitReg32(mask 0x80000000, value 1)` (`0xfffffe00097ecf38`, see the note).
+   `IODelay(1)`.
+4. **Deassert reset.** Write `w | 0x400`. Wait for `RESET` == 0 (mask
+   `0x80000000`, value 0). `IODelay(1)`.
+5. Wait for bit 11 == 0 (mask `0x800`), this time unconditionally.
+6. **Re-arm.** If bit 28 was set on entry, call `_setPSLevel(…, 15, autoPmEn = 1)`.
 
 *Note on `0xfffffe00097ecf38`:* `waitReg32` compares `(v & mask) == value`
 (`0xfffffe00097e85c0`), so `mask = 0x80000000, value = 1` can never be
@@ -498,13 +455,10 @@ does not disarm `AUTO_ENABLE`.
 
 ## 7. Which ADT `devices` fields drive which behaviour
 
-`ApplePMGR::_deviceIDToDeviceData(id)` — `0xfffffe00097d91cc`:
-
-```
-0xfffffe00097d91e0  assert 0 < id < 0x320                      // 800 device ids
-0xfffffe00097d91f0  idx = u16 map[this+0x9d40 + id*2]          // must not be 0xffff
-0xfffffe00097d9210  return *(void**)(this+0x90a8) + idx*48     // <-- stride 48
-```
+`ApplePMGR::_deviceIDToDeviceData(id)` — `0xfffffe00097d91cc` — asserts
+`0 < id < 0x320` (800 device ids), maps the id to an index through a `u16`
+table at `this+0x9d40` (at `id*2`; `0xffff` is invalid), and returns that
+index's entry in an array whose base pointer is at `this+0x90a8`, **stride 48**.
 
 Stride 48 = `sizeof(struct pmgr_device)` in m1n1
 (`m1n1-src/src/pmgr.c:23`). Every field macOS reads lands on an m1n1/`adt.py`

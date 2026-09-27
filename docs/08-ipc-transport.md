@@ -225,35 +225,25 @@ Initial state (`0xfffffe0008cb4174`..`0xfffffe0008cb41d0`):
 
 ### Send (`_IOProcessorChannelSend64`)
 
-```
-i = handle[+0x24];  if (i == -1) return -1;              // ring full
-slot = base + i*0x40;
-slot[0x08] = (u64)(u32)arg1;
-slot[0x10] = (u64)(u32)arg2;
-slot[0x00] = payload | (type ^ 1);                       // flips the phase bit
-dsb st;                                                  // 0xfffffe0008cb4438
-r = handle[+0x20]; w = handle[+0x24];
-if (r == -1) { handle[+0x20] = w; r = w; }
-w = (w == nslots-1) ? 0 : w+1;
-handle[+0x24] = (r == w) ? -1 : w;
-handle[+0x2C]++;
-handle[+0x00](handle[+0x08]);                            // ← rings the doorbell
-```
+The handle holds the read index at `+0x20` and the write index at `+0x24`
+(−1 = none: full for the write index, empty for the read index), the receive
+and send counts at `+0x28` and `+0x2C`, and a notify function and its cookie
+at `+0x00` and `+0x08`. A send into a full ring returns −1. Otherwise the slot
+at the write index gets `arg1` at `+0x08` and `arg2` at `+0x10` (u32s,
+zero-extended), then **word0 last**: `payload | (type ^ 1)`, which flips the
+phase bit. A `dsb st` follows (`0xfffffe0008cb4438`), then the index advance
+([36](36-ipc-implementation.md) §6 gives the rule), the send count, and the
+notify call.
 
-The final indirect call is at `0xfffffe0008cb44c0`. **This is where the doorbell
-is rung** — the ring library itself knows nothing about MMIO.
+The notify call is an indirect call at `0xfffffe0008cb44c0`. **This is where
+the doorbell is rung** — the ring library itself knows nothing about MMIO.
 
 ### Receive (`_IOProcessorChannelReceive64`)
 
-```
-i = handle[+0x20];  if (i == -1) return -1;              // nothing queued
-slot = base + i*0x40;
-if ((slot[0] & 1) != (type & 1)) return -1;              // phase mismatch: empty
-*out_payload = slot[0x00] & ~3ULL;
-*out_arg1    = (u32)slot[0x08];
-*out_arg2    = (u32)slot[0x10];
-   ... symmetric index advance, handle[+0x28]++ ...
-```
+An empty read index returns −1, and so does a slot whose phase bit (word0 bit
+0) differs from `type & 1`: nothing has been queued there. Otherwise it hands
+back `word0 & ~3` as the payload and the low 32 bits of `+0x08` and `+0x10`,
+then advances the read index symmetrically and bumps the receive count.
 
 `MessageAvailable64` is just the phase-bit test without consuming.
 
