@@ -9,8 +9,9 @@ data the firmware reads per reference has been checked against the kext
 and the firmware without finding the cause; the switches used to get
 there (`session_ref_spacing_p`, `session_search_range`,
 `session_hevc_refs`, `session_bframes`, `session_direct_spatial`) stay in
-the driver. The rest of this document is the plan as written before any
-run.
+the driver. docs/85 adds `session_macos`: macOS's own fields in bit
+groups, for a send-everything-then-bisect test (not yet run). The rest of
+this document is the plan as written before any run.
 
 Conventions follow docs/65.
 - **fw** = 13.5 firmware image VA (file = VA + 0x4000). **kext** = 13.5 kernelcache VA.
