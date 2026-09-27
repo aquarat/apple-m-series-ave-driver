@@ -4299,3 +4299,27 @@ the PMP clock; DART stream 15; B-specific paths. B frames are parked here
 - **R8**: a V4L2 hang (RefSpacingP 2 at runtime) fails the stream in
   2.6 s; the last close re-probes the device, which resets and restores;
   the next H.264 and HEVC streams are identical to before. docs/84 §5.
+
+## A2-A6, B1-B2 (2026-09-27): ave1 encodes, both encoders at once (docs/82)
+
+No m1n1 change: since docs/84 §3, the driver programs ave1's DAPF itself.
+- **A2** (`OVERLAY=6 stop_after=10`, read-only): ave1's RVBAR =
+  **0x102010000b28001**, base 0x10000b28000: iBoot points ave1 at ave0's
+  TEXT, read-only and shared.
+- The pristine DATA's iBoot tag list ({tag reversed, len, value}) holds
+  three instance addresses: CpAd 0x40d800000 (DATA+0x3bbb), WrAd
+  0x40dc00000 (+0x3bcb), IOBA 0x40c000000 (+0x3be4); nothing else in the
+  blob is ave0-specific. ave1 gets a driver-owned copy with 0x507800000 /
+  0x507c00000 / 0x506000000, mapped at DVA 0xec000 in its own domain.
+- **A3** (`stop_after=15`): the driver writes ave1's DAPF (TEXT r0 0x11,
+  the 0x1f0 window 0x33, the ADT MMIO 0x31, 13 slots cleared), the core
+  starts from the shared TEXT on the patched DATA, and the **handshake
+  completes**. No DAPF miss, fault or assert.
+- **A6** (defaults, V4L2 node `apple-ave1-enc`): H.264 **44.308053 dB**, as
+  ave0; HEVC **byte-identical** to ave0's.
+- **B1** (overlay `variant=7`: both encoders): each node encodes as
+  before, one at a time.
+- **B2** (both nodes at once, 300 frames 1080p each): **each at its
+  single-stream speed** (17.2 / 17.4 ms per frame, 6.0 s wall for both),
+  both 44.688286 dB and byte-identical to each other; HEVC on both at once
+  byte-identical too. **Two concurrent streams, double the throughput.**

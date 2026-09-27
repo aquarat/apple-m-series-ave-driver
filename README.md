@@ -39,6 +39,8 @@ It is a stateful mem2mem encoder, NV12 in:
 - **Sizes:** 192x96 to 4096x4096, width a multiple of 64 and height a
   multiple of 16, or any height via an OUTPUT crop (1920x1080 is a 1920x1088
   buffer with a crop).
+- **Both encoders:** the M1 Max's second encoder (ave1) is a second node,
+  `apple-ave1-enc`; two streams run at once, each at full speed (docs/82).
 - **Checks:** `v4l2-compliance -s` passes 54/54. ffmpeg and GStreamer
   (`v4l2h264enc`/`v4l2h265enc`) work. `testsrc2` comes back at 43-45 dB PSNR
   from 480p to 4K in both codecs.
@@ -56,8 +58,6 @@ It is a stateful mem2mem encoder, NV12 in:
   - **B frames**, and more than one reference per frame. The firmware
     reorders as designed, but any frame with two active references stalls
     the pipe, in H.264 and HEVC alike (docs/81; docs/53 bs1-bs6, hb3).
-  - **The second encoder, ave1.** It binds and powers up; it needs an m1n1
-    change to fetch its firmware (docs/82).
   - System suspend/resume (untested; suspend is masked on the lab machine).
 - **Stability (docs/84):** a 2-hour campaign (6055 byte-identical streams,
   60 000-frame streams, 300 open/close cycles, 150 random configurations,

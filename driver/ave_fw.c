@@ -680,6 +680,10 @@ static void ave_fw_unmap_iboot(struct ave_device *ave)
 		dev_info(ave->dev, "iboot: DATA unmapped, %zu of %#llx bytes\n",
 			 n, ave->soc->iboot.data_size);
 		ave->iboot_data_mapped = false;
+		if (ave->owned_data) {
+			__free_pages(ave->owned_data, get_order(ave->soc->iboot.data_size));
+			ave->owned_data = NULL;
+		}
 	}
 	if (ave->iboot_text_mapped) {
 		n = iommu_unmap(domain, ave->soc->iboot.text_dva, ave->soc->iboot.text_size);
@@ -688,6 +692,59 @@ static void ave_fw_unmap_iboot(struct ave_device *ave)
 		ave->iboot_text_mapped = false;
 	}
 	ave->iboot_domain = NULL;
+}
+
+static int ave_fw_load_pristine(struct ave_device *ave);
+
+/*
+ * docs/82 ave1: this instance's DATA, built here: the pristine blob with the
+ * three instance tags (CpAd, WrAd, IOBA - {tag, len 8, value} records at
+ * DATA+0x3bb3..) set from the table, in pages we own, mapped at data_dva.
+ * A fresh copy every probe, so a reload needs no restore.
+ */
+#define AVE_DATA_TAG_CPAD	0x3bbb
+#define AVE_DATA_TAG_WRAD	0x3bcb
+#define AVE_DATA_TAG_IOBA	0x3be4
+
+static int ave_fw_map_owned_data(struct ave_device *ave,
+				 struct iommu_domain *domain)
+{
+	const typeof(ave->soc->iboot) *ib = &ave->soc->iboot;
+	unsigned int order = get_order(ib->data_size);
+	struct page *pg;
+	u8 *p;
+	int ret;
+
+	ret = ave_fw_load_pristine(ave);
+	if (ret)
+		return ret;
+	/* the tags must be where ave0's are, with ave0's values: same image */
+	if (get_unaligned_le64(ave->iboot_data_pristine + AVE_DATA_TAG_CPAD) != 0x40d800000ULL ||
+	    get_unaligned_le64(ave->iboot_data_pristine + AVE_DATA_TAG_WRAD) != 0x40dc00000ULL ||
+	    get_unaligned_le64(ave->iboot_data_pristine + AVE_DATA_TAG_IOBA) != 0x40c000000ULL) {
+		dev_err(ave->dev, "owned DATA: REFUSING - the blob's CpAd/WrAd/IOBA are not where docs/82 found them\n");
+		return -EINVAL;
+	}
+	pg = alloc_pages(GFP_KERNEL | __GFP_ZERO, order);
+	if (!pg)
+		return -ENOMEM;
+	p = page_address(pg);
+	memcpy(p, ave->iboot_data_pristine, ib->data_size);
+	put_unaligned_le64(ib->tag_cpad, p + AVE_DATA_TAG_CPAD);
+	put_unaligned_le64(ib->tag_wrad, p + AVE_DATA_TAG_WRAD);
+	put_unaligned_le64(ib->tag_ioba, p + AVE_DATA_TAG_IOBA);
+	ret = iommu_map(domain, ib->data_dva, page_to_phys(pg), ib->data_size,
+			IOMMU_READ | IOMMU_WRITE, GFP_KERNEL);
+	if (ret) {
+		dev_err(ave->dev, "owned DATA: iommu_map failed: %d\n", ret);
+		__free_pages(pg, order);
+		return ret;
+	}
+	ave->owned_data = pg;
+	dev_info(ave->dev, "  owned DATA: %#llx bytes at phys %pa -> DVA %#llx; CpAd %#llx WrAd %#llx IOBA %#llx\n",
+		 ib->data_size, &(phys_addr_t){ page_to_phys(pg) }, ib->data_dva,
+		 ib->tag_cpad, ib->tag_wrad, ib->tag_ioba);
+	return 0;
 }
 
 static int ave_fw_map_iboot(struct ave_device *ave, struct iommu_domain *domain,
@@ -721,7 +778,12 @@ static int ave_fw_map_iboot(struct ave_device *ave, struct iommu_domain *domain,
 
 	ave->iboot_domain = domain;
 
-	if (fw_map_data) {
+	if (fw_map_data && ave->soc->iboot.data_owned) {
+		ret = ave_fw_map_owned_data(ave, domain);
+		if (ret)
+			goto fail;
+		ave->iboot_data_mapped = true;
+	} else if (fw_map_data) {
 		ret = ave_fw_map_one(ave, domain, ave->soc->iboot.data_dva,
 				     ave->soc->iboot.data_phys, ave->soc->iboot.data_size,
 				     IOMMU_READ | IOMMU_WRITE, "iboot DATA");
@@ -930,6 +992,18 @@ int ave_fw_data_ran(struct ave_device *ave)
 	u8 *p;
 	int ret;
 
+	/*
+	 * Owned DATA is a fresh copy every probe and says nothing. A core that
+	 * has never run reads exactly 0x2a (ave0 and ave1 both, A1b); a halted
+	 * one 0x2e. The exact value, not the STOPPED bit (s2-9).
+	 */
+	if (ave->soc->iboot.data_owned) {
+		u32 st = ave_read(ave, AVE_BANK_ASC, AVE_ASC_CPU_STATUS);
+
+		dev_info(ave->dev, "reload: CPU_STATUS %#x: %s\n", st,
+			 st == 0x2a ? "cold" : "a core has run");
+		return st != 0x2a;
+	}
 	ret = ave_fw_load_pristine(ave);
 	if (ret)
 		return ret;
@@ -966,6 +1040,9 @@ int ave_fw_restore_data(struct ave_device *ave)
 	 */
 	int mode = fw_restore_data;
 
+	/* Owned DATA is rebuilt from the blob every probe (docs/82) */
+	if (ave->soc->iboot.data_owned)
+		return 0;
 	if (!mode && ave->recover_halted) {
 		dev_info(ave->dev,
 			 "restore: recovering a halted core, so DATA is restored whether or not fw_restore_data was given\n");
@@ -1170,6 +1247,8 @@ int ave_fw_load(struct ave_device *ave)
 	 * So we take the address from the register rather than choosing one.
 	 */
 	fwreg = ave_read64(ave, AVE_BANK_ASC, AVE_ASC_FW_BASE);
+	dev_info(ave->dev, "  RVBAR (ASC+%#x) = %#llx, base %#llx\n", AVE_ASC_FW_BASE,
+		 fwreg, fwreg & AVE_ASC_FW_BASE_MASK);	/* docs/82 A2 */
 
 	/*
 	 * Take the low 32 bits, not the wide mask.

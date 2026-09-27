@@ -1707,6 +1707,11 @@ static int ave_probe_stages(struct platform_device *pdev)
 		v = ave_read(ave, AVE_BANK_ASC, AVE_ASC_CPU_STATUS);
 		dev_info(dev, "  ASC CPU_STATUS = 0x%08x\n", v);
 
+		/* docs/82: ave1's DAPF is the driver's to program */
+		ret = ave_dapf_program_instance(ave);
+		if (ret)
+			return dev_err_probe(dev, ret, "DAPF program (instance)\n");
+
 		/* E2 (docs/48): read-only DART + DAPF dump; no-op unless dapf_dump=1. */
 		ret = ave_dapf_dump(ave);
 		if (ret)

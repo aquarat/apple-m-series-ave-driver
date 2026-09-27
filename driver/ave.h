@@ -116,6 +116,7 @@ struct ave_device {
 	/* iBoot segment DART mappings (ave_fw.c, fw_map_data / fw_map_text) */
 	struct iommu_domain	*iboot_domain;
 	bool			iboot_data_mapped;
+	struct page		*owned_data;	/* soc->iboot.data_owned: our DATA */
 	bool			iboot_text_mapped;
 	/*
 	 * Pristine copy of the firmware's DATA segment (ave_fw.c,

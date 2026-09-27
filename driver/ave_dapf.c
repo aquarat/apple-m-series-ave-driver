@@ -804,6 +804,31 @@ static int ave_dapf_probe_slot15(struct ave_device *ave)
 	return 0;
 }
 
+/*
+ * docs/82, docs/84 §3: for a DART m1n1 leaves alone (ave1), the driver
+ * writes what m1n1 writes for ave0 - iBoot's TEXT (r0 0x11), the 0x1f0
+ * window (0x33) and the ADT's MMIO entry (0x31) - and clears the other
+ * slots of their power-on garbage. Non-posted, before the core starts.
+ */
+int ave_dapf_program_instance(struct ave_device *ave)
+{
+	const struct ave_soc *soc = ave->soc;
+	struct ave_dapf_entry ent[AVE_DAPF_MAX_ENTRIES] = {
+		{ .start = soc->iboot.text_phys,
+		  .end = soc->iboot.text_phys + soc->iboot.text_size - 4,
+		  .r0 = 0x11, .r4 = 1, .what = "iBoot TEXT" },
+		{ .start = soc->dapf_window.start, .end = soc->dapf_window.end,
+		  .r0 = 0x33, .r4 = 1, .what = "0x1f0 window" },
+		{ .start = soc->dapf_mmio_adt.start, .end = soc->dapf_mmio_adt.end,
+		  .r0 = 0x31, .r4 = 1, .what = "ADT MMIO" },
+	};
+
+	if (!soc->dapf_by_driver || !soc->iboot.text_phys)
+		return 0;
+	dev_info(ave->dev, "dapf: programming %s's DAPF (m1n1 does not)\n", soc->name);
+	return ave_dapf_program(ave, ent, AVE_DAPF_MAX_ENTRIES, false);
+}
+
 int ave_dapf_program(struct ave_device *ave,
 		     const struct ave_dapf_entry *ent, unsigned int n,
 		     bool preclear)

@@ -70,7 +70,16 @@ struct ave_soc {
 		u64		data_size;
 		u64		data_dva;
 		u64		data_literal;	/* DATA's DVA as the image spells it */
+		/*
+		 * docs/82 ave1: iBoot loads DATA for ave0 only. true = the
+		 * driver builds this instance's DATA itself - the pristine
+		 * blob with the tags below - in memory it owns (data_phys 0).
+		 */
+		bool		data_owned;
+		u64		tag_cpad, tag_wrad, tag_ioba;
 	} iboot;
+	/* docs/84 §3: the driver programs this DART's DAPF (m1n1 does not) */
+	bool		dapf_by_driver;
 
 	/* Power domains the DT cannot hand to the node (docs/57 #3, docs/78) */
 	const char	*me1_node;		/* venc_me1 */

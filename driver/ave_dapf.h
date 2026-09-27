@@ -63,6 +63,7 @@ int ave_dapf_dump_now(struct ave_device *ave, const char *tag,
  * Ungated primitive - callers are responsible for the gate. Returns -EIO on
  * readback mismatch.
  */
+int ave_dapf_program_instance(struct ave_device *ave);
 int ave_dapf_program(struct ave_device *ave,
 		     const struct ave_dapf_entry *ent, unsigned int n,
 		     bool preclear);
