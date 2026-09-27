@@ -101,37 +101,44 @@ unmasks IRQ 27 and parks. **[C]**
 
 ### 1.2 The per-macroblock handler (image `0x1a8`..`0x352`)
 
-```
-1a8  r2 = 0x41243180                       ; per-MB context block
-1bc  r1 = ldrh [0x41243000]                ; MB word
-1be  r0 = 0x41242014                       ; hif +0x14
-1c8  r3 = [0x41243228]
-1cc  [r0-8]  = 0                           ; hif +0x0C = 0
-1d0  [r0-4]  = 0                           ; hif +0x10 = 0
-1d6  r1 >>= 10                             ; per-MB QP = bits 10..15 of 0x41243000
-1dc  [r0]    = 0x80000025                  ; hif +0x14: request
-1e0..1fa     poll until bit 31 clear       ; grant
-1fc  r4 = [0x41243184]
-20a  if (r4 < 0x10000000) goto 0x308       ; nothing to program
-214  r4 = [DMem 0x10000764]                ; ASC-supplied mode word
-21e  if (r4 bit2)  -> 0x22e : 0x4124a1cc = [0x41243008], 0x4124a1c8 = [0x41243004]
-222  if (r4 bit4)  -> 0x248 : QP path, skipped when QP == 63
-226  if (r4 bit0)  -> 0x24c with r1 = [0x41243228]
-     else            -> 0x26a (programs nothing)
-24c  0x4124a1c8 = QP                        ; QPY
-250  if (byte [DMem 0x10000000] bit 0):
-262    r1 = imageTable[0x412 + QP] ; <<4
-266    0x4124a1cc = r1                      ; nQuant / lambda
-26a  if ((word [DMem 0x10000000] & 0x08000001) == 0x08000001): patch 0x4124a1d4 bit0
-294  if (word [DMem 0x10000000] bit 12):    0x4124a1d0, 0x4124a1d4, 0x4124a1d8
-2d0  if (byte [DMem 0x10000002] bit 2):     save/restore 0x4124a1d4/d8 in DMem
-308  [0x41243254] = [0x41243258] = [0x4124325c] = 0
-316  [r0] = 0x60000000 ; poll until bits 29-30 clear
-346  [0x4124a080] = 1                       ; per-MB GO
-34e  [r0-12] = 0x2000                       ; ack hif +8 bit 13
-```
+This is the IRQ 27 vector (§1.1). Addresses are the MCPU's view
+(`0x4124xxxx` = AP `0x40D24xxxx`); **hif** is the host-interface block at
+`0x41242000` (§4.3) and **ctx** the per-MB context block at `0x41243000`, which
+the handler addresses from `0x41243180` (§4.2). Per macroblock it:
 
-**[C]** for every line. This matches and completes
+1. **Reads its inputs** from ctx: the u16 at `0x41243000`, whose bits 10..15
+   are the per-MB QP, and the word at `0x41243228`, a second QP source.
+2. **Zeroes hif `+0x0C` and `+0x10`.** Nothing later in the handler writes
+   them again.
+3. **Requests:** hif `+0x14` = `0x80000025`, then polls until bit 31 clears
+   (the grant).
+4. **Checks for work:** if ctx `0x41243184` is below `0x10000000` it programs
+   nothing and goes straight to step 7.
+5. **Programs QP and λ**, as selected by the ASC-supplied mode word at DMem
+   `0x10000764`. The bits are tested in the order 2, 4, 0 and the first one set
+   wins; with none set, nothing is programmed here.
+
+   | mode bit | effect |
+   |---|---|
+   | 2 | `0x4124A1CC` = ctx `0x41243008`, `0x4124A1C8` = ctx `0x41243004` |
+   | 4 | the QP path, with the per-MB QP from step 1; skipped when that QP is 63 |
+   | 0 | the QP path, with the QP from ctx `0x41243228` |
+
+   The QP path writes the QP to `0x4124A1C8` (QPY) and, only if bit 0 of DMem
+   byte `0x10000000` is set, entry `0x412 + QP` of a table in the MCPU image,
+   shifted left 4, to `0x4124A1CC` (nQuant / λ).
+6. **Applies three more DMem tests** (from image `0x26a`):
+   - word `0x10000000` `& 0x08000001` == `0x08000001`: patches bit 0 of
+     `0x4124A1D4`;
+   - word `0x10000000` bit 12: writes `0x4124A1D0`, `0x4124A1D4` and
+     `0x4124A1D8`;
+   - byte `0x10000002` bit 2: saves/restores `0x4124A1D4`/`0x4124A1D8` in DMem.
+7. **Clears** ctx `0x41243254`, `0x41243258` and `0x4124325C`.
+8. **Posts:** hif `+0x14` = `0x60000000`, then polls until bits 29-30 clear.
+9. **Kicks the stage:** `0x4124A080 = 1`, the per-MB **go**.
+10. **Acknowledges** IRQ 27: hif `+0x08` = `0x2000` (bit 13).
+
+**[C]** for every step. This matches and completes
 [59](59-row1-stall.md) §2.1.
 
 ### 1.3 The ASC side: five words and one enable, and nothing else
