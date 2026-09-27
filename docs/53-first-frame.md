@@ -4326,3 +4326,19 @@ No m1n1 change: since docs/84 §3, the driver programs ave1's DAPF itself.
 - **bs7** (bs1 + `session_max_mvs=16`, Start_AVC MaxMvsPer2Mb as macOS sends
   it, which sets a ModeDec parameter flag, fw 0x5d3c0): the two-reference
   frame hangs as before. MaxMvsPer2Mb is not it.
+
+## mq1-mq3 (2026-09-27): the macOS-equivalent Start image (docs/85)
+
+`session_macos` sends macOS's values for every Start/Process field where
+ours differ, in ten groups (docs/85).
+- **mq1** (bs1 + `session_macos=0x3ff`, every group): frame 1 changes
+  (2637 bytes against 2524), so the groups take effect, but **frame 2, two
+  L0 references, hangs as before.**
+- **mq2** (b4's explicit {B1, P2} + 0x3ff, macOS's own B-frame case): **B1
+  hangs as before.** The Start image is not the cause.
+- **mq3** (0x3ff, frames after the IDR sent as **type 5**, "the firmware
+  decides", as macOS sends them; one batch of 4): all complete, in order,
+  but **every frame is coded as an IDR** (FrameTypeReturned 3, five IDR
+  slices). CFrameType::FrameType (fw 0x3d23c) takes its IDR branch
+  (0x3d2e0) when byte +53 of its frame record is 0; the caller fills that
+  byte from PICMGMT+0xCB0 (fw 0x23d14/0x23d3c). Being traced (host).

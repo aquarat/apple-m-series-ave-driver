@@ -662,6 +662,12 @@ static inline u32 ave_coded_data_size_max(u32 w, u32 h, bool hevc)
 #define AVE_FRAME_TYPE_B		2
 #define AVE_FRAME_TYPE_IDR		3
 /*
+ * "The firmware decides": macOS sends every frame as 5 and GetFrameType
+ * (CFrameType/AdaptiveB, fw 0x145d4) writes the real type before the slice
+ * writer sees it (docs/81 §1.4). docs/85 mq3.
+ */
+#define AVE_FRAME_TYPE_AUTO		5
+/*
  * Only ever seen coming BACK, in CODED_DATA_HDR.FrameTypeReturned: the
  * firmware dropped the frame (written at fw 0x13340 and 0x5c930, tested at
  * 0x14bc0). docs/67 §5.
