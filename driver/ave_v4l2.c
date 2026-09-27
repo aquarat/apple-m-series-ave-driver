@@ -66,6 +66,7 @@ struct ave_v4l2 {
 	struct mutex		hw_mutex;	/* ave_enc_* calls */
 	struct workqueue_struct	*wq;
 	struct ave_ctx		*owner;		/* the context holding a session */
+	atomic_t		users;		/* open file handles (docs/84 §5) */
 	bool			hevc;		/* HEVC offered (ave_enc_hevc_supported) */
 };
 
@@ -913,6 +914,11 @@ static void ave_run_work(struct work_struct *work)
 			ctx->frame_n, ret);
 		state = VB2_BUF_STATE_ERROR;
 		len = 0;
+		/* No later frame can succeed: tell the client now (EPOLLERR) */
+		if (av->ave->fw_hung) {
+			vb2_queue_error(v4l2_m2m_get_src_vq(m2m));
+			vb2_queue_error(v4l2_m2m_get_dst_vq(m2m));
+		}
 	} else {
 		ctx->force_key = false;
 		ctx->frame_n++;
@@ -993,6 +999,7 @@ static int ave_open(struct file *file)
 		goto err_ctrl;
 	}
 	v4l2_fh_add(&ctx->fh, file);
+	atomic_inc(&av->users);
 	return 0;
 
 err_ctrl:
@@ -1016,6 +1023,12 @@ static int ave_release(struct file *file)
 	v4l2_fh_del(&ctx->fh, file);
 	v4l2_fh_exit(&ctx->fh);
 	kfree(ctx);
+	/*
+	 * A hung firmware is reset by re-probing the device, which tears down
+	 * this V4L2 device: only once nobody holds it open (docs/84 §5).
+	 */
+	if (atomic_dec_and_test(&av->users) && av->ave->fw_hung)
+		ave_schedule_recover(av->ave);
 	return 0;
 }
 

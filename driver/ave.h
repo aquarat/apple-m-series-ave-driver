@@ -243,6 +243,13 @@ struct ave_device {
 	 * (status 0x2e)", which is what s1-9 did (docs/53).
 	 */
 	bool			recover_halted;
+	/*
+	 * docs/84 §5: a Process timed out, so the firmware is wedged (R1).
+	 * Encodes and starts fail fast; the last close re-probes the device,
+	 * which resets the core and restores DATA (R7).
+	 */
+	bool			fw_hung;
+	bool			recover_scheduled;
 };
 
 /*
@@ -285,6 +292,7 @@ static inline void ave_write64(struct ave_device *ave, unsigned int bank,
 /* ave_fw.c */
 int ave_fw_load(struct ave_device *ave);
 void __iomem *ave_devm_ioremap_np(struct device *dev, phys_addr_t pa, size_t size);
+void ave_schedule_recover(struct ave_device *ave);
 void ave_pmp_stream_on(struct ave_device *ave);
 void ave_pmp_stream_off(struct ave_device *ave);
 void ave_fw_unload(struct ave_device *ave);

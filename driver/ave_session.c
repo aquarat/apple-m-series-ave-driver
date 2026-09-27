@@ -327,7 +327,7 @@ MODULE_PARM_DESC(session_dpb,
  */
 /* docs/81 bs1: RefSpacingP; 2 gives P frames two L0 references */
 static unsigned int session_ref_spacing_p;
-module_param(session_ref_spacing_p, uint, 0444);
+module_param(session_ref_spacing_p, uint, 0644);	/* per stream: docs/84 R8 */
 MODULE_PARM_DESC(session_ref_spacing_p,
 	"H.264 Start_AVC RefSpacingP (wire 0x10574); 2 = two L0 references per P, needs session_dpb=3 (docs/81)");
 
@@ -4929,6 +4929,9 @@ int ave_enc_start(struct ave_device *ave, const struct ave_enc_cfg *cfg)
 	const bool hevc = cfg->codec == AVE_ENC_CODEC_HEVC;
 	int ret;
 
+	if (ave->fw_hung)
+		return -EIO;
+
 	BUILD_BUG_ON(AVE_ENC_CODEC_H264 != AVE_SESS_CODEC_AVC ||
 		     AVE_ENC_CODEC_HEVC != AVE_SESS_CODEC_HEVC);
 	if (!abi || !bufs)
@@ -5007,6 +5010,8 @@ int ave_enc_encode(struct ave_device *ave, u32 n, bool idr,
 	u64 t_start;
 	int ret;
 
+	if (ave->fw_hung)
+		return -EIO;
 	if (!abi || !bufs || !ave->client_open)
 		return -EINVAL;
 	if (!stride || (stride & (AVE_STRIDE_ALIGN - 1)))
@@ -5022,6 +5027,13 @@ int ave_enc_encode(struct ave_device *ave, u32 n, bool idr,
 	ret = ave_session_process(ave, abi, bufs, AVE_SESS_CLIENT_ID, n);
 	bufs->ext_src = false;
 	bufs->force_idr = false;
+	if (ret == -ETIMEDOUT) {
+		/* R1: nothing answers after this but a core reset */
+		ave->fw_hung = true;
+		dev_err(ave->dev,
+			"enc: frame %u timed out: the encoder firmware is hung. Failing this stream; the device resets itself when its last user closes it (docs/84)\n",
+			n);
+	}
 	if (ret)
 		return ret;
 	if (bufs->stream_len > out_size)
@@ -5048,6 +5060,9 @@ int ave_enc_stop(struct ave_device *ave)
 
 	if (!bufs || !ave->client_open)
 		return 0;
+	/* Stop is acked but never completed on a hung firmware (R1): 2 s each */
+	if (ave->fw_hung)
+		return -EIO;
 	if (bufs->t_frames)
 		dev_info(ave->dev,
 			 "enc: %u frames %ux%u: Process round trip avg %llu us (max %llu), whole frame avg %llu us\n",
