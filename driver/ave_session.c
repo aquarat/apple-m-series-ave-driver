@@ -663,6 +663,15 @@ module_param(session_hevc_bitdepth, uint, 0444);
 MODULE_PARM_DESC(session_hevc_bitdepth,
 	"HEVC self-test: SPS bit depth, 8 (Main, default) or 10 (Main 10; docs/83)");
 
+/*
+ * docs/81 hb2: HEVC P frames with two references (numRefs and the SPS sets,
+ * macOS's IPPP shape capped at 2). Needs session_dpb=3. Default 1.
+ */
+static unsigned int session_hevc_refs = 1;
+module_param(session_hevc_refs, uint, 0444);
+MODULE_PARM_DESC(session_hevc_refs,
+	"HEVC self-test: references per P frame, 1 (default) or 2 (needs session_dpb=3; docs/81 hb2)");
+
 /* docs/83 m2: the HEVC self-test's source as P010 (10) instead of NV12 (8) */
 static unsigned int session_src_bitdepth = 8;
 module_param(session_src_bitdepth, uint, 0444);
@@ -2235,7 +2244,9 @@ static int ave_session_start_hevc(struct ave_device *ave,
 			 "session: HEVC_INIT: session_hevc_xc=1: one transcoder straight into the coded buffer (PICMGMT+0xF65 = 1), no TranscodedData\n");
 	}
 
-	bufs->hevc_refs = bufs->n_dpb >= 2 ? 1 : 0;
+	/* docs/81 hb2: session_hevc_refs=2 gives two-reference P frames */
+	bufs->hevc_refs = bufs->n_dpb >= 2 ?
+		clamp_t(u32, session_hevc_refs, 1, bufs->n_dpb - 1) : 0;
 	bufs->hevc_poc_mask = (1u << (AVE_SESS_HEVC_POC_LSB_M4 + 4)) - 1;
 	bufs->hevc_sao = session_hevc_sao;
 	bufs->last_idr = 0;
@@ -2243,6 +2254,7 @@ static int ave_session_start_hevc(struct ave_device *ave,
 	h->level_idc = max_t(u32, ave_hevc_level_for(st.cw, st.ch),
 			     bufs->level_floor);
 	h->input_format_word = AVE_SESS_HEVC_INPUT_FMT;
+	h->vp.ref_spacing_p = min_t(u32, session_ref_spacing_p, 255);	/* hb3 */
 	h->bit_depth = bufs->bit_depth;		/* docs/83; 0 = 8 */
 	h->input_bitdepth = bufs->src_bitdepth == 10 ? 10 : 8;	/* P010 : NV12 */
 	h->max_num_ref_frames = bufs->hevc_refs;
@@ -2254,6 +2266,7 @@ static int ave_session_start_hevc(struct ave_device *ave,
 	h->qp_mod = session_hevc_qpmod && h->vp.rc_enable;
 	/* the firmware picks set 0..3 per frame itself (docs/77 §18) */
 	h->n_st_rps = bufs->hevc_refs ? 4 : 0;
+	h->st_rps_refs = bufs->hevc_refs >= 2 ? 2 : 1;
 	/*
 	 * ui32IdrPeriod (wire 0xFF34) = 1 is an all-intra session to the HEVC
 	 * firmware, not just to the rate model (docs/76): IEP copies it to
@@ -2915,6 +2928,45 @@ static void ave_session_diag_hevc_inter(struct ave_device *ave)
 				 v[2], v[3], v[4], v[5], v[6], v[7], v[8], v[9],
 				 v[10], v[11], v[12], v[13], v[14], v[15]);
 		}
+}
+
+/*
+ * docs/81 bs4: the motion-estimation setup, read-only, for comparing a
+ * one-reference frame with a two-reference one. Each word is one the
+ * firmware writes (DPE bank):
+ *   +0x10000       search range bits 12-14 (fw 0x5317c-0x531c0)
+ *   +0x10110       setLRME range & 7 (fw 0x52214)
+ *   +0xE0000       ME config, bits 12-14 (fw 0x562e8-0x5632c)
+ *   +0xE000C+4k    per-reference word; AVC copies L0[0]'s for k = 1
+ *                  (fw 0x53a8c), HEVC programs each (0x71168)
+ *   +0x90110..1DC  ME reference bank (L0 at +0x190, L1 at +0x1D0)
+ *   +0x90630       MESATDSCALING (fw 0x5668c)
+ */
+static void ave_session_diag_me(struct ave_device *ave, const char *tag)
+{
+	u32 v[16];
+	int k;
+
+	for (k = 0; k < 4; k++)
+		v[k] = ave_read(ave, AVE_BANK_DPE, 0xe000c + 4 * k);
+	dev_info(ave->dev,
+		 "session: me [%s] 10000 %08x 10110 %08x e0000 %08x e000c.. %08x %08x %08x %08x 90630 %08x\n",
+		 tag, ave_read(ave, AVE_BANK_DPE, 0x10000),
+		 ave_read(ave, AVE_BANK_DPE, 0x10110),
+		 ave_read(ave, AVE_BANK_DPE, 0xe0000), v[0], v[1], v[2], v[3],
+		 ave_read(ave, AVE_BANK_DPE, 0x90630));
+	for (k = 0; k < 16; k++)
+		v[k] = ave_read(ave, AVE_BANK_DPE, 0x90110 + 4 * k);
+	dev_info(ave->dev,
+		 "session: me [%s] 90110: %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x\n",
+		 tag, v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7], v[8],
+		 v[9], v[10], v[11], v[12], v[13], v[14], v[15]);
+	for (k = 0; k < 16; k++)
+		v[k] = ave_read(ave, AVE_BANK_DPE, 0x90190 + 4 * k);
+	dev_info(ave->dev,
+		 "session: me [%s] 90190: %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x\n",
+		 tag, v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7], v[8],
+		 v[9], v[10], v[11], v[12], v[13], v[14], v[15]);
 }
 
 static void ave_session_diag_channels(struct ave_device *ave, const char *tag)
@@ -4009,6 +4061,13 @@ static int ave_session_process(struct ave_device *ave,
 				 "session: RESULT frame %u: coded header undecodable; MB I %u P %u skip %u of %u\n",
 				 n, i_mb, p_mb, skip_mb, mbs);
 	}
+	/* docs/81 bs4: the ME setup this frame ran with, as the control */
+	if (!ret && (session_ref_spacing_p >= 2 || session_bframes)) {
+		char tag[16];
+
+		snprintf(tag, sizeof(tag), "frame %u", n);
+		ave_session_diag_me(ave, tag);
+	}
 	if (!bufs->quiet)
 		ave_step(ave, "frame result logged; next: post-frame diagnostics");
 
@@ -4108,6 +4167,8 @@ static int ave_session_process(struct ave_device *ave,
 		ave_session_diag_costs(ave);
 		ave_step(ave, "diag: channels");
 		ave_session_diag_channels(ave, "timeout");
+		if (session_ref_spacing_p >= 2 || session_bframes)
+			ave_session_diag_me(ave, "timeout");
 		/* the reference readers for AVC too (docs/81 bs2) */
 		if (hevc || session_ref_spacing_p >= 2) {
 			ave_step(ave, "diag: HEVC reference / low-res readers");

@@ -1,10 +1,16 @@
 # 81. B-frames (H.264 first, then HEVC)
 
-**Status (2026-09-26):** a design from host-only static analysis of the
-13.5 firmware and kext, being built step by step on hardware. **b1 and b2
-pass** (docs/53): POC type 0 and two references, with IPPP output
-identical to before. Next is b3, two commands in flight. The rest of the
-document is the plan as written before any run; results go in docs/53.
+**Status (2026-09-27): parked.** b1-b3 pass (POC type 0, two DPB
+references, several commands in flight). b4: the firmware reorders as
+designed (P2 completes before the held B1). But **any frame with two
+active references stalls the pipe after two macroblocks, in H.264 and in
+HEVC** (docs/53 b4-b6c, bs1-bs6, hb2-hb3), and a B needs two. The host
+data the firmware reads per reference has been checked against the kext
+and the firmware without finding the cause; the switches used to get
+there (`session_ref_spacing_p`, `session_search_range`,
+`session_hevc_refs`, `session_bframes`, `session_direct_spatial`) stay in
+the driver. The rest of this document is the plan as written before any
+run.
 
 Conventions follow docs/65.
 - **fw** = 13.5 firmware image VA (file = VA + 0x4000). **kext** = 13.5 kernelcache VA.

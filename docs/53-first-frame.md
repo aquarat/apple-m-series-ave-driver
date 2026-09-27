@@ -4245,3 +4245,33 @@ H.264 resets OUTPUT to NV12. One boot, `tools/v4l2-test.sh`, 1280x720,
   1280x720): **P010 -> Main 10 3993 kbit/s** (99.8 %), Y 47.91 dB in 10
   bits; NV12 -> Main 3991 kbit/s in the same boot. No assert or hang. The
   12-step QP domain shift at 10 bits does not upset the controller.
+
+## bs3-bs6, hb2, hb3 (2026-09-27): two references hang both codecs
+
+Host analysis 3 found search_range 2 is not a t6001 mode (the kext's
+`SearchRange_AVC_Castor` lists 0 and 1 only), so bs2 proves nothing.
+- **bs3** (bs1 at the valid `session_search_range=1`): frame 1 (one
+  reference) completes; frame 2 (two) hangs as in bs1. The window size is
+  not it.
+- **bs4** (bs1 + a read-only ME register dump, `ave_session_diag_me`): the
+  second reference gets its own per-reference word (DPE+0xE0010
+  `c0010000` beside `c0000000`) and its own ME-bank entry (DPE+0x90194
+  `0x10`); not a copy of the first. Both reference readers are programmed
+  (L0[0] slot 2, L0[1] slot 0) and both LowResResult readers active (0xEC00
+  of 0xF000 read).
+- **bs5** (bs1 with the PMP report and the VMAX+FAB0 vote, read back): the
+  same hang. Clocks are not it.
+- **bs6** (bs1 on overlay variant=5, DART stream 15 attached): the same
+  hang. Stream 15 is not it.
+- **hb2** (HEVC, `session_dpb=3 session_hevc_refs=2`: numRefs 2, SPS sets
+  {-1,-2} except set 1 {-1}, macOS's IPPP shape capped at two): completes,
+  but every slice has `refs l0 1`; the firmware keeps both pictures and
+  uses one.
+- **hb3** (hb2 + RefSpacingP 2, now written for HEVC too): **frame 2 hangs,
+  PIPE HANG 3, 3**, as H.264 does.
+
+**Any frame with two active references stalls the pipe, in both codecs**
+(macOS's own HEVC IPPP uses up to four). Ruled out: the reference, LowRes,
+colocated, SrcNeighbor and entropy sizes; search range; direct mode; CAVLC;
+the PMP clock; DART stream 15; B-specific paths. B frames are parked here
+(docs/81).

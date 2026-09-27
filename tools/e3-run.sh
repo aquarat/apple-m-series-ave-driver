@@ -47,8 +47,9 @@ if [ -n "${OVERLAY:-}" ]; then
     if lsmod | grep -q '^ave_overlay'; then
         step "overlay already applied this boot; OVERLAY=$OVERLAY ignored"
     else
-        step "applying overlay variant=$OVERLAY"
-        sudo insmod test/ave-overlay.ko variant="$OVERLAY"; RCO=$?
+        step "applying overlay variant=$OVERLAY ${OVERLAY_ARGS:-}"
+        # OVERLAY_ARGS: extra overlay parameters, e.g. pmp_venc=1 (docs/78)
+        sudo insmod test/ave-overlay.ko variant="$OVERLAY" ${OVERLAY_ARGS:-}; RCO=$?
         step "overlay insmod returned rc=$RCO"
         [ $RCO -eq 0 ] || { sudo kill $CAP 2>/dev/null; echo "$LOG"; exit 1; }
         # Default 0 since f32 (2026-09-21). The 20 s wait was added after F6

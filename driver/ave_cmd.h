@@ -361,6 +361,13 @@ struct ave_hevc_session {
 	 */
 	u32	n_st_rps;
 	/*
+	 * docs/81 hb2: references per set. 0/1 = every set {-1} (above). 2 =
+	 * macOS's IPPP shape capped at two: set 1 {-1} (the first P after an
+	 * IDR has one picture), sets 0, 2, 3 {-1, -2}. Needs
+	 * max_num_ref_frames >= 2.
+	 */
+	u8	st_rps_refs;
+	/*
 	 * TranscodedData (docs/77 §14): the two transcoders' output buffers,
 	 * session-wide, 128-aligned, transcoded_size bytes each (the kext:
 	 * align4K(CodedData / 2)). Required - exactly transcoded_max of them -
