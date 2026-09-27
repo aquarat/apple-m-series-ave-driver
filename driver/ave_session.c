@@ -548,6 +548,12 @@ MODULE_PARM_DESC(session_direct_spatial,
  * previous session's buffers stay mapped until remove (the firmware has
  * released them after Close, but freeing them is not what is under test).
  */
+/* docs/84 R1: after a failed frame, try a new session on the same firmware */
+static bool session_recover;
+module_param(session_recover, bool, 0444);
+MODULE_PARM_DESC(session_recover,
+	"self-test: after a failed frame, Stop + Close and encode two frames in a new session (docs/84)");
+
 static unsigned int session_repeat = 1;
 module_param(session_repeat, uint, 0444);
 MODULE_PARM_DESC(session_repeat,
@@ -4228,6 +4234,35 @@ bool ave_session_selftest_requested(void)
 	return session_selftest || session_frame;
 }
 
+/*
+ * After Stop + Close: free the closed session's buffers back to the
+ * post-Config marks and Open + Start a fresh one on the running firmware
+ * (docs/68 §6.9, f60). Shared by session_repeat and session_recover.
+ */
+static int ave_session_reopen(struct ave_device *ave,
+			      const struct ave_cmd_abi *abi,
+			      struct ave_sess_bufs *bufs,
+			      unsigned int mark_dma, unsigned int mark_ipc)
+{
+	int ret;
+
+	ave_sess_free_to(bufs, mark_dma, mark_ipc);
+	/* Caches into what was just freed (pic_recon dangled in f60). */
+	memset(bufs->src, 0, sizeof(bufs->src));
+	memset(bufs->proc_cmd, 0, sizeof(bufs->proc_cmd));
+	memset(&bufs->pic_recon, 0, sizeof(bufs->pic_recon));
+	bufs->stream_len = 0;
+	bufs->n_done = 0;
+	ret = ave_session_open(ave, abi, bufs, AVE_SESS_CLIENT_ID);
+	if (ret)
+		return ret;
+	ave->client_open = true;
+	ave_session_alloc_nbr(ave, bufs);
+	ave_session_alloc_entropy(ave, abi, bufs);
+	ave_session_alloc_dpb(ave, bufs);
+	return ave_session_start(ave, abi, bufs, AVE_SESS_CLIENT_ID);
+}
+
 int ave_session_selftest(struct ave_device *ave)
 {
 	const struct ave_cmd_abi *abi;
@@ -4416,6 +4451,31 @@ int ave_session_selftest(struct ave_device *ave)
 		}
 		frame += k;
 	}
+	/*
+	 * docs/84 R1: does the firmware recover from a pipe hang at session
+	 * level? Stop + Close the hung client, Open + Start a new one, and
+	 * encode two frames (IDR + one P). Each step's result is logged.
+	 */
+	if (ret && session_recover) {
+		int r;
+		u32 f2;
+
+		dev_warn(ave->dev, "recover: frame %u failed (%d); trying Stop + Close and a new session\n",
+			 frame, ret);
+		r = ave_session_close_client(ave);
+		dev_warn(ave->dev, "recover: Stop + Close = %d%s\n", r,
+			 r ? " - the firmware did not release the hung client" : "");
+		if (r)
+			ave->client_open = false;	/* try the Open anyway */
+		r = ave_session_reopen(ave, abi, bufs, mark_dma, mark_ipc);
+		dev_warn(ave->dev, "recover: Open + Start on the same firmware = %d\n", r);
+		for (f2 = 0; !r && f2 < min_t(u32, bufs->n_frames, 2); f2++)
+			r = ave_session_process(ave, abi, bufs, AVE_SESS_CLIENT_ID, f2);
+		dev_warn(ave->dev, "recover: %s (%d)\n",
+			 r ? "FAILED - a hang needs more than a new session" :
+			     "RECOVERED - a new session encodes after the hang", r);
+		ret = r;
+	}
 	{
 		u32 k, nrep = clamp_t(u32, session_repeat, 1, 8);
 
@@ -4429,21 +4489,7 @@ int ave_session_selftest(struct ave_device *ave)
 			dev_info(ave->dev, "session %u of %u: Open + Start_AVC on the running firmware; freeing the previous session's %u DMA buffers and %u commands\n",
 				 k + 1, nrep, bufs->ndma - mark_dma,
 				 bufs->nipc - mark_ipc);
-			ave_sess_free_to(bufs, mark_dma, mark_ipc);
-			/* Caches into what was just freed (pic_recon dangled in f60). */
-			memset(bufs->src, 0, sizeof(bufs->src));
-			memset(bufs->proc_cmd, 0, sizeof(bufs->proc_cmd));
-			memset(&bufs->pic_recon, 0, sizeof(bufs->pic_recon));
-			bufs->stream_len = 0;
-			bufs->n_done = 0;
-			ret = ave_session_open(ave, abi, bufs, AVE_SESS_CLIENT_ID);
-			if (ret)
-				break;
-			ave->client_open = true;
-			ave_session_alloc_nbr(ave, bufs);
-			ave_session_alloc_entropy(ave, abi, bufs);
-			ave_session_alloc_dpb(ave, bufs);
-			ret = ave_session_start(ave, abi, bufs, AVE_SESS_CLIENT_ID);
+			ret = ave_session_reopen(ave, abi, bufs, mark_dma, mark_ipc);
 			if (ret)
 				break;
 			for (frame = 0; frame < bufs->n_frames; frame++) {

@@ -239,6 +239,26 @@ static int ave_dapf_check_power(struct ave_device *ave)
  * Map "cpudart" and "dapf". Idempotent. Validates the apparatus before the
  * first mapping; it performs no register access itself.
  */
+static void ave_iounmap_action(void *p)
+{
+	iounmap((void __iomem *)p);
+}
+
+/*
+ * A device-managed ioremap_np(): /soc is nonposted-mmio, and neither this
+ * kernel nor 7.1 has devm_ioremap_np(). Not a resource request, because
+ * apple-dart already owns the DART's region.
+ */
+void __iomem *ave_devm_ioremap_np(struct device *dev, phys_addr_t pa, size_t size)
+{
+	void __iomem *p = ioremap_np(pa, size);
+
+	if (!p || devm_add_action_or_reset(dev, ave_iounmap_action,
+					   (void __force *)p))
+		return NULL;
+	return p;
+}
+
 static int ave_dapf_map(struct ave_device *ave)
 {
 	struct platform_device *pdev = to_platform_device(ave->dev);
@@ -288,8 +308,14 @@ static int ave_dapf_map(struct ave_device *ave)
 		}
 	}
 
-	ave->cpudart = devm_ioremap(ave->dev, rd->start, DART_MAP_SIZE);
-	ave->dapf = devm_ioremap(ave->dev, rf->start, DAPF_MAP_SIZE);
+	/*
+	 * Non-posted, as /soc's nonposted-mmio makes every resource mapping.
+	 * Every DAPF/CPUDART write that SErrored (E3a, N1h2, N1j, N1k; docs/49)
+	 * went through a posted devm_ioremap() - the mistake f93/f94 made on
+	 * the PMP (docs/75 §11 row 2, docs/84 R2).
+	 */
+	ave->cpudart = ave_devm_ioremap_np(ave->dev, rd->start, DART_MAP_SIZE);
+	ave->dapf = ave_devm_ioremap_np(ave->dev, rf->start, DAPF_MAP_SIZE);
 	if (!ave->cpudart || !ave->dapf) {
 		dev_err(ave->dev, "dapf: ioremap failed\n");
 		ave->cpudart = NULL;
@@ -318,7 +344,7 @@ static int ave_dapf_map(struct ave_device *ave)
 		ret = of_address_to_resource(args.np, 0, &ri);
 		of_node_put(args.np);
 		if (!ret && ri.start == ave->soc->dart1_phys) {
-			ave->dart1 = devm_ioremap(ave->dev, ri.start, DART_MAP_SIZE);
+			ave->dart1 = ave_devm_ioremap_np(ave->dev, ri.start, DART_MAP_SIZE);
 			if (ave->dart1)
 				dev_info(ave->dev, "dapf: mapped datapath DART %#llx (not requested)\n",
 					 (u64)ave->soc->dart1_phys);
@@ -696,6 +722,48 @@ int ave_dapf_dump(struct ave_device *ave)
 	return 0;
 }
 
+/*
+ * docs/84 R2: write every slot back with exactly what it holds, in m1n1's
+ * order (r4, start, end, r0 last), then read it back. No entry changes, so
+ * the core's fetches are unaffected; the only question is whether a write
+ * from Linux survives.
+ */
+static int ave_dapf_rewrite_same(struct ave_device *ave)
+{
+	struct ave_dapf_entry cur[AVE_DAPF_MAX_ENTRIES], back;
+	unsigned int i, bad = 0;
+	int ret;
+
+	ret = ave_dapf_check_power(ave);
+	if (ret)
+		return ret;
+	ret = ave_dapf_map(ave);
+	if (ret)
+		return ret;
+	for (i = 0; i < AVE_DAPF_MAX_ENTRIES; i++)
+		ave_dapf_slot_read(ave, i, &cur[i]);
+	ave_step(ave, "dapf same: first non-posted write, slot 0 r4 (docs/84 R2)");
+	for (i = 0; i < AVE_DAPF_MAX_ENTRIES; i++) {
+		void __iomem *b = ave->dapf + DAPF_ENTRY(i);
+
+		writel(cur[i].r4, b + DAPF_R4);
+		writeq(cur[i].start, b + DAPF_START);
+		writeq(cur[i].end, b + DAPF_END);
+		writel(cur[i].r0, b + DAPF_R0);
+		if (!i)
+			ave_step(ave, "dapf same: slot 0 written and alive");
+	}
+	for (i = 0; i < AVE_DAPF_MAX_ENTRIES; i++) {
+		ave_dapf_slot_read(ave, i, &back);
+		if (back.r0 != cur[i].r0 || back.r4 != cur[i].r4 ||
+		    back.start != cur[i].start || back.end != cur[i].end)
+			bad++;
+	}
+	dev_info(ave->dev, "dapf same: %u slots written back non-posted, %u read back different\n",
+		 AVE_DAPF_MAX_ENTRIES, bad);
+	return bad ? -EIO : 0;
+}
+
 int ave_dapf_program(struct ave_device *ave,
 		     const struct ave_dapf_entry *ent, unsigned int n,
 		     bool preclear)
@@ -784,7 +852,9 @@ int ave_dapf_program(struct ave_device *ave,
 
 bool ave_dapf_program_requested(void)
 {
-	return dapf_set && *dapf_set && !sysfs_streq(dapf_set, "off");
+	/* "same" rewrites what is there: no TEXT policy needed (docs/84 R2) */
+	return dapf_set && *dapf_set && !sysfs_streq(dapf_set, "off") &&
+	       !sysfs_streq(dapf_set, "same");
 }
 
 /*
@@ -902,6 +972,9 @@ int ave_dapf_program_selected(struct ave_device *ave)
 		return 0;
 	}
 
+	/* docs/84 R2: can Linux write this DAPF at all, non-posted? */
+	if (sysfs_streq(dapf_set, "same"))
+		return ave_dapf_rewrite_same(ave);
 	if (sysfs_streq(dapf_set, "control"))
 		want_text = false;
 	else if (sysfs_streq(dapf_set, "text"))

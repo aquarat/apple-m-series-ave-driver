@@ -105,7 +105,7 @@ int ave_smmu_init(struct ave_device *ave)
 		return irq;
 	}
 
-	ave->smmu = devm_ioremap(ave->dev, res->start, resource_size(res));
+	ave->smmu = ave_devm_ioremap_np(ave->dev, res->start, resource_size(res));	/* /soc: non-posted */
 	if (!ave->smmu)
 		return -ENOMEM;
 	ratelimit_state_init(&ave->smmu_rs, HZ, 10);
