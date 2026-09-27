@@ -151,6 +151,17 @@ See also [docs/01-hardware.md](docs/01-hardware.md) and
 
 ## Licensing and blobs
 
+**This project exists for interoperability:** its only aim is a Linux driver
+that lets the owner of an Apple Silicon Mac use the video encoder in their own
+machine. Apple's firmware and kext were studied only to learn the interfaces
+that driver has to meet. The documents record those as facts: register
+addresses and values, message and structure layouts, and the formulas for the
+buffer sizes the hardware expects. They are not meant to reproduce Apple's code.
+
+**Rights holders:** if you believe something here should not be, please
+contact the maintainer through [GitHub](https://github.com/aquarat) and it
+will be looked at promptly.
+
 **No Apple firmware is committed to this repository, and none may be.**
 `data/blobs/` is gitignored. `tools/fetch_firmware.py` extracts the blobs
 locally from Apple's own distribution; each user fetches their own copy for
