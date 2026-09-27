@@ -864,6 +864,8 @@ int ave_cmd_build_start_hevc(const struct ave_cmd_abi *abi, u8 *buf,
 		return -EINVAL;
 	if (h->log2_max_poc_lsb_minus4 > 12 || h->n_st_rps > AVE_HEVC_ST_RPS_MAX ||
 	    (h->n_st_rps && !h->max_num_ref_frames) ||
+	    h->st_rps_refs > 2 ||
+	    (h->st_rps_refs == 2 && h->max_num_ref_frames < 2) ||
 	    h->max_num_ref_frames > 15 ||
 	    s->n_recon < h->max_num_ref_frames + 1)
 		return -EINVAL;
@@ -906,6 +908,12 @@ int ave_cmd_build_start_hevc(const struct ave_cmd_abi *abi, u8 *buf,
 	wr32(&w, hl->sao_enb_config, h->sao ? 0xffff : 0);
 	wr32(&w, hl->sao_eo_bo, 0xffffffff);		/* firmware default */
 	wr32(&w, hl->input_bitdepth, h->input_bitdepth ? h->input_bitdepth : 8);
+	/* The shared RC block's RefSpacingP (docs/81 hb3); 0 = not written */
+	if (s->ref_spacing_p) {
+		if (l->ref_spacing == AVE_OFF_NONE)
+			return -EINVAL;
+		wr32(&w, l->ref_spacing, s->ref_spacing_p);
+	}
 	wr32(&w, hl->max_num_ref_frames, h->max_num_ref_frames);
 	wr32(&w, hl->slice_map_height, ch);
 	for (i = 0; i < h->n_transcoded; i++)
@@ -970,18 +978,23 @@ int ave_cmd_build_start_hevc(const struct ave_cmd_abi *abi, u8 *buf,
 	 */
 	for (i = 0; i < h->n_st_rps; i++) {
 		u32 e = rps + p->rps_entry0 + i * p->rps_entry_stride;
+		/* hb2: set 1 is the first P after an IDR, which has one picture */
+		u32 nr = h->st_rps_refs == 2 && i != 1 ? 2 : 1, j;
 
 		wr8(&w, e + p->rps_inter_pred, 0);
-		wr32(&w, e + p->rps_num_neg, 1);
+		wr32(&w, e + p->rps_num_neg, nr);
 		wr32(&w, e + p->rps_num_pos, 0);
-		wr16(&w, e + p->rps_dpoc_s0_m1, 0);	/* delta POC -1 */
-		wr8(&w, e + p->rps_used_s0, 1);
-		wr32(&w, e + p->rps_num_delta_pocs, 1);
+		wr32(&w, e + p->rps_num_delta_pocs, nr);
 		/* The derived fields the firmware's ref lists read (docs/77 §18). */
-		wr32(&w, e + p->rps_d_num_neg, 1);
+		wr32(&w, e + p->rps_d_num_neg, nr);
 		wr32(&w, e + p->rps_d_num_pos, 0);
-		wr8(&w, e + p->rps_d_used_s0, 1);
-		wr32(&w, e + p->rps_d_delta_poc_s0, (u32)-1);	/* DeltaPocS0[0] */
+		for (j = 0; j < nr; j++) {
+			/* delta_poc_s0_minus1 0 each: DeltaPocS0[j] = -(j + 1) */
+			wr16(&w, e + p->rps_dpoc_s0_m1 + 2 * j, 0);
+			wr8(&w, e + p->rps_used_s0 + j, 1);
+			wr8(&w, e + p->rps_d_used_s0 + j, 1);
+			wr32(&w, e + p->rps_d_delta_poc_s0 + 4 * j, (u32)-(int)(j + 1));
+		}
 	}
 
 	/* ---- PPS[0] (pic_parameter_set_rbsp 0x1f50c) ---- */

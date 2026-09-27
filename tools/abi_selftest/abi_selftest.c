@@ -1564,6 +1564,41 @@ static void test_start_hevc_main10(void)
 	ave_cmd_build_start_hevc(a, buf, sizeof(buf), &CTX, &h);
 	E32(buf, 0xfd20, 10, "input_bitdepth 10: P010 in (code 21)");
 
+	/* docs/81 hb2: two-reference IPPP sets */
+	{
+		const u32 rps = a->start_hevc.rps_block;
+		u32 e1 = rps + p->rps_entry0 + 1 * p->rps_entry_stride;
+		u32 e2 = rps + p->rps_entry0 + 2 * p->rps_entry_stride;
+		struct ave_hevc_session h2 = hevc_720p();
+
+		h2.st_rps_refs = 2;
+		expect_int(ave_cmd_build_start_hevc(a, buf, sizeof(buf), &CTX, &h2), -EINVAL,
+			   "2-reference sets with max_num_ref_frames 1");
+		static struct ave_recon_buf recon3[3] = {
+			{ 0x0000000200000000ull, 0, 0x0000000200300000ull },
+			{ 0x0000000200400000ull, 0, 0x0000000200700000ull },
+			{ 0x0000000200800000ull, 0, 0x0000000200b00000ull },
+		};
+
+		h2.max_num_ref_frames = 2;
+		h2.vp.recon = recon3;
+		h2.vp.n_recon = 3;
+		/* one LowResRef and one colocated surface per recon slot */
+		h2.vp.n_low_res_ref = 3;
+		h2.vp.low_res_ref[2] = 0x0000000210200000ull;
+		h2.vp.n_colocated = 3;
+		h2.vp.colocated[2] = 0x0000000230020000ull;
+		memset(buf, 0, sizeof(buf));
+		expect_int(ave_cmd_build_start_hevc(a, buf, sizeof(buf), &CTX, &h2) > 0, 1,
+			   "2-reference sets build");
+		E32(buf, e1 + p->rps_num_neg, 1, "set 1: one negative (first P after the IDR)");
+		E32(buf, e2 + p->rps_num_neg, 2, "set 2: two negatives");
+		E32(buf, e2 + p->rps_d_num_neg, 2, "set 2: derived NumNegativePics 2");
+		E32(buf, e2 + p->rps_d_delta_poc_s0 + 4, (u32)-2, "set 2: DeltaPocS0[1] = -2");
+		E8(buf, e2 + p->rps_d_used_s0 + 1, 1, "set 2: UsedByCurrPicS0[1]");
+		E32(buf, e2 + p->rps_num_delta_pocs, 2, "set 2: NumDeltaPocs 2");
+	}
+
 	h.bit_depth = 9;
 	expect_int(ave_cmd_build_start_hevc(a, buf, sizeof(buf), &CTX, &h), -EINVAL, "depth 9");
 	h.bit_depth = 12;
