@@ -1,5 +1,13 @@
 # apple-ave-driver
 
+This repository is almost entirely AI-generated (Claude Opus models specifically, some Fable). The purpose of this work is to produce a working H.264 and HEVC Apple Video Encoder hardware driver for Linux running on M-series machines. This work was created in the interests of interoperability and allowing open source software to run efficiently on ageing hardware.
+
+This driver is alpha work and has only been used on an M1 Max machine so far. Before using it, make sure it's right for you.
+
+As per the documents the work has been tested extensively (several hours now), but has some specific shortcomings that I _largely_ don't care about.
+
+And now... over to the machine (largely):
+
 Reverse-engineering notes and tooling for **AVE**, the Apple Video Encoder block
 on Apple Silicon, with the goal of a Linux V4L2 encoder driver.
 
