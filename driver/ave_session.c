@@ -352,7 +352,7 @@ MODULE_PARM_DESC(session_search_range,
 static unsigned int session_macos;
 module_param(session_macos, uint, 0644);
 MODULE_PARM_DESC(session_macos,
-	"H.264: bitmask of macOS-equivalence groups (docs/85): 0 PARAMS 1 GOP 2 SH 3 RC 4 ME 5 ADAPTB 6 PIC 7 SPS 8 BUFS 9 QPMOD; 0x3ff = all; 0 = none (default)");
+	"H.264: bitmask of macOS-equivalence groups (docs/85): 0 GOP 1 PARAMS 2 SH 3 RC 4 ME 5 ADAPTB 6 PIC 7 SPS 8 BUFS 9 QPMOD; 0x3ff = all; 0 = none (default)");
 
 static bool session_poc0;
 module_param(session_poc0, bool, 0444);
@@ -1754,15 +1754,15 @@ static u32 ave_level_macos(u32 cw, u32 ch, u32 fps_num, u32 fps_den)
 
 /* docs/85: "SH PIC GOP ..." for the Start line. */
 static const char *const ave_macos_group_name[AVE_MACOS_G_COUNT] = {
-	[AVE_MACOS_G_BUFS]	= "BUFS",
-	[AVE_MACOS_G_SH]	= "SH",
-	[AVE_MACOS_G_PIC]	= "PIC",
 	[AVE_MACOS_G_GOP]	= "GOP",
-	[AVE_MACOS_G_ADAPTB]	= "ADAPTB",
-	[AVE_MACOS_G_ME]	= "ME",
 	[AVE_MACOS_G_PARAMS]	= "PARAMS",
+	[AVE_MACOS_G_SH]	= "SH",
 	[AVE_MACOS_G_RC]	= "RC",
+	[AVE_MACOS_G_ME]	= "ME",
+	[AVE_MACOS_G_ADAPTB]	= "ADAPTB",
+	[AVE_MACOS_G_PIC]	= "PIC",
 	[AVE_MACOS_G_SPS]	= "SPS",
+	[AVE_MACOS_G_BUFS]	= "BUFS",
 	[AVE_MACOS_G_QPMOD]	= "QPMOD",
 };
 

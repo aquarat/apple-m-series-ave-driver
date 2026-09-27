@@ -1767,8 +1767,8 @@ struct ave_process_hevc_layout {
  * to matter for the two-reference stall (docs/81, docs/53 bs1-bs7).
  */
 enum ave_macos_group {
-	AVE_MACOS_G_PARAMS	= 0,	/* VP scalars: pix_pck, 0xFDA4, 0xFEB4, slice map, multipass */
-	AVE_MACOS_G_GOP		= 1,	/* IdrPeriod 30, BFrames, reordering, RefSpacing */
+	AVE_MACOS_G_GOP		= 0,	/* IdrPeriod 30, BFrames, reordering, RefSpacing */
+	AVE_MACOS_G_PARAMS	= 1,	/* VP scalars: pix_pck, 0xFDA4, 0xFEB4, slice map, multipass */
 	AVE_MACOS_G_SH		= 2,	/* per frame: the slice block at cmd+0x40 */
 	AVE_MACOS_G_RC		= 3,	/* RC scalars common to macOS's RC and FIXQP */
 	AVE_MACOS_G_ME		= 4,	/* the level macOS picks, MaxMvsPer2Mb */
