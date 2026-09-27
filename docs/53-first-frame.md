@@ -4323,3 +4323,6 @@ No m1n1 change: since docs/84 §3, the driver programs ave1's DAPF itself.
   single-stream speed** (17.2 / 17.4 ms per frame, 6.0 s wall for both),
   both 44.688286 dB and byte-identical to each other; HEVC on both at once
   byte-identical too. **Two concurrent streams, double the throughput.**
+- **bs7** (bs1 + `session_max_mvs=16`, Start_AVC MaxMvsPer2Mb as macOS sends
+  it, which sets a ModeDec parameter flag, fw 0x5d3c0): the two-reference
+  frame hangs as before. MaxMvsPer2Mb is not it.
