@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0-only
 """Assert that ADT bus addresses are translated to CPU physical addresses.
 
 Nodes under /arm-io carry BUS addresses. The /arm-io node's "ranges" property

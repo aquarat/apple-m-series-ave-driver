@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: GPL-2.0-only
 # AVE bring-up test: overlay (with the DART) + staged driver probe.
 #
 # Does not need a fresh boot for the core's sake: the VENC domains gate off

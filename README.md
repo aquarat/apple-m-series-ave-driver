@@ -11,6 +11,9 @@ This repository is the starting point for that work.
 which exposes two independent encoder instances (`ave0`, `ave1`). The approach
 should generalise across the M1 family and forward.
 
+> **Experimental kernel code that can hang or reset the machine.** Not
+> affiliated with Apple. See [Disclaimer](#disclaimer) and [Licence](#licence).
+
 ## Status (2026-09-24)
 
 A driver exists and runs on real hardware. It brings the block up, starts the
@@ -168,6 +171,31 @@ locally from Apple's own distribution; each user fetches their own copy for
 hardware they own. Only *derived facts* — symbol names, register addresses,
 node properties — live in `data/derived/`, since those are interoperability
 information rather than redistributed code.
+
+## Licence
+
+| what | licence |
+|---|---|
+| Code: `driver/`, `test/`, `tools/` | GPL-2.0-only, [LICENSE](LICENSE) |
+| Device tree: `dts/` | as marked in each file (`GPL-2.0-only OR BSD-2-Clause`, `GPL-2.0+ OR MIT`), the usual terms for upstream bindings and device trees |
+| Documentation and run records: `docs/`, `results/`, this README, `AGENTS.md` | CC BY-SA 4.0, [docs/LICENSE](docs/LICENSE) |
+
+Every source file states its licence in an `SPDX-License-Identifier` line.
+Apple's firmware, kext and device tree are Apple's; they are not covered by
+these licences, and none of them is included here.
+
+## Disclaimer
+
+- **Not affiliated with or endorsed by Apple.** Apple, Mac and macOS are
+  trademarks of Apple Inc., registered in the U.S. and other countries. They
+  are used here only to name the hardware this driver is for.
+- **Experimental.** The driver and the test modules run in the kernel. During
+  development they hung and reset the machine many times, and a reset loses
+  anything unsaved. Use them at your own risk, on a machine you can afford to
+  reset.
+- **No warranty.** Everything here is provided "as is", without warranty of
+  any kind, to the extent the law allows: see sections 11 and 12 of the GPL
+  and section 5 of CC BY-SA 4.0.
 
 ## Quick start
 

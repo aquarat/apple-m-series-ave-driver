@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: GPL-2.0-only
 # Restore the known-good m1n1 stage 2 on this Mac's Asahi/Fedora ESP.
 #
 # Copies boot.bin.pre-ave (the stock stage 2 saved before the AVE DAPF

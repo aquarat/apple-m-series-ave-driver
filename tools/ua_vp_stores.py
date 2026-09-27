@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0-only
 """List every store (and optionally load) into AVE_VIDEO_PARAMS / AVEFWRCSettings
 made by the macOS user-space encoder (AppleVideoEncoder.bundle), from an
 `ipsw macho disass` listing. docs/72-userspace-video-params.md.

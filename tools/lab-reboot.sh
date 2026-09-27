@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: GPL-2.0-only
 # Reboot the target from the host and wait until it is usable again: its
 # netconsole-ave boot marker has reached the receiver, and SSH answers.
 #   tools/lab-reboot.sh            reboot (the driver has no .shutdown)

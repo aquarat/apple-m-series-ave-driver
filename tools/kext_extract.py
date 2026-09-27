@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0-only
 """List/extract kexts from an Apple Silicon MH_FILESET kernelcache.
 
 AppleAVE2.kext is the HOST side of the AVE protocol: it holds the mailbox

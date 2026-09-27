@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: GPL-2.0-only
 # On the target, with apple-ave loaded (tools/ave-load.sh): the stability
 # campaign of docs/84. Everything goes through the V4L2 node with v4l2-ctl.
 #

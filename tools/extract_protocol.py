@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0-only
 """Recover AVE's host<->firmware protocol from the firmware's own symbols.
 
 Apple shipped AppleAVE2FW with its symbol table and C++ source paths intact,

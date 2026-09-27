@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0-only
 """Build the pristine macOS 13.5 AVE firmware __DATA blob, as iBoot leaves it.
 
 Why this exists

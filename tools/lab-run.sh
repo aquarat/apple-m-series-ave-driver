@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: GPL-2.0-only
 # Run one tools/e3-run.sh step on the target from the host, and collect it.
 # Addresses come from lab.env (git-ignored; see AGENTS.md).
 #   tools/lab-run.sh NAME "ENV=.. ENV=.." module-params...

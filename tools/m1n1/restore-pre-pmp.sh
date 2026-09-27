@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: GPL-2.0-only
 # Undo the PMP experiment (docs/78): put back the stage 2 that was live
 # before it, the DAPF-patched m1n1 with the stock device trees.
 #

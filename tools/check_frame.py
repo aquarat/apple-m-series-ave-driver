@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0-only
 """Decide whether a run's encoded frame actually contains our source picture.
 
     tools/check_frame.py results/<run>-load1 [--width 1280] [--height 720]
