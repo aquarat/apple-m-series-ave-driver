@@ -53,8 +53,9 @@ It is a stateful mem2mem encoder, NV12 in:
   the options are ignored with a warning and the encoder runs at the boot
   clock.
 - **Not yet:**
-  - **B frames.** The firmware reorders as designed, but any frame with a
-    second reference stalls the pipe (docs/81, docs/53 bs1/bs2).
+  - **B frames**, and more than one reference per frame. The firmware
+    reorders as designed, but any frame with two active references stalls
+    the pipe, in H.264 and HEVC alike (docs/81; docs/53 bs1-bs6, hb3).
   - **The second encoder, ave1.** It binds and powers up; it needs an m1n1
     change to fetch its firmware (docs/82).
   - Reloading the module without a reboot.
