@@ -1,6 +1,11 @@
 # 81. B-frames (H.264 first, then HEVC)
 
-**Status (2026-09-27): parked.** b1-b3 pass (POC type 0, two DPB
+**Status (2026-09-27): parked, after docs/85.** The macOS-equivalent
+Start image (mq1/mq2) and the firmware's own frame-type path (mq4, type
+5) both still stall on the second reference, so the cause is not in the
+commands (docs/53 mq1-mq4, bs8).
+
+**Earlier status:** b1-b3 pass (POC type 0, two DPB
 references, several commands in flight). b4: the firmware reorders as
 designed (P2 completes before the held B1). But **any frame with two
 active references stalls the pipe after two macroblocks, in H.264 and in

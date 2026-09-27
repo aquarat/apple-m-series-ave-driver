@@ -2057,7 +2057,8 @@ static int ave_session_start_prep(struct ave_device *ave,
 			? ALIGN((size_t)128 * DIV_ROUND_UP(cw, 32) *
 				DIV_ROUND_UP(ch, 64), SZ_4K)
 			: ALIGN((size_t)128 * (cw / 16) * (ch / 16), SZ_4K);
-		const size_t pad = !hevc && session_bframes ? AVE_SESS_COLOC_PAD : 0;
+		const size_t pad = !hevc && (session_bframes || session_ftype5) ?
+				   AVE_SESS_COLOC_PAD : 0;
 
 		for (i = 0; i < bufs->n_dpb; i++) {
 			dma_addr_t iova;
@@ -3601,6 +3602,13 @@ static int ave_session_process_build(struct ave_device *ave,
 	 */
 	if (type >= 0)
 		f.frame_type = type;
+	else if (session_ftype5 && !hevc)
+		/*
+		 * docs/85 mq4: frame 0 too. CFrameType sets its GOP state up only
+		 * on the first frame it is asked about; an explicit IDR skips it,
+		 * and then every frame is "key frame due" (mq3). macOS sends 5.
+		 */
+		f.frame_type = AVE_FRAME_TYPE_AUTO;
 	else
 		f.frame_type = bufs->force_idr ? AVE_FRAME_TYPE_IDR :
 			       n ? AVE_FRAME_TYPE_P : session_frame_type;
