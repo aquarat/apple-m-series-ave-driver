@@ -4342,3 +4342,19 @@ ours differ, in ten groups (docs/85).
   slices). CFrameType::FrameType (fw 0x3d23c) takes its IDR branch
   (0x3d2e0) when byte +53 of its frame record is 0; the caller fills that
   byte from PICMGMT+0xCB0 (fw 0x23d14/0x23d3c). Being traced (host).
+- mq3's IDRs, explained (host): CFrameType sets up its GOP state only on
+  the first frame it is asked about; mq3 sent frame 0 as an explicit IDR,
+  which skips it, so every later frame was "key frame due".
+- **mq4** (every frame type 5, frame 0 included, `session_macos=0x3df`,
+  AdaptB off): **the firmware chooses IDR, B, P** itself (frame 2
+  FrameTypeReturned 1, 2251 bytes, completes first, as macOS's queue
+  does), **and its own B frame hangs as ours did** (`PIPE HANG: 3, 3`). With
+  macOS's Start image and the firmware choosing types and references, the
+  second reference still stalls: the cause is outside the commands.
+- **bs8** (bs1 + `session_sve_ungate=1`: SVE clock gating off around
+  Process): the same hang. Not the SVE clock gating.
+
+The two-reference stall survives every host-side command difference
+found (docs/85) and the firmware's own frame-type path. What remains is
+the hardware set-up outside the commands (power, clocks, tunables, fabric)
+or something only seen by tracing macOS. B frames stay parked (docs/81).
