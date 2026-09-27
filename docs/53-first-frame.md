@@ -4358,3 +4358,15 @@ The two-reference stall survives every host-side command difference
 found (docs/85) and the firmware's own frame-type path. What remains is
 the hardware set-up outside the commands (power, clocks, tunables, fabric)
 or something only seen by tracing macOS. B frames stay parked (docs/81).
+
+## b0 (2026-09-27): the suspend/resume branch, no sleep (docs/86)
+
+The suspend/resume work (probe stages 6-16 factored into a restartable
+boot, `pm_sleep` default 0) merged; one boot, both encoders:
+- load 1 (defaults): H.264 44.308053 dB and HEVC byte-identical on
+  apple-ave-enc and apple-ave1-enc, as before.
+- unload, load 2 with `pm_sleep=2`: both encoders reload (ave0 by DATA
+  drift, ave1 by its CPU_STATUS 0x22) and encode identically; each logs
+  "pm: DAPF captured for resume". No sleep was attempted.
+Next is docs/86's a1 (bare `rtcwake -m freeze` with no driver), which
+needs the operator at the machine.
