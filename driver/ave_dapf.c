@@ -676,7 +676,7 @@ static u64 ave_dapf_fingerprint(struct ave_device *ave, bool *admits_fetch)
 }
 
 int ave_dapf_dump_now(struct ave_device *ave, const char *tag,
-		      u64 *fingerprint, bool *admits_fetch)
+		      u64 *fingerprint, bool *admits_fetch, bool darts)
 {
 	bool admits;
 	u64 fp;
@@ -689,7 +689,13 @@ int ave_dapf_dump_now(struct ave_device *ave, const char *tag,
 	if (ret)
 		return ret;
 
-	ave_dapf_dump_dart(ave, tag);
+	/*
+	 * @darts false: the DAPF entries only. f56 died reading the datapath
+	 * DART right after the block reset; the entries are what decides
+	 * whether a restart is safe (docs/84 §4).
+	 */
+	if (darts)
+		ave_dapf_dump_dart(ave, tag);
 	ave_dapf_dump_entries(ave, tag);
 	fp = ave_dapf_fingerprint(ave, &admits);
 	dev_info(ave->dev, "dapf: [%s] fingerprint %#018llx, TEXT fetch %s\n",

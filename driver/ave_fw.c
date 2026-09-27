@@ -899,6 +899,39 @@ static u64 ave_fw_diff_pristine(struct ave_device *ave, const u8 *live,
  * it before AVE_IOP::Start and so do we. A no-op when fw_restore_data=0, so it
  * is safe to call unconditionally; fw_restore_data=2 reports and writes nothing.
  */
+/*
+ * docs/84 §4: has a core run on this boot's DATA? iBoot's image differs
+ * from the pristine blob only in STKG (random per boot, docs/31 R3); a run
+ * rewrites ~300 000 bytes. Read-only. 1 = it ran, 0 = cold, < 0 = cannot
+ * tell (no blob, placement not this machine's) - treat as cold.
+ */
+int ave_fw_data_ran(struct ave_device *ave)
+{
+	u64 bytes = 0;
+	size_t off;
+	u8 *p;
+	int ret;
+
+	ret = ave_fw_load_pristine(ave);
+	if (ret)
+		return ret;
+	ret = ave_fw_check_iboot_placement(ave);
+	if (ret)
+		return ret;
+	p = memremap(ave->soc->iboot.data_phys, ave->soc->iboot.data_size,
+		     ARCH_MEMREMAP_PMEM);
+	if (!p)
+		return -ENOMEM;
+	for (off = 0; off < ave->soc->iboot.data_size; off++)
+		if (p[off] != ave->iboot_data_pristine[off] &&
+		    (off < AVE_DATA_STKG_OFF || off >= AVE_DATA_STKG_OFF + 8))
+			bytes++;
+	memunmap(p);
+	dev_info(ave->dev, "reload: DATA differs from pristine in %llu byte(s) besides STKG: %s\n",
+		 bytes, bytes ? "a core has run on this boot" : "cold");
+	return bytes ? 1 : 0;
+}
+
 int ave_fw_restore_data(struct ave_device *ave)
 {
 	u32 ctl, status;
