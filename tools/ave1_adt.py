@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0-only
 """ave1 facts from the 13.5 ADT (docs/82 §1): read-only. Run from the repo root."""
 import sys
 sys.path.insert(0,'m1n1-src/proxyclient')

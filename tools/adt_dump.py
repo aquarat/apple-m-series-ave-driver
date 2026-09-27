@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0-only
 """Dump Apple Device Tree nodes from an unwrapped DeviceTree image.
 
 The ADT is the ground truth for how AVE is wired: MMIO ranges, interrupts,

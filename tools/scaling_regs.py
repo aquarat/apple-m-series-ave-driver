@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0-only
 """Predict the quantiser scaling-list registers the AVC firmware programs (docs/74).
 
 Models, from the macOS 13.5 AVE firmware, what ends up in

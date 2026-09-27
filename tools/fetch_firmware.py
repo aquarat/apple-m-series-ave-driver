@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0-only
 """Fetch Apple's AVE firmware and DeviceTree out of an IPSW without downloading it.
 
 An Apple Silicon restore image is ~20 GB, but the objects we need total under

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0-only
 """Parse the AVE RTKit firmware Mach-O (MH_PRELOAD, arm64e).
 
 Apple ships AppleAVE2FW_<variant>.im4p as a standard Mach-O preload image.

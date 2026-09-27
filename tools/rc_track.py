@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0-only
 """Grade a rate-controlled run: does the firmware controller track its target?
 
     tools/rc_track.py results/<run>-load1 --bitrate 300000 [--fps 30]

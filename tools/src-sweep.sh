@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: GPL-2.0-only
 # Sweep Start_AVC wire 0xFEC0 (session_src_mode) across loads in ONE boot.
 #
 #   tools/src-sweep.sh NAME value [value ...]

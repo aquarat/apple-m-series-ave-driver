@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0-only
 """Predict the ModeDecision candidate words and IntraEst per-QP words (docs/73).
 
 Models, from the macOS 13.5 AVE firmware, what ends up in

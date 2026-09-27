@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0-only
 """Read the SPS, PPS and slice headers out of an Annex B H.264 stream.
 
     tools/h264_parse.py results/<run>-load1/frame.h264

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0-only
 """Netconsole receiver for the wired link from the target (AGENTS.md).
 
 Replaces `socat -u UDP-RECV:6666 CREATE:ave-netconsole.log` on the old

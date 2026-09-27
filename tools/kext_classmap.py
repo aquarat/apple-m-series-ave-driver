@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0-only
 """Group AppleAVE2 kext symbols into a class -> method map.
 
 The kext is the HOST side of the AVE protocol. Its class layout shows how

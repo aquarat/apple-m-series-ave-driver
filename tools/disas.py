@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0-only
 """Disassemble a symbol from the kernelcache or the AVE firmware.
 
 Handles the VA->file-offset arithmetic that both images need. llvm-objdump

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0-only
 """Check whether a firmware Mach-O is the image actually loaded, against a RAM dump.
 
 iBoot copies the RTKit image's __TEXT and __DATA file contents into DRAM. If a
