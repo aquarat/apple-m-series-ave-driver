@@ -109,6 +109,7 @@ struct ave_avc_session {
 	/* RefSpacingP (docs/81 bs1): 2 gives a P frame two L0 references */
 	u8	ref_spacing_p;
 	u8	search_range;		/* 0 widest (default) .. 2 (docs/81 bs2) */
+	u8	max_mvs_per_2mb;	/* 0 = not sent (default); macOS 16 (bs7) */
 
 	u64	fw_client_addr;		/* per-client firmware buffer */
 	u32	fw_client_size;

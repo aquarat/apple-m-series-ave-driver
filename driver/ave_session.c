@@ -331,6 +331,12 @@ module_param(session_ref_spacing_p, uint, 0644);	/* per stream: docs/84 R8 */
 MODULE_PARM_DESC(session_ref_spacing_p,
 	"H.264 Start_AVC RefSpacingP (wire 0x10574); 2 = two L0 references per P, needs session_dpb=3 (docs/81)");
 
+/* docs/81 bs7: Start_AVC MaxMvsPer2Mb (wire 0x70); macOS 16, we sent 0 */
+static unsigned int session_max_mvs;
+module_param(session_max_mvs, uint, 0644);
+MODULE_PARM_DESC(session_max_mvs,
+	"H.264 Start_AVC MaxMvsPer2Mb (wire 0x70): 0 = not sent (default), macOS sends 16 at level >= 3.1 (docs/81 bs7)");
+
 /* docs/81 bs2: Start_AVC search_range (wire 0xFCE0); 0 = widest */
 static unsigned int session_search_range;
 module_param(session_search_range, uint, 0444);
@@ -2094,6 +2100,7 @@ static int ave_session_start_avc(struct ave_device *ave,
 	s.poc_type0 = session_poc0;
 	s.ref_spacing_p = min_t(u32, session_ref_spacing_p, 255);
 	s.search_range = min_t(u32, session_search_range, 255);
+	s.max_mvs_per_2mb = min_t(u32, session_max_mvs, 255);
 	/* The firmware reads max_num_ref_frames + 1 slots (see session_dpb) */
 	s.max_refs = bufs->n_dpb > 2 ? bufs->n_dpb - 1 : 1;
 

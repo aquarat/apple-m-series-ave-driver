@@ -1266,6 +1266,12 @@ struct ave_start_avc_layout {
 	u32	ref_spacing;
 	/* u16 search_range: 0 = +-192x96 (macOS), 1 = 128x64, 2 = 64x32 (docs/65) */
 	u32	search_range;
+	/*
+	 * u32 VP+0x10 MaxMvsPer2Mb: macOS 16 at level >= 3.1, 32 at 3.0, 64
+	 * below (US 0x374f4-0x37534); non-zero sets a ModeDec parameter flag
+	 * (fw 0x5d3c0). We have always sent 0 (docs/72 §4, docs/81 bs7).
+	 */
+	u32	max_mvs_per_2mb;
 	/* parameter-set blocks */
 	u32	sps_block, sps_block_size;
 	u32	pps_block, pps_block_size;
@@ -1947,6 +1953,7 @@ const struct ave_cmd_abi ave_cmd_abi_13_5 = {
 		.num_views	= { 0xff24, 0xff28 },	/* kext 0xec9078 rejects 0 */
 		.ref_spacing	= 0x10574,		/* RC+0x644, fw 0x5da74 */
 		.search_range	= 0xfce0,		/* ldrh fw 0x5cf0c */
+		.max_mvs_per_2mb = 0x70,		/* VP+0x10, fw 0x5d3c0 */
 		.sps_block	= 0x105b0,	/* memcpy 0x6ac from payload+0x10550 0x5ce68-90 */
 		.sps_block_size	= 0x6ac,
 		.pps_block	= 0x10c5c,	/* memcpy 0x184 from payload+0x10bfc 0x5ce94-ac */
@@ -2463,6 +2470,7 @@ const struct ave_cmd_abi ave_cmd_abi_26_6 = {
 		.num_views	= { AVE_OFF_NONE, AVE_OFF_NONE },
 		.ref_spacing	= AVE_OFF_NONE,
 		.search_range	= AVE_OFF_NONE,
+		.max_mvs_per_2mb = AVE_OFF_NONE,
 		.sps_block	= AVE_START_SPS_OFF,
 		.sps_block_size	= AVE_START_SPS_SIZE,
 		.pps_block	= AVE_START_PPS_OFF,

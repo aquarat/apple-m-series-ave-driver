@@ -742,6 +742,12 @@ static void test_start_13_5(void)
 	s.search_range = 3;
 	expect_int(ave_cmd_build_start_avc(a, buf, sizeof(buf), &CTX, &s), -EINVAL, "search_range 3");
 	s.search_range = 0;
+	E32(buf, 0x70, 0, "MaxMvsPer2Mb 0 unless asked");
+	s.max_mvs_per_2mb = 16;
+	memset(buf, 0, sizeof(buf));
+	ave_cmd_build_start_avc(a, buf, sizeof(buf), &CTX, &s);
+	E32(buf, 0x70, 16, "MaxMvsPer2Mb (VP+0x10, fw 0x5d3c0)");
+	s.max_mvs_per_2mb = 0;
 }
 
 static void test_start_26_6(void)
