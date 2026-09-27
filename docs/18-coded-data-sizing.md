@@ -209,13 +209,13 @@ distinct mode whose name is **unknown**.
 ## 3. `AVE_CalcBufSizeOfCodedData` — the computation
 
 Helper, `AVE_Linear_CalcFrameSize(int w, int h, int bitDepth, _E_ChromaFmt fmt)`
-at `0xfffffe0008b8cfec` (24 instructions, no branches out):
+at `0xfffffe0008b8cfec` (24 instructions, no branches out). With
+`y = w·h·((bitDepth+7) >> 3)` and `(dw, dh)` the divisor pair for `fmt` from
+the table at `0xfffffe0007276400`, integer division throughout:
 
-```c
-y = w * h * ((bitDepth + 7) >> 3);            // 0xb8cff0-0xb8d004
-if (fmt == 0) return y;                        // 0xb8d008 -> 0xb8d040
-(dw, dh) = ((int2*)0xfffffe0007276400)[fmt];   // 0xb8d010-0xb8d02c
-return y + ((y / dw) / dh) * 2;                // 0xb8d030-0xb8d044
+```
+Linear(w, h, bitDepth, fmt) = y                        fmt = 0 (400)
+                            = y + 2·((y / dw) / dh)    fmt = 1, 2, 3
 ```
 
 Divisor table dumped from `__PRELINK_TEXT` at `0xfffffe0007276400`:
@@ -223,110 +223,84 @@ Divisor table dumped from `__PRELINK_TEXT` at `0xfffffe0007276400`:
 `2*y`, 4:4:4 gives `3*y`. (Third independent confirmation of the ChromaFmt
 ordering; see [16](16-encode-surface-set.md).)
 
-Now the function itself. Register aliases: `mb` = the alignment granule,
-`base` = `w22`, `size` = `w27`.
+Now the function itself, `AVE_CalcBufSizeOfCodedData` at `0xfffffe0008b5f58c`,
+with the thirteen arguments of §2. What it computes, stated as rules rather
+than as code (the instruction addresses of each piece are in §4 and §5).
+Conventions: `/` is C integer division; `trunc()` is the double-to-int
+conversion (`fcvtzs`, toward zero) applied wherever a double factor meets an
+integer; **small** means `W·H < 921601` (`= 1280·720 + 1`, so 720p itself is
+small), where `W·H` uses the *unaligned* width.
 
-```c
-int AVE_CalcBufSizeOfCodedData(devType, encType, W, H, chromaFmt, iBitDepth,
-                               bufSize, bLossless, bufSizeFactor, bMaxBufSize,
-                               encMode, RCMode, initialQPI)
-{
-    /* ---- 1. macroblock alignment of the WIDTH ONLY ------------------- */
-    mb   = (encType == 1) ? 16 : 32;              // 0xb5f5c8-0xb5f5d8
-    mask = (encType == 1) ? ~15 : ~31;            // 0xb5f5c0-0xb5f5cc
+**Guard.** The result is 0 when `W < 0`, `H < 0` or `(int64)W·H >= 2^31`.
 
-    /* ---- 2. overflow guard ------------------------------------------ */
-    if ((W|H) < 0 || (int64)W*H >= 0x80000000)    // 0xb5f5e0-0xb5f5f0
-        return 0;                                 // 0xb5f6f4 / 0xb5f740
+**Width alignment — width only; `H` is used raw.**
 
-    Wa = (W + mb - 1) & mask;                     // 0xb5f608-0xb5f610
-
-    /* ---- 3. base = one uncompressed 8-bit 4:2:0 frame ---------------- */
-    R = AVE_Linear_CalcFrameSize(Wa, H, 8, /*420*/1);  // 0xb5f614-0xb5f620
-      = 3 * Wa * H / 2
-
-    base = (iBitDepth < 9) ? R : (R * 10) / 8;    // 0xb5f624-0xb5f644
-                                                  //   10-bit costs +25%
-
-    /* ---- 4. chroma-format inflation --------------------------------- */
-    pix = W * H;                                  // 0xb5f650
-    K   = 921601;                  // = 1280*720 + 1   0xb5f648-0xb5f64c
-    if (!(devType == 11 && pix >= 0x1000001))     // 0xb5f654-0xb5f664
-    {                                             //   (never true on M1: DevType 10)
-        if (chromaFmt == 3)                       // 0xb5f66c-0xb5f670
-            base *= (pix < K) ? d[0x9f8] /*1.6*/ : d[0x9f0] /*1.3*/;
-                                                  // 0xb5f748-0xb5f764
-        else if (chromaFmt == 2)                  // 0xb5f674-0xb5f678
-            base *= (pix < K) ? 1.5             : d[0xa00] /*1.2*/;
-                                                  // 0xb5f67c-0xb5f694
-        /* chromaFmt 0 and 1: no scaling */
-        base = (int)base;                         // fcvtzs, 0xb5f76c
-    }
-
-    /* ---- 5. "maximum buffer size" mode ------------------------------ */
-    if (bMaxBufSize) {                            // 0xb5f790
-        /* recompute from a 4:4:4 frame at the REAL bit depth; the
-           chroma-inflated value above is discarded */
-        base = AVE_Linear_CalcFrameSize(Wa, H, iBitDepth, /*444*/3);
-                                                  // 0xb5f79c-0xb5f7b0
-              = 3 * Wa * H * ((iBitDepth+7)>>3)
-    }
-
-    /* ---- 6. pick the raw size --------------------------------------- */
-    if (bLossless)                                // 0xb5f7b4 / 0xb5f7e4
-        size = base * ((pix < K) ? d[0xa08] /*2.8*/ : 2.5);
-                                                  // 0xb5f7b8-0xb5f7d4,
-                                                  // 0xb5f7e8-0xb5f804
-    else {
-        if (!bMaxBufSize && bufSizeFactor != 0)   // 0xb5f930
-            size = (base / 100) * bufSizeFactor;  // 0xb5f934-0xb5f948
-        else
-            size = base;                          // 0xb5f90c / 0xb5fa8c
-
-        if (RCMode == 3) {                        // 0xb5fa94-0xb5fa9c
-            f = (initialQPI < 12) ? 2.0           // 0xb5faa0-0xb5faa8
-                                  : (102 - initialQPI) / d[0xa10] /*51.0*/;
-                                                  // 0xb5faac-0xb5fac0
-            size = (int)(f * size);               // 0xb5fac4-0xb5facc
-        }
-        if (encMode == 2) {                       // 0xb5fad4-0xb5fadc
-            size = max(size, base * d[0xa00] /*1.2*/);
-                                                  // 0xb5fae0-0xb5fafc
-            if (initialQPI >= 13) {               // 0xb5fb00-0xb5fb04
-                cap  = (size > 8388609) ? size/2 : 4194304;
-                                                  // 0xb5fb08-0xb5fb1c
-                size = min(size, cap);            // 0xb5fb20-0xb5fb24
-            }
-        }
-    }
-
-    /* ---- 7. floor: never below one 640x480 4:2:0 frame --------------- */
-    m = AVE_Linear_CalcFrameSize(640, 480, 8, 1); // 0xb5f80c-0xb5f840
-      = 460800
-    if (size <= m) size = m;
-
-    /* ---- 8. ceiling -------------------------------------------------- */
-    if (bLossless) size = min(size, (int)(base * 2.8));  // 0xb5f848-0xb5f864
-    else           size = min(size, 2 * base);           // 0xb5f86c-0xb5f874
-
-    /* ---- 9. explicit override, then page rounding -------------------- */
-    if (bufSize != 0) size = bufSize;             // 0xb5f878-0xb5f87c
-    return (size + 0xfff) & ~0xfff;               // 0xb5f880-0xb5f884
-}
 ```
+mb = 16 if encType == 1 (AVC), else 32 (HEVC, AV1)        Wa = align_up(W, mb)
+```
+
+**Base.** `R = Linear(Wa, H, 8, 420) = 3·Wa·H/2`, one uncompressed 8-bit 4:2:0
+frame. Then
+
+```
+base = Linear(Wa, H, iBitDepth, 444) = 3·Wa·H·((iBitDepth+7) >> 3)    if bMaxBufSize
+base = trunc(D · C)                                                   otherwise
+
+D    = R               if iBitDepth <= 8
+     = (10·R) / 8      if iBitDepth >= 9       (10-bit costs +25%)
+```
+
+with the chroma inflation factor `C`:
+
+| `chromaFmt` | `C`, small | `C`, not small |
+|---|---|---|
+| 0 (`400`), 1 (`420`) | 1 | 1 |
+| 2 (`422`) | 1.5 | 1.2 |
+| 3 (`444`) | 1.6 | 1.3 |
+
+`C = 1` for every format when `devType == 11` and `W·H >= 0x1000001` (never on
+M1: DevType 10). Under `bMaxBufSize` the chroma-inflated value plays no part:
+a 4:4:4 frame at the real bit depth replaces it.
+
+**Raw size `S`.**
+
+| case | `S` |
+|---|---|
+| `bLossless` | `trunc(base · 2.8)` if small, `trunc(base · 2.5)` if not; no further terms |
+| not lossless | `S0 = (base/100) · bufSizeFactor` if `bufSizeFactor != 0` and not `bMaxBufSize`, else `S0 = base`; then the rate-control term, then the encode-mode term |
+
+* **Rate-control term** (`RCMode == 3` only): `S = trunc(f · S)` with
+  `f = 2.0` for `initialQPI < 12` and `f = (102 - initialQPI)/51.0` (double)
+  otherwise.
+* **Encode-mode term** (`encMode == 2` only): `S = max(S, trunc(1.2 · base))`;
+  then, if `initialQPI >= 13`, `S = S/2` when `S > 8388609`, else
+  `S = min(S, 4194304)`.
+
+**Floor, ceiling, override, rounding.**
+
+```
+floor   = Linear(640, 480, 8, 420) = 460800
+ceiling = trunc(2.8 · base)   if bLossless
+        = 2 · base            otherwise
+
+size    = align_up( bufSize != 0 ? bufSize : min(max(S, floor), ceiling) , 4096 )
+```
+
+A nonzero `bufSize` is an outright override: it bypasses floor and ceiling
+and is only page-rounded.
 
 Two consequences worth stating plainly, because they are what makes this
 tractable:
 
-* **Step 8 is unconditional.** Whatever rate control, QP, percentage or
-  encode mode did in steps 5–6, the result is clamped to `2 x base`
+* **The ceiling is unconditional.** Whatever rate control, QP, percentage or
+  encode mode did to `S`, the result is clamped to `2 x base`
   (`2.8 x base` when lossless) before it is returned. There is no path around
-  it.
-* **`(102 - QP)/51` maxes out at 2.0**, and step 6's `bufSizeFactor` is
-  likewise capped by step 8. So the rate-control machinery can at most double
-  the base figure, never more.
+  it other than the explicit `bufSize` override.
+* **`(102 - QP)/51` maxes out at 2.0**, and the `bufSizeFactor` percentage is
+  likewise capped by the ceiling. So the rate-control machinery can at most
+  double the base figure, never more.
 
-The `640x480` floor is itself subject to the step-8 ceiling, so for very small
+The `640x480` floor is itself subject to the ceiling, so for very small
 frames the effective floor is `min(2 x base, 460800)` — e.g. QCIF 176x144 AVC
 returns 77,824, not 462,848.
 
@@ -423,11 +397,11 @@ written two ways; it is resolution-, codec- and work-type-independent.
 
 ### `AVE_CalcBufNumOfCodedHeader` (`0xfffffe0008b5fb2c`)
 
-```
-if ((unsigned)(workType - 5) < 2) return 10;   // 0xb5fb30-0xb5fb3c
-if (workType == 2)                return 4;    // 0xb5fb44-0xb5fb4c
-tail-call AVE_CalcBufNumOfCodedData(args shifted left by one)  // 0xb5fb84
-```
+| `workType` | count |
+|---|---|
+| 5 or 6 | 10 |
+| 2 | 4 |
+| anything else | `AVE_CalcBufNumOfCodedData` of the remaining arguments (a tail call, `0xb5fb84`) |
 
 The literal work-type values are visible at the call sites: GGM passes 5
 (`mov w0,#0x5` at `0xb3f614`), DMV passes 6 (`mov w0,#0x6` at `0xc37750`) —
@@ -438,21 +412,29 @@ the encode path the header count equals the data count.
 ### `AVE_CalcBufNumOfCodedData` (`0xfffffe0008b5f4d0`)
 
 Branch-free. With `a0..a5` the six leading ints, `a6 = encMode`, `a7` a bool,
-`a8 = MCTF_Mode`, `a9`, `a10 = RCMode`, `a11`:
+`a8 = MCTF_Mode`, `a9`, `a10 = RCMode`, `a11`. Let `c = a2`, or 1 when
+`a2 == 0`. A starting count `n0` comes from the first matching row:
 
-```c
-c = (a2 == 0) ? 1 : a2;                       // 0xb5f4e0-0xb5f4e4
-p = (a7 == 0) ? c + (a3 ? 2 : 4)              // 0xb5f4e8-0xb5f4f4, 0xb5f514
-              : ((a8 == 1) ? 2 : c + 7);      // 0xb5f4fc-0xb5f50c
-q = (a9 == 1) ? 12 : c + 4;                   // 0xb5f518-0xb5f52c
-n = (a1 < 2) ? p : q;                         // 0xb5f530-0xb5f534
-if (a6 == 2) n = 10;                          // 0xb5f538-0xb5f53c
-n += (a5 - 1) * (a2 + 2);                     // 0xb5f540-0xb5f548
-if (a11 > 0) n = min(n, a11 * a5);            // 0xb5f54c-0xb5f55c
-n = min(n, 30 / (3 - a5));                    // 0xb5f560-0xb5f574
-if (a0 != 0) n = a0;                          // 0xb5f578-0xb5f57c
-return min(n, 30);                            // 0xb5f580-0xb5f584
+| condition | `n0` |
+|---|---|
+| `a6 == 2` | 10 |
+| `a1 < 2`, `a7 == 0`, `a3 != 0` | `c + 2` |
+| `a1 < 2`, `a7 == 0`, `a3 == 0` | `c + 4` |
+| `a1 < 2`, `a7 != 0`, `a8 == 1` | 2 |
+| `a1 < 2`, `a7 != 0`, `a8 != 1` | `c + 7` |
+| `a1 >= 2`, `a9 == 1` | 12 |
+| `a1 >= 2`, `a9 != 1` | `c + 4` |
+
+and then
+
 ```
+count = min(a0, 30)                                               if a0 != 0
+count = min( n0 + (a5 - 1)·(a2 + 2),  30 / (3 - a5),  a11·a5,  30 )   otherwise
+```
+
+where the `a11·a5` term is present only when `a11 > 0`, `30 / (3 - a5)` is an
+integer division, and the extra-count term uses the raw `a2`, not `c`. `a4`
+and `a10` (`RCMode`) do not enter the result.
 
 From `AVE_Work_Enc_CalcSurfaceInfo` (`0xca9d8c`–`0xca9dc8`): `a0 =
 client[16552]` (an explicit override), `a2 = client[6016]`, `a5 =
@@ -496,7 +478,7 @@ the function on this path.
 
 If you want a number that is valid no matter what `RCMode`, `encMode`,
 `initialQPI` or `bufSizeFactor` the firmware/host ends up using, take the
-step-8 ceiling — which no path can exceed:
+§3 ceiling — which no path can exceed:
 
 ```
 size <= ALIGN( 2 * base , 4096 )  =  ALIGN( 3 * ALIGN(W, mb) * H , 4096 )
@@ -506,7 +488,8 @@ i.e. **3 bytes per pixel** (24 bpp) for 8-bit 4:2:0, both codecs. This is a
 *derived maximum over the input domain*, read from the ceiling instruction at
 `0xb5f86c`–`0xb5f874`, not a guess.
 
-Extending the domain (still 8-bit, from `base`'s own maximum in §3 step 4):
+Extending the domain (still 8-bit, from `base`'s own maximum in §3's chroma
+table):
 
 | domain admitted | bound |
 |---|---|
@@ -591,7 +574,7 @@ Companion surfaces, for the same configurations:
   `20, 100` in the firmware (`CRateControl::Check_RCMode`, firmware VA
   `0xf830`); `encMode` against `1, 2`. So which mode `RCMode == 3` is —
   the only one that changes the buffer size — is **unknown**. It does not
-  matter for the bound, because step 8 clamps it regardless.
+  matter for the bound, because the §3 ceiling clamps it regardless.
 * **What sets `client[16552] / [16556] / [16560] / [16564]`** (`bufNum`
   override, `bufSize` override, `bMaxBufSize`, `bufSizeFactor`). The string
   `"iOutputBufSizeFactor %d"` (file `0x282c4a`) shows `bufSizeFactor` is

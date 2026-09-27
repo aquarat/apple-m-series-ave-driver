@@ -473,44 +473,32 @@ The host's own interrupt handler is the direct proof:
 with it. For `ch == 1` (`"IO"`) there is no echo, because the firmware's reply
 *is* the return of the slot.
 
-### `Send64(h, payload_fw, arg1, arg2)`
+### `Send64` and `Receive64` — the ring rules
 
-```c
-int i = (int)h->wr;
-if (i == -1) return -1;                      /* ring full, 0xcb43f4  */
-slot = h->slots + i * 0x40;
-slot[0x08] = (u64)(u32)arg1;                 /* 0xcb441c */
-slot[0x10] = (u64)(u32)arg2;                 /* 0xcb4424 */
-slot[0x00] = payload_fw | (h->type ^ 1);     /* 0xcb4434 */
-dsb st;                                      /* 0xcb4438 — the ONLY barrier */
-/* clean(slot, 0x40) — hook is NULL on this driver, see below */
-r = h->rd; w = h->wr;                        /* 0xcb4454 */
-if (r == -1) { h->rd = w; r = w; }           /* 0xcb4460 */
-w = (w == h->nslots - 1) ? 0 : w + 1;        /* csinc, 0xcb4478 */
-h->wr = (r == w) ? -1 : w;                   /* csinv, 0xcb4480 */
-h->send_count++;                             /* 0xcb448c */
-h->notify(h->cookie);                        /* 0xcb44c8 — rings the doorbell */
-return 0;
-```
+A slot is `0x40` bytes: word0 at `+0x00` holds the payload address with the
+phase in bit 0 (and bit 1 reserved; receivers mask `~3`), `+0x08` holds
+`arg1` and `+0x10` holds `arg2`, each a u32 zero-extended to u64. The channel
+handle keeps `rd` at `+0x20` and `wr` at `+0x24`, slot indices where **−1
+means none**: `wr = −1` is a full ring, `rd = −1` an empty one.
 
-### `Receive64(h, &payload, &arg1, &arg2)`
+**Send** (`0xcb43a8`..`0xcb44c8`) fails with −1 when `wr = −1`
+(`0xcb43f4`). Otherwise it fills slot `wr` — `arg1`, `arg2`, and **word0 last**,
+`payload | (type ^ 1)` (`0xcb4434`) — then issues `dsb st` (`0xcb4438`), **the
+only barrier on either side**. The hook that would clean the slot is NULL on
+this driver (below). It then advances the indices, counts the send, and calls
+the channel's notify hook (`0xcb44c8`), which is what rings the doorbell.
 
-```c
-int i = (int)h->rd;
-if (i == -1) return -1;                      /* 0xcb4534 */
-slot = h->slots + i * 0x40;
-/* invalidate(slot, 0x40) — hook is NULL */
-if ((slot[0] & 1) != (h->type & 1)) return -1;   /* 0xcb4584 */
-*payload = slot[0x00] & ~3ULL;               /* 0xcb4590 */
-*arg1    = (u32)slot[0x08];                  /* 0xcb459c */
-*arg2    = (u32)slot[0x10];                  /* 0xcb45a4 */
-r = h->rd; w = h->wr;                        /* 0xcb45a8 */
-if (w == -1) { h->wr = r; w = r; }           /* 0xcb45b4 */
-r = (r == h->nslots - 1) ? 0 : r + 1;        /* 0xcb45c8 */
-h->rd = (w == r) ? -1 : r;                   /* 0xcb45d4 */
-h->recv_count++;                             /* 0xcb45e0 */
-return 0;
-```
+**Receive** (`0xcb44e8`..`0xcb45e0`) fails with −1 when `rd = −1`, and also when
+slot `rd`'s phase bit differs from `type & 1` (`0xcb4584`): the peer has not
+filled it yet. Otherwise it returns `word0 & ~3` and the low 32 bits of `arg1`
+and `arg2`, **never writes the slot**, advances the indices and counts the
+receive.
+
+**Index rule, both directions.** Taking a slot advances that side's index by
+one modulo `nslots`; if it lands on the other side's index, it becomes −1
+(full after a send, empty after a receive). And when the other side's index
+is −1, it is first set to the slot just taken, since the ring is no longer
+empty (after a send) or full (after a receive).
 
 `MessageAvailable64` is the phase test alone, without consuming
 (`0xcb4358`..`0xcb436c`).

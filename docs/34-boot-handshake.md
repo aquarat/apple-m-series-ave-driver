@@ -143,14 +143,9 @@ otherwise (`0xfffffe0008c91398`..`0xfffffe0008c913ac`).
 
 ### `SendIOPMsg(uint a, uint b, uint c, uint d)` — `0xfffffe0008c9143c`
 
-```c
-if (table[2] >= 1) Write32(bank2, table[3], a);   // scratch0, 0xfffffe0008c91480
-if (table[2] >= 2) Write32(bank2, table[4], b);   // scratch1, 0xfffffe0008c914a4
-if (table[2] >= 3) Write32(bank2, table[5], c);   // scratch2, 0xfffffe0008c914c8
-if (table[2] >= 4) Write32(bank2, table[6], d);   // scratch3, 0xfffffe0008c914ec
-SetIntr(1);                                       // 0xfffffe0008c914f8 -> bank2+0x0C = 1
-return 0;
-```
+It writes `a`, `b`, `c`, `d` to scratch 0, 1, 2, 3 in that order, each only
+if the scratch count (`table[2]`) covers it, then rings the doorbell with
+`SetIntr(1)`: `bank2+0x0C = 1`. It returns 0.
 
 **`SendIOPMsg` rings the doorbell itself** (`SetIntr(1)`, i.e. bit 0 of
 `+0x0C`). docs/08 §9 did not record this; it is essential.
@@ -159,21 +154,15 @@ return 0;
 
 **It polls. It is not interrupt-driven.** It also acknowledges.
 
-```c
-n = 0;
-while ((Read32(bank2, table[1]) & 1) == 0) {          // 0xfffffe0008c91658 / tbnz w0,#0 @c91664
-    if (n >= cfg->timeout_scale * 2000)               // 0xfffffe0008c91720 (mul), c91728
-        goto timeout;                                 // PrintRegs, return -1017 (0xfffffe0008c918cc)
-    IODelay(1000);                                    // 1000 us, 0xfffffe0008c9172c/c91730
-    n++;
-}
-ClearIntr(1);                                         // 0xfffffe0008c91754 -> W1C bit 0 of +0x10
-if (p0 && table[2] >= 1) *p0 = Read32(bank2, table[3]);   // scratch0, 0xfffffe0008c91778
-if (p1 && table[2] >= 2) *p1 = Read32(bank2, table[4]);   // scratch1, 0xfffffe0008c917a4
-if (p2 && table[2] >= 3) *p2 = Read32(bank2, table[5]);   // scratch2, 0xfffffe0008c917d0
-if (p3 && table[2] >= 4) *p3 = Read32(bank2, table[6]);   // scratch3, 0xfffffe0008c917f8
-return 0;
-```
+1. **Wait.** Poll bit 0 of the status register (`table[1]`, `bank2+0x10`),
+   with `IODelay(1000)` (1 ms) between reads, for at most
+   `cfg->timeout_scale * 2000` iterations. On timeout it dumps the registers
+   (`PrintRegs`) and returns `-1017`.
+2. **Acknowledge.** `ClearIntr(1)` (`0xfffffe0008c91754`): write 1 to bit 0 of
+   `bank2+0x10` (W1C), before any scratch register is read.
+3. **Read.** Scratch 0, 1, 2, 3 into `p0`..`p3`. A NULL pointer, or an index
+   beyond the scratch count, is skipped.
+4. Return 0.
 
 Answers to the four questions asked about it:
 
@@ -266,15 +255,18 @@ This is the missing piece. The core is started with `scratch0 = 0x08042006` and
 
 ### Host side
 
-```
-AVE_IPC::Alloc(0x38, &fwcfg_kva)   // 0xc1d688 (out ptr), 0xc1d68c (size 0x38)
-AVE_HwC::MakeFwCfg(fwcfg_kva)      // 0xc1d978
-SetIOPFlag(0)                      // 0xc1da64  -> scratch0 = 0x08042006
-d = AVE_IPC::Kernel2DARTAddr(fwcfg_kva)   // 0xc1db50
-WriteScratch(1, (u32)d)            // 0xc1dc74/0xc1dc7c
-WriteScratch(2, d >> 32)           // 0xc1dd08/0xc1dd10
-AVE_IOP::Config(); AVE_IOP::Start();
-```
+In `AVE_HwC::StartUpIOP`, before the core is configured or started (call
+sites in the §3 table):
+
+1. allocate 56 bytes (`0x38`) with `AVE_IPC::Alloc`;
+2. fill them with `AVE_HwC::MakeFwCfg` (layout below);
+3. `SetIOPFlag(0)`: scratch 0 = `0x08042006`;
+4. translate the block's kernel VA to its DART address with
+   `AVE_IPC::Kernel2DARTAddr`;
+5. `WriteScratch(1, low 32 bits)`, then `WriteScratch(2, high 32 bits)`;
+6. `AVE_IOP::Config`, then `AVE_IOP::Start`.
+
+No doorbell is rung: this is a boot argument block, not a message.
 
 `AVE_IPC::Alloc` returns a **kernel VA**: `ChkPool::Alloc` yields a DART
 address, and `0xfffffe0008c43338`..`0xfffffe0008c43360` converts it
@@ -315,28 +307,26 @@ index **29** (`mov w0, #0x1d`, `0xfffffe0008b406b4`).
 
 This is the firmware's very first act after boot:
 
-```
-w21 = 0x08042006                       ; 0xe1020/0xe102c
-w0  = GPIO::Read(0)                    ; 0xe1150
-this->standalone = (w0 != 0x08042006)  ; 0xe115c..0xe1164
-if (this->standalone) { ... nothing to read ... }   ; 0xe1170 tbz
-else {
-    hi = GPIO::Read(2);                ; 0xe11b8
-    lo = GPIO::Read(1);                ; 0xe11e4
-    map(sp+0x70, lo | hi<<32, 56, 0);  ; 0xe11f0..0xe11fc  <- 0x38 == 56
-    p = ptr(sp+0x70);                  ; 0xe1204
-    devIndex        = LE32(p+0);       ; 0xe1218..0xe1244
-    devID           = LE32(p+4);       ; 0xe124c
-    devNum          = LE32(p+8);       ; 0xe128c
-    devNumPerGroup  = LE32(p+12);      ; 0xe1294
-    devSubIDFlag    = LE64(p+16);      ; 0xe12f8
-    devRevision     = LE32(p+24);      ; 0xe1300
-    logAddr         = LE64(p+32);      ; 0xe1344
-    logSize         = LE32(p+40);      ; 0xe1368
-    SetLogBuffer(logAddr, logSize);    ; 0xe1378..0xe1380 -> 0xab8c
-    SetIdentity(devIndex, devID, devNum, devNumPerGroup, devSubIDFlag, devRevision);  ; 0xe13a4
-}
-```
+1. Read scratch 0. If it is not `0x08042006` the firmware marks itself
+   **standalone** and reads nothing else from the host (test at
+   `0xe115c`..`0xe1164`, branch at `0xe1170`).
+2. Otherwise read scratch 2 (high word), then scratch 1 (low word), and map
+   the 56-byte (`0x38`) block at `lo | hi << 32` (`0xe11f8`).
+3. Read these fields from it, little-endian:
+
+   | off | size | field | consumed by |
+   |---|---|---|---|
+   | `+0x00` | u32 | device index | `SetIdentity` |
+   | `+0x04` | u32 | device ID | `SetIdentity` |
+   | `+0x08` | u32 | device number | `SetIdentity` |
+   | `+0x0C` | u32 | devices per group | `SetIdentity` |
+   | `+0x10` | u64 | sub-ID flag | `SetIdentity` |
+   | `+0x18` | u32 | revision | `SetIdentity` |
+   | `+0x20` | u64 | log buffer address | `SetLogBuffer` (`0xab8c`) |
+   | `+0x28` | u32 | log buffer size | `SetLogBuffer` |
+
+4. Call `SetLogBuffer(address, size)`, then `SetIdentity` with the six
+   identity fields in offset order.
 
 Both the 56-byte size and every field offset match `MakeFwCfg` exactly. The
 firmware reads the struct byte-at-a-time (unaligned-safe), so no alignment
@@ -471,14 +461,13 @@ iova     = (cpu_va - fwipc_cpu_base) + fwipc_iova_base
 
 Between messages 3 and 4 the host allocates:
 
-```c
-AVE_IPC::AllocChannelMem(w1_from_msg1, &chanMem);  // 0xc1ee44/0xc1ee48
-bzero(chanMem, w1);                                // 0xc1effc
-AVE_IPC::Alloc(0x50, &ipcinfo);                    // 0xc1f008/0xc1f00c   80 bytes
-AVE_IPC::Alloc(0x10000, &HwC[0x118]);              // 0xc1f1ec/0xc1f1f0   64 KiB
-HwC[0x120] = 0x10000;  bzero(HwC[0x118], 0x10000); // 0xc1f1dc, 0xc1f3ac
-memset(ipcinfo, 0, 0x50);                          // 0xc1f1c8..0xc1f1d8 (stp q0)
-```
+| block | size | how | zeroed | kept at |
+|---|---|---|---|---|
+| channel-descriptor memory | message 1's scratch 1 | `AVE_IPC::AllocChannelMem` | yes | `AVE_IPC+0x48` (see below) |
+| IPC info block | `0x50` (80 bytes) | `AVE_IPC::Alloc` | yes, before it is filled | — |
+| 64 KiB block | `0x10000` | `AVE_IPC::Alloc` | yes | `AVE_HwC+0x118`, size `0x10000` at `AVE_HwC+0x120` |
+
+Call sites are in the §3 table.
 
 `AllocChannelMem` (`0xfffffe0008c44020`) caches its single allocation at
 `AVE_IPC+0x48` and returns it on every later call.
@@ -522,15 +511,12 @@ The arch-`0x20` layout is different (all 32-bit, base address at `+0x00`,
 
 ## 10. Message 5 and `CreateChannel` — confirmed (both)
 
-```c
-RecvIOPMsg(&d0, &d1, &d2, 0);                       // 0xc1f804..0xc1f818
-descFw = *(u64 *)&d0;                               // ldur x20,[x29,#-112], 0xc1f8d8
-gClientBufferSize = d2;                             // 0xc1fca0/0xc1fca8
-if (d2 > 0x13C000) fail;                            // cmp w8,#0x13c,lsl #12, 0xc1fcac
-descKVA = Fw2KernelAddr(descFw);                    // 0xc1fa0c
-if (descKVA != chanMem) fail;                       // 0xc1fa14..0xc1fa1c
-AVE_IPC::CreateChannel(nChannels, version, descKVA); // 0xc1fa30
-```
+The host receives message 5 (`RecvIOPMsg(&d0, &d1, &d2, 0)`) and then:
+
+| value | from | check | use |
+|---|---|---|---|
+| descriptor array, firmware address | scratch 0 (low) and scratch 1 (high), read as one u64 | its kernel VA (`Fw2KernelAddr`, `0xc1fa0c`) must equal the host's own `chanMem`, else fail (`0xc1fa14`..`0xc1fa1c`) | passed to `AVE_IPC::CreateChannel(nChannels, version, descKVA)` (`0xc1fa30`) |
+| client buffer size | scratch 2 | must be ≤ `0x13C000`, else fail (`0xc1fcac`) | stored as `gClientBufferSize` |
 
 `nChannels` and `version` are **scratch0 and scratch2 of message 1**, carried in
 `x21`/`x22` since `0xc1e0c8`; every intervening write to those registers is
@@ -583,16 +569,10 @@ Ring mechanics (slot size `0x40`, phase bit, host-private indices) are unchanged
 
 ## 11. The ready flag — confirmed (both)
 
-```c
-SetIOPFlag(3);                                   // 0xc1fcb8/0xc1fcbc -> scratch3 = 0x08042006
-n = 0;
-while (CheckIOPFlag(3) != 0) {                   // 0xc1fcc8, 0xc1fdac
-    if (n > cfg->timeout_scale * 20000) fail;    // 0xc1fd8c..0xc1fd94 (w22 = 20000 @0xc1fcec)
-    n++;
-    IODelay(100);                                // 0xc1fd9c/0xc1fda0
-}
-return 0;                                        // 0xc1fdb4
-```
+1. `SetIOPFlag(3)`: scratch 3 = `0x08042006`.
+2. Poll `CheckIOPFlag(3)` until it returns 0, i.e. until scratch 3 reads 0,
+   with `IODelay(100)` between polls, for at most `cfg->timeout_scale * 20000`
+   polls; past that, fail. On success `StartUpIOP` returns 0.
 
 Default timeout `1 × 20000 × 100 µs` = **2 s**.
 
