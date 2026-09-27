@@ -1016,9 +1016,12 @@ static void test_process_13_5(void)
 	f.frame_type = 7;
 	expect_int(ave_cmd_build_process_avc(a, buf, sizeof(buf), &CTX, 21, &f), -EINVAL,
 		   "7 (reference B, pyramid only) refused (docs/81 R12)");
-	f.frame_type = 5;
+	f.frame_type = AVE_FRAME_TYPE_AUTO;
+	expect_int(ave_cmd_build_process_avc(a, buf, sizeof(buf), &CTX, 21, &f), 0x1940,
+		   "5 accepted: the firmware decides (GetFrameType fw 0x145d4, docs/85 mq3)");
+	f.frame_type = 6;
 	expect_int(ave_cmd_build_process_avc(a, buf, sizeof(buf), &CTX, 21, &f), -EINVAL,
-		   "5 is not an IMG_FRAME_TYPE the firmware accepts");
+		   "6 is not an IMG_FRAME_TYPE the firmware accepts");
 }
 
 static void test_process_26_6(void)

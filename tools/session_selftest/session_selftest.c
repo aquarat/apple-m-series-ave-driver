@@ -583,10 +583,10 @@ static void test_abi(enum ave_fw_abi which, const char *name)
 		CHECK(ave_cmd_build_process_avc(abi, cmdbuf, sizeof(cmdbuf), &c,
 						SESS_PROCESS_SLOT, &f) == -EINVAL,
 		      "builder accepted type 7 outside the pyramid (docs/81 R12)");
-		f.frame_type = 5;
+		f.frame_type = 6;	/* 5 is "the firmware decides" (docs/85 mq3) */
 		CHECK(ave_cmd_build_process_avc(abi, cmdbuf, sizeof(cmdbuf), &c,
 						SESS_PROCESS_SLOT, &f) == -EINVAL,
-		      "builder accepted frame type 5");
+		      "builder accepted frame type 6");
 		f.frame_type = AVE_FRAME_TYPE_IDR;
 
 		CHECK(ave_cmd_build_process_avc(abi, cmdbuf, sizeof(cmdbuf), &c,

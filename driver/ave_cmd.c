@@ -1164,6 +1164,7 @@ static int ave_pic_check(const struct ave_cmd_abi *abi,
 	if (f->frame_type != AVE_FRAME_TYPE_I &&
 	    f->frame_type != AVE_FRAME_TYPE_P &&
 	    f->frame_type != AVE_FRAME_TYPE_B &&
+	    f->frame_type != AVE_FRAME_TYPE_AUTO &&
 	    f->frame_type != AVE_FRAME_TYPE_IDR)
 		return -EINVAL;
 	if (!f->in_luma_addr || (f->in_luma_addr & (AVE_STRIDE_ALIGN - 1)) ||

@@ -538,6 +538,15 @@ MODULE_PARM_DESC(session_batch,
  * as one batch; the firmware holds the B until P is coded. Needs
  * session_poc0=1, session_dpb=3 and a Main or High profile.
  */
+/*
+ * docs/85 mq3: after the IDR, send every frame as type 5 in one batch, as
+ * macOS does, and let the firmware choose (and hold) its B frames.
+ */
+static bool session_ftype5;
+module_param(session_ftype5, bool, 0444);
+MODULE_PARM_DESC(session_ftype5,
+	"H.264 self-test: frames after the IDR as type 5 (firmware decides), one batch (docs/85 mq3)");
+
 static bool session_bframes;
 module_param(session_bframes, bool, 0444);
 MODULE_PARM_DESC(session_bframes,
@@ -4549,10 +4558,14 @@ int ave_session_selftest(struct ave_device *ave)
 		/* {B, P}: the pair, or a lone trailing frame as P */
 		if (session_bframes && frame)
 			k = min_t(u32, 2, bufs->n_frames - frame);
+		/* mq3: the rest in one batch, all type 5 */
+		if (session_ftype5 && frame)
+			k = min3(bufs->n_frames - frame, bufs->n_coded, (u32)AVE_SESS_RX_Q);
 		if (k > 1) {
 			for (i = 0; i < k; i++) {
 				ns[i] = frame + i;
-				types[i] = session_bframes && i < k - 1 ?
+				types[i] = session_ftype5 ? AVE_FRAME_TYPE_AUTO :
+					   session_bframes && i < k - 1 ?
 					   AVE_FRAME_TYPE_B : AVE_FRAME_TYPE_P;
 			}
 			ret = ave_session_process_batch(ave, abi, bufs,
