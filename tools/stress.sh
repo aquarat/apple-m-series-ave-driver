@@ -19,13 +19,14 @@
 set -u
 SOAK_MIN=${1:-60}; PARTS=${2:-123456}
 REPO=$(dirname "$(readlink -f "$0")")/..	# before the cd: $0 may be relative
-D=$HOME/ave-stress; mkdir -p "$D"; cd "$D" || exit 1
+D=$HOME/ave-stress${STRESS_DIR_SUFFIX:-}; mkdir -p "$D"; cd "$D" || exit 1
 SUM=$D/summary.txt; : > "$SUM"
+NODE=${NODE:-apple-ave-enc}	# apple-ave1-enc: the second encoder (docs/82)
 DEV=
 for n in /sys/class/video4linux/video*/name; do
-    grep -q apple-ave-enc "$n" && DEV=/dev/$(basename "$(dirname "$n")")
+    grep -qx "$NODE" "$n" && DEV=/dev/$(basename "$(dirname "$n")")
 done
-[ -n "$DEV" ] || { echo "no apple-ave-enc node"; exit 1; }
+[ -n "$DEV" ] || { echo "no $NODE node"; exit 1; }
 FAILS=0
 res() { echo "$(date +%T) $1 $2" | tee -a "$SUM"; [ "$1" = FAIL ] && FAILS=$((FAILS + 1)); true; }
 MARK=0
@@ -245,7 +246,7 @@ p5() {
         sleep "0.$((RANDOM % 9 + 1))$((RANDOM % 10))"
         [ $((i % 4)) -eq 0 ] && sleep 2
         # the client itself, not the timeout(1) wrapper around it
-        pkill -9 -x v4l2-ctl; wait $pid 2>/dev/null
+        pkill -9 -f "^v4l2-ctl -d $DEV "; wait $pid 2>/dev/null
         enc h264 nv12 640 480 480 10 "" k.h264; m=$(sum k.h264)
         [ "$m" = "$ref" ] || { bad=$((bad + 1)); res FAIL "kill $i: next stream differs"; }
     done

@@ -102,3 +102,15 @@ longer refuses a second load.
   untested. The building blocks now exist: core reset, DATA restore, and
   Linux writes to the DAPF (if venc_sys loses power in suspend).
 - **`.shutdown`.** Not needed for a reboot, which cold-starts the block.
+
+## 7. Both encoders under load at once
+
+2026-09-27 10:28-11:15, `ave-load.sh` (variant 7, both encoders; ave0
+with the PMP vote). `tools/stress.sh 30` on ave0 while ave1 encodes HEVC
+1080p (120 frames a stream) in a loop, byte-exact against its first.
+- ave0: **0 FAIL**: 217 x 7 = 1519 byte-identical soak streams (the same
+  rate as the solo run, so ave1's load does not slow ave0), the 60 000-frame
+  streams, 300 cycles, 150 random configurations, kill and contention.
+- ave1: 2437 streams, 2397 byte-identical. The other 40 are exactly part
+  5's 40 SIGKILLs: its `pkill -x v4l2-ctl` killed ave1's client too. A test
+  bug, fixed (`pkill -f "^v4l2-ctl -d $DEV "`).

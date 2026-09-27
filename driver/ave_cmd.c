@@ -627,6 +627,7 @@ int ave_cmd_build_start_avc(const struct ave_cmd_abi *abi, u8 *buf, size_t len,
 	    s->max_refs > 4 ||
 	    (s->ref_spacing_p && abi->start_avc.ref_spacing == AVE_OFF_NONE) ||
 	    s->search_range > 2 ||
+	    (s->max_mvs_per_2mb && abi->start_avc.max_mvs_per_2mb == AVE_OFF_NONE) ||
 	    (s->search_range && abi->start_avc.search_range == AVE_OFF_NONE))
 		return -EINVAL;
 
@@ -645,6 +646,8 @@ int ave_cmd_build_start_avc(const struct ave_cmd_abi *abi, u8 *buf, size_t len,
 		wr32(&w, l->ref_spacing, s->ref_spacing_p);
 	if (s->search_range)
 		wr16(&w, l->search_range, s->search_range);
+	if (s->max_mvs_per_2mb)
+		wr32(&w, l->max_mvs_per_2mb, s->max_mvs_per_2mb);
 
 	/* ---- SPS ---- */
 	wr32(&w, sps->profile, sps->enum_profile_level ? (u32)prof : s->profile_idc);
