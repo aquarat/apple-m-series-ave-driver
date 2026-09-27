@@ -92,6 +92,15 @@ int ave_smmu_init(struct ave_device *ave)
 		dev_warn(ave->dev, "smmu: not powered; not watching\n");
 		return -ENODEV;
 	}
+	/*
+	 * docs/86: stage 7 runs again after a system resume. The mapping and
+	 * the shared IRQ are devres and still in place; only re-arm.
+	 */
+	if (ave->smmu && ave->smmu_irq > 0) {
+		ave_smmu_log(ave, "baseline (resume)");
+		WRITE_ONCE(ave->smmu_live, true);
+		return 0;
+	}
 
 	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "smmu");
 	if (!res || res->start != ave->soc->smmu_phys || resource_size(res) != AVE_SMMU_SIZE) {
