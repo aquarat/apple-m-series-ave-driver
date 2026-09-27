@@ -388,28 +388,33 @@ frame number — assert `pFrameInfo->frameNumber == pCodedHeader->FrameNumberFro
 
 ### 3.2 `AVE_RetrieveRCStats` (`0xfffffe0008ec4e38`)
 
-```c
-void AVE_RetrieveRCStats(_E_AVE_CodecType codec, CODED_DATA_HDR *hdr,
-                         S_AVE_DRC_FrameStats *out)   /* 456 bytes, memset 0 */
-{
-    out->frameType   = hdr->FrameTypeReturned;          /* out+8   0xec4e94 */
-    out->u64_a       = *(u64*)((u8*)hdr + 0x221A4);     /* out+440 0xec4ea4 */
-    out->u64_b       = *(u64*)((u8*)hdr + 0x221AC);     /* out+448 0xec4eb4 */
-    total = 0; overhead = 0; out->nSlices = 0;
-    for (s = 0; s < 256; s++) {
-        n = slice[s].ui32BytesWritten;
-        if (n == 0) break;                              /* 0xec4ec4 */
-        out->nSlices++;                                 /* out+4   0xec4ed0 */
-        total += n;
-        if (codec == HEVC) total += slice[s].extra;     /* 0xec4ee0 */
-        r = (int8_t)slice[s].bytesToRemove;
-        if (r < 0) goto error;                          /* 0xec5078 */
-        overhead += r;
-    }
-    out->frameBytes = total - overhead;                 /* out+0   0xec4f08 */
-    /* … then a fixed run of u32 copies from hdr+0x20 at stride 16 … */
-}
+`AVE_RetrieveRCStats(_E_AVE_CodecType codec, CODED_DATA_HDR *hdr,
+S_AVE_DRC_FrameStats *out)` zeroes `*out` and fills it from the header:
+
+| `S_AVE_DRC_FrameStats` | from `CODED_DATA_HDR` |
+|---|---|
+| `+0` frame bytes | the slice sum below |
+| `+4` slice count | number of slices counted |
+| `+8` frame type | `FrameTypeReturned` (`+0x110`) |
+| `+440` u64 | `+0x221A4` |
+| `+448` u64 | `+0x221AC` |
+| further u32 fields | a fixed run of u32s from `+0x20` at stride 16 (not itemised here) |
+
+**Slice records.** Slice `s` (`s = 0 … 255`) has its fields at
+`hdr + 0x220·s + offset`, with the offsets of the table in §3.1. The slices
+counted are those before the first whose `ui32BytesWritten` is 0 — all 256 if
+none is. Over the counted slices:
+
 ```
+frame bytes = Σ ui32BytesWritten                        (+0x180, u32)
+            + Σ HEVC extra        only when codec == 1  (+0x398, u32)
+            − Σ bytesToRemove                           (+0x38C, read as s8)
+```
+
+A negative `bytesToRemove` in a counted slice is an **error**: the function
+takes its error exit (`0xec5078`) before the frame byte count is stored (the
+slice count at that point already includes the offending slice). The HEVC
+extra is the slice-header byte length ([77](77-hevc.md) §4).
 
 **C.** `S_AVE_DRC_FrameStats` is `0x1C8` = **456** bytes
 (`mov w2,#0x1c8; bl bzero` `0xec4e80`–`0xec4e84`).

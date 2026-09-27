@@ -16,7 +16,7 @@
 >   `t6000` → ChipType 8, **DevType 11**, DevID 14; `t6001` → ChipType 9,
 >   **DevType 12**, DevID 15. **Confirmed.**
 > - `LFSRef/LFSResult/LRSResult` are `LowResRef/LowResResult/LowResRCResult`.
->   `LowResResult` size equals the §5 LFSResult middle-line formula (AVC,
+>   `LowResResult` size equals the §5 LFSResult `9 – 22` row (AVC,
 >   DevType 11–24, `0xfffffe0008ea5840`); count is 4 for DevType > 10
 >   (`0xfffffe0008ea570c`). `LowResRCResult` is 0 below DevType 12
 >   (`0xfffffe0008ea58e8`).
@@ -338,11 +338,11 @@ Every threshold below is evaluated at DevType 9/10.
 
 `AVE_CalcBufNumOfCodedHeader(_E_AVE_WorkType wt, …)` (`0xfffffe0008b5fb2c`):
 
-```
-if ((unsigned)(wt - 5) < 2) return 10;      ; wt in {GGM, DMV}   0xb5fb30-0xb5fb3c
-if (wt == 2)                return 4;       ; LRME               0xb5fb44-0xb5fb4c
-tail-call AVE_CalcBufNumOfCodedData(...)    ;                    0xb5fb84
-```
+| `wt` | buffers |
+|---|---|
+| 5, 6 (GGM, DMV) — one unsigned range test, `wt − 5 < 2` | **10** |
+| 2 (LRME) | **4** |
+| anything else | whatever `AVE_CalcBufNumOfCodedData` returns for the same arguments (tail call) |
 
 `AVE_CalcBufSizeOfCodedHeader()` (`0xfffffe0008b5fb88`) is a constant:
 
@@ -357,12 +357,8 @@ mov w0, #0xc000    ; 0xfffffe0008b5fb8c
 `AVE_CalcBufNumOfFwClient(int n)` (`0xfffffe0008b63214`) is the identity — the
 body is `bti c; ret`. LRME/GGM/DMV/MSC all pass 1.
 
-`AVE_CalcBufSizeOfFwClient(int n)` (`0xfffffe0008b6321c`):
-
-```
-w8 = 0x0013C000                     ; movz/movk 0xb63220-0xb63224
-return (n == 0) ? w8 : n;           ; 0xb63228-0xb6322c
-```
+`AVE_CalcBufSizeOfFwClient(int n)` (`0xfffffe0008b6321c`) returns `n`, or the
+built-in default **`0x0013C000`** (a `movz`/`movk` pair) when `n == 0`.
 
 LRME passes the mutable `__DATA` word at **`0xfffffe000c69aaf0`**
 (`0xfffffe0008cb1344`), which is **0** in the shipped image → the default
@@ -380,16 +376,13 @@ AVE_CalcBufLayerNumOfLFSRef(int n)     0xb61510   -> min(n, 2)
 int, int, int* out4)` (`0xfffffe0008b615a0`) branches `wt==5` / `wt==2` /
 default at `0xb615dc`–`0xb615e8`; the LRME arm additionally splits on
 `DevType >= 30` (`cmp w19, #0x1e`, `0xb615ec`). **On M1 the `DevType < 30` arm at
-`0xfffffe0008b61764` runs:**
+`0xfffffe0008b61764` runs.** With `W`, `H` = `w`, `h`, each multiplied by 4
+when `f` is set:
 
-```
-s  = f ? 2 : 0                                    ; 0xb61770-0xb61778
-bw = ceil( ceil((w << s) / 16) / 4 )              ; 0xb6177c-0xb61790
-bh = ceil( ceil((h << s) / 16) / 4 )              ; 0xb61794-0xb617a8
-sz = align_up(bw * bh * 256, 512)                 ; 0xb617ac-0xb617b8
-d  = (DevType > 16 && ChromaFmt != 0) ? 1 : 0     ; 0xb617bc-0xb617c4  (0 on M1)
-return sz << d
-```
+- `bw = ⌈W/64⌉`, `bh = ⌈H/64⌉` — the dimension in 16-pixel blocks, then in
+  groups of four (`⌈⌈W/16⌉/4⌉`);
+- size = `align_up(256 · bw · bh, 512)`, doubled when `DevType > 16` and
+  `ChromaFmt ≠ 0` (never on M1).
 
 The three other sub-region sizes (`w27`, `w28`, `w20`) are forced to zero on
 this arm (`0xb61764`–`0xb6176c`); all four are written through the `int*`
@@ -415,20 +408,17 @@ LRME passes `wt=2, c=0` (`mov w3, #0` at `0xfffffe0008cb12b4`) → **4 buffers**
 
 `AVE_CalcBufSizeOfLFSResult(wt, DevType, EncType, w, h, bool g)`
 (`0xfffffe0008b61ce8`); LRME arm `0xb61d40`, and for `DevType < 30` it lands at
-`0xfffffe0008b61f40`:
+`0xfffffe0008b61f40`. There the size is a per-row byte count `R` times a row
+count, plus a constant. With `w'`, `h'` = `w`, `h`, each multiplied by 4 when
+`g` is set, `W = ⌈w'/16⌉`, `H = ⌈h'/16⌉` and `H4 = ⌈H/4⌉`:
 
-```
-s = g ? 2 : 0                                     ; 0xb61d44-0xb61d4c
-W = ceil((w << s) / 16)                           ; 0xb61f40-0xb61f44
-H = ceil((h << s) / 16)                           ; 0xb61f48-0xb61f4c
-H4 = ceil(H / 4)                                  ; 0xb61f68-0xb61f6c
-                    DevType <  9 : align_up(((W+1)>>1) * 96, 64) * H4        (0xb61f50-0xb61f70)
-size =              9 <= DT < 23 : align_up(W * 64, 128) * H4 + 1024         (0xb61f74-0xb61f84)
-                    DevType >= 23: align_up(((W+1) & ~1) * 80, 64) * H4 + 1024 (0xb61f90-0xb61fa0)
-return size << (DevType < 9 ? 1 : 0)              ; 0xb61fac-0xb62054
-```
+| DevType | row bytes `R` | size per buffer |
+|---|---|---|
+| < 9 | `align_up(96 · ⌈W/2⌉, 64)` | `2 · R · H4` |
+| 9 – 22 | `align_up(64 · W, 128)` | `R · H4 + 1024` |
+| ≥ 23 | `align_up(80 · 2⌈W/2⌉, 64)` | `R · H4 + 1024` |
 
-**M1 uses the middle line.** 1920×1080, `g = 0`: `W = 120`, `H = 68`,
+**M1 (DevType 9/10) uses the 9 – 22 row.** 1920×1080, `g = 0`: `W = 120`, `H = 68`,
 `H4 = 17` → `align_up(7680,128) * 17 + 1024` = **131 584 bytes** per buffer,
 4 buffers.
 
@@ -437,32 +427,41 @@ return size << (DevType < 9 ? 1 : 0)              ; 0xb61fac-0xb62054
 ```
 AVE_CalcBufModeNumOfLRSResult(int n)   0xb620a4   -> (n == 1) ? 17 : 1
 AVE_CalcBufTypeNumOfLRSResult(bool b)  0xb620b8   -> b ? 2 : 1
-AVE_CalcBufNumOfLRSResult(DevType, wt, bool e, bool f)   0xb620cc:
-    if (wt == 5) return 10;                                        ; 0xb620f8
-    n = f ? 10 : ((wt == 2) ? 4 : 3);                              ; 0xb620d8-0xb620ec
-    return (DevType > 8 && e) ? n : 0;                             ; 0xb620d0, 0xb620f0
 ```
+
+`AVE_CalcBufNumOfLRSResult(DevType, wt, bool e, bool f)` (`0xb620cc`), first
+matching row:
+
+| condition | buffers |
+|---|---|
+| `wt == 5` (GGM) | **10** |
+| `DevType ≤ 8`, or `e` clear | 0 |
+| `f` set | 10 |
+| `wt == 2` (LRME) | 4 |
+| otherwise | 3 |
 
 LRME passes `wt=2, f=0` → **4 buffers if `e`, else 0.**
 
 `AVE_CalcBufSizeOfLRSResult(DevType, wt, bool e, w, h, bool g)`
-(`0xfffffe0008b62104`):
+(`0xfffffe0008b62104`), first matching row:
 
-```
-if (wt == 5) return 0x40000;              ; GGM: 256 KiB flat, 0xb62154
-if (DevType < 9) return 0;                ; 0xb621c4-0xb621c8
-if (!e) return 0;                         ; 0xb621cc
-s  = g ? 2 : 0                            ; 0xb621f0-0xb621f8
-w' = w << s ;  h' = h << s
-cols = align_up(w', 64)                                        ; 0xb62218-0xb6221c
-      DevType > 29 : ceil(h'/128) * (((w'+127)>>1) & ~63) * 40 + cols   ; 0xb62200-0xb62228
-size =
-      DevType <= 29: (((h' + 255) >> 6) & ~3) * cols                    ; 0xb6222c-0xb62238
-return size << ((wt == 2) ? 3 : 1)         ; 0xb62244-0xb62250
-```
+| condition | bytes per buffer |
+|---|---|
+| `wt == 5` (GGM) | **`0x40000`**, 256 KiB flat |
+| `DevType < 9` | 0 |
+| `e` clear | 0 |
+| otherwise | `base × 8` when `wt == 2` (LRME), `base × 2` for any other `wt` |
 
-**M1 uses the second line, with the ×8 LRME shift.** 1920×1080, `g = 0`:
-`((1080+255)>>6) & ~3 = 20`, `cols = 1920` → `38 400 << 3` = **307 200 bytes**
+With `W`, `H` = `w`, `h`, each multiplied by 4 when `g` is set, and
+`cols = align_up(W, 64)`:
+
+| DevType | `base` |
+|---|---|
+| ≤ 29 | `4 · ⌈H/256⌉ · cols` |
+| ≥ 30 | `2560 · ⌈W/128⌉ · ⌈H/128⌉ + cols` (2560 = 40 × 64) |
+
+**M1 uses the `DevType ≤ 29` row, with the ×8 LRME factor.** 1920×1080, `g = 0`:
+`4 · ⌈1080/256⌉ = 20`, `cols = 1920` → `38 400 × 8` = **307 200 bytes**
 per buffer.
 
 `e` and `g` come from the same unnamed client bits as `f` above
@@ -505,13 +504,12 @@ then:
 `AVE_BufPool::CalcSize(_E_AVE_BPType, int n, int d)` (`0xfffffe0008c64df0`)
 accounts only for the **descriptor array**, 48 bytes per entry:
 
-```
-type 1: if (n < 1 || d < 1) 0;  else BlkPool::CalcSize(n,0,0) + align_up(n*48, 64)
-                                                          ; 0xc64e34-0xc64e54
-type 2: if (n < 1 || d < 1) 0;  else ChkPool::CalcSize(0,n,1) + align_up((n/d)*48, 64)
-                                                          ; 0xc64e70-0xc64e94
-type 3: return 48 * n                                     ; 0xc64e9c-0xc64ea0
-```
+| type | bytes | range check |
+|---|---|---|
+| 0 | 0 (`0xfffffe0008c64ea8`) | — |
+| 1 | `BlkPool::CalcSize(n, 0, 0) + align_up(48·n, 64)` | 0 unless `n ≥ 1` and `d ≥ 1` |
+| 2 | `ChkPool::CalcSize(0, n, 1) + align_up(48·⌊n/d⌋, 64)` | 0 unless `n ≥ 1` and `d ≥ 1` |
+| 3 | `48·n` | none |
 
 Both delegated calls are passed a **zero size** (`unitSize=0` for the BlkPool
 call, `totalSize=0` for the ChkPool call) and therefore contribute **0** — see
@@ -527,18 +525,20 @@ stub: `bti c ; b AVE_BlkBuf_CalcSize` (`0xfffffe0008b5d624` →
 `0xfffffe0008b3c800`). Argument names come from the `CreateWithMem` assertion
 above: **`(int num, int size, int alignment)`**.
 
+`AVE_BlkBuf_CalcSize(num, size, alignment)` returns **0** unless all of:
+
+- `num ≥ 1` and `size ≥ 1`;
+- `alignment` is 0 or a power of two, and at most 64 (the bound is an unsigned
+  compare, so a negative alignment is rejected too).
+
+Otherwise, with `a` = `alignment`, or 64 when `alignment == 0`:
+
 ```
-AVE_BlkBuf_CalcSize(num, size, alignment):
-    if (num  < 1)                       return 0;      ; 0xb3c808
-    if (size < 1)                       return 0;      ; 0xb3c810
-    if ((unsigned)alignment > 64)       return 0;      ; 0xb3c818
-    if (alignment & (alignment - 1))    return 0;      ; 0xb3c820-0xb3c828
-    a = (alignment == 0) ? 64 : alignment;             ; 0xb3c82c-0xb3c834
-    unit = align_up(size, a);                          ; 0xb3c838-0xb3c844
-    hdr  = (num*24 + a + 167) & ~(a-1);                ; 0xb3c848-0xb3c854
-         =  align_up(num*24 + 168, a)
-    return num*unit + hdr;                             ; 0xb3c858
+bytes = num · align_up(size, a)  +  align_up(168 + 24·num, a)
 ```
+
+The first term is the units, the second the manager overhead. The code forms
+the second as `(24·num + a + 167) & ~(a − 1)`, which is the same number.
 
 So: **alignment must be a power of two ≤ 64, 0 means 64; the manager overhead is
 a 168-byte header plus 24 bytes per unit, rounded to the alignment.**
@@ -548,7 +548,7 @@ just `num * align_up(size, alignment)`, or 0 on `INT_MAX` overflow
 (`0xb3c7e8`–`0xb3c7f8`).
 
 This is where `BufPool::CalcSize` type 1 loses its backing store: it calls
-`BlkPool::CalcSize(n, 0, 0)`, and `size == 0` fails the `size < 1` test.
+`BlkPool::CalcSize(n, 0, 0)`, and `size == 0` fails the `size ≥ 1` condition.
 
 ---
 
@@ -559,23 +559,28 @@ This is where `BufPool::CalcSize` type 1 loses its backing store: it calls
 `CreateWithMem` assertion and from the code: **`(int size, int unitSize,
 int roundUp)`**.
 
-```
-AVE_ChkBuf_CalcSize(size, unitSize, roundUp):
-    if (size == 0)                        return 0;    ; 0xb3d510
-    if (unitSize < 0)                     return 0;    ; 0xb3d52c
-    if (unitSize & (unitSize - 1))        return 0;    ; 0xb3d530-0xb3d538   power of two only
-    if (unitSize == 0) {                               ; 0xb3d53c
-        if (size & 63)                    return 0;    ; 0xb3d5a0
-        unitSize = 64;                                 ; 0xb3d5c0
-    }
-    aligned = roundUp ? align_up(size, unitSize)
-                      : align_down(size, unitSize);    ; 0xb3d540-0xb3d554
-    AVE_ChkBuf_CalcAlignedSize(&aligned, &unitSize, 0);; 0xb3d568
-    if (unitSize < original unitSize)     return 0;    ; 0xb3d574
-    n = aligned / unitSize;
-    if (n > 0x200000)                     return 0;    ; 0xb3d584   2 097 152-chunk cap
-    return ((n*4 + 167) & ~63) + aligned;              ; 0xb3d58c-0xb3d598
-```
+`AVE_ChkBuf_CalcSize(size, unitSize, roundUp)` computes, in terms of a chunk
+size `u` and a managed size `A`:
+
+1. `u` = `unitSize`, or the **64-byte default** when `unitSize == 0`.
+2. `A` = `size` rounded to a multiple of `u`: up when `roundUp` is set, down
+   otherwise.
+3. **`AVE_ChkBuf_CalcAlignedSize(&A, &u, 0)`** may adjust both (not decoded;
+   see the caveat at the end of this section).
+4. `n = A / u` chunks.
+5. **bytes = `A + align_up(4·n + 104, 64)`** — the data plus the manager
+   array, 4 bytes per chunk and a header, rounded to 64. The code forms the
+   second term as `(4·n + 0xa7) & ~63`.
+
+It returns **0** instead when any of these holds:
+
+| rejected when | |
+|---|---|
+| `size == 0` | |
+| `unitSize < 0`, or not a power of two (0 passes) | power of two only |
+| `unitSize == 0` and `size` is not a multiple of 64 | |
+| step 3 hands back a smaller `u` than it was given | |
+| `n > 0x200000` | 2 097 152-chunk cap |
 
 **Granularity constants, confirmed:**
 

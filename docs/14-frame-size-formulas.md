@@ -237,44 +237,26 @@ signed divide-by-3 magic `0x55555556` at `0xfffffe0008c4c6d8`) and `height` is
 the multiplier (`mul w8,w2,w8` at `0xfffffe0008c4c6f0`) — which is the byte
 layout of a 10-bit packed row, so arg2 = width, arg3 = height.
 
-```c
-if (!fmt) return 0;                                  // 0xfffffe0008c4c6a4
-cf   = fmt->chromaFmt;   // +12                      // 0xfffffe0008c4c6ac
-kind = fmt->layoutKind;  // +24                      // 0xfffffe0008c4c6b0
+A null `fmt` gives 0. Otherwise the result is chosen by the layout kind
+(`+24`), using the entry's own `bits` (`+4`), `cf` (`+12`), `hdiv`/`vdiv`
+(`+16`/`+20`) and `L` (`+32`). All divisions are C integer divisions, and
+`Y = width·height·((bits+7)/8)`:
 
-switch (kind) {
-case 0: /* Linear    — inlined, 0xfffffe0008c4c760 */
-    bps  = (fmt->bits + 7) / 8;                      // 0xfffffe0008c4c768-c4c774
-    luma = width * height * bps;                     // 0xfffffe0008c4c760, c4c778
-    chroma = (cf == 0) ? 0                           // csel 0xfffffe0008c4c784
-           : (2 * luma) / (fmt->hdiv * fmt->vdiv);   // 0xfffffe0008c4c78c-c4c790
-    return luma + chroma;                            // 0xfffffe0008c4c794
+| kind | size |
+|---|---|
+| 0 Linear (inlined) | `Y` if `cf == 0`, else `Y + (2·Y)/(hdiv·vdiv)` |
+| 1 Packed (inlined) | 0 unless `bits == 10`; then `4·height·((width+2)/3)`, plus `(4·height·(((2·width)/hdiv + 2)/3))/vdiv` if `cf != 0` |
+| 2 HTPC | `AVE_HTPC_CalcFrameSize(width, height, bits, 0, cf)` (tail call, §4.4) |
+| 3 Interchange | `AVE_Interchange_CalcFrameSize(width, height, L, bits, cf)` (tail call, §4.3) |
 
-case 1: /* Packed    — inlined, 0xfffffe0008c4c6c8 */
-    if (fmt->bits != 10) return 0;                   // 0xfffffe0008c4c6cc-c4c6d0
-    luma = 4 * height * ((width + 2) / 3);           // 0xfffffe0008c4c6d4-c4c728
-    chroma = (cf == 0) ? 0                           // csel 0xfffffe0008c4c71c
-           : (4 * (((2*width)/fmt->hdiv + 2)/3) * height) / fmt->vdiv;
-    return luma + chroma;
-
-case 2: /* HTPC */
-    return AVE_HTPC_CalcFrameSize(width, height, fmt->bits, 0, cf);
-                                                     // tail-call 0xfffffe0008c4c7b4
-case 3: /* Interchange */
-    return AVE_Interchange_CalcFrameSize(width, height,
-                                         fmt->lossyLevel, fmt->bits, cf);
-                                                     // tail-call 0xfffffe0008c4c75c
-}
-```
-
-Note the kind-4 argument `0` handed to HTPC (`mov w3,#0` at
-`0xfffffe0008c4c7b0`) — the HTPC "header grouping shift" is always 0 through
-this path.
+Note the fourth argument `0` handed to HTPC in the kind-2 case
+(`mov w3,#0` at `0xfffffe0008c4c7b0`) — the HTPC "header grouping shift" is
+always 0 through this path.
 
 The two inlined cases are arithmetically the same as the standalone `Linear`
 and `Packed` functions except for divisor order: the dispatcher computes
-`(2*luma)/(hdiv*vdiv)` while `AVE_Linear_CalcFrameSize` computes
-`2*((luma/hdiv)/vdiv)`. Identical when the division is exact; they can differ
+`(2*Y)/(hdiv*vdiv)` while `AVE_Linear_CalcFrameSize` computes
+`2*((Y/hdiv)/vdiv)`. Identical when the division is exact; they can differ
 by a byte or two on odd dimensions.
 
 **`AVE_PixelFmt_CalcFrameSize` has no call site anywhere in the kernelcache**
@@ -295,13 +277,14 @@ authoritative statement of the layouts*, not as the code that runs per frame.
 `0xfffffe0008b5f620`, which passes the width-aligned value in `w0` and the
 height in `w1` (§7).
 
-```c
-bps  = (bits + 7) / 8;                 // 0xfffffe0008b8cff4-b8d000
-luma = w * h * bps;                    // 0xfffffe0008b8cff0, b8d004
-if (cf == 0) return luma;              // 0xfffffe0008b8d008
-(hdiv, vdiv) = chromaDiv[cf];          // 0xfffffe0008b8d010, b8d02c
-chroma = 2 * ((luma / hdiv) / vdiv);   // 0xfffffe0008b8d030-b8d038
-return luma + chroma;                  // 0xfffffe0008b8d044
+With `bps = (bits+7)/8`, `(hdiv, vdiv)` from the §1 divisor table, and C
+integer division:
+
+```
+luma   = w·h·bps
+chroma = 0                              cf = 0 (explicit guard)
+       = 2·((luma / hdiv) / vdiv)       cf = 1, 2, 3
+size   = luma + chroma
 ```
 
 `AVE_Linear_CalcChromaPlaneSize(w, h, bits, cf)` (`0xfffffe0008b8cf38`) is
@@ -323,15 +306,16 @@ chromaSize   = 2 * lumaSize / (hdiv * vdiv)
 `0xfffffe0008c54250`. The `p420`/`pf20`/`p422`/… family: 3 ten-bit samples per
 32-bit word.
 
-```c
-if (bits != 10) return 0;                       // 0xfffffe0008c54254
-lumaRowBytes = 4 * ((w + 2) / 3);               // 0xfffffe0008c5425c-c54278
-luma         = h * lumaRowBytes;                // 0xfffffe0008c5427c
-if (cf == 0) return luma;                       // 0xfffffe0008c54280
-(hdiv, vdiv) = chromaDiv[cf];                   // 0xfffffe0008c54288, c542a8
-chromaRowBytes = 4 * ((((2*w) / hdiv) + 2) / 3);// 0xfffffe0008c542a4-c542c4
-chroma = (h * chromaRowBytes) / vdiv;           // 0xfffffe0008c542c4-c542c8
-return luma + chroma;                           // 0xfffffe0008c542d8
+Defined only for `bits == 10`; any other depth gives 0. Then, with
+`(hdiv, vdiv)` from the §1 table and C integer division:
+
+```
+lumaRowBytes   = 4·((w + 2) / 3)
+chromaRowBytes = 4·(((2·w) / hdiv + 2) / 3)
+luma           = h·lumaRowBytes
+chroma         = 0                              cf = 0 (explicit guard)
+               = (h·chromaRowBytes) / vdiv      cf = 1, 2, 3
+size           = luma + chroma
 ```
 
 `(x + 2) / 3` is the compiler's signed divide-by-3 (`smull` with `0x55555556`,
@@ -345,27 +329,23 @@ return luma + chroma;                           // 0xfffffe0008c542d8
 (`bl 0xfffffe0008c2a8dc` → `0xfffffe0008c2a7c4`), summed at
 `0xfffffe0008c2a8e0`.
 
-```c
-/* AVE_Interchange_CalcLumaSize, 0xfffffe0008c2a658 */
-bpt = (bits == 8 ? lumaTile8[L] : lumaTileX[L]);  // csel 0xfffffe0008c2a670
-tX  = (w + 31) / 32;                              // 0xfffffe0008c2a690-c2a69c
-tY  = (h + 31) / 32;                              // 0xfffffe0008c2a6a0-c2a6ac
-eX  = (w < 33) ? 0 : ceil_log2(tX);               // clz 0xfffffe0008c2a6b8, cmp c2a6c4
-eY  = (h < 33) ? 0 : ceil_log2(tY);               // clz 0xfffffe0008c2a6d0, cmp c2a6d8
-meta = align_up(32 << (eX + eY), 128);            // 0xfffffe0008c2a6e4-c2a6ec
-return tX * tY * bpt + meta;                      // 0xfffffe0008c2a6f0
+Both halves are the same per-plane formula with different parameters. For a
+plane of `pw x ph` samples cut into `T x T` tiles of `bpt` bytes, with
+metadata unit `u`:
 
-/* AVE_Interchange_CalcChromaSize, 0xfffffe0008c2a7c4 */
-(hdiv, vdiv) = chromaDiv[cf];                     // 0xfffffe0008c2a7cc, c2a800
-cw = w / hdiv;  ch = h / vdiv;                    // 0xfffffe0008c2a81c/c2a820
-cbpt = (bits == 8 ? chrTile8[L] : chrTileX[L]);   // csel 0xfffffe0008c2a7fc
-ctX = (cw + 15) / 16;                             // 0xfffffe0008c2a828-c2a834
-ctY = (ch + 15) / 16;                             // 0xfffffe0008c2a838-c2a844
-eX  = (cw < 17) ? 0 : ceil_log2(ctX);             // clz 0xfffffe0008c2a850, cmp c2a85c
-eY  = (ch < 17) ? 0 : ceil_log2(ctY);             // clz 0xfffffe0008c2a868, cmp c2a870
-meta = align_up(8 << (eX + eY), 128);             // 0xfffffe0008c2a880-c2a888
-return ctX * ctY * cbpt + meta;                   // 0xfffffe0008c2a88c
 ```
+nX = ceil(pw / T)        nY = ceil(ph / T)
+e(p, n) = 0 if p <= T, else ceil_log2(n)
+plane(pw, ph) = nX·nY·bpt + align_up(u << (e(pw, nX) + e(ph, nY)), 128)
+```
+
+| half | function | plane `pw x ph` | tile `T` | meta unit `u` | `bpt` |
+|---|---|---|---|---|---|
+| luma | `AVE_Interchange_CalcLumaSize` `0xfffffe0008c2a658` | `w x h` | 32 | 32 | luma table below, 8-bit or other, indexed by `L` |
+| chroma | `AVE_Interchange_CalcChromaSize` `0xfffffe0008c2a7c4` | `(w / hdiv) x (h / vdiv)` (integer division, §1 divisors) | 16 | 8 | chroma table below, 8-bit or other, indexed by `L` |
+
+"8-bit" means `bits == 8` exactly; every other depth uses the "other" row.
+The chroma half has no `cf == 0` guard (§1).
 
 `ceil_log2(n)` is literally `32 - clz(n - 1)`, i.e. the metadata region covers
 both tile counts rounded up to powers of two. Bytes-per-tile tables (unchanged
@@ -389,24 +369,16 @@ dimensions and that the chroma tile is interleaved CbCr.
 passes 0. Uncompressed 16x8 (luma) / 8x8-pair (chroma) tiling plus a 4-byte
 per-tile-column header.
 
-```c
-bps = (bits + 7) / 8;                          // 0xfffffe0008b3fde0-b3fdec
-tX  = (w + 15) / 16;                           // 0xfffffe0008b3fdf0-b3fdfc
-tY  = (h +  7) /  8;                           // 0xfffffe0008b3fe00-b3fe0c
-lumaTiles = tX * tY;                           // 0xfffffe0008b3fe10
-lumaHdrStride = align_up((tX << k) * 4, 128);  // 0xfffffe0008b3fe14-b3fe20
-lumaHdrRows   = ((1 << k) + tY - 1) >> k;      // 0xfffffe0008b3fe24-b3fe34
-lumaHdr       = lumaHdrStride * lumaHdrRows;   // 0xfffffe0008b3fe38
+With `bps = (bits+7)/8`, `(hdiv, vdiv)` from the §1 table (no `cf == 0`
+guard) and C integer division:
 
-(hdiv, vdiv) = chromaDiv[cf];                  // 0xfffffe0008b3fe40, b3fe5c
-cw = w / hdiv;  ch = h / vdiv;                 // 0xfffffe0008b3fe60/b3fe64
-ctX = (cw + 7) / 8;                            // 0xfffffe0008b3fe68-b3fe74
-ctY = (ch + 7) / 8;                            // 0xfffffe0008b3fe78-b3fe84
-chrHdrStride = align_up((ctX << k) * 4, 128);  // 0xfffffe0008b3fe88-b3fe94
-chrHdrRows   = (((1 << k) - 1) + ctY) >> k;    // 0xfffffe0008b3fe98-b3fea8
-totalTiles = ctX * ctY + lumaTiles;            // 0xfffffe0008b3feac
-return (chrHdrRows * chrHdrStride + lumaHdr)   // 0xfffffe0008b3feb4
-     + totalTiles * bps * 128;                 // 0xfffffe0008b3feb8
+```
+tX  = ceil(w / 16)              tY  = ceil(h / 8)             luma tiles
+ctX = ceil((w / hdiv) / 8)      ctY = ceil((h / vdiv) / 8)    chroma tiles
+
+hdr(n, m) = align_up(4·(n << k), 128) · ceil(m / 2^k)          header stride x header rows
+
+size = hdr(tX, tY) + hdr(ctX, ctY) + 128·bps·(tX·tY + ctX·ctY)
 ```
 
 `align_up(..., 128)` is `add #0x7f` / `and #0xffffff80`. The luma-header
@@ -543,17 +515,17 @@ unverified** and the safe first-light choice is the unpadded layout in §8.
 Two independent facts, neither of which is an input-buffer stride requirement.
 
 **`AVE_Enc_AlignDimension(_E_AVE_DevID, _E_AVE_ClientType, _E_AVE_EncType, int *pW, int *pH)`**
-at `0xfffffe0008ba2660`:
+at `0xfffffe0008ba2660`. It looks up the resolution set with
+`AVE_DevCap_FindResolution(devid, clientType, encType)` and fails if there is
+none or its entry count is `<= 0`. For `clientType` 1 or 2 it then succeeds
+with
 
-```c
-set = AVE_DevCap_FindResolution(devid, clientType, encType);   // 0xfffffe0008ba2690
-if (!set || set->count <= 0) return error;                     // 0xfffffe0008ba2694, ba26a0
-if (clientType == 1 || clientType == 2) {                      // 0xfffffe0008ba26a8-ba26b4
-    *pW = max((*pW + 15) & ~15, set->minEntry[0].w);           // 0xfffffe0008ba26c0-ba26d0
-    *pH = max((*pH + 15) & ~15, set->minEntry[0].h);           // 0xfffffe0008ba26d8-ba26e8
-    return 0;
-}
 ```
+W' = max(align_up(W, 16), min[0].w)        H' = max(align_up(H, 16), min[0].h)
+```
+
+where `min[0]` is the first minimum-resolution entry of the set (layout
+below). The other client types were not recorded.
 
 So the encoder's coded dimensions are rounded up to a multiple of **16** and
 clamped to a per-device minimum. This function has **no caller** in the
@@ -639,7 +611,7 @@ For 1920x1080 that is Y at `0`, CbCr at `0x1FA400`, total `0x2F7600`.
 `AVE_Interchange_CalcChromaSize` adds a 4:4:4-sized chroma region to a
 monochrome format. Read from the code, not a transcription error.
 
-The other resolutions are in the same shapes; regenerate with the pseudocode in
+The other resolutions are in the same shapes; regenerate with the formulas in
 §4 if needed.
 
 ---

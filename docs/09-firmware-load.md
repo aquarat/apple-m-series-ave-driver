@@ -542,17 +542,13 @@ Same in all 21 (offset = block base + **`0x48`**). Only **Aion** uses
 
 `AVE_IOP::Stop` (`0xfffffe0008c40da4`) **performs no register write at all.**
 It loads `gsc_saAVE_IOP_If[type-1].CheckIdle` (`0xfffffe0008c40eb8`) and
-polls:
+calls it in a loop with `IODelay(50)` between calls
+(`0xfffffe0008c40efc`), succeeding once the idle reads run consecutively
+(`0xfffffe0008c40edc`, return 0 at `0xfffffe0008c41178`) and failing with
+**−1017** (`0xfffffe0008c411d0`) once the iteration count passes
+`cfg->[0x18] × 10000` (`0xfffffe0008c40ee8`). A busy read restarts the count
+of consecutive idle reads.
 
-```
-w22 = 10000                                ; 0xfffffe0008c40ebc
-loop: ret = CheckIdle_<X>(AVE_Reg*)        ; 0xfffffe0008c40ec8
-      if (ret != 0) consec = 0             ; 0xfffffe0008c40ed4
-      else if (consec > 1) return 0        ; 0xfffffe0008c40edc -> 0xfffffe0008c41178
-      limit = cfg->[0x18] * 10000          ; 0xfffffe0008c40ee8
-      if (iter > limit) return -1017       ; 0xfffffe0008c40ef4 -> 0xfffffe0008c411d0
-      IODelay(50); iter++                  ; 0xfffffe0008c40efc
-```
 **50 µs per iteration, three consecutive idle reads required**, iteration cap
 `cfg->[0x18] * 10000`. No `mach_absolute_time` deadline. Timeout string
 `"stopping IOP time out %p %d %d %d 0x%x"` (`0xfffffe00072a380a`).
