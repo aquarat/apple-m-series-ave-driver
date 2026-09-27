@@ -284,6 +284,7 @@ static inline void ave_write64(struct ave_device *ave, unsigned int bank,
 
 /* ave_fw.c */
 int ave_fw_load(struct ave_device *ave);
+void __iomem *ave_devm_ioremap_np(struct device *dev, phys_addr_t pa, size_t size);
 void ave_pmp_stream_on(struct ave_device *ave);
 void ave_pmp_stream_off(struct ave_device *ave);
 void ave_fw_unload(struct ave_device *ave);
