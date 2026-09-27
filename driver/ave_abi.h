@@ -1272,6 +1272,37 @@ struct ave_start_avc_layout {
 	 * (fw 0x5d3c0). We have always sent 0 (docs/72 §4, docs/81 bs7).
 	 */
 	u32	max_mvs_per_2mb;
+	/*
+	 * docs/85, the macOS-equivalence fields whose value depends on the
+	 * session (the rest are constants in the ave_macos_patch tables):
+	 *   bframes          u32 VP+0x18 BFrames: 1 (Main/High), 0 (Baseline)
+	 *                    (US 0x3b51c-0x3b540, 0x3b75c; fw 0x5dab4 RC init)
+	 *   adapt_b          u8  VP+0x1D bEnableAdaptB: 1 (Main/High), 0
+	 *                    (Baseline) (US 0x29a84, 0x3b760; fw 0x5cf94 ORs it
+	 *                    into the MCPU mode word bit 4)
+	 *   max_sub_mb_rect  u32 VP+0x14 MaxSubMbRectSize: 576 for Baseline
+	 *                    below level 3.1, else 0 (US 0x37518-0x37550;
+	 *                    fw 0x5cf20 -> ctrl+0x2C1F8)
+	 *   slice_map_end    u32 sSliceMap slice 0's second word: the picture
+	 *                    height in pixels (US 0x29ac0/0x29ac4 = VP+4; fw
+	 *                    memcpy 0x104 -> client+0xCC 0x14414, reader [U])
+	 * AVE_OFF_NONE = not located (26.6.2).
+	 */
+	u32	bframes;
+	u32	adapt_b;
+	u32	max_sub_mb_rect;
+	u32	slice_map_end;
+	/*
+	 * docs/85 group BUFS: TranscodedData, u64[transcoded_max] + one u32
+	 * size, the same wire offsets as HEVC_INIT's (docs/77 §14). The kext
+	 * publishes two for AVC too (AVE_CHM_SetFwBuf 0xfffffe0008eaf280/
+	 * 0xeaf28c; count 2 for DevType >= 9, 0xea5b14); no AVC firmware
+	 * reader was found (docs/85 §1.3).
+	 */
+	u32	transcoded_set;
+	u32	transcoded_stride;
+	u32	transcoded_max;
+	u32	transcoded_size;
 	/* parameter-set blocks */
 	u32	sps_block, sps_block_size;
 	u32	pps_block, pps_block_size;
@@ -1483,6 +1514,14 @@ struct ave_process_avc_layout {
 	/* Loose scratch IOVAs the host publishes per frame. */
 	u32	scratch[AVE_PIC_SCRATCH_MAX];
 	u32	scratch_n;
+	/*
+	 * docs/85 group PIC: u8, PICMGMT-relative. The kext writes
+	 * (Process commands sent since Start < iNumViews) here (kext
+	 * 0xfffffe0008eab8f8-0xeab908): 1 on the first Process of a session,
+	 * 0 after. ManageDPBBuffer re-anchors m_iFirstFrameNumber on it (fw
+	 * 0x2d30c / 0x2d3b8), so it must never be 1 later (docs/81 R11).
+	 */
+	u32	first_process;
 };
 
 /*
@@ -1721,6 +1760,41 @@ struct ave_process_hevc_layout {
 	u32	pic_single_xc;
 };
 
+/*
+ * docs/85: "send what macOS sends", one GROUP of fields per bit of the
+ * driver's session_macos parameter. Bit numbers are part of the test plan
+ * (docs/85 §3), so they never move; bit 0 is the group judged most likely
+ * to matter for the two-reference stall (docs/81, docs/53 bs1-bs7).
+ */
+enum ave_macos_group {
+	AVE_MACOS_G_PARAMS	= 0,	/* VP scalars: pix_pck, 0xFDA4, 0xFEB4, slice map, multipass */
+	AVE_MACOS_G_GOP		= 1,	/* IdrPeriod 30, BFrames, reordering, RefSpacing */
+	AVE_MACOS_G_SH		= 2,	/* per frame: the slice block at cmd+0x40 */
+	AVE_MACOS_G_RC		= 3,	/* RC scalars common to macOS's RC and FIXQP */
+	AVE_MACOS_G_ME		= 4,	/* the level macOS picks, MaxMvsPer2Mb */
+	AVE_MACOS_G_ADAPTB	= 5,	/* bEnableAdaptB: MCPU mode-word bit 4 */
+	AVE_MACOS_G_PIC		= 6,	/* per frame: PICMGMT scalars, zero fw-owned pointers */
+	AVE_MACOS_G_SPS		= 7,	/* SPS/PPS: frame_num/POC lengths, PPS bytes */
+	AVE_MACOS_G_BUFS	= 8,	/* TranscodedData x2, one entropy column */
+	AVE_MACOS_G_QPMOD	= 9,	/* RC-on only: QP/lambda modulation set */
+	AVE_MACOS_G_COUNT
+};
+#define AVE_MACOS_ALL	((1u << AVE_MACOS_G_COUNT) - 1)
+
+/*
+ * One constant field macOS sends and we otherwise do not: written at wire
+ * offset @off (absolute in the command) when bit @group is set, after every
+ * other field, so it wins. Values that depend on the session (the level, the
+ * height, the IDR period, RefSpacingP) are written by the builder from named
+ * layout fields instead. An ABI with no table refuses any bit.
+ */
+struct ave_macos_patch {
+	u8	group;		/* enum ave_macos_group */
+	u8	width;		/* 1, 2 or 4 bytes */
+	u32	off;		/* wire offset */
+	u32	val;
+};
+
 struct ave_cmd_abi {
 	enum ave_fw_abi			abi;
 	const char			*name;
@@ -1736,6 +1810,11 @@ struct ave_cmd_abi {
 	struct ave_start_hevc_layout	start_hevc;	/* 13.5 only */
 	struct ave_hevc_ps_layout	hps;		/* 13.5 only */
 	struct ave_process_hevc_layout	process_hevc;	/* 13.5 only */
+	/* docs/85 macOS-equivalence patches; 13.5 only (26.6.2: none) */
+	const struct ave_macos_patch	*macos_start_avc;
+	u32				n_macos_start_avc;
+	const struct ave_macos_patch	*macos_process_avc;
+	u32				n_macos_process_avc;
 };
 
 extern const struct ave_cmd_abi ave_cmd_abi_13_5;
@@ -1753,9 +1832,94 @@ const struct ave_cmd_abi *ave_cmd_abi_get(enum ave_fw_abi abi);
  * macOS 13.5 (22G74) - AppleAVE2FW-6070.11.1. Bare VAs are 13.5 firmware
  * image VAs, 0xfffffe... are 13.5 kernelcache VAs. docs/46, docs/47.
  * ------------------------------------------------------------------------ */
+/*
+ * docs/85: the constant AVC_INIT fields a plain macOS 13.5 VideoToolbox
+ * H.264 session sends and we otherwise leave zero. US = AppleVideoEncoder
+ * VA (docs/72 §1; AVE_SetEncoderDefault sub_2985c unless said), fw = the
+ * AVC InitEncodingParameters read. Session-dependent fields are in
+ * ave_cmd_build_start_avc() (docs/85 §2).
+ */
+static const struct ave_macos_patch ave_macos_start_avc_13_5[] = {
+	/* GOP: bAllowFrameReordering, RefSpacingB0/B1 (RC+0x10, +0x648/+0x64C) */
+	{ AVE_MACOS_G_GOP,    1, 0xff40,  1 },		/* US 0x29bb4 */
+	{ AVE_MACOS_G_GOP,    4, 0x10578, 1 },		/* US 0x29ca4; fw 0x5da7c */
+	{ AVE_MACOS_G_GOP,    4, 0x1057c, 1 },		/* US 0x29ca8; fw 0x5da84 */
+	/* PARAMS: the VP scalar block at VP+0xFC78.. and the multipass words */
+	{ AVE_MACOS_G_PARAMS, 1, 0xfce8,  1 },		/* pix_pck, US 0x29b1c; fw 0x5d118 */
+	{ AVE_MACOS_G_PARAMS, 4, 0xfd10,  0xffff },	/* sao_enb_config, US 0x29b28 (HEVC) */
+	{ AVE_MACOS_G_PARAMS, 4, 0xfd1c,  0xffffffff },	/* sao_eo_bo_offset_config, US 0x29b20 */
+	{ AVE_MACOS_G_PARAMS, 4, 0xfd20,  8 },		/* input_bitdepth, US 0x29b18 */
+	{ AVE_MACOS_G_PARAMS, 4, 0xfda4,  1 },		/* VP+0xFD44, US 0x29aac; fw 0x5d10c */
+	{ AVE_MACOS_G_PARAMS, 4, 0xfeb4,  16 },		/* VP+0xFE54, US 0x29acc; fw 0x5d008 */
+	{ AVE_MACOS_G_PARAMS, 4, 0xff04,  0xffffffff },	/* multipass, US 0x29af4; fw 0x5cdfc */
+	{ AVE_MACOS_G_PARAMS, 4, 0xff08,  0xffffffff },	/* fw 0x5ce0c */
+	{ AVE_MACOS_G_PARAMS, 4, 0xff0c,  0xffffffff },	/* fw 0x5ce1c: < 0 -> 6 */
+	{ AVE_MACOS_G_PARAMS, 4, 0xff10,  0xffffffff },	/* fw 0x5ce2c: < 0 -> 0x1305 */
+	/* RC: what macOS's RC-on (path A) and FIXQP (path B) both send */
+	{ AVE_MACOS_G_RC,     4, 0xff48,  0xcdcdcdcd },	/* RC+0x18, US 0x29c58 */
+	{ AVE_MACOS_G_RC,     4, 0xff60,  0x3f800000 },	/* RC+0x30 1.0f, US 0x29b74 */
+	{ AVE_MACOS_G_RC,     1, 0xff73,  1 },		/* bEnableVarianceQPMod, US 0x29b8c; fw 0x5d188 */
+	{ AVE_MACOS_G_RC,     4, 0xff84,  0xcdcdcdcd },	/* RealTimeClient, US 0x29bd4; fw 0x5cee4 */
+	{ AVE_MACOS_G_RC,     4, 0xff88,  0xcdcdcdcd },	/* SoftMinQP, US 0x29bd4; fw 0x5d9f0 */
+	/* QPMOD: path A (RC on) only; macOS's FIXQP clears all four (US 0x3b8e8-0x3b8fc) */
+	{ AVE_MACOS_G_QPMOD,  1, 0xff70,  1 },		/* bEnableQPMod, US 0x29b80 */
+	{ AVE_MACOS_G_QPMOD,  1, 0xff72,  1 },		/* bEnableLamdaMod, US 0x29b8c; fw 0x5d178 */
+	{ AVE_MACOS_G_QPMOD,  1, 0xff78,  1 },		/* bEnableQPModRefresh, US 0x29b84 */
+	{ AVE_MACOS_G_QPMOD,  4, 0xff80,  1 },		/* eStaticAreasLowQpSel, US 0x3aa84 */
+	/* SPS: log2_max_frame_num_minus4 1 (US 0x29dc4, const 0x115fa0) */
+	{ AVE_MACOS_G_SPS,    4, 0x109cc, 1 },
+	/* SPS VUI bytes (vui_parameters_present stays 0: not coded), US 0x29ddc-0x29dec */
+	{ AVE_MACOS_G_SPS,    1, 0x109f7, 1 },
+	{ AVE_MACOS_G_SPS,    4, 0x109f8, 5 },
+	{ AVE_MACOS_G_SPS,    1, 0x10a00, 1 },
+	{ AVE_MACOS_G_SPS,    4, 0x10a04, 2 },
+	{ AVE_MACOS_G_SPS,    4, 0x10a08, 2 },
+	{ AVE_MACOS_G_SPS,    4, 0x10a0c, 2 },
+	/* PPS+0x38..0x53 and +0x60..0x7B: 0xCD fill (US 0x29e40-0x29e5c); not coded (fw 0x1997c) */
+	{ AVE_MACOS_G_SPS,    4, 0x10c94, 0xcdcdcdcd },
+	{ AVE_MACOS_G_SPS,    4, 0x10c98, 0xcdcdcdcd },
+	{ AVE_MACOS_G_SPS,    4, 0x10c9c, 0xcdcdcdcd },
+	{ AVE_MACOS_G_SPS,    4, 0x10ca0, 0xcdcdcdcd },
+	{ AVE_MACOS_G_SPS,    4, 0x10ca4, 0xcdcdcdcd },
+	{ AVE_MACOS_G_SPS,    4, 0x10ca8, 0xcdcdcdcd },
+	{ AVE_MACOS_G_SPS,    4, 0x10cac, 0xcdcdcdcd },
+	{ AVE_MACOS_G_SPS,    4, 0x10cbc, 0xcdcdcdcd },
+	{ AVE_MACOS_G_SPS,    4, 0x10cc0, 0xcdcdcdcd },
+	{ AVE_MACOS_G_SPS,    4, 0x10cc4, 0xcdcdcdcd },
+	{ AVE_MACOS_G_SPS,    4, 0x10cc8, 0xcdcdcdcd },
+	{ AVE_MACOS_G_SPS,    4, 0x10ccc, 0xcdcdcdcd },
+	{ AVE_MACOS_G_SPS,    4, 0x10cd0, 0xcdcdcdcd },
+	{ AVE_MACOS_G_SPS,    4, 0x10cd4, 0xcdcdcdcd },
+};
+
+/*
+ * docs/85: the per-frame (AVC_ENCODE) constants. SH = the 0x984-byte
+ * AVC_Slice block at cmd+0x40 (kext memcpy 0xfffffe0008eac9a4), which the
+ * user space seeds once (AVE_SetEncoderDefault) and the kext's AVC_Slice
+ * constructor adjusts (0xfffffe0008f470b4); nothing changes it per frame on
+ * a plain session. PICMGMT at cmd+0x9C8 (AVE_CHM_SetDataInfo_RC 0xeab85c).
+ */
+static const struct ave_macos_patch ave_macos_process_avc_13_5[] = {
+	{ AVE_MACOS_G_SH,     4, 0x40,    0x984 },	/* SH+0 size, kext 0xf470dc; no fw reader */
+	{ AVE_MACOS_G_SH,     4, 0x44,    1 },		/* SH+4 nal_ref_idc, US 0x29e70; fw rewrites */
+	{ AVE_MACOS_G_SH,     4, 0x50,    2 },		/* SH+0x10 slice_type, US 0x29eb8; fw rewrites */
+	{ AVE_MACOS_G_SH,     4, 0x64,    1 },		/* SH+0x24 idr_pic_id, kext 0xf470fc */
+	{ AVE_MACOS_G_SH,     1, 0x7c,    1 },		/* SH+0x3C direct_spatial, US 0x29ebc;
+							 * setPipe slice config bit 2, 0x563a0 */
+	{ AVE_MACOS_G_SH,     4, 0x9c0,   0xffffffff },	/* SH+0x980, US 0x29f0c; fw 0x486f4 */
+	{ AVE_MACOS_G_PIC,    4, 0x1000,  0xffffffff },	/* PICMGMT+0x638 avgVar "fw computes",
+							 * kext 0xeab948; fw 0x486fc */
+	{ AVE_MACOS_G_PIC,    4, 0x108c,  0xffff },	/* PICMGMT+0x6C4, kext 0xeabb04 (gated dead) */
+	{ AVE_MACOS_G_PIC,    4, 0x1098,  100 },	/* PICMGMT+0x6D0, kext 0xeabb10 (gated dead) */
+};
+
 const struct ave_cmd_abi ave_cmd_abi_13_5 = {
 	.abi	= AVE_ABI_MACOS_13_5,
 	.name	= "macOS 13.5",
+	.macos_start_avc	= ave_macos_start_avc_13_5,
+	.n_macos_start_avc	= ARRAY_SIZE(ave_macos_start_avc_13_5),
+	.macos_process_avc	= ave_macos_process_avc_13_5,
+	.n_macos_process_avc	= ARRAY_SIZE(ave_macos_process_avc_13_5),
 	.cmd = {
 		/* sizes: fw insize checks in CmdProcessor; slot/prio literals:
 		 * kext q-literal table 0xfffffe000722f210 ({3,200},{4,200},
@@ -1954,6 +2118,14 @@ const struct ave_cmd_abi ave_cmd_abi_13_5 = {
 		.ref_spacing	= 0x10574,		/* RC+0x644, fw 0x5da74 */
 		.search_range	= 0xfce0,		/* ldrh fw 0x5cf0c */
 		.max_mvs_per_2mb = 0x70,		/* VP+0x10, fw 0x5d3c0 */
+		.bframes	= 0x78,			/* VP+0x18, fw 0x5dab4 */
+		.adapt_b	= 0x7d,			/* VP+0x1D, fw 0x5cf94 */
+		.max_sub_mb_rect = 0x74,		/* VP+0x14, fw 0x5cf20 */
+		.slice_map_end	= 0xfdb4,		/* VP+0xFD54, US 0x29ac4 */
+		.transcoded_set	= 0x5a8,		/* VP+0x548, kext 0xeaf280 */
+		.transcoded_stride = 0x08,
+		.transcoded_max	= 2,
+		.transcoded_size = 0x5b8,		/* VP+0x558, kext 0xeaf28c */
 		.sps_block	= 0x105b0,	/* memcpy 0x6ac from payload+0x10550 0x5ce68-90 */
 		.sps_block_size	= 0x6ac,
 		.pps_block	= 0x10c5c,	/* memcpy 0x184 from payload+0x10bfc 0x5ce94-ac */
@@ -2091,6 +2263,7 @@ const struct ave_cmd_abi ave_cmd_abi_13_5 = {
 		/* kext 0xfffffe0008eb0b10/b44/b68/b84; meanings unknown. */
 		.scratch	= { 0x8e0, 0x8e8, 0x8f0, 0x900 },
 		.scratch_n	= 4,
+		.first_process	= 0x6d8,	/* kext 0xfffffe0008eab908; fw 0x2d30c */
 	},
 	.coded_hdr = {
 		/* kext AVE_PrintCodedHeader 0xfffffe0008eb6584, field offsets
@@ -2471,6 +2644,13 @@ const struct ave_cmd_abi ave_cmd_abi_26_6 = {
 		.ref_spacing	= AVE_OFF_NONE,
 		.search_range	= AVE_OFF_NONE,
 		.max_mvs_per_2mb = AVE_OFF_NONE,
+		.bframes	= AVE_OFF_NONE,	/* docs/85: 13.5 only */
+		.adapt_b	= AVE_OFF_NONE,
+		.max_sub_mb_rect = AVE_OFF_NONE,
+		.slice_map_end	= AVE_OFF_NONE,
+		.transcoded_set	= AVE_OFF_NONE,
+		.transcoded_max	= 0,
+		.transcoded_size = AVE_OFF_NONE,
 		.sps_block	= AVE_START_SPS_OFF,
 		.sps_block_size	= AVE_START_SPS_SIZE,
 		.pps_block	= AVE_START_PPS_OFF,
@@ -2566,6 +2746,7 @@ const struct ave_cmd_abi ave_cmd_abi_26_6 = {
 				    AVE_PIC_SCRATCH_SLOTPOOL,
 				    AVE_PIC_SCRATCH_CMDINFO48, AVE_OFF_NONE },
 		.scratch_n	= 3,
+		.first_process	= AVE_OFF_NONE,	/* docs/85: 13.5 only */
 	},
 	/*
 	 * CODED_DATA_HDR on 26.6.2 has NOT been read. The 26.6.2 kext carries

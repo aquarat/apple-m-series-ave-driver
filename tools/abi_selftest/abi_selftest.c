@@ -1071,6 +1071,399 @@ static void test_process_26_6(void)
 }
 
 /* ------------------------------------------------------------------------ */
+/* docs/85: session_macos, the macOS-equivalence groups                     */
+/* ------------------------------------------------------------------------ */
+
+/*
+ * The bs1 session (docs/53): 1280x720 Main CAVLC, POC type 0, two
+ * references, RefSpacingP 2, with the driver's defaults (lambda block, flat
+ * scaling 16, skip mode 3, LSB planes, three DPB slots, LowResResult x4).
+ */
+static const struct ave_recon_buf RECON_BS1[3] = {
+	{ 0x0000000200000000ull, 0, 0x0000000200200000ull },
+	{ 0x0000000200400000ull, 0, 0x0000000200600000ull },
+	{ 0x0000000200800000ull, 0, 0x0000000200a00000ull },
+};
+
+static struct ave_avc_session session_bs1(void)
+{
+	struct ave_avc_session s = {
+		.width = 1280, .height = 720, .frame_rate = 30, .frame_rate_div = 1,
+		.qp_i = 30, .qp_p = 30, .qp_b = 30, .qp_max = 51,
+		.key_interval = 1, .profile_idc = 77, .level_idc = 40,
+		.poc_type0 = true, .max_refs = 2, .ref_spacing_p = 2,
+		.fw_client_addr = 0x0000000400000000ull, .fw_client_size = 0x100000,
+		.fw_client_mem_addr = 0x0000000400200000ull, .fw_client_mem_size = 0x100000,
+		.param_sets_addr = 0x0000000400300000ull, .param_sets_size = 0x1000,
+		.need_lsb_planes = true, .lambda_block = true, .scaling_flat = 16,
+		.skip_mode = 3,
+		.recon = RECON_BS1, .n_recon = 3,
+		.coded = CODED, .coded_hdr = CODED_HDR_13, .n_coded = 2,
+		.n_low_res_ref = 3, .n_low_res_result = 4, .n_colocated = 3,
+		.n_entropy = 4, .n_entropy_cols = 4, .entropy_size = 0xf0000,
+		.n_src_nbr = 4,
+	};
+	u32 i, j;
+
+	for (i = 0; i < 3; i++) {
+		s.low_res_ref[i] = 0x0000000700000000ull + 0x100000ull * i;
+		s.colocated[i] = 0x0000000710000000ull + 0x100000ull * i;
+	}
+	for (i = 0; i < 4; i++) {
+		s.low_res_result[i] = 0x0000000720000000ull + 0x10000ull * i;
+		for (j = 0; j < 4; j++) {
+			s.entropy[i][j] = 0x0000000800000000ull + 0x100000ull * (4 * i + j);
+			s.src_nbr[i][j] = 0x0000000900000000ull + 0x10000ull * (4 * i + j);
+		}
+	}
+	return s;
+}
+
+static struct ave_avc_frame frame_bs1(u32 type, u32 n)
+{
+	struct ave_avc_frame f = {
+		.frame_type = type, .frame_num = n,
+		.in_luma_addr = 0x0000000500000000ull, .in_luma_stride = 1280,
+		.in_chroma_addr = 0x0000000500200000ull, .in_chroma_stride = 1280,
+		.coded_index = n % 2, .coded_addr = CODED[n % 2].addr,
+		.coded_hdr_addr = CODED_HDR_13[n % 2].addr, .coded_size = 0x2f8000,
+		.recon_luma_addr = 0x0000000600000000ull,
+		.recon_chroma_addr = 0x0000000600200000ull,
+		.recon_mv_addr = 0x0000000600400000ull,
+		.recon_luma_lsb_addr = 0x0000000600600000ull,
+		.recon_chroma_lsb_addr = 0x0000000600800000ull,
+		.force_key_frame = type == 3,
+		.low_res_src_addr = 0x0000000700000000ull,
+		.n_entropy = 4, .n_entropy_cols = 4, .n_src_nbr = 4,
+	};
+	u32 i, j;
+
+	for (i = 0; i < 4; i++)
+		for (j = 0; j < 4; j++) {
+			f.entropy[i][j] = 0x0000000800000000ull + 0x100000ull * (4 * i + j);
+			f.src_nbr[i][j] = 0x0000000900000000ull + 0x10000ull * (4 * i + j);
+		}
+	return f;
+}
+
+/* FNV-1a 64 */
+static u64 fnv64(const u8 *b, u32 n)
+{
+	u64 h = 0xcbf29ce484222325ull;
+	u32 i;
+
+	for (i = 0; i < n; i++) {
+		h ^= b[i];
+		h *= 0x100000001b3ull;
+	}
+	return h;
+}
+
+/*
+ * What each group must put on the wire for the bs1 session / a bs1 frame,
+ * typed in from docs/85 §1 (user-space and firmware VAs there), not read
+ * from ave_abi.h.
+ */
+struct macos_pin { int group; int width; u32 off; u32 val; const char *what; };
+
+static const struct macos_pin MACOS_START_PINS[] = {
+	/* GOP */
+	{ 1, 4, 0xff34,  30,         "IdrPeriod 30 (US 0x29b60), key_interval 1 asked" },
+	{ 1, 4, 0x78,    1,          "BFrames 1 (US 0x3b51c-0x3b540)" },
+	{ 1, 1, 0xff40,  1,          "bAllowFrameReordering (US 0x29bb4)" },
+	{ 1, 4, 0x10578, 1,          "RefSpacingB0 (US 0x29ca4)" },
+	{ 1, 4, 0x1057c, 1,          "RefSpacingB1 (US 0x29ca8)" },
+	/* ADAPTB */
+	{ 5, 1, 0x7d,    1,          "bEnableAdaptB (US 0x29a84; fw 0x5cf94)" },
+	/* ME: level 40 in this builder call -> 16 */
+	{ 4, 4, 0x70,    16,         "MaxMvsPer2Mb 16 at level >= 3.1 (US 0x37508)" },
+	/* PARAMS */
+	{ 0, 1, 0xfce8,  1,          "pix_pck (US 0x29b1c; fw 0x5d118)" },
+	{ 0, 4, 0xfd10,  0xffff,     "sao_enb_config (US 0x29b28)" },
+	{ 0, 4, 0xfd1c,  0xffffffff, "sao_eo_bo_offset_config (US 0x29b20)" },
+	{ 0, 4, 0xfd20,  8,          "input_bitdepth (US 0x29b18)" },
+	{ 0, 4, 0xfda4,  1,          "VP+0xFD44 (US 0x29aac; fw 0x5d10c)" },
+	{ 0, 4, 0xfdb4,  720,        "sSliceMap slice 0 end = height (US 0x29ac4)" },
+	{ 0, 4, 0xfeb4,  16,         "VP+0xFE54 (US 0x29acc; fw 0x5d008)" },
+	{ 0, 4, 0xff04,  0xffffffff, "multipass VP+0xFEA4 (US 0x29af4)" },
+	{ 0, 4, 0xff08,  0xffffffff, "multipass VP+0xFEA8" },
+	{ 0, 4, 0xff0c,  0xffffffff, "multipass VP+0xFEAC (fw < 0 -> 6, 0x5ce24)" },
+	{ 0, 4, 0xff10,  0xffffffff, "multipass VP+0xFEB0 (fw < 0 -> 0x1305, 0x5ce34)" },
+	/* RC */
+	{ 3, 4, 0xff48,  0xcdcdcdcd, "RC+0x18 unset (US 0x29c58)" },
+	{ 3, 4, 0xff60,  0x3f800000, "RC+0x30 1.0f (US 0x29b74)" },
+	{ 3, 1, 0xff73,  1,          "bEnableVarianceQPMod (US 0x29b8c)" },
+	{ 3, 4, 0xff84,  0xcdcdcdcd, "RealTimeClient (US 0x29bd4)" },
+	{ 3, 4, 0xff88,  0xcdcdcdcd, "SoftMinQP (US 0x29bd4)" },
+	/* SPS */
+	{ 7, 4, 0x109cc, 1,          "log2_max_frame_num_minus4 1 (US 0x29dc4)" },
+	{ 7, 4, 0x109d4, 2,          "log2_max_poc_lsb_minus4 2 (US 0x29dc4)" },
+	{ 7, 1, 0x109f7, 1,          "VUI byte SPS+0x447 (US 0x29ddc)" },
+	{ 7, 4, 0x109f8, 5,          "VUI SPS+0x448 video_format 5 (US 0x29ddc)" },
+	{ 7, 1, 0x10a00, 1,          "VUI SPS+0x450 (US 0x29de0)" },
+	{ 7, 4, 0x10a04, 2,          "VUI SPS+0x454 (US 0x29de8)" },
+	{ 7, 4, 0x10a08, 2,          "VUI SPS+0x458 (US 0x29de8)" },
+	{ 7, 4, 0x10a0c, 2,          "VUI SPS+0x45C (US 0x29dec)" },
+	{ 7, 4, 0x10c94, 0xcdcdcdcd, "PPS+0x38 (US 0x29e40)" },
+	{ 7, 4, 0x10c98, 0xcdcdcdcd, "PPS+0x3C" },
+	{ 7, 4, 0x10c9c, 0xcdcdcdcd, "PPS+0x40" },
+	{ 7, 4, 0x10ca0, 0xcdcdcdcd, "PPS+0x44 (US 0x29e54)" },
+	{ 7, 4, 0x10ca4, 0xcdcdcdcd, "PPS+0x48" },
+	{ 7, 4, 0x10ca8, 0xcdcdcdcd, "PPS+0x4C" },
+	{ 7, 4, 0x10cac, 0xcdcdcdcd, "PPS+0x50" },
+	{ 7, 4, 0x10cbc, 0xcdcdcdcd, "PPS+0x60 (US 0x29e48)" },
+	{ 7, 4, 0x10cc0, 0xcdcdcdcd, "PPS+0x64" },
+	{ 7, 4, 0x10cc4, 0xcdcdcdcd, "PPS+0x68" },
+	{ 7, 4, 0x10cc8, 0xcdcdcdcd, "PPS+0x6C (US 0x29e5c)" },
+	{ 7, 4, 0x10ccc, 0xcdcdcdcd, "PPS+0x70" },
+	{ 7, 4, 0x10cd0, 0xcdcdcdcd, "PPS+0x74" },
+	{ 7, 4, 0x10cd4, 0xcdcdcdcd, "PPS+0x78" },
+	/* QPMOD */
+	{ 9, 1, 0xff70,  1,          "bEnableQPMod (US 0x29b80)" },
+	{ 9, 1, 0xff72,  1,          "bEnableLamdaMod (US 0x29b8c)" },
+	{ 9, 1, 0xff78,  1,          "bEnableQPModRefresh (US 0x29b84)" },
+	{ 9, 4, 0xff80,  1,          "eStaticAreasLowQpSel (US 0x3aa84)" },
+};
+
+static const struct macos_pin MACOS_PROCESS_PINS[] = {
+	/* SH: the slice block at cmd+0x40 */
+	{ 2, 4, 0x40,    0x984,      "SH+0 = 0x984 (kext AVC_Slice ctor 0xfffffe0008f470dc)" },
+	{ 2, 4, 0x44,    1,          "SH+4 nal_ref_idc 1 (US 0x29e70)" },
+	{ 2, 4, 0x50,    2,          "SH+0x10 slice_type 2 (US 0x29eb8)" },
+	{ 2, 4, 0x64,    1,          "SH+0x24 idr_pic_id 1 (kext 0xfffffe0008f470fc)" },
+	{ 2, 1, 0x7c,    1,          "SH+0x3C direct_spatial_mv_pred_flag (US 0x29ebc)" },
+	{ 2, 4, 0x9c0,   0xffffffff, "SH+0x980 (US 0x29f0c; fw 0x486f4)" },
+	/* PIC: PICMGMT at 0x9C8 */
+	{ 6, 4, 0x1000,  0xffffffff, "PICMGMT+0x638 avgVar -1 (kext 0xfffffe0008eab948)" },
+	{ 6, 4, 0x108c,  0xffff,     "PICMGMT+0x6C4 (kext 0xfffffe0008eabb04)" },
+	{ 6, 4, 0x1098,  100,        "PICMGMT+0x6D0 (kext 0xfffffe0008eabb10)" },
+	{ 6, 1, 0x10a0,  0,          "PICMGMT+0x6D8 0 after the first Process (kext 0xfffffe0008eab908)" },
+	{ 6, 8, 0x1260,  0,          "PICMGMT+0x898 recon Y 0 (FwBuf returns at 0xfffffe0008eb0bd4)" },
+	{ 6, 8, 0x1268,  0,          "PICMGMT+0x8A0 recon Y LSB 0" },
+	{ 6, 8, 0x1270,  0,          "PICMGMT+0x8A8 recon UV 0" },
+	{ 6, 8, 0x1278,  0,          "PICMGMT+0x8B0 recon UV LSB 0" },
+	{ 6, 8, 0x1280,  0,          "PICMGMT+0x8B8 recon MV 0" },
+	{ 6, 8, 0x15e8,  0,          "PICMGMT+0xC20 LowResSrcLumaScaled 0" },
+	{ 6, 8, 0x1348,  0,          "PICMGMT+0x980 SrcNbr/entropy 0" },
+	{ 6, 8, 0x1350,  0,          "PICMGMT+0x988 SrcNbr/entropy 0" },
+	{ 6, 8, 0x1358,  0,          "PICMGMT+0x990 SrcNbr/entropy 0" },
+	{ 6, 8, 0x1360,  0,          "PICMGMT+0x998 SrcNbr/entropy 0" },
+	{ 6, 8, 0x1368,  0,          "PICMGMT+0x9a0 SrcNbr/entropy 0" },
+	{ 6, 8, 0x1370,  0,          "PICMGMT+0x9a8 SrcNbr/entropy 0" },
+	{ 6, 8, 0x1378,  0,          "PICMGMT+0x9b0 SrcNbr/entropy 0" },
+	{ 6, 8, 0x1380,  0,          "PICMGMT+0x9b8 SrcNbr/entropy 0" },
+	{ 6, 8, 0x1388,  0,          "PICMGMT+0x9c0 SrcNbr/entropy 0" },
+	{ 6, 8, 0x1390,  0,          "PICMGMT+0x9c8 SrcNbr/entropy 0" },
+	{ 6, 8, 0x1398,  0,          "PICMGMT+0x9d0 SrcNbr/entropy 0" },
+	{ 6, 8, 0x13a0,  0,          "PICMGMT+0x9d8 SrcNbr/entropy 0" },
+	{ 6, 8, 0x13a8,  0,          "PICMGMT+0x9e0 SrcNbr/entropy 0" },
+	{ 6, 8, 0x13b0,  0,          "PICMGMT+0x9e8 SrcNbr/entropy 0" },
+	{ 6, 8, 0x13b8,  0,          "PICMGMT+0x9f0 SrcNbr/entropy 0" },
+	{ 6, 8, 0x13c0,  0,          "PICMGMT+0x9f8 SrcNbr/entropy 0" },
+	{ 6, 8, 0x13c8,  0,          "PICMGMT+0xa00 SrcNbr/entropy 0" },
+	{ 6, 8, 0x13d0,  0,          "PICMGMT+0xa08 SrcNbr/entropy 0" },
+	{ 6, 8, 0x13d8,  0,          "PICMGMT+0xa10 SrcNbr/entropy 0" },
+	{ 6, 8, 0x13e0,  0,          "PICMGMT+0xa18 SrcNbr/entropy 0" },
+	{ 6, 8, 0x13e8,  0,          "PICMGMT+0xa20 SrcNbr/entropy 0" },
+	{ 6, 8, 0x13f0,  0,          "PICMGMT+0xa28 SrcNbr/entropy 0" },
+	{ 6, 8, 0x13f8,  0,          "PICMGMT+0xa30 SrcNbr/entropy 0" },
+	{ 6, 8, 0x1400,  0,          "PICMGMT+0xa38 SrcNbr/entropy 0" },
+	{ 6, 8, 0x1408,  0,          "PICMGMT+0xa40 SrcNbr/entropy 0" },
+	{ 6, 8, 0x1410,  0,          "PICMGMT+0xa48 SrcNbr/entropy 0" },
+	{ 6, 8, 0x1418,  0,          "PICMGMT+0xa50 SrcNbr/entropy 0" },
+	{ 6, 8, 0x1420,  0,          "PICMGMT+0xa58 SrcNbr/entropy 0" },
+	{ 6, 8, 0x1428,  0,          "PICMGMT+0xa60 SrcNbr/entropy 0" },
+	{ 6, 8, 0x1430,  0,          "PICMGMT+0xa68 SrcNbr/entropy 0" },
+	{ 6, 8, 0x1438,  0,          "PICMGMT+0xa70 SrcNbr/entropy 0" },
+	{ 6, 8, 0x1440,  0,          "PICMGMT+0xa78 SrcNbr/entropy 0" },
+};
+
+/*
+ * Build with @groups and check: every pin of those groups has its value,
+ * and no byte outside those pins differs from the groups == 0 build in
+ * @ref. Returns the command size.
+ */
+static void macos_check(const char *name, const u8 *ref, u32 size,
+			const struct macos_pin *p, u32 n, u32 groups)
+{
+	u32 i;
+	int stray = 0;
+
+	begin(name);
+	for (i = 0; i < n; i++)
+		if (groups & (1u << p[i].group))
+			expect_val(buf, p[i].off, p[i].width, p[i].val, p[i].what);
+	checks++;
+	for (i = 0; i < size; i++)
+		if (buf[i] != ref[i] && !covered[i]) {
+			if (stray++ < 8)
+				printf("    unexpected change @0x%x: 0x%02x -> 0x%02x\n",
+				       i, ref[i], buf[i]);
+		}
+	if (stray)
+		FAIL("groups %#x changed %d byte(s) outside their pins", groups, stray);
+}
+
+static u8 ref0[MAXCMD];
+
+static void test_macos(void)
+{
+	const struct ave_cmd_abi *a = ave_cmd_abi_get(AVE_ABI_MACOS_13_5);
+	const struct ave_cmd_abi *a26 = ave_cmd_abi_get(AVE_ABI_MACOS_26_6);
+	struct ave_avc_session s = session_bs1();
+	struct ave_avc_frame f;
+	u32 g;
+
+	/*
+	 * The control: groups 0 builds exactly what the driver sent before
+	 * session_macos existed. The hashes were taken from the builder at
+	 * 6231977 (the commit before docs/85) on these same inputs.
+	 */
+	begin("macos 0 is byte-identical to 6231977");
+	memset(buf, 0, sizeof(buf));
+	expect_int(ave_cmd_build_start_avc(a, buf, sizeof(buf), &CTX, &s), 0x10e10,
+		   "bs1 Start_AVC size");
+	checks++;
+	if (fnv64(buf, 0x10e10) != 0x5e4b216d155e8157ull)
+		FAIL("bs1 Start_AVC hash %016llx", (unsigned long long)fnv64(buf, 0x10e10));
+	memcpy(ref0, buf, 0x10e10);
+	f = frame_bs1(3, 0);
+	memset(buf, 0, sizeof(buf));
+	expect_int(ave_cmd_build_process_avc(a, buf, sizeof(buf), &CTX, 21, &f), 0x1940,
+		   "bs1 IDR size");
+	checks++;
+	if (fnv64(buf, 0x1940) != 0x1d8dc5cbcc9b37d8ull)
+		FAIL("bs1 IDR hash %016llx", (unsigned long long)fnv64(buf, 0x1940));
+	f = frame_bs1(1, 2);
+	memset(buf, 0, sizeof(buf));
+	expect_int(ave_cmd_build_process_avc(a, buf, sizeof(buf), &CTX, 21, &f), 0x1940,
+		   "bs1 P size");
+	checks++;
+	if (fnv64(buf, 0x1940) != 0xa0f78b0e01e0fbb9ull)
+		FAIL("bs1 P hash %016llx", (unsigned long long)fnv64(buf, 0x1940));
+
+	/* Every group alone, then all of them: only their own pins change. */
+	for (g = 0; g <= AVE_MACOS_G_COUNT; g++) {
+		u32 groups = g < AVE_MACOS_G_COUNT ? 1u << g : AVE_MACOS_ALL;
+
+		s = session_bs1();
+		s.macos = groups;
+		memset(buf, 0, sizeof(buf));
+		expect_int(ave_cmd_build_start_avc(a, buf, sizeof(buf), &CTX, &s),
+			   0x10e10, "Start_AVC with a group");
+		macos_check("macos Start_AVC group", ref0, 0x10e10, MACOS_START_PINS,
+			    ARRAY_SIZE(MACOS_START_PINS), groups);
+	}
+	f = frame_bs1(1, 2);
+	memset(buf, 0, sizeof(buf));
+	ave_cmd_build_process_avc(a, buf, sizeof(buf), &CTX, 21, &f);
+	memcpy(ref0, buf, 0x1940);
+	for (g = 0; g <= AVE_MACOS_G_COUNT; g++) {
+		u32 groups = g < AVE_MACOS_G_COUNT ? 1u << g : AVE_MACOS_ALL;
+
+		f = frame_bs1(1, 2);
+		f.macos = groups;
+		memset(buf, 0, sizeof(buf));
+		expect_int(ave_cmd_build_process_avc(a, buf, sizeof(buf), &CTX, 21, &f),
+			   0x1940, "Process with a group");
+		macos_check("macos Process group", ref0, 0x1940, MACOS_PROCESS_PINS,
+			    ARRAY_SIZE(MACOS_PROCESS_PINS), groups);
+	}
+
+	/* The session-dependent values (docs/85 §2). */
+	begin("macos computed fields");
+	s = session_bs1();
+	s.macos = AVE_MACOS_ALL;
+	s.key_interval = 60;
+	s.ref_spacing_p = 0;
+	s.level_idc = 30;
+	s.crop_height = 700;
+	memset(buf, 0, sizeof(buf));
+	ave_cmd_build_start_avc(a, buf, sizeof(buf), &CTX, &s);
+	E32(buf, 0xff34, 60, "a key interval the client set is kept");
+	E32(buf, 0x10574, 1, "RefSpacingP 1 when the run did not ask (US 0x29ca4)");
+	E32(buf, 0x70, 32, "MaxMvsPer2Mb 32 at level 3.0 (US 0x37534)");
+	E32(buf, 0x74, 0, "MaxSubMbRectSize 0 for Main");
+	E32(buf, 0xfdb4, 700, "slice map end = the display height");
+	s.level_idc = 22;
+	memset(buf, 0, sizeof(buf));
+	ave_cmd_build_start_avc(a, buf, sizeof(buf), &CTX, &s);
+	E32(buf, 0x70, 64, "MaxMvsPer2Mb 64 below level 3.0");
+	s.max_mvs_per_2mb = 16;
+	memset(buf, 0, sizeof(buf));
+	ave_cmd_build_start_avc(a, buf, sizeof(buf), &CTX, &s);
+	E32(buf, 0x70, 16, "an explicit session_max_mvs wins");
+	s = session_bs1();
+	s.macos = AVE_MACOS_ALL;
+	s.profile_idc = 66;
+	s.level_idc = 30;
+	memset(buf, 0, sizeof(buf));
+	expect_int(ave_cmd_build_start_avc(a, buf, sizeof(buf), &CTX, &s), 0x10e10,
+		   "Baseline with every group");
+	E32(buf, 0x78, 0, "Baseline: BFrames 0 (US 0x3b75c)");
+	E8(buf, 0x7d, 0, "Baseline: bEnableAdaptB 0 (US 0x3b760)");
+	E32(buf, 0x74, 576, "Baseline below 3.1: MaxSubMbRectSize 576 (US 0x37518)");
+	s = session_bs1();
+	s.macos = 1u << AVE_MACOS_G_SPS;
+	s.poc_type0 = false;
+	memset(buf, 0, sizeof(buf));
+	ave_cmd_build_start_avc(a, buf, sizeof(buf), &CTX, &s);
+	E32(buf, 0x109d0, 2, "POC type 2 kept without session_poc0");
+	E32(buf, 0x109d4, 0, "no POC lsb length for type 2");
+
+	f = frame_bs1(3, 0);
+	f.macos = 1u << AVE_MACOS_G_PIC;
+	memset(buf, 0, sizeof(buf));
+	ave_cmd_build_process_avc(a, buf, sizeof(buf), &CTX, 21, &f);
+	E8(buf, 0x10a0, 1, "PICMGMT+0x6D8 1 on the first Process (kext 0xfffffe0008eab8f8)");
+
+	/* BUFS: the AVC TranscodedData pair (kext 0xfffffe0008eaf280/0xeaf28c) */
+	s = session_bs1();
+	s.n_transcoded = 2;
+	s.transcoded[0] = 0x0000000730000000ull;
+	s.transcoded[1] = 0x0000000730200000ull;
+	s.transcoded_size = 0x17c000;
+	memset(buf, 0, sizeof(buf));
+	expect_int(ave_cmd_build_start_avc(a, buf, sizeof(buf), &CTX, &s), 0x10e10,
+		   "TranscodedData published");
+	E64(buf, 0x5a8, 0x0000000730000000ull, "TranscodedData[0] at VP+0x548");
+	E64(buf, 0x5b0, 0x0000000730200000ull, "TranscodedData[1] at VP+0x550");
+	E32(buf, 0x5b8, 0x17c000, "TranscodedData size at VP+0x558");
+	s.n_transcoded = 1;
+	expect_int(ave_cmd_build_start_avc(a, buf, sizeof(buf), &CTX, &s), -EINVAL,
+		   "TranscodedData: both or none");
+	s.n_transcoded = 2;
+	s.transcoded[1] += 32;
+	expect_int(ave_cmd_build_start_avc(a, buf, sizeof(buf), &CTX, &s), -EINVAL,
+		   "TranscodedData & 63");
+	s = session_1080p(false);
+	s.n_transcoded = 2;
+	s.transcoded[0] = 0x0000000730000000ull;
+	s.transcoded[1] = 0x0000000730200000ull;
+	s.transcoded_size = 0x1000;
+	expect_int(ave_cmd_build_start_avc(a26, buf, sizeof(buf), &CTX, &s), -EINVAL,
+		   "26.6.2 has no AVC TranscodedData layout");
+
+	begin("macos refusals");
+	s = session_bs1();
+	s.macos = AVE_MACOS_ALL + 1;
+	expect_int(ave_cmd_build_start_avc(a, buf, sizeof(buf), &CTX, &s), -EINVAL,
+		   "an unknown group bit");
+	f = frame_bs1(1, 2);
+	f.macos = (u16)(AVE_MACOS_ALL + 1);
+	expect_int(ave_cmd_build_process_avc(a, buf, sizeof(buf), &CTX, 21, &f), -EINVAL,
+		   "an unknown group bit per frame");
+	s = session_1080p(false);
+	s.macos = 1;
+	expect_int(ave_cmd_build_start_avc(a26, buf, sizeof(buf), &CTX, &s), -EINVAL,
+		   "26.6.2 has no macOS tables");
+	f = frame_idr();
+	f.macos = 1;
+	expect_int(ave_cmd_build_process_avc(a26, buf, sizeof(buf), &CTX, 1, &f), -EINVAL,
+		   "26.6.2 per frame");
+}
+
+/* ------------------------------------------------------------------------ */
 
 static void put32(u8 *b, u32 off, u32 v) { put_unaligned_le32(v, b + off); }
 
@@ -1994,6 +2387,7 @@ int main(void)
 	test_start_26_6();
 	test_process_13_5();
 	test_process_26_6();
+	test_macos();
 	test_replies();
 	test_negative_control();
 	test_start_hevc_13_5();
