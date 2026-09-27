@@ -4286,3 +4286,10 @@ the PMP clock; DART stream 15; B-specific paths. B frames are parked here
 - **R2** (`dapf_set=same`, non-posted): 16 DAPF slots written back, no
   SError. **R2b** (`dapf_set=probe`): slot 15 cleared and reads back 0.
   docs/49's "Linux cannot write the DAPF" was the posted mapping.
+- **R5**: unload, then reload with `core_reset=2 fw_restore_data=1`: DAPF
+  survives the pulse, DATA restored, **identical PSNR**. f56 died only
+  because it read the datapath DART right after the pulse.
+- **R6** (new `reload`, default on: pulse + restore only when this boot's
+  DATA has drifted from pristine): five load/encode/unload cycles in one
+  boot, defaults only, identical H.264 PSNR and byte-identical HEVC each
+  time.

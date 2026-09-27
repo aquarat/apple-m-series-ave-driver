@@ -290,6 +290,7 @@ void ave_pmp_stream_off(struct ave_device *ave);
 void ave_fw_unload(struct ave_device *ave);
 int ave_fw_map_text_mode(void);
 int ave_fw_restore_data(struct ave_device *ave);
+int ave_fw_data_ran(struct ave_device *ave);
 
 /* ave_ipc.c */
 int ave_boot_config(struct ave_device *ave);

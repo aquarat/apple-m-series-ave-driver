@@ -53,10 +53,11 @@ are missing, ask the operator.
 
 ### The rules
 
-- **One load per boot, no unload.** The teardown (Stop, Close, Halt, unmap,
-  gate; docs/63) works, but a clean unload was once followed by a reset
-  (s3-9). Reboot between runs, survive or die. The driver has no
-  `.shutdown`, so `systemctl reboot` does not run the teardown.
+- **Reloading works after a clean unload** (docs/84 §4, R5/R6): the next
+  load resets the core and restores its DATA by itself. Experiments still
+  start from a fresh boot (`tools/lab-run.sh` refuses otherwise), so each
+  run's evidence begins cold. The driver has no `.shutdown`, so
+  `systemctl reboot` does not run the teardown.
 - **Local logs on the target lose their tail on a hard reset**, `fsync` or
   not. Only the netconsole receiver on the host says where a run died, and
   only the wired receiver has been shown to keep the tail: the old Wi‑Fi

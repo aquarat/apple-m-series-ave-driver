@@ -7,21 +7,18 @@
 #   sudo tools/ave-load.sh unload   # rmmod apple-ave (Stop + Close any stream)
 #   sudo OVERLAY_ARGS=pmp_venc=1 tools/ave-load.sh pmp_report=1   # docs/78 R3
 #
-# Once per boot: the driver unloads cleanly, but loading it a second time in
-# the same boot does not work yet (docs/53 f56/f58). Reboot to reload.
+# Reloading in the same boot works: a load after an unload resets the core
+# and restores its DATA by itself (driver parameter reload, default on;
+# docs/84 §4).
 set -eu
 cd "$(dirname "$0")/.."
 
 if [ "${1:-}" = unload ]; then
     rmmod apple_ave
-    echo "apple-ave unloaded; reboot before loading it again"
+    echo "apple-ave unloaded"
     exit 0
 fi
 lsmod | grep -q '^apple_ave' && { echo "apple-ave is already loaded"; exit 0; }
-if dmesg | grep -q 'apple-ave.*powered off (remove)'; then
-    echo "apple-ave was unloaded earlier this boot; reloading needs a reboot" >&2
-    exit 1
-fi
 [ -f driver/apple-ave.ko ] || { echo "build it first: make -C driver" >&2; exit 1; }
 [ -f test/ave-overlay.ko ] || { echo "build the overlay first: make -C test" >&2; exit 1; }
 

@@ -53,3 +53,23 @@ the mistake f93/f94 made on the PMP (docs/75). With non-posted mappings
 
 Consequences: ave1's DAPF can be programmed by the driver (docs/82 M1 may
 not need m1n1), and a reload is not blocked by the DAPF.
+
+## 4. Reloading in the same boot
+
+**R5** (load, encode, clean unload, then `insmod core_reset=2
+fw_restore_data=1`): the halted core (0x2e) is pulsed, the DAPF fingerprint
+**survives**, DATA is restored and the reload encodes at the **identical**
+PSNR (44.308053). The one change from f56, which died here: the post-pulse
+check reads only the DAPF, not the datapath DART's registers.
+
+`reload` (default on) makes this automatic. At stage 7, when `core_reset`
+is not given, `ave_fw_data_ran()` compares this boot's DATA with the
+pristine blob, ignoring STKG (random per boot). Cold: 0 bytes, nothing
+pulsed. After a run: ~291 600 bytes, so pulse + restore (`recover_halted`).
+CPU_STATUS alone cannot tell cold (0x2a) from halted (0x2e) reliably, which
+is how s2-9 pulsed a cold core.
+
+**R6** (five `ave-load.sh` / encode / `ave-load.sh unload` cycles in one
+boot, default parameters): load 1 "cold", loads 2-5 reset and restore.
+**Every load: H.264 44.308053 dB, HEVC byte-identical.** `ave-load.sh` no
+longer refuses a second load.

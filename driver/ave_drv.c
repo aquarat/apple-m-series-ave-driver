@@ -109,6 +109,19 @@ module_param(probe_diag, uint, 0444);
 MODULE_PARM_DESC(probe_diag,
 	"bitmask of pre-start instrumentation: 1 = carveout CRC, 2 = image scan, 4 = CPU_STATUS liveness. 0 (default) starts the core without reading tens of MiB first");
 
+/*
+ * docs/84 §4: a second load in the same boot. When core_reset is not
+ * given, stage 7 asks whether a core has run on this boot's DATA
+ * (ave_fw_data_ran: drift from the pristine blob besides STKG) and, only
+ * then, pulses the block reset and restores DATA - the path R5 showed
+ * gives a byte-identical encoder after an unload. A cold core is never
+ * pulsed (s2-9).
+ */
+static bool reload = true;
+module_param(reload, bool, 0444);
+MODULE_PARM_DESC(reload,
+		 "on a load after an unload in the same boot, reset the core and restore its DATA automatically (default on; docs/84)");
+
 static int core_reset;
 module_param(core_reset, int, 0444);
 MODULE_PARM_DESC(core_reset,
@@ -1057,6 +1070,10 @@ static int ave_core_reset(struct ave_device *ave, bool *pulsed)
 		ave->recover_halted = true;
 		dev_warn(dev, "core reset: CPU_STATUS %#010x has STOPPED set and auto_recover was asked for - NOTE a cold core reads 0x2a and also has it set; pulsing the block reset\n",
 			 st);
+	} else if (!core_reset && reload && ave_fw_data_ran(ave) == 1) {
+		ave->recover_halted = true;
+		dev_info(dev, "reload: CPU_STATUS %#010x; resetting the core and restoring DATA\n",
+			 st);
 	} else if (!core_reset) {
 		return 0;
 	} else if ((st & AVE_ASC_ST_STOPPED) && core_reset < 2) {
@@ -1073,7 +1090,7 @@ static int ave_core_reset(struct ave_device *ave, bool *pulsed)
 	 * question that decides whether this path is viable.
 	 * (Review 2026-09-13, finding 3.)
 	 */
-	ret = ave_dapf_dump_now(ave, "before core reset", &before, NULL);
+	ret = ave_dapf_dump_now(ave, "before core reset", &before, NULL, true);
 	if (ret) {
 		dev_err(dev, "core reset: cannot read the DAPF (%d) - refusing to pulse, since the readback is the whole point (needs overlay variant=2 or 3)\n",
 			ret);
@@ -1148,7 +1165,7 @@ static int ave_core_reset(struct ave_device *ave, bool *pulsed)
 	dev_info(dev, "core reset: CPU_STATUS now %#010x%s\n",
 		 st, st & AVE_ASC_ST_STOPPED ? " STOPPED" : " NOT STOPPED");
 
-	ret = ave_dapf_dump_now(ave, "after core reset", &after, &admits);
+	ret = ave_dapf_dump_now(ave, "after core reset", &after, &admits, false);
 	if (ret) {
 		dev_err(dev, "core reset: DAPF unreadable after the pulse (%d)\n",
 			ret);

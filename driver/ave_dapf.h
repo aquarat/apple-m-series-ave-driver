@@ -56,7 +56,7 @@ int ave_dapf_dump(struct ave_device *ave);
  * reset, which Linux could not put back (docs/49).
  */
 int ave_dapf_dump_now(struct ave_device *ave, const char *tag,
-		      u64 *fingerprint, bool *admits_fetch);
+		      u64 *fingerprint, bool *admits_fetch, bool darts);
 
 /*
  * E3: write @n entries exactly as m1n1 does, then read every one back.
