@@ -1168,27 +1168,27 @@ struct macos_pin { int group; int width; u32 off; u32 val; const char *what; };
 
 static const struct macos_pin MACOS_START_PINS[] = {
 	/* GOP */
-	{ 1, 4, 0xff34,  30,         "IdrPeriod 30 (US 0x29b60), key_interval 1 asked" },
-	{ 1, 4, 0x78,    1,          "BFrames 1 (US 0x3b51c-0x3b540)" },
-	{ 1, 1, 0xff40,  1,          "bAllowFrameReordering (US 0x29bb4)" },
-	{ 1, 4, 0x10578, 1,          "RefSpacingB0 (US 0x29ca4)" },
-	{ 1, 4, 0x1057c, 1,          "RefSpacingB1 (US 0x29ca8)" },
+	{ 0, 4, 0xff34,  30,         "IdrPeriod 30 (US 0x29b60), key_interval 1 asked" },
+	{ 0, 4, 0x78,    1,          "BFrames 1 (US 0x3b51c-0x3b540)" },
+	{ 0, 1, 0xff40,  1,          "bAllowFrameReordering (US 0x29bb4)" },
+	{ 0, 4, 0x10578, 1,          "RefSpacingB0 (US 0x29ca4)" },
+	{ 0, 4, 0x1057c, 1,          "RefSpacingB1 (US 0x29ca8)" },
 	/* ADAPTB */
 	{ 5, 1, 0x7d,    1,          "bEnableAdaptB (US 0x29a84; fw 0x5cf94)" },
 	/* ME: level 40 in this builder call -> 16 */
 	{ 4, 4, 0x70,    16,         "MaxMvsPer2Mb 16 at level >= 3.1 (US 0x37508)" },
 	/* PARAMS */
-	{ 0, 1, 0xfce8,  1,          "pix_pck (US 0x29b1c; fw 0x5d118)" },
-	{ 0, 4, 0xfd10,  0xffff,     "sao_enb_config (US 0x29b28)" },
-	{ 0, 4, 0xfd1c,  0xffffffff, "sao_eo_bo_offset_config (US 0x29b20)" },
-	{ 0, 4, 0xfd20,  8,          "input_bitdepth (US 0x29b18)" },
-	{ 0, 4, 0xfda4,  1,          "VP+0xFD44 (US 0x29aac; fw 0x5d10c)" },
-	{ 0, 4, 0xfdb4,  720,        "sSliceMap slice 0 end = height (US 0x29ac4)" },
-	{ 0, 4, 0xfeb4,  16,         "VP+0xFE54 (US 0x29acc; fw 0x5d008)" },
-	{ 0, 4, 0xff04,  0xffffffff, "multipass VP+0xFEA4 (US 0x29af4)" },
-	{ 0, 4, 0xff08,  0xffffffff, "multipass VP+0xFEA8" },
-	{ 0, 4, 0xff0c,  0xffffffff, "multipass VP+0xFEAC (fw < 0 -> 6, 0x5ce24)" },
-	{ 0, 4, 0xff10,  0xffffffff, "multipass VP+0xFEB0 (fw < 0 -> 0x1305, 0x5ce34)" },
+	{ 1, 1, 0xfce8,  1,          "pix_pck (US 0x29b1c; fw 0x5d118)" },
+	{ 1, 4, 0xfd10,  0xffff,     "sao_enb_config (US 0x29b28)" },
+	{ 1, 4, 0xfd1c,  0xffffffff, "sao_eo_bo_offset_config (US 0x29b20)" },
+	{ 1, 4, 0xfd20,  8,          "input_bitdepth (US 0x29b18)" },
+	{ 1, 4, 0xfda4,  1,          "VP+0xFD44 (US 0x29aac; fw 0x5d10c)" },
+	{ 1, 4, 0xfdb4,  720,        "sSliceMap slice 0 end = height (US 0x29ac4)" },
+	{ 1, 4, 0xfeb4,  16,         "VP+0xFE54 (US 0x29acc; fw 0x5d008)" },
+	{ 1, 4, 0xff04,  0xffffffff, "multipass VP+0xFEA4 (US 0x29af4)" },
+	{ 1, 4, 0xff08,  0xffffffff, "multipass VP+0xFEA8" },
+	{ 1, 4, 0xff0c,  0xffffffff, "multipass VP+0xFEAC (fw < 0 -> 6, 0x5ce24)" },
+	{ 1, 4, 0xff10,  0xffffffff, "multipass VP+0xFEB0 (fw < 0 -> 0x1305, 0x5ce34)" },
 	/* RC */
 	{ 3, 4, 0xff48,  0xcdcdcdcd, "RC+0x18 unset (US 0x29c58)" },
 	{ 3, 4, 0xff60,  0x3f800000, "RC+0x30 1.0f (US 0x29b74)" },
