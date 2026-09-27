@@ -97,10 +97,10 @@ longer refuses a second load.
 
 ## 6. Still open
 
-- **System suspend/resume.** The driver has no PM ops. Suspend is masked
-  on the lab machine (the USB NIC does not survive s2idle), so it is
-  untested. The building blocks now exist: core reset, DATA restore, and
-  Linux writes to the DAPF (if venc_sys loses power in suspend).
+- **System suspend/resume.** Implemented behind `pm_sleep` (default 0 =
+  no PM handling, as before; 1 = refuse to sleep while powered; 2 = halt
+  before, re-boot after), untested: docs/86, with its test plan. Suspend is
+  masked on the lab machine (the USB NIC does not survive s2idle).
 - **`.shutdown`.** Not needed for a reboot, which cold-starts the block.
 
 ## 7. Both encoders under load at once

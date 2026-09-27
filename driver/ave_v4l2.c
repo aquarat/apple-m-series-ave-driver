@@ -111,6 +111,12 @@ struct ave_ctx {
 	u32			frame_n;	/* frames sent this stream */
 	u32			out_seq, cap_seq;
 	bool			session;	/* Open + Start_AVC done */
+	/*
+	 * docs/86: a system suspend ended this stream's session. Every job
+	 * still queued fails and the queues are in error until the client
+	 * stops streaming and starts again.
+	 */
+	bool			pm_lost;
 };
 
 static inline struct ave_ctx *fh_to_ctx(struct file *file)
@@ -784,6 +790,7 @@ static int ave_start_streaming(struct vb2_queue *q, unsigned int count)
 		if (!ret) {
 			av->owner = ctx;
 			ctx->session = true;
+			ctx->pm_lost = false;
 			ctx->frame_n = 0;
 		}
 	}
@@ -915,7 +922,7 @@ static void ave_run_work(struct work_struct *work)
 		state = VB2_BUF_STATE_ERROR;
 		len = 0;
 		/* No later frame can succeed: tell the client now (EPOLLERR) */
-		if (av->ave->fw_hung) {
+		if (av->ave->fw_hung || ctx->pm_lost) {
 			vb2_queue_error(v4l2_m2m_get_src_vq(m2m));
 			vb2_queue_error(v4l2_m2m_get_dst_vq(m2m));
 		}
@@ -1103,6 +1110,77 @@ err_wq:
 err_free:
 	kfree(av);
 	return ret;
+}
+
+/* ---------------------------------------------------------------------- */
+/* System sleep (docs/86)                                                 */
+/* ---------------------------------------------------------------------- */
+
+/*
+ * Stop scheduling jobs, wait out the one running (its Process is bounded by
+ * the session timeout), then end the open stream: Stop + Close while the
+ * firmware is still up. Returns with hw_mutex HELD, so nothing reaches the
+ * session layer while ave_drv.c halts and releases the core; the caller
+ * drops it with ave_v4l2_pm_unlock().
+ *
+ * The stream is failed, not resumed: after the sleep its session is gone
+ * with the firmware that held it, and a new IDR on a new session would be a
+ * different stream than the one the client configured and started.
+ */
+void ave_v4l2_pm_quiesce(struct ave_device *ave)
+{
+	struct ave_v4l2 *av = ave->v4l2;
+	struct ave_ctx *ctx;
+	int ret;
+
+	if (!av)
+		return;
+	/* Not under hw_mutex: the running job's work item takes it. */
+	v4l2_m2m_suspend(av->m2m_dev);
+	flush_workqueue(av->wq);
+	mutex_lock(&av->hw_mutex);
+	ctx = av->owner;
+	if (!ctx)
+		return;
+	ret = ave_enc_stop(ave);
+	dev_warn(ave->dev,
+		 "pm: system suspend during a stream: session ended (Stop/Close %d); the stream fails with EIO - stop both queues and start again after resume\n",
+		 ret);
+	/*
+	 * ctx is still alive: its release clears owner under hw_mutex (in
+	 * ave_end_session) before its m2m context is freed.
+	 */
+	ctx->session = false;
+	ctx->pm_lost = true;
+	av->owner = NULL;
+	vb2_queue_error(v4l2_m2m_get_src_vq(ctx->fh.m2m_ctx));
+	vb2_queue_error(v4l2_m2m_get_dst_vq(ctx->fh.m2m_ctx));
+}
+
+/* The resume boot holds the session layer the same way. */
+void ave_v4l2_pm_lock(struct ave_device *ave)
+{
+	if (ave->v4l2)
+		mutex_lock(&ave->v4l2->hw_mutex);
+}
+
+void ave_v4l2_pm_unlock(struct ave_device *ave)
+{
+	if (ave->v4l2)
+		mutex_unlock(&ave->v4l2->hw_mutex);
+}
+
+/* Once per ave_v4l2_pm_quiesce(), after the core is back (or given up on). */
+void ave_v4l2_pm_resume(struct ave_device *ave)
+{
+	if (ave->v4l2)
+		v4l2_m2m_resume(ave->v4l2->m2m_dev);
+}
+
+/* No open file handle: a re-probe cannot pull the device from under one. */
+bool ave_v4l2_idle(struct ave_device *ave)
+{
+	return !ave->v4l2 || !atomic_read(&ave->v4l2->users);
 }
 
 void ave_v4l2_unregister(struct ave_device *ave)

@@ -27,6 +27,7 @@
 #include <linux/reset.h>
 #include <linux/reset.h>
 #include <linux/slab.h>
+#include <linux/suspend.h>
 
 #include "ave.h"
 #include "ave_dapf.h"
@@ -121,6 +122,39 @@ static bool reload = true;
 module_param(reload, bool, 0444);
 MODULE_PARM_DESC(reload,
 		 "on a load after an unload in the same boot, reset the core and restore its DATA automatically (default on; docs/84)");
+
+/*
+ * System suspend/resume (s2idle; docs/86). UNTESTED ON HARDWARE, so OFF by
+ * default, and 0 changes nothing: no notifier, and the PM callback is a
+ * no-op, exactly as before this existed.
+ *
+ *   0  off (default). A suspend with the encoder up gates its domains under
+ *      a running core - the docs/63 hazard. Do not suspend with this.
+ *   1  refuse: abort any system suspend while the encoder is powered. Touches
+ *      no register. The safe choice for a machine that can sleep, until 2
+ *      has passed docs/86's test plan.
+ *   2  full: before the freeze, end the stream (it fails with EIO), halt the
+ *      core (or reset a wedged one), release everything and drop power;
+ *      after resume, bring the firmware back through probe's stages 6-16.
+ */
+#define AVE_PM_SLEEP_OFF	0
+#define AVE_PM_SLEEP_REFUSE	1
+#define AVE_PM_SLEEP_FULL	2
+static int pm_sleep;
+module_param(pm_sleep, int, 0444);
+MODULE_PARM_DESC(pm_sleep,
+		 "system suspend: 0 = no PM handling (default, as before), 1 = refuse to suspend while the encoder is powered, 2 = halt before the sleep and re-boot the firmware after it (docs/86, untested)");
+
+/*
+ * pm_sleep=2 with a firmware that will not halt (hung, docs/84 §2): pulse
+ * the block reset - what the re-probe after a hang does (R7, R8) - and let
+ * the sleep go on if the core then reads STOPPED. 0 = abort the suspend
+ * instead; the device then recovers on its last close, as after any hang.
+ */
+static bool pm_hung_reset = true;
+module_param(pm_hung_reset, bool, 0444);
+MODULE_PARM_DESC(pm_hung_reset,
+		 "pm_sleep=2: reset a core that did not halt so the suspend can proceed (default 1); 0 = abort the suspend");
 
 static int core_reset;
 module_param(core_reset, int, 0444);
@@ -1054,6 +1088,47 @@ static void ave_power_off_action(void *data)
 }
 
 /*
+ * Stage 6's power-up: the runtime-PM reference, the IRQ, venc_me1 and the
+ * PMP report and vote. Probe registers the devres power-off with it; a
+ * system resume (docs/86) runs it again after the suspend path's
+ * ave_power_off(), with that action still in place.
+ */
+static int ave_power_up(struct ave_device *ave, bool probe)
+{
+	struct device *dev = ave->dev;
+	int ret;
+
+	ret = pm_runtime_resume_and_get(dev);
+	if (ret < 0)
+		return dev_err_probe(dev, ret, "power up failed\n");
+	ave->powered = true;
+	/*
+	 * Registered after the IRQ and the power-domain devres, so it is
+	 * released first on every probe failure: quiesce the IRQ and drop
+	 * power before pd detach and free_irq.
+	 */
+	if (probe) {
+		ret = devm_add_action_or_reset(dev, ave_power_off_action, ave);
+		if (ret)
+			return dev_err_probe(dev, ret, "power-off action\n");
+	}
+	if (ave->irq > 0) {
+		enable_irq(ave->irq);
+		ave->irq_enabled = true;
+	}
+	dev_info(dev, "  resumed; left powered for inspection\n");
+
+	/* docs/57 #3: venc_me1, which no DT reference powers. */
+	ret = ave_power_me1_on(ave);
+	if (ret)
+		return ret;
+	ret = ave_pmp_report_on(ave);
+	if (ret)
+		return ret;
+	return ave_pmp_vote_setup(ave);
+}
+
+/*
  * Pulse the block reset when the core is still running from an earlier load.
  *
  * venc_sys no longer gates off under the patched m1n1 (docs/31, 2026-09-13),
@@ -1083,43 +1158,19 @@ static void ave_power_off_action(void *data)
  * whether this path is viable at all, so it runs even when the reset leaves
  * the core running - that answer is worth the same either way.
  */
-static int ave_core_reset(struct ave_device *ave, bool *pulsed)
+/*
+ * The pulse itself, with the DAPF read before and after it: ave_core_reset()
+ * at stage 7, and the system-suspend path for a firmware that did not halt
+ * (docs/86). 0 once the reset was pulsed; *st is CPU_STATUS after it.
+ */
+static int ave_core_pulse(struct ave_device *ave, u64 *before, u64 *after,
+			  bool *admits, u32 *st)
 {
 	struct device *dev = ave->dev;
-	u64 before = 0, after = 0;
-	bool admits = false;
 	bool irq_was_on;
-	u32 st;
 	int ret;
 
-	*pulsed = false;
-
-	/*
-	 * Read the state before deciding anything. A core that reads STOPPED
-	 * was halted by a previous load of this module - the driver always
-	 * halts at unload now - and it will NOT start again: stage 13 polls
-	 * for (CPU_STATUS & 3) == 0 and STOPPED is bit 1, so the poll times
-	 * out and probe fails with -ETIMEDOUT. The recovery is a block reset
-	 * and a DATA restore, and since this is the ordinary state of every
-	 * load after the first, the driver does it itself rather than making
-	 * the operator remember two module parameters.
-	 */
-	st = ave_read(ave, AVE_BANK_ASC, AVE_ASC_CPU_STATUS);
-	if ((st & AVE_ASC_ST_STOPPED) && auto_recover && !core_reset) {
-		ave->recover_halted = true;
-		dev_warn(dev, "core reset: CPU_STATUS %#010x has STOPPED set and auto_recover was asked for - NOTE a cold core reads 0x2a and also has it set; pulsing the block reset\n",
-			 st);
-	} else if (!core_reset && reload && ave_fw_data_ran(ave) == 1) {
-		ave->recover_halted = true;
-		dev_info(dev, "reload: CPU_STATUS %#010x; resetting the core and restoring DATA\n",
-			 st);
-	} else if (!core_reset) {
-		return 0;
-	} else if ((st & AVE_ASC_ST_STOPPED) && core_reset < 2) {
-		dev_info(dev, "core reset: CPU_STATUS %#010x is STOPPED already, nothing to do\n",
-			 st);
-		return 0;
-	}
+	*st = ave_read(ave, AVE_BANK_ASC, AVE_ASC_CPU_STATUS);
 
 	/*
 	 * Baseline the DAPF BEFORE the pulse. Without it "N non-empty slots"
@@ -1129,7 +1180,7 @@ static int ave_core_reset(struct ave_device *ave, bool *pulsed)
 	 * question that decides whether this path is viable.
 	 * (Review 2026-09-13, finding 3.)
 	 */
-	ret = ave_dapf_dump_now(ave, "before core reset", &before, NULL, true);
+	ret = ave_dapf_dump_now(ave, "before core reset", before, NULL, true);
 	if (ret) {
 		dev_err(dev, "core reset: cannot read the DAPF (%d) - refusing to pulse, since the readback is the whole point (needs overlay variant=2 or 3)\n",
 			ret);
@@ -1137,8 +1188,8 @@ static int ave_core_reset(struct ave_device *ave, bool *pulsed)
 	}
 
 	dev_info(dev, "core reset: CPU_STATUS %#010x%s, DAPF fingerprint %#018llx before; pulsing the block reset\n",
-		 st, st & AVE_ASC_ST_STOPPED ? " STOPPED (core_reset=2)" : " not STOPPED",
-		 before);
+		 *st, *st & AVE_ASC_ST_STOPPED ? " STOPPED" : " not STOPPED",
+		 *before);
 
 	if (!ave->rst) {
 		ave->rst = devm_reset_control_get_optional_exclusive(dev, NULL);
@@ -1187,7 +1238,6 @@ static int ave_core_reset(struct ave_device *ave, bool *pulsed)
 	dev_info(dev, "core reset: reset_control_reset() = %d\n", ret);
 	if (ret)
 		return ret;
-	*pulsed = true;
 
 	/*
 	 * The pulse clears the SVE block's registers, scratch included
@@ -1200,19 +1250,64 @@ static int ave_core_reset(struct ave_device *ave, bool *pulsed)
 		 ave_read(ave, AVE_BANK_SVE, AVE_SVE_SCRATCH(1)),
 		 ave_read(ave, AVE_BANK_SVE, AVE_SVE_SCRATCH(2)));
 
-	st = ave_read(ave, AVE_BANK_ASC, AVE_ASC_CPU_STATUS);
+	*st = ave_read(ave, AVE_BANK_ASC, AVE_ASC_CPU_STATUS);
 	dev_info(dev, "core reset: CPU_STATUS now %#010x%s\n",
-		 st, st & AVE_ASC_ST_STOPPED ? " STOPPED" : " NOT STOPPED");
+		 *st, *st & AVE_ASC_ST_STOPPED ? " STOPPED" : " NOT STOPPED");
 
-	ret = ave_dapf_dump_now(ave, "after core reset", &after, &admits, false);
+	ret = ave_dapf_dump_now(ave, "after core reset", after, admits, false);
 	if (ret) {
 		dev_err(dev, "core reset: DAPF unreadable after the pulse (%d)\n",
 			ret);
 		return ret;
 	}
 	dev_info(dev, "core reset: DAPF fingerprint %#018llx -> %#018llx: %s, TEXT fetch %s\n",
-		 before, after, after == before ? "SURVIVED" : "CHANGED",
-		 admits ? "admitted" : "NOT ADMITTED");
+		 *before, *after, *after == *before ? "SURVIVED" : "CHANGED",
+		 *admits ? "admitted" : "NOT ADMITTED");
+	return 0;
+}
+
+static int ave_core_reset(struct ave_device *ave, bool *pulsed, bool resume)
+{
+	struct device *dev = ave->dev;
+	u64 before = 0, after = 0;
+	bool admits = false;
+	u32 st;
+	int ret;
+
+	*pulsed = false;
+
+	/*
+	 * Read the state before deciding anything. A core that reads STOPPED
+	 * was halted by a previous load of this module - the driver always
+	 * halts at unload now - and it will NOT start again: stage 13 polls
+	 * for (CPU_STATUS & 3) == 0 and STOPPED is bit 1, so the poll times
+	 * out and probe fails with -ETIMEDOUT. The recovery is a block reset
+	 * and a DATA restore, and since this is the ordinary state of every
+	 * load after the first, the driver does it itself rather than making
+	 * the operator remember two module parameters.
+	 */
+	st = ave_read(ave, AVE_BANK_ASC, AVE_ASC_CPU_STATUS);
+	if ((st & AVE_ASC_ST_STOPPED) && auto_recover && !core_reset) {
+		ave->recover_halted = true;
+		dev_warn(dev, "core reset: CPU_STATUS %#010x has STOPPED set and auto_recover was asked for - NOTE a cold core reads 0x2a and also has it set; pulsing the block reset\n",
+			 st);
+	} else if (!core_reset && (reload || resume) && ave_fw_data_ran(ave) == 1) {
+		/* resume (docs/86): the core this driver halted before the sleep */
+		ave->recover_halted = true;
+		dev_info(dev, "reload: CPU_STATUS %#010x; resetting the core and restoring DATA\n",
+			 st);
+	} else if (!core_reset) {
+		return 0;
+	} else if ((st & AVE_ASC_ST_STOPPED) && core_reset < 2) {
+		dev_info(dev, "core reset: CPU_STATUS %#010x is STOPPED already, nothing to do\n",
+			 st);
+		return 0;
+	}
+
+	ret = ave_core_pulse(ave, &before, &after, &admits, &st);
+	if (ret)
+		return ret;
+	*pulsed = true;
 
 	/*
 	 * core_reset_only: answer the two questions and stop, without ever
@@ -1385,6 +1480,9 @@ static void ave_ctl_asc_sample(struct device *dev)
 	iounmap(b);
 }
 
+static int ave_boot_core(struct ave_device *ave, bool resume);
+static void ave_pm_work(struct work_struct *work);
+
 static int ave_probe_stages(struct platform_device *pdev)
 {
 	static const char * const bank_names[AVE_NUM_BANKS] = {
@@ -1400,6 +1498,8 @@ static int ave_probe_stages(struct platform_device *pdev)
 		return -ENOMEM;
 
 	ave->dev = dev;
+	/* Before anything can fail: remove() and the notifier both flush it */
+	INIT_WORK(&ave->pm_work, ave_pm_work);
 	{
 		const struct ave_soc_set *set = of_device_get_match_data(dev);
 		struct resource *r = platform_get_resource(pdev, IORESOURCE_MEM, 0);
@@ -1562,32 +1662,7 @@ static int ave_probe_stages(struct platform_device *pdev)
 	 * If they do not all read "on" here, do not proceed to stage 7.
 	 */
 	if (ave_stage(dev, AVE_STAGE_POWER_ON)) {
-		ret = pm_runtime_resume_and_get(dev);
-		if (ret < 0)
-			return dev_err_probe(dev, ret, "power up failed\n");
-		ave->powered = true;
-		/*
-		 * Registered after the IRQ and the power-domain devres, so it is
-		 * released first on every probe failure: quiesce the IRQ and drop
-		 * power before pd detach and free_irq.
-		 */
-		ret = devm_add_action_or_reset(dev, ave_power_off_action, ave);
-		if (ret)
-			return dev_err_probe(dev, ret, "power-off action\n");
-		if (ave->irq > 0) {
-			enable_irq(ave->irq);
-			ave->irq_enabled = true;
-		}
-		dev_info(dev, "  resumed; left powered for inspection\n");
-
-		/* docs/57 #3: venc_me1, which no DT reference powers. */
-		ret = ave_power_me1_on(ave);
-		if (ret)
-			return ret;
-		ret = ave_pmp_report_on(ave);
-		if (ret)
-			return ret;
-		ret = ave_pmp_vote_setup(ave);
+		ret = ave_power_up(ave, true);
 		if (ret)
 			return ret;
 
@@ -1612,6 +1687,21 @@ static int ave_probe_stages(struct platform_device *pdev)
 	} else {
 		return 0;
 	}
+
+	return ave_boot_core(ave, false);
+}
+
+/*
+ * Stages 7-16: from Apple's first register write to a firmware that has
+ * taken Config. Probe runs it once after stage 6; a system resume runs it
+ * again (@resume, docs/86) on a device whose stages 1-5 are still in place,
+ * after ave_power_up() - the same path a reload takes (docs/84 §4), without
+ * the unbind: the V4L2 node and its open file handles stay.
+ */
+static int ave_boot_core(struct ave_device *ave, bool resume)
+{
+	struct device *dev = ave->dev;
+	int ret;
 
 	/*
 	 * THE experiment (docs/29-first-access-hypothesis.md).
@@ -1645,6 +1735,18 @@ static int ave_probe_stages(struct platform_device *pdev)
 		ave_write(ave, AVE_BANK_SVE, AVE_SVE_IDLE, 1);
 		dev_info(dev, "  write returned\n");
 		/*
+		 * docs/86: whether venc_sys lost power in the sleep is unknown,
+		 * and the pulse below refuses to start a core whose DAPF does
+		 * not admit its TEXT fetch. Compare with probe's capture and,
+		 * only if it changed, write it back - before the pulse, so the
+		 * pulse's own before/after check sees the DAPF the core needs.
+		 */
+		if (resume) {
+			ret = ave_dapf_pm_restore(ave);
+			if (ret)
+				return dev_err_probe(dev, ret, "resume: DAPF\n");
+		}
+		/*
 		 * If the core is still up from an earlier load, reset the block
 		 * here - after Apple's first access, so that ordering holds, but
 		 * before every other write this driver makes to the block. The
@@ -1655,13 +1757,21 @@ static int ave_probe_stages(struct platform_device *pdev)
 		 * died on a DAPF miss at the UART (r2, r3; docs/55 13). No-op
 		 * unless core_reset=1.
 		 */
-		ret = ave_core_reset(ave, &pulsed);
+		ret = ave_core_reset(ave, &pulsed, resume);
 		if (ret)
 			return dev_err_probe(dev, ret, "stage-7 core reset\n");
-		if (pulsed) {
-			ave_write(ave, AVE_BANK_SVE, AVE_SVE_IDLE, 1);
-			dev_info(dev, "  re-wrote SVE+0x%x after the reset\n",
-				 AVE_SVE_IDLE);
+		/*
+		 * On resume also without a pulse: a core that lost power reads
+		 * cold and is not pulsed, and whether apple-dart's resume put
+		 * DART1's translation back is not known. Nothing is written
+		 * when it did.
+		 */
+		if (pulsed || resume) {
+			if (pulsed) {
+				ave_write(ave, AVE_BANK_SVE, AVE_SVE_IDLE, 1);
+				dev_info(dev, "  re-wrote SVE+0x%x after the reset\n",
+					 AVE_SVE_IDLE);
+			}
 			/*
 			 * The pulse also clears the datapath DART's
 			 * translation (F4 vs F5, docs/53 16). Without it the
@@ -1716,6 +1826,14 @@ static int ave_probe_stages(struct platform_device *pdev)
 		ret = ave_dapf_dump(ave);
 		if (ret)
 			return dev_err_probe(dev, ret, "DAPF dump\n");
+
+		/*
+		 * docs/86: what resume compares against. Read-only, and only
+		 * with pm_sleep=2; without it a suspend is refused, not risked.
+		 */
+		if (!resume && pm_sleep == AVE_PM_SLEEP_FULL &&
+		    ave_dapf_capture(ave))
+			dev_warn(dev, "pm: DAPF not readable; system suspend will be refused while the encoder is up\n");
 
 		/*
 		 * docs/49: host writes to CPUDART/DAPF raise a fatal SError once
@@ -1949,6 +2067,8 @@ iop_config_done:
 		if (ret)
 			return dev_err_probe(dev, ret, "stage-13 DATA restore\n");
 		ave_step(ave, "next: ASC start (core released)");
+		/* From the first RUN write on, a failure may leave a live core */
+		ave->asc_started = true;
 		ret = ave_asc_start(ave);
 		if (ret)
 			return dev_err_probe(dev, ret, "ASC start\n");
@@ -2006,7 +2126,8 @@ iop_config_done:
 			 ? "something is executing"
 			 : "no observable activity - core may not be running");
 
-		ave_asc_liveness(ave, "started");
+		if (!resume)	/* 2000 reads of the probe-time evidence */
+			ave_asc_liveness(ave, "started");
 		ave_dapf_dump(ave);	/* post-run DART/DAPF state, if dapf_dump=1 */
 
 		/*
@@ -2036,6 +2157,14 @@ iop_config_done:
 		 */
 		if (perf_dump)
 			ave_perf_dump(ave);
+		/*
+		 * docs/86: after a resume only Config, whenever probe sent one,
+		 * so the next Halt has its controller (fw 0x10d44). The V4L2
+		 * node is still registered; the self-test is not run again.
+		 */
+		if (resume)
+			return v4l2 || ave_session_selftest_requested() ?
+			       ave_enc_init(ave) : 0;
 		if (!ave_session_selftest_requested() && v4l2) {
 			ret = ave_enc_init(ave);
 			if (!ret)
@@ -2049,6 +2178,256 @@ iop_config_done:
 
 	return 0;
 }
+
+/* ------------------------------------------------------------------------ */
+/* System sleep (pm_sleep; docs/86)                                          */
+/* ------------------------------------------------------------------------ */
+
+/*
+ * The shape, and why it is not dev_pm_ops alone: the teardown is the one a
+ * clean unload does (Stop, Close, Halt, unmap while powered, gate last;
+ * docs/63) and the bring-up is probe's (reset, DATA restore, boot, Config;
+ * docs/84 §4). Both need a live system - request_firmware(), device_add()
+ * of the venc_me1 holder, seconds of IPC with IRQs - so they run from the PM
+ * notifier: PM_SUSPEND_PREPARE before tasks freeze, and a work item queued
+ * at PM_POST_SUSPEND, after they thaw. What genpd then does to the domains
+ * in the noirq phase happens to a device with no core running and nothing
+ * mapped. The dev_pm_ops callback only refuses a suspend that finds the
+ * encoder still powered.
+ *
+ * Every wait on the way down is bounded: the running V4L2 job (its Process
+ * times out at 2 s and marks the firmware hung), Stop and Close (2 s each,
+ * skipped on a hung firmware), Halt (1 s), the reset (200 ms settle).
+ */
+
+/* One resume boot at a time, as probe brings the instances up one by one. */
+static DEFINE_MUTEX(ave_pm_boot_lock);
+
+/*
+ * Unmap and free everything the firmware was given, IRQ first, while still
+ * powered and only once the core is proven stopped (docs/63 §7).
+ */
+static void ave_release_all(struct ave_device *ave)
+{
+	if (ave->irq_enabled) {
+		disable_irq(ave->irq);
+		ave->irq_enabled = false;
+	}
+	if (ave->irq > 0)
+		synchronize_irq(ave->irq);
+	ave_smmu_quiesce(ave);
+	ave_session_release(ave);
+	ave_fw_unload(ave);
+	ave_ipc_fini(ave);
+}
+
+/* What the stopped firmware knew; the next boot starts from probe's state. */
+static void ave_pm_forget_core(struct ave_device *ave)
+{
+	ave->running = false;
+	ave->mcpu_created = false;
+	ave->client_open = false;
+	ave->client_codec = 0;
+	ave->fw_hung = false;
+	ave->recover_halted = false;
+	ave->asc_started = false;
+	ave->hs_seen = false;
+	ave->dapf_programmed = false;
+}
+
+/*
+ * Stop the core and take the block down: the teardown remove() does, with
+ * a reset instead of a leak when the firmware will not halt. Called with
+ * the V4L2 layer quiesced and holding its hw lock. *touched says whether
+ * anything was sent to the firmware or the block, so a failure knows
+ * whether the firmware can still be trusted.
+ */
+static int ave_pm_quiesce_core(struct ave_device *ave, bool *touched)
+{
+	struct device *dev = ave->dev;
+	u64 before = 0, after = 0;
+	bool admits = false;
+	u32 st;
+	int ret;
+
+	/* The self-test's client, or a V4L2 stream whose Stop/Close failed */
+	if (ave->client_open && !ave->fw_hung) {
+		*touched = true;
+		if (ave_session_close_client(ave))
+			dev_warn(dev, "pm: the client was not given back; the core will be reset instead of halted\n");
+	}
+	if (ave->running && ave->mcpu_created && !ave->client_open &&
+	    !ave->fw_hung) {
+		*touched = true;
+		ret = ave_session_halt(ave);
+		if (ret)
+			dev_warn(dev, "pm: Halt did not land (%d)\n", ret);
+	}
+
+	/*
+	 * The same test remove() applies. A cold core also reads STOPPED, but
+	 * a core is never cold here: pm_state ON with stop_after=16.
+	 */
+	st = ave_read(ave, AVE_BANK_ASC, AVE_ASC_CPU_STATUS);
+	if (!(st & AVE_ASC_ST_STOPPED)) {
+		*touched = true;
+		if (!pm_hung_reset) {
+			dev_err(dev, "pm: CPU_STATUS %#010x: the core did not stop, and pm_hung_reset=0\n",
+				st);
+			return -EBUSY;
+		}
+		dev_warn(dev, "pm: CPU_STATUS %#010x: the core did not stop; pulsing the block reset so the sleep cannot gate a live core (docs/63, R7)\n",
+			 st);
+		ret = ave_core_pulse(ave, &before, &after, &admits, &st);
+		if (ret)
+			return ret;
+		if (!(st & AVE_ASC_ST_STOPPED)) {
+			dev_err(dev, "pm: CPU_STATUS %#010x after the reset: still not stopped\n",
+				st);
+			return -EBUSY;
+		}
+	}
+
+	dev_info(dev, "pm: core stopped (CPU_STATUS %#010x); unmapping while powered, then gating\n",
+		 st);
+	ave_release_all(ave);
+	ave_pm_forget_core(ave);
+	ave_power_off(ave, "system suspend");
+	return 0;
+}
+
+static int ave_pm_prepare(struct ave_device *ave)
+{
+	struct device *dev = ave->dev;
+	bool touched = false;
+	int ret;
+
+	flush_work(&ave->pm_work);	/* a resume boot still under way */
+	if (ave->pm_state != AVE_PM_ON || !ave->powered)
+		return 0;		/* nothing powered, nothing running */
+	if (pm_sleep == AVE_PM_SLEEP_REFUSE) {
+		dev_warn(dev, "pm: refusing the system suspend: the encoder is powered and pm_sleep=1 (docs/86)\n");
+		return -EBUSY;
+	}
+	if (stop_after < AVE_STAGE_START || !ave->dapf_boot_valid ||
+	    !ave->bank[AVE_BANK_ASC].base || !ave->bank[AVE_BANK_SVE].base) {
+		dev_warn(dev, "pm: refusing the system suspend: %s (docs/86)\n",
+			 stop_after < AVE_STAGE_START ?
+			 "a staged load (stop_after < 16) cannot be brought back" :
+			 "no probe-time DAPF capture to resume against");
+		return -EBUSY;
+	}
+
+	dev_info(dev, "pm: system suspend: stopping the encoder\n");
+	WRITE_ONCE(ave->pm_state, AVE_PM_SUSPENDING);
+	ave_v4l2_pm_quiesce(ave);
+	ret = ave_pm_quiesce_core(ave, &touched);
+	if (ret && touched)
+		ave->fw_hung = true;
+	WRITE_ONCE(ave->pm_state, ret ? AVE_PM_ON : AVE_PM_OFF);
+	ave_v4l2_pm_unlock(ave);
+
+	if (ret) {
+		dev_err(dev, "pm: the encoder could not be stopped (%d); aborting the system suspend%s\n",
+			ret, ave->fw_hung ?
+			". The firmware is treated as hung: it is reset when the device's last user closes it (docs/84 §5)" : "");
+		ave_v4l2_pm_resume(ave);
+		if (ave->fw_hung && ave_v4l2_idle(ave))
+			ave_schedule_recover(ave);
+		return -EBUSY;
+	}
+	dev_info(dev, "pm: encoder off for the sleep\n");
+	return 0;
+}
+
+static void ave_pm_post(struct ave_device *ave)
+{
+	if (ave->pm_state != AVE_PM_OFF)
+		return;
+	WRITE_ONCE(ave->pm_state, AVE_PM_BOOTING);
+	queue_work(system_unbound_wq, &ave->pm_work);
+}
+
+/*
+ * The resume boot. Holds the V4L2 hw lock throughout, so a STREAMON that
+ * comes in meanwhile waits for it rather than failing.
+ */
+static void ave_pm_work(struct work_struct *work)
+{
+	struct ave_device *ave = container_of(work, struct ave_device, pm_work);
+	struct device *dev = ave->dev;
+	ktime_t t0 = ktime_get();
+	int ret;
+
+	mutex_lock(&ave_pm_boot_lock);
+	ave_v4l2_pm_lock(ave);
+	dev_info(dev, "pm: resume: bringing the firmware back through stages 6-16 (docs/86)\n");
+	ave_pm_forget_core(ave);
+	ret = ave_power_up(ave, false);
+	if (!ret)
+		ret = ave_boot_core(ave, true);
+
+	if (!ret) {
+		WRITE_ONCE(ave->pm_state, AVE_PM_ON);
+		dev_info(dev, "pm: resume: encoder ready again after %lld ms\n",
+			 ktime_ms_delta(ktime_get(), t0));
+	} else if (!ave->asc_started) {
+		dev_err(dev, "pm: resume failed (%d) before the core was released; releasing and powering off. The device is re-probed when nothing holds it open\n",
+			ret);
+		ave_release_all(ave);
+		ave_power_off(ave, "resume failed");
+		ave->fw_hung = true;
+		WRITE_ONCE(ave->pm_state, AVE_PM_DEAD);
+	} else {
+		dev_err(dev, "pm: resume failed (%d) after the core was released; leaving it powered (docs/63) and treating the firmware as hung: it is reset when the device's last user closes it (docs/84 §5)\n",
+			ret);
+		ave->fw_hung = true;
+		WRITE_ONCE(ave->pm_state, AVE_PM_ON);
+	}
+	ave_v4l2_pm_unlock(ave);
+	mutex_unlock(&ave_pm_boot_lock);
+	ave_v4l2_pm_resume(ave);
+	if (ret && ave_v4l2_idle(ave))
+		ave_schedule_recover(ave);
+}
+
+static int ave_pm_notify(struct notifier_block *nb, unsigned long action,
+			 void *data)
+{
+	struct ave_device *ave = container_of(nb, struct ave_device, pm_nb);
+
+	switch (action) {
+	case PM_SUSPEND_PREPARE:
+	case PM_HIBERNATION_PREPARE:
+	case PM_RESTORE_PREPARE:
+		return notifier_from_errno(ave_pm_prepare(ave));
+	case PM_POST_SUSPEND:
+	case PM_POST_HIBERNATION:
+	case PM_POST_RESTORE:
+		ave_pm_post(ave);
+		return NOTIFY_OK;
+	}
+	return NOTIFY_DONE;
+}
+
+/*
+ * The last line of defence: by device suspend the notifier has taken the
+ * encoder down. If it is still powered (pm_sleep=1, or a path the notifier
+ * did not see), refuse rather than let genpd gate its domains under a live
+ * core in the noirq phase.
+ */
+static int ave_pm_suspend(struct device *dev)
+{
+	struct ave_device *ave = dev_get_drvdata(dev);
+
+	if (pm_sleep == AVE_PM_SLEEP_OFF || !ave || !ave->powered)
+		return 0;
+	dev_err(dev, "pm: still powered at device suspend (pm state %d); refusing (docs/63, docs/86)\n",
+		ave->pm_state);
+	return -EBUSY;
+}
+
+static DEFINE_SIMPLE_DEV_PM_OPS(ave_pm_ops, ave_pm_suspend, NULL);
 
 /*
  * Every probe failure after stage 9 used to leak FwIPC, the firmware buffer
@@ -2068,6 +2447,18 @@ static int ave_probe(struct platform_device *pdev)
 		ave_session_release(ave);
 		ave_fw_unload(ave);
 		ave_ipc_fini(ave);
+	}
+	/* docs/86: nothing at all with pm_sleep=0, the default */
+	if (!ret && ave && pm_sleep != AVE_PM_SLEEP_OFF) {
+		ave->pm_nb.notifier_call = ave_pm_notify;
+		if (register_pm_notifier(&ave->pm_nb))
+			dev_warn(ave->dev, "pm: no PM notifier; a system suspend will be refused while the encoder is up\n");
+		else
+			ave->pm_nb_on = true;
+		dev_info(ave->dev, "pm: pm_sleep=%d (%s)\n", pm_sleep,
+			 pm_sleep == AVE_PM_SLEEP_REFUSE ?
+			 "system suspend refused while the encoder is powered" :
+			 "halt before a system suspend, re-boot after it; UNTESTED, docs/86");
 	}
 	return ret;
 }
@@ -2103,6 +2494,31 @@ static void ave_remove(struct platform_device *pdev)
 	 * Both replies are withheld until the client's work has drained, so
 	 * this is also what makes the buffers below safe to free. docs/63.
 	 */
+	/*
+	 * docs/86, first: after this no PM notifier call is running or can
+	 * start (unregistering waits for one in progress), and no resume boot
+	 * either. Neither takes a lock this path holds.
+	 */
+	if (ave->pm_nb_on) {
+		unregister_pm_notifier(&ave->pm_nb);
+		ave->pm_nb_on = false;
+	}
+	cancel_work_sync(&ave->pm_work);
+	if (ave->pm_state == AVE_PM_OFF || ave->pm_state == AVE_PM_BOOTING ||
+	    ave->pm_state == AVE_PM_DEAD) {
+		/*
+		 * The suspend path (or a failed resume) already stopped the
+		 * core, released everything and dropped power; a cancelled boot
+		 * never started. Nothing is left to halt or unmap.
+		 */
+		dev_info(ave->dev, "remove: encoder already off (pm state %d)\n",
+			 ave->pm_state);
+		ave_v4l2_unregister(ave);
+		ave_release_all(ave);
+		ave_power_off(ave, "remove");
+		return;
+	}
+
 	/* No new streams, and every open one stopped (Stop + Close). */
 	ave_v4l2_unregister(ave);
 	if (ave_session_close_client(ave))
@@ -2228,6 +2644,7 @@ static struct platform_driver ave_driver = {
 	.driver	= {
 		.name		= "apple-ave",
 		.of_match_table	= ave_of_match,
+		.pm		= pm_sleep_ptr(&ave_pm_ops),
 	},
 };
 module_platform_driver(ave_driver);

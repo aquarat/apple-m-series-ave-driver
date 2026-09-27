@@ -1116,9 +1116,15 @@ int ave_ipc_init(struct ave_device *ave)
 	if (ave->ipc.cpu)
 		return 0;
 
-	/* The lock exists before boot_abi is published: the IRQ handler keys on it. */
-	spin_lock_init(&ave->ipc_lock);
-	ratelimit_state_init(&ave->fwlog_rs, 5 * HZ, 100);
+	/*
+	 * The lock exists before boot_abi is published: the IRQ handler keys on
+	 * it. ave_ipc_fini() leaves boot_abi set, so after a system resume
+	 * (docs/86) the lock is live already and is not initialised again.
+	 */
+	if (!ave->boot_abi) {
+		spin_lock_init(&ave->ipc_lock);
+		ratelimit_state_init(&ave->fwlog_rs, 5 * HZ, 100);
+	}
 	ave->ipc_irq = ave_ipc_irq_dispatch;
 
 	/*

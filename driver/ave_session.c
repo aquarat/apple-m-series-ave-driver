@@ -5071,6 +5071,9 @@ int ave_enc_start(struct ave_device *ave, const struct ave_enc_cfg *cfg)
 
 	if (ave->fw_hung)
 		return -EIO;
+	/* docs/86: suspending, or resumed and not booted yet */
+	if (READ_ONCE(ave->pm_state) != AVE_PM_ON)
+		return -EBUSY;
 
 	BUILD_BUG_ON(AVE_ENC_CODEC_H264 != AVE_SESS_CODEC_AVC ||
 		     AVE_ENC_CODEC_HEVC != AVE_SESS_CODEC_HEVC);
@@ -5150,7 +5153,7 @@ int ave_enc_encode(struct ave_device *ave, u32 n, bool idr,
 	u64 t_start;
 	int ret;
 
-	if (ave->fw_hung)
+	if (ave->fw_hung || READ_ONCE(ave->pm_state) != AVE_PM_ON)
 		return -EIO;
 	if (!abi || !bufs || !ave->client_open)
 		return -EINVAL;

@@ -13,9 +13,11 @@
 #include <linux/delay.h>
 #include <linux/device.h>
 #include <linux/io.h>
+#include <linux/notifier.h>
 #include <linux/ratelimit.h>
 #include <linux/reset.h>
 #include <linux/types.h>
+#include <linux/workqueue.h>
 
 #include "ave_hw.h"
 #include "ave_abi.h"
@@ -59,6 +61,28 @@ struct ave_channel {
 };
 
 struct ave_v4l2;
+
+/* One DAPF slot as read back (ave_dapf.c); the probe-time capture for resume. */
+struct ave_dapf_slot {
+	u32	r0, r4;
+	u64	start, end;
+};
+#define AVE_DAPF_SLOTS		16
+
+/*
+ * System sleep (docs/86). ON is everything probe leaves behind; the PM
+ * notifier takes a powered encoder to OFF (core halted or reset, every
+ * mapping released, power dropped) and a work item after resume takes it
+ * back to ON through probe's stages 6-16. DEAD: that boot failed before the
+ * core was released, power is off, and the device waits for a re-probe.
+ */
+enum ave_pm_state {
+	AVE_PM_ON = 0,
+	AVE_PM_SUSPENDING,
+	AVE_PM_OFF,
+	AVE_PM_BOOTING,
+	AVE_PM_DEAD,
+};
 
 struct ave_device {
 	struct device		*dev;
@@ -251,6 +275,21 @@ struct ave_device {
 	 */
 	bool			fw_hung;
 	bool			recover_scheduled;
+
+	/* --- system sleep (ave_drv.c, pm_sleep; docs/86) --- */
+	enum ave_pm_state	pm_state;
+	bool			asc_started;	/* stage 13 released the core this boot */
+	bool			pm_nb_on;	/* pm_nb registered */
+	struct notifier_block	pm_nb;
+	struct work_struct	pm_work;	/* the resume boot */
+	/*
+	 * The DAPF as it was when this probe's core started (after stage 8,
+	 * so ave1's entries are the driver's own): what resume compares with
+	 * and, if s2idle took it, writes back (docs/84 §3: Linux can).
+	 */
+	struct ave_dapf_slot	dapf_boot[AVE_DAPF_SLOTS];
+	u64			dapf_boot_fp;
+	bool			dapf_boot_valid;
 };
 
 /*
