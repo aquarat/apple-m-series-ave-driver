@@ -1,0 +1,12 @@
+test                                W mean W over idle     fps  J/frame CPU s/frame
+idle (before)                         6.08
+cam-a     2000k ave                   8.20        2.12    71.3    0.030      0.0062
+cam-a     2000k x265-ultrafast       23.99       17.92    79.3    0.226      0.0792
+cam-a     2000k x265-fast            28.85       22.77    42.0    0.542      0.1458
+cam-a     2000k x265-medium          25.45       19.38    35.0    0.554      0.1513
+crowd_run 8000k ave                   9.70        3.62   116.9    0.031      0.0046
+crowd_run 8000k x265-ultrafast       29.86       23.79    72.5    0.328      0.0923
+crowd_run 8000k x265-fast            31.19       25.12    33.9    0.740      0.1883
+crowd_run 8000k x265-medium          30.71       24.63    32.5    0.759      0.1925
+idle (after)                          7.41   (J/frame above use the before-idle; with the mean idle 6.74 W they shift by -0.67 W x time/frame)
+POWER-DONE
