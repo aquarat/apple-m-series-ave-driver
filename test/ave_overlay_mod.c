@@ -31,6 +31,7 @@
 #include "ave_overlay_e6_dtbo.h"
 #include "ave_overlay_e7_dtbo.h"
 #include "ave_overlay_pmp_venc_dtbo.h"
+#include "ave_overlay_t6000_dtbo.h"
 
 static int ovcs_id, pmp_ovcs_id;
 
@@ -229,6 +230,9 @@ fail:
  *                      encoder datapath's DART carries the same mappings as
  *                      the CPUDART - the way Linux attaches ISP's DARTs.
  *
+ * variant=8 (docs/87): variant=4 for t6000 (M1 Pro): compatible
+ *                      "apple,t6000-ave" and no afnc4_ioa, which t6000 lacks.
+ *
  * Selected here rather than at build time so the risk is chosen when the
  * module is loaded, with the consequence in front of whoever types it.
  * Any other value is refused; before variants 2 and 3 existed every non-zero
@@ -237,7 +241,7 @@ fail:
 static int variant;
 module_param(variant, int, 0444);
 MODULE_PARM_DESC(variant,
-		 "0 = with DART (default), 1 = no IOMMU: preserves iBoot's DART config, NO backstop, 2 = 1 + cpudart/dapf regs (E2), 3 = 0 + cpudart/dapf regs (E3), 4 = 3 with both DARTs in iommus (docs/56), 5 = 4 + stream 15 (docs/69), 6 = ave1 alone, 7 = both encoders (docs/82)");
+		 "0 = with DART (default), 1 = no IOMMU: preserves iBoot's DART config, NO backstop, 2 = 1 + cpudart/dapf regs (E2), 3 = 0 + cpudart/dapf regs (E3), 4 = 3 with both DARTs in iommus (docs/56), 5 = 4 + stream 15 (docs/69), 6 = ave1 alone, 7 = both encoders (docs/82), 8 = t6000 (M1 Pro) ave0 (docs/87)");
 
 static int __init ave_ov_init(void)
 {
@@ -286,8 +290,13 @@ static int __init ave_ov_init(void)
 		len = ave_overlay_e5_dtbo_len;
 		pr_warn("ave-overlay: variant=5 - variant=4 plus stream 15, which the ADT declares (sids 0x8001) and nothing has attached (docs/69)\n");
 		break;
+	case 8:
+		fdt = ave_overlay_t6000_dtbo;
+		len = ave_overlay_t6000_dtbo_len;
+		pr_warn("ave-overlay: variant=8 - t6000 (M1 Pro) ave0, variant=4's shape (docs/87)\n");
+		break;
 	default:
-		pr_err("ave-overlay: variant=%d is not 0-7; refusing\n", variant);
+		pr_err("ave-overlay: variant=%d is not 0-8; refusing\n", variant);
 		return -EINVAL;
 	}
 
