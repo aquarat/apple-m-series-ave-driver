@@ -1,0 +1,55 @@
+--- stock/src/kboot.c	2026-08-08 13:21:47.000000000 +0200
++++ probe/src/kboot.c	2026-10-01 12:46:45.616770114 +0200
+@@ -2746,6 +2746,43 @@
+     return 0;
+ }
+ 
++/*
++ * AVE bring-up aid (apple-ave-driver docs/79): copy what iBoot left on the
++ * video encoder's ADT node into /chosen so Linux can read it. Read-only on
++ * the ADT, no MMIO. Never fails the boot.
++ */
++static void dt_set_ave_info(void)
++{
++    static const char *const paths[] = {"/arm-io/ave", "/arm-io/ave0"};
++    int anode = -1;
++
++    for (size_t i = 0; i < ARRAY_SIZE(paths) && anode < 0; i++)
++        anode = adt_path_offset(adt, paths[i]);
++    if (anode < 0)
++        return;
++
++    int node = fdt_path_offset(dt, "/chosen");
++    if (node < 0)
++        return;
++
++    u32 len = 0;
++    const void *seg = adt_getprop(adt, anode, "segment-ranges", &len);
++    if (!seg || !len || len > 4 * sizeof(struct adt_segment_ranges)) {
++        printf("FDT: ave: no segment-ranges (len %u)\n", len);
++        len = 0;
++    }
++    if (fdt_setprop(dt, node, "asahi,ave-segment-ranges", len ? seg : "", len))
++        printf("FDT: ave: couldn't set asahi,ave-segment-ranges\n");
++
++    u32 plen = 0;
++    const void *pre = adt_getprop(adt, anode, "pre-loaded", &plen);
++    if (pre && plen <= 16) {
++        node = fdt_path_offset(dt, "/chosen");
++        if (node >= 0 && fdt_setprop(dt, node, "asahi,ave-pre-loaded", pre, plen))
++            printf("FDT: ave: couldn't set asahi,ave-pre-loaded\n");
++    }
++}
++
+ int kboot_prepare_dt(void *fdt)
+ {
+     if (dt) {
+@@ -2839,6 +2876,8 @@
+         fdt_node_check_compatible(dt, 0, "apple,t6022") == 0)
+         dt_fixup_t6020_compat(dt);
+ 
++    dt_set_ave_info();
++
+     /*
+      * Set the /memory node late since we might be allocating from the top of memory
+      * in one of the above devicetree prep functions, and we want an up-to-date value

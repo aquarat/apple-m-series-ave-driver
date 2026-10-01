@@ -27,3 +27,6 @@ test/*_dtbo.h
 lab.env
 lab.local.md
 .claude/
+
+# t8103 port: built boot images (rebuild with t8103/build-m1n1.sh)
+t8103/boot/
