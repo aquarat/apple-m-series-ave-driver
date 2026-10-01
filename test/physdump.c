@@ -40,31 +40,65 @@ static bool full;
 module_param(full, bool, 0444);
 MODULE_PARM_DESC(full, "copy through the end of the firmware DATA segment (window + 0x109c000) instead of 16 MiB");
 
+/*
+ * base= / size=: another window instead, for a port (docs/79). Only ranges
+ * that have been shown to be the AVE firmware's own memory are accepted:
+ * what iBoot's segment-ranges name for that machine.
+ */
+static unsigned long base;
+module_param(base, ulong, 0444);
+MODULE_PARM_DESC(base, "physical base of the window (default: the t6001 window)");
+static unsigned long size;
+module_param(size, ulong, 0444);
+MODULE_PARM_DESC(size, "bytes to copy when base= is given");
+
+static const struct { u64 base, size; const char *what; } pd_ok[] = {
+	{ 0x8009f4000ULL, 0xcc000, "t8103 j313 13.5 H13G TEXT" },
+	{ 0x8019b0000ULL, 0x128000, "t8103 j313 13.5 H13G DATA" },
+};
+
 static struct dentry *pd_dir;
 static struct debugfs_blob_wrapper pd_blob;
 
 static int __init pd_init(void)
 {
-	size_t size = full ? PD_SIZE_FULL : PD_SIZE;
+	u64 from = PD_BASE;
+	size_t n = full ? PD_SIZE_FULL : PD_SIZE;
 	void *src;
 
-	pd_blob.data = vmalloc(size);
+	if (base) {
+		unsigned int i;
+
+		for (i = 0; i < ARRAY_SIZE(pd_ok); i++)
+			if (base == pd_ok[i].base && size && size <= pd_ok[i].size)
+				break;
+		if (i == ARRAY_SIZE(pd_ok)) {
+			pr_err("physdump: %#lx+%#lx is not a known firmware range; refusing\n",
+			       base, size);
+			return -EINVAL;
+		}
+		from = base;
+		n = size;
+		pr_info("physdump: %s\n", pd_ok[i].what);
+	}
+
+	pd_blob.data = vmalloc(n);
 	if (!pd_blob.data)
 		return -ENOMEM;
 
-	src = memremap(PD_BASE, size, MEMREMAP_WB);
+	src = memremap(from, n, MEMREMAP_WB);
 	if (!src) {
-		pr_err("physdump: cannot map %#llx\n", PD_BASE);
+		pr_err("physdump: cannot map %#llx\n", from);
 		vfree(pd_blob.data);
 		return -ENOMEM;
 	}
-	memcpy(pd_blob.data, src, size);
+	memcpy(pd_blob.data, src, n);
 	memunmap(src);
-	pd_blob.size = size;
+	pd_blob.size = n;
 
 	pd_dir = debugfs_create_dir("ave_physdump", NULL);
 	debugfs_create_blob("window.bin", 0400, pd_dir, &pd_blob);
-	pr_info("physdump: copied %#zx bytes from %#llx\n", size, PD_BASE);
+	pr_info("physdump: copied %#zx bytes from %#llx\n", n, from);
 	return 0;
 }
 
