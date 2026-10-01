@@ -1,0 +1,11 @@
+[Unit]
+Description=Apple AVE hardware video encoder (experimental driver)
+ConditionPathExists=/usr/local/lib/apple-ave/apple-ave-load
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/lib/apple-ave/apple-ave-load
+
+[Install]
+WantedBy=multi-user.target

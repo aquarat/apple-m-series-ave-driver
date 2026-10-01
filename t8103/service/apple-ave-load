@@ -1,0 +1,58 @@
+#!/bin/bash
+# Load the AVE encoder (overlay + driver). Installed root-owned in
+# /usr/local/lib/apple-ave/ and run by apple-ave.service, so that starting the
+# unit can be allowed without a password: nothing here is writable by a user.
+#
+# Guard against a reset loop: a flag is written before the modules go in and
+# removed once the driver has been up for a while. If the machine dies in
+# between, the next start finds the flag and refuses.
+set -u
+log() { echo "apple-ave: $*"; }
+REL=$(uname -r)
+DIR=/usr/local/lib/apple-ave/$REL
+FLAG=/var/lib/apple-ave/loading
+
+node() { grep -lx apple-ave-enc /sys/class/video4linux/*/name 2>/dev/null | head -1; }
+if [ -n "$(node)" ]; then log "already loaded"; exit 0; fi
+
+v=$(tr -d '\0' < /proc/device-tree/chosen/asahi,m1n1-stage2-version 2>/dev/null)
+case $v in
+*avedapf*) ;;
+*) log "m1n1 stage 2 is '$v', not the DAPF build the encoder needs"; exit 1 ;;
+esac
+for f in "$DIR/apple-ave.ko" "$DIR/ave-overlay.ko" /lib/firmware/apple/ave_h13g.bin; do
+    [ -f "$f" ] || { log "missing $f (kernel update? rebuild and run install-service.sh)"; exit 1; }
+done
+if [ -e "$FLAG" ]; then
+    log "the last load did not finish (did the machine reset?); not trying again. Remove $FLAG to retry."
+    exit 1
+fi
+if lsmod | grep -q '^apple_ave '; then
+    log "apple_ave is loaded but has no encoder node; reboot"
+    exit 1
+fi
+
+mkdir -p "$(dirname "$FLAG")"
+: > "$FLAG"
+sync
+modprobe -a videodev v4l2-mem2mem videobuf2-common videobuf2-v4l2 videobuf2-dma-contig
+# The overlay cannot be applied twice in one boot.
+lsmod | grep -q '^ave_overlay ' || insmod "$DIR/ave-overlay.ko" variant=8 || { log "overlay failed"; rm -f "$FLAG"; exit 1; }
+# pm_sleep=1: refuse a system suspend while the encoder is powered. Suspend
+# with a running core is untested on the M1, and there is no DATA blob to
+# bring a core back after one.
+insmod "$DIR/apple-ave.ko" pm_sleep=1 || { log "driver failed, see dmesg"; rm -f "$FLAG"; exit 1; }
+for _ in $(seq 100); do
+    [ -n "$(node)" ] && break
+    sleep 0.1
+done
+if [ -z "$(node)" ]; then
+    log "driver loaded but no encoder node appeared, see dmesg"
+    rm -f "$FLAG"
+    exit 1
+fi
+log "encoder at /dev/$(basename "$(dirname "$(node)")")"
+# Every reset during the bring-up came within seconds of a load.
+sleep 30
+rm -f "$FLAG"
+sync
