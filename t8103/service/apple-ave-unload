@@ -1,0 +1,31 @@
+#!/bin/bash
+# Unload the AVE encoder driver: Stop, Close, Halt, unmap, power off (the
+# driver's remove path). The overlay stays; a later load resets the core and
+# restores its DATA. Run by apple-ave.service's stop and by the sleep hook.
+#
+# If the teardown is not clean the driver leaves the core powered and running
+# on purpose. The machine must not suspend in that state, so a sleep inhibitor
+# is held until the next boot.
+set -u
+log() { echo "apple-ave: $*"; }
+lsmod | grep -q '^apple_ave ' || exit 0
+
+echo "=== apple-ave unload ===" > /dev/kmsg
+if ! rmmod apple_ave 2>/tmp/apple-ave-rmmod.$$; then
+    log "not unloaded: $(cat /tmp/apple-ave-rmmod.$$)"
+    rm -f /tmp/apple-ave-rmmod.$$
+    exit 1
+fi
+rm -f /tmp/apple-ave-rmmod.$$
+# Only what the kernel logged since the marker above.
+if dmesg | awk '/=== apple-ave unload ===/ { buf = "" } { buf = buf "\n" $0 } END { print buf }' |
+        grep -q 'teardown was not clean\|power will be left on'; then
+    log "the teardown was not clean: the core is still powered. Blocking suspend until the next boot."
+    systemctl is-active -q apple-ave-nosleep.service ||
+        systemd-run --quiet --unit=apple-ave-nosleep \
+            --description="AVE encoder core still running after an unclean unload" \
+            systemd-inhibit --what=sleep --mode=block --who=apple-ave \
+            --why="encoder core still running after an unclean unload; reboot" sleep infinity
+    exit 1
+fi
+log "unloaded"

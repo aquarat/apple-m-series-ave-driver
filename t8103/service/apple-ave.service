@@ -1,11 +1,11 @@
 [Unit]
-Description=Apple AVE hardware video encoder (experimental driver)
+Description=Apple AVE hardware video encoder (experimental driver), loaded while in use
+# Not enabled: ipadcast restarts it when a viewer connects and stops it when
+# the last one has left; the system-sleep hook unloads it before a suspend.
 ConditionPathExists=/usr/local/lib/apple-ave/apple-ave-load
 
 [Service]
 Type=oneshot
 RemainAfterExit=yes
 ExecStart=/usr/local/lib/apple-ave/apple-ave-load
-
-[Install]
-WantedBy=multi-user.target
+ExecStop=/usr/local/lib/apple-ave/apple-ave-unload

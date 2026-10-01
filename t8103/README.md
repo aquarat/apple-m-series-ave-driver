@@ -20,15 +20,26 @@ sudo t8103/service/install-service.sh install   # once, and again after a kernel
 systemctl start apple-ave.service               # no sudo: a polkit rule allows the start
 ```
 
-The unit runs a root-owned copy of the modules and loader from
-`/usr/local/lib/apple-ave/`, so the passwordless start cannot be used to
-load anything else. It keeps a flag while the modules go in and for 30 s
-after; if the machine resets in that window, it refuses to load again until
-`/var/lib/apple-ave/loading` is removed. It loads the driver with
-`pm_sleep=1`: once the encoder is up, the machine refuses to suspend until
-the next boot (suspend with a running core is untested here, and a core
-cannot be brought back without a pristine DATA blob). `ipadcast` starts the
-unit when its first viewer connects.
+The unit runs a root-owned copy of the modules and scripts from
+`/usr/local/lib/apple-ave/`, so the passwordless start, stop and restart
+cannot be used to load anything else. Start loads overlay and driver, stop
+unloads the driver (Halt, power off). A later start resets the core and
+restores its DATA from the pristine blob.
+
+The encoder is meant to be loaded only while it is used, because the
+machine cannot suspend with the core running:
+
+- `ipadcast` restarts the unit when a viewer connects and stops it a minute
+  after the last one has left.
+- `/usr/lib/systemd/system-sleep/apple-ave` unloads the driver before every
+  suspend. With the driver unloaded, s2idle works and the DAPF survives it.
+- The driver is loaded with `pm_sleep=1`, so if the unload fails (device in
+  use) the suspend is refused rather than risked.
+- An unclean unload leaves the core powered; the unload script then holds a
+  sleep inhibitor until the next boot.
+- The load keeps a flag while the modules go in and for 30 s after; if the
+  machine resets in that window it refuses to load again until
+  `/var/lib/apple-ave/loading` is removed.
 
 Either way that leaves `/dev/videoN` (name `apple-ave-enc`) usable without root. With
 ffmpeg, pad to the encoder's grid: its V4L2 encoder cannot crop, and a
@@ -129,6 +140,9 @@ the machine.
 | C8 | 30 frames via v4l2-ctl | IPPP, High/CABAC, 43.8 dB, 3.1 ms per frame |
 | same boot | ffmpeg, RC 8 Mbit/s | 720p 52.0 dB; 1080p60 (padded) 40.9 dB, 6.4 ms per frame |
 | same boot | wf-recorder, DP-1, 5 s | 295 frames, picture checked by eye |
+| D1 | load, 30 frames, `rmmod` | Halt reaches wfi, CPU_STATUS 0x2e, domains off |
+| D2 | load again in the same boot | reset pulse stops the core (0x22), DAPF survives, DATA restored (290120 bytes had changed), 30 frames identical |
+| D2 after s2idle | suspend with the driver unloaded, wake, load | two suspend/resume cycles, DAPF unchanged, 30 frames identical |
 
 Power, measured in `~/Projects/m1-power` (2 + 2 alternating runs, mirroring
 DP-1 to an iPad while a 1080p60 video plays): 5.164 W with this encoder
@@ -138,9 +152,8 @@ detectable difference on a still screen.
 ## Not tested
 
 HEVC, P010, B-frames, more than a few hundred frames in one session, system
-suspend, unload and reload in one boot, two sessions at once, the pipe
-diagnostics (`pipe_diag`), `fw_restore_data` (there is no pristine H13G DATA
-blob, so a halted core cannot be recovered without a reboot).
+suspend with the driver loaded (`pm_sleep=2`), two sessions at once, the pipe
+diagnostics (`pipe_diag`), recovering a hung firmware.
 
 ## Rules on this machine
 

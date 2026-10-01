@@ -1,0 +1,7 @@
+#!/bin/sh
+# systemd system-sleep hook: take the AVE encoder down before a suspend.
+# Suspend with a running encoder core is untested on the M1; with the driver
+# unloaded it works (run D2 after s2idle, 2026-10-01). If the unload fails
+# (device in use), the driver itself refuses the suspend (pm_sleep=1).
+[ "$1" = pre ] && [ -x /usr/local/lib/apple-ave/apple-ave-unload ] && /usr/local/lib/apple-ave/apple-ave-unload
+exit 0
