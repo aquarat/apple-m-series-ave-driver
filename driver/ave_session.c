@@ -277,6 +277,12 @@ module_param(session_diag, bool, 0444);
 MODULE_PARM_DESC(session_diag,
 	"on a Process timeout, log the VENC power states, the pipe done/go/AXI registers and scratch 7 (read-only, docs/57 #3/#4)");
 
+/* The pipe-register diagnostics, where their offsets are known to be real. */
+static bool ave_sess_pipe_diag(const struct ave_device *ave)
+{
+	return session_diag && ave->soc->pipe_diag;
+}
+
 static bool session_ignore_dart;
 module_param(session_ignore_dart, bool, 0444);
 MODULE_PARM_DESC(session_ignore_dart,
@@ -4041,7 +4047,7 @@ static int ave_session_process_batch(struct ave_device *ave,
 			 * pipe stopped, and what the reference readers were
 			 * given - the L1 reader for a B (docs/81 b4 (e)).
 			 */
-			if (session_diag) {
+			if (ave_sess_pipe_diag(ave)) {
 				ave_session_diag_channels(ave, "batch timeout");
 				ave_session_diag_hevc_inter(ave);
 				ave_session_diag_mcpu(ave, bufs);
@@ -4073,7 +4079,7 @@ static int ave_session_process_batch(struct ave_device *ave,
 		len += scnprintf(order + len, sizeof(order) - len, "%s%u",
 				 k ? "," : "", ns[j]);
 		/* docs/81 b4e: the readers after a frame that did complete */
-		if (session_diag && session_bframes) {
+		if (ave_sess_pipe_diag(ave) && session_bframes) {
 			dev_info(ave->dev, "session: batch: readers after frame %u (type %u) completed:\n",
 				 ns[j], job[j].frame_type);
 			ave_session_diag_hevc_inter(ave);
@@ -4133,12 +4139,13 @@ static int ave_session_process(struct ave_device *ave,
 	 * Configuration registers the firmware writes; read-only here, and
 	 * deliberately not the interrupt-status registers (docs/57 #4).
 	 */
-	sess_info(bufs, ave->dev,
-		 "session: recon writer DPE+0x30240 = %#010x (want 0x800314b1 when programmed); +0x24c %#010x +0x25c %#010x +0x31c %#010x\n",
-		 ave_read(ave, AVE_BANK_DPE, 0x30240),
-		 ave_read(ave, AVE_BANK_DPE, 0x3024c),
-		 ave_read(ave, AVE_BANK_DPE, 0x3025c),
-		 ave_read(ave, AVE_BANK_DPE, 0x3031c));
+	if (ave->soc->pipe_diag)
+		sess_info(bufs, ave->dev,
+			 "session: recon writer DPE+0x30240 = %#010x (want 0x800314b1 when programmed); +0x24c %#010x +0x25c %#010x +0x31c %#010x\n",
+			 ave_read(ave, AVE_BANK_DPE, 0x30240),
+			 ave_read(ave, AVE_BANK_DPE, 0x3024c),
+			 ave_read(ave, AVE_BANK_DPE, 0x3025c),
+			 ave_read(ave, AVE_BANK_DPE, 0x3031c));
 
 	/*
 	 * Did the source reader get OUR buffer? CAVCController::setPipe writes
@@ -4147,7 +4154,7 @@ static int ave_session_process(struct ave_device *ave,
 	 * wire 0xFEC0 (docs/62 §6.2). F17 left the comparison to be done by
 	 * hand afterwards; do it here, where the expected value is known.
 	 */
-	{
+	if (ave->soc->pipe_diag) {
 		u32 got = ave_read(ave, AVE_BANK_DPE, 0x20010);
 		u32 want = lower_32_bits(luma_iova);
 
@@ -4204,7 +4211,8 @@ static int ave_session_process(struct ave_device *ave,
 				 n, i_mb, p_mb, skip_mb, mbs);
 	}
 	/* docs/81 bs4: the ME setup this frame ran with, as the control */
-	if (!ret && (session_ref_spacing_p >= 2 || session_bframes)) {
+	if (!ret && ave->soc->pipe_diag &&
+	    (session_ref_spacing_p >= 2 || session_bframes)) {
 		char tag[16];
 
 		snprintf(tag, sizeof(tag), "frame %u", n);
@@ -4229,7 +4237,7 @@ static int ave_session_process(struct ave_device *ave,
 	 * whether the source reader actually walked the frame - F16 completed
 	 * a frame whose picture was flat, so "it finished" is not evidence.
 	 */
-	if ((session_diag && !bufs->quiet)) {
+	if ((ave_sess_pipe_diag(ave) && !bufs->quiet)) {
 		sess_info(bufs, ave->dev,
 			 "session: diag PS DMA %#010x PIPE4 %#010x PIPE5 %#010x ME0 %#010x ME1 %#010x\n",
 			 ave_read(ave, AVE_BANK_PMGR_PS, 0x00),
@@ -4526,7 +4534,7 @@ int ave_session_selftest(struct ave_device *ave)
 	ave_session_alloc_dpb(ave, bufs);
 
 	ret = ave_session_start(ave, abi, bufs, AVE_SESS_CLIENT_ID);
-	if (!ret && session_frame && session_diag)
+	if (!ret && session_frame && ave_sess_pipe_diag(ave))
 		ave_session_diag_channels(ave, "after Start_AVC");
 	/* docs/77 §8.2 H1: the param-sets buffer is the whole result. */
 	if (!ret && !session_frame && bufs->codec == AVE_SESS_CODEC_HEVC)
