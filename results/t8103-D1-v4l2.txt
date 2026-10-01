@@ -1,0 +1,21 @@
+node /dev/video1 codec h264
+Driver Info:
+	Driver name      : apple-ave
+	Card type        : Apple AVE H.264/HEVC encoder
+	Bus info         : platform:apple-ave
+	Driver version   : 7.1.13
+	Capabilities     : 0x84208000
+		Video Memory-to-Memory
+		Streaming
+	[0]: 'H264' (H.264, compressed)
+	[1]: 'HEVC' (HEVC, compressed)
+	[0]: 'NV12' (Y/UV 4:2:0)
+	[1]: 'P010' (10-bit Y/UV 4:2:0)
+
+EOS EVENT
+P
+-rw-r--r-- 1 root root 362506 Oct  1 16:25 out.h264
+stream|codec_name=h264|profile=High|width=1280|height=720|level=40
+decoded frames: 30
+[Parsed_psnr_0 @ 0xfffea80029b0] PSNR y:44.304305 u:43.057707 v:42.948355 average:43.825762 min:43.710545 max:45.005960
+frame=   30 fps=0.0 q=-0.0 Lsize=N/A time=00:00:01.00 bitrate=N/A speed=19.6x elapsed=0:00:00.05    
