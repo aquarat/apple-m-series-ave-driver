@@ -1,60 +1,60 @@
-[ 2449.488141] apple-ave 267100000.video-encoder:   msg3: fw_base 0xffffffff80000000 (FwIPC iova 0x00000000ff800000)
-[ 2449.488307] apple-ave 267100000.video-encoder:   fw heap (surface 23): 768 KiB at iova 0x00000000ff500000
-[ 2449.488321] apple-ave 267100000.video-encoder:   msg4: info fw 0xffffffff80009bc0, chanmem fw 0xffffffff80000000 (0x9bc0 bytes), dev_type 10
-[ 2449.490098] apple-ave 267100000.video-encoder:   message taken from the IRQ handler (status 0x1)
-[ 2449.490100] apple-ave 267100000.video-encoder:   msg5: desc fw 0xffffffff80000000, client buffer 0xb0000 (max 0x100000, expect 0xb4000)
-[ 2449.490103] apple-ave 267100000.video-encoder:   desc[0] 'TERMINAL' id=4 dir=2 bit=0 nslots=512 slots_fw=0xffffffff80000700 (+0x700)
-[ 2449.490106] apple-ave 267100000.video-encoder:   desc[1] 'IO' id=1 dir=0 bit=1 nslots=32 slots_fw=0xffffffff80008700 (+0x8700)
-[ 2449.490110] apple-ave 267100000.video-encoder:   desc[2] 'DEBUG' id=5 dir=0 bit=1 nslots=8 slots_fw=0xffffffff80008f00 (+0x8f00)
-[ 2449.490112] apple-ave 267100000.video-encoder:   desc[3] 'BUF_H2T' id=6 dir=0 bit=2 nslots=1 slots_fw=0xffffffff80009100 (+0x9100)
-[ 2449.490115] apple-ave 267100000.video-encoder:   desc[4] 'BUF_T2H' id=7 dir=1 bit=3 nslots=1 slots_fw=0xffffffff80009140 (+0x9140)
-[ 2449.490117] apple-ave 267100000.video-encoder:   desc[5] 'SHAREDMALLOC' id=3 dir=1 bit=3 nslots=8 slots_fw=0xffffffff80009180 (+0x9180)
-[ 2449.490119] apple-ave 267100000.video-encoder:   desc[6] 'IO_T2H' id=2 dir=1 bit=3 nslots=32 slots_fw=0xffffffff80009380 (+0x9380)
-[ 2449.490122] apple-ave 267100000.video-encoder:   msg5: client buffer 0xb0000, firmware literal is 0xb4000
-[ 2449.490229] apple-ave 267100000.video-encoder:   macOS 13.5 handshake complete: 7 channel(s), heartbeat scratch7 0x0
-[ 2449.490231] apple-ave 267100000.video-encoder: coprocessor up, 7 IPC channel(s)
-[ 2449.490233] apple-ave 267100000.video-encoder: Apple AVE video encoder ready
-[ 2449.490262] apple-ave 267100000.video-encoder: fw[0]| FW Cfg: prod, tag: AppleAVE2FW-6070.11.1, SHA: c86a10b71
-[ 2449.490274] apple-ave 267100000.video-encoder: session: Config: shmem IOVA 0x00000000ff480000 size 0x40000, dsid 0x0, reg_dart 0x0
-[ 2449.490277] apple-ave 267100000.video-encoder: session: Config: sending 112 bytes at IOVA 0x00000000ff819c40 on IO
-[ 2449.491014] apple-ave 267100000.video-encoder: session: Config: reply 64 bytes flags 0x40: id=0x0e01 cid=0x0 slot=0xffffffff status=0xee0000
-[ 2449.491025] apple-ave 267100000.video-encoder: session: Config: ACCEPTED, status 0xee0000
-[ 2449.491172] apple-ave 267100000.video-encoder: v4l2: H.264/HEVC encoder at /dev/video1
-[ 2449.491178] apple-ave 267100000.video-encoder: pm: pm_sleep=1 (system suspend refused while the encoder is powered)
-[ 2454.630850] === e3-run done: t8103-D2 ===
-[ 2454.663300] === D2 v4l2-test 30 ctl ===
-[ 2454.681415] apple-ave 267100000.video-encoder: session: Open: client id 1
-[ 2454.681476] apple-ave 267100000.video-encoder: session: SrcNeighbor slot 80 KiB for 80 MB columns (docs/47 formula)
-[ 2454.682450] apple-ave 267100000.video-encoder: session: entropy: 4 x 4 buffers of 960 KiB at 0xfd000000..0xfde10000 (kext formula, larger K)
-[ 2454.682453] apple-ave 267100000.video-encoder: session: recon planes for 1280x720: luma 942080 + chroma 471040 = MSB 1413120; luma_meta 65536 + chroma_meta 16384 = LSB 81920; slot 0x16d000
-[ 2454.682634] apple-ave 267100000.video-encoder: session: LowResResult 4 surface(s) of 0xf400 bytes from 0x00000000fca40000 (ALIGN(4*1280,128) * ceil(720/64) + 1024)
-[ 2454.682636] apple-ave 267100000.video-encoder: session: DPB slot 0: recon 0x00000000fcc00000 LowResRef 0x00000000fca80000
-[ 2454.682637] apple-ave 267100000.video-encoder: session: DPB slot 1: recon 0x00000000fcd6d000 LowResRef 0x00000000fcabc000
-[ 2454.682638] apple-ave 267100000.video-encoder: session: DPB 2 slot(s): recon 0x00000000fcc00000 +0x16d000 each; LowResRef 0x00000000fca80000 +0x3c000 each, lr_stride 5120, 48 rows (AVE_CalcBufSizeOfLowResRef formula)
-[ 2454.683029] apple-ave 267100000.video-encoder: session: Start_AVC: NEED_LSB_PLANES=1; slot 0 LSB 0x00000000fcc00000 MSB 0xfcc00000 (slot 0x16d000 bytes)
-[ 2454.683031] apple-ave 267100000.video-encoder: session: Start_AVC: flat scaling lists 16 (docs/74); expect quantiser scale registers 0x10000010
-[ 2454.683033] apple-ave 267100000.video-encoder: session: Start_AVC: macOS lambda block (docs/72); expect DPE+0x16A09C = DPE+0x16A0A0 = nQuant
-[ 2454.683034] apple-ave 267100000.video-encoder: session: Start_AVC: entropy 4 x 4 at wire 0xf830, slot 0 0xfd000000, size 0xf0000 at wire 0xfa30
-[ 2454.683096] apple-ave 267100000.video-encoder: session: Start_AVC: colocated 2 slot(s) of 0x71000 bytes at wire 0xf6b0 (0x5A fill)
-[ 2454.683098] apple-ave 267100000.video-encoder: session: colocated slot 0: 0xfbd80000
-[ 2454.683099] apple-ave 267100000.video-encoder: session: colocated slot 1: 0xfbd00000
-[ 2454.683100] apple-ave 267100000.video-encoder: session: Start_AVC: LowResResult 4 surface(s) at wire 0x3b8, [0] 0xfca40000 - inert for I, required from the first P
-[ 2454.683107] apple-ave 267100000.video-encoder: session: Start_AVC: 1280x720 (coded 1280x720) QP 30, profile 100 level 40 CABAC, fixed QP, POC type 2, 1 ref
-[ 2454.683110] apple-ave 267100000.video-encoder: session: Start_AVC: session_macos 0x0: macOS groups applied: none (docs/85)
-[ 2454.683111] apple-ave 267100000.video-encoder: session: Start_AVC: fw_client 0x00000000fc900000/0xb0000 mem 0x00000000fc800000/0x100000 coded[0] 0x00000000fc600000/0x152000 hdr[0] 0x00000000fc580000/0x23000 psets 0x00000000fbe3c000/0x1000 (4 coded buffer(s), slots 21..24)
-[ 2454.683114] apple-ave 267100000.video-encoder: session: Start_AVC: DPB slot 0: recon 0x00000000fcc00000 at wire 0x88, LowResRef 0x00000000fca80000 at wire 0x2a8
-[ 2454.683116] apple-ave 267100000.video-encoder: session: Start_AVC: DPB slot 1: recon 0x00000000fcd6d000 at wire 0x98, LowResRef 0x00000000fcabc000 at wire 0x2b0
-[ 2454.683117] apple-ave 267100000.video-encoder: session: Start_AVC: SrcNeighbor 4 entries/group at 0xfe800000 0xfe850000 0xfe8a0000 0xfe8f0000 (+0 KiB each)
-[ 2454.795730] apple-ave 267100000.video-encoder: enc: 30 frames 1280x720: Process round trip avg 3131 us (max 3249), whole frame avg 3213 us
-[ 2454.798106] apple-ave 267100000.video-encoder: close: client 1 returned (Stop -> UNINIT_DONE, Close -> STOP_DONE); the firmware has let go of its buffers
-[ 2455.056963] === D2 v4l2-test done ===
-[ 2455.280947] === D2 rmmod apple_ave ===
-[ 2455.282701] apple-ave 267100000.video-encoder: halt: sending command 14, 64 bytes at IOVA 0x00000000ff829cc0 on IO (no reply is expected)
-[ 2455.282924] apple-ave 267100000.video-encoder: halt: scratch 0 = 0x08042006, the firmware reached its wfi
-[ 2455.283078] apple-ave 267100000.video-encoder: halt: CPU_STATUS 0x0000002e STOPPED after 3 sample(s)
-[ 2455.283116] apple-ave 267100000.video-encoder: iboot: DATA unmapped, 1212416 of 0x128000 bytes
-[ 2455.283309] apple-ave 267100000.video-encoder: me1: venc_me1 released
-[ 2455.283321] apple-ave 267100000.video-encoder: powered off (remove)
-[ 2455.303847] === D2 rmmod returned rc=0 ===
-[ 2458.307443] === D2 alive 3 s after the unload ===
-[ 2465.314430] === D2 alive 10 s after the unload ===
+[ 3746.979097] apple-ave 267100000.video-encoder:   msg3: fw_base 0xffffffff80000000 (FwIPC iova 0x00000000ff800000)
+[ 3746.979245] apple-ave 267100000.video-encoder:   fw heap (surface 23): 768 KiB at iova 0x00000000ff500000
+[ 3746.979260] apple-ave 267100000.video-encoder:   msg4: info fw 0xffffffff80009bc0, chanmem fw 0xffffffff80000000 (0x9bc0 bytes), dev_type 10
+[ 3746.981275] apple-ave 267100000.video-encoder:   message taken from the IRQ handler (status 0x1)
+[ 3746.981277] apple-ave 267100000.video-encoder:   msg5: desc fw 0xffffffff80000000, client buffer 0xb0000 (max 0x100000, expect 0xb4000)
+[ 3746.981281] apple-ave 267100000.video-encoder:   desc[0] 'TERMINAL' id=4 dir=2 bit=0 nslots=512 slots_fw=0xffffffff80000700 (+0x700)
+[ 3746.981286] apple-ave 267100000.video-encoder:   desc[1] 'IO' id=1 dir=0 bit=1 nslots=32 slots_fw=0xffffffff80008700 (+0x8700)
+[ 3746.981294] apple-ave 267100000.video-encoder:   desc[2] 'DEBUG' id=5 dir=0 bit=1 nslots=8 slots_fw=0xffffffff80008f00 (+0x8f00)
+[ 3746.981298] apple-ave 267100000.video-encoder:   desc[3] 'BUF_H2T' id=6 dir=0 bit=2 nslots=1 slots_fw=0xffffffff80009100 (+0x9100)
+[ 3746.981302] apple-ave 267100000.video-encoder:   desc[4] 'BUF_T2H' id=7 dir=1 bit=3 nslots=1 slots_fw=0xffffffff80009140 (+0x9140)
+[ 3746.981306] apple-ave 267100000.video-encoder:   desc[5] 'SHAREDMALLOC' id=3 dir=1 bit=3 nslots=8 slots_fw=0xffffffff80009180 (+0x9180)
+[ 3746.981309] apple-ave 267100000.video-encoder:   desc[6] 'IO_T2H' id=2 dir=1 bit=3 nslots=32 slots_fw=0xffffffff80009380 (+0x9380)
+[ 3746.981313] apple-ave 267100000.video-encoder:   msg5: client buffer 0xb0000, firmware literal is 0xb4000
+[ 3746.981424] apple-ave 267100000.video-encoder:   macOS 13.5 handshake complete: 7 channel(s), heartbeat scratch7 0x0
+[ 3746.981428] apple-ave 267100000.video-encoder: coprocessor up, 7 IPC channel(s)
+[ 3746.981431] apple-ave 267100000.video-encoder: Apple AVE video encoder ready
+[ 3746.981462] apple-ave 267100000.video-encoder: fw[0]| FW Cfg: prod, tag: AppleAVE2FW-6070.11.1, SHA: c86a10b71
+[ 3746.981480] apple-ave 267100000.video-encoder: session: Config: shmem IOVA 0x00000000ff440000 size 0x40000, dsid 0x0, reg_dart 0x0
+[ 3746.981484] apple-ave 267100000.video-encoder: session: Config: sending 112 bytes at IOVA 0x00000000ff819c40 on IO
+[ 3746.982261] apple-ave 267100000.video-encoder: session: Config: reply 64 bytes flags 0x40: id=0x0e01 cid=0x0 slot=0xffffffff status=0xee0000
+[ 3746.982298] apple-ave 267100000.video-encoder: session: Config: ACCEPTED, status 0xee0000
+[ 3746.982673] apple-ave 267100000.video-encoder: v4l2: H.264/HEVC encoder at /dev/video1
+[ 3746.982683] apple-ave 267100000.video-encoder: pm: pm_sleep=1 (system suspend refused while the encoder is powered)
+[ 3752.059505] === e3-run done: t8103-D2 ===
+[ 3752.089510] === D2 v4l2-test 30 ctl ===
+[ 3752.105432] apple-ave 267100000.video-encoder: session: Open: client id 1
+[ 3752.105499] apple-ave 267100000.video-encoder: session: SrcNeighbor slot 80 KiB for 80 MB columns (docs/47 formula)
+[ 3752.106585] apple-ave 267100000.video-encoder: session: entropy: 4 x 4 buffers of 960 KiB at 0xfd000000..0xfde10000 (kext formula, larger K)
+[ 3752.106590] apple-ave 267100000.video-encoder: session: recon planes for 1280x720: luma 942080 + chroma 471040 = MSB 1413120; luma_meta 65536 + chroma_meta 16384 = LSB 81920; slot 0x16d000
+[ 3752.106826] apple-ave 267100000.video-encoder: session: LowResResult 4 surface(s) of 0xf400 bytes from 0x00000000ff480000 (ALIGN(4*1280,128) * ceil(720/64) + 1024)
+[ 3752.106830] apple-ave 267100000.video-encoder: session: DPB slot 0: recon 0x00000000fcc00000 LowResRef 0x00000000fc980000
+[ 3752.106832] apple-ave 267100000.video-encoder: session: DPB slot 1: recon 0x00000000fcd6d000 LowResRef 0x00000000fc9bc000
+[ 3752.106835] apple-ave 267100000.video-encoder: session: DPB 2 slot(s): recon 0x00000000fcc00000 +0x16d000 each; LowResRef 0x00000000fc980000 +0x3c000 each, lr_stride 5120, 48 rows (AVE_CalcBufSizeOfLowResRef formula)
+[ 3752.107350] apple-ave 267100000.video-encoder: session: Start_AVC: NEED_LSB_PLANES=1; slot 0 LSB 0x00000000fcc00000 MSB 0xfcc00000 (slot 0x16d000 bytes)
+[ 3752.107353] apple-ave 267100000.video-encoder: session: Start_AVC: flat scaling lists 16 (docs/74); expect quantiser scale registers 0x10000010
+[ 3752.107356] apple-ave 267100000.video-encoder: session: Start_AVC: macOS lambda block (docs/72); expect DPE+0x16A09C = DPE+0x16A0A0 = nQuant
+[ 3752.107359] apple-ave 267100000.video-encoder: session: Start_AVC: entropy 4 x 4 at wire 0xf830, slot 0 0xfd000000, size 0xf0000 at wire 0xfa30
+[ 3752.107446] apple-ave 267100000.video-encoder: session: Start_AVC: colocated 2 slot(s) of 0x71000 bytes at wire 0xf6b0 (0x5A fill)
+[ 3752.107449] apple-ave 267100000.video-encoder: session: colocated slot 0: 0xfb700000
+[ 3752.107451] apple-ave 267100000.video-encoder: session: colocated slot 1: 0xfb680000
+[ 3752.107453] apple-ave 267100000.video-encoder: session: Start_AVC: LowResResult 4 surface(s) at wire 0x3b8, [0] 0xff480000 - inert for I, required from the first P
+[ 3752.107466] apple-ave 267100000.video-encoder: session: Start_AVC: 1280x720 (coded 1280x720) QP 30, profile 100 level 40 CABAC, fixed QP, POC type 2, 1 ref
+[ 3752.107471] apple-ave 267100000.video-encoder: session: Start_AVC: session_macos 0x0: macOS groups applied: none (docs/85)
+[ 3752.107474] apple-ave 267100000.video-encoder: session: Start_AVC: fw_client 0x00000000fc800000/0xb0000 mem 0x00000000fc700000/0x100000 coded[0] 0x00000000fc400000/0x152000 hdr[0] 0x00000000fc340000/0x23000 psets 0x00000000fb7bc000/0x1000 (4 coded buffer(s), slots 21..24)
+[ 3752.107479] apple-ave 267100000.video-encoder: session: Start_AVC: DPB slot 0: recon 0x00000000fcc00000 at wire 0x88, LowResRef 0x00000000fc980000 at wire 0x2a8
+[ 3752.107482] apple-ave 267100000.video-encoder: session: Start_AVC: DPB slot 1: recon 0x00000000fcd6d000 at wire 0x98, LowResRef 0x00000000fc9bc000 at wire 0x2b0
+[ 3752.107485] apple-ave 267100000.video-encoder: session: Start_AVC: SrcNeighbor 4 entries/group at 0xfe800000 0xfe850000 0xfe8a0000 0xfe8f0000 (+0 KiB each)
+[ 3752.224782] apple-ave 267100000.video-encoder: enc: 30 frames 1280x720: Process round trip avg 3135 us (max 3243), whole frame avg 3224 us
+[ 3752.227145] apple-ave 267100000.video-encoder: close: client 1 returned (Stop -> UNINIT_DONE, Close -> STOP_DONE); the firmware has let go of its buffers
+[ 3752.506990] === D2 v4l2-test done ===
+[ 3752.739432] === D2 rmmod apple_ave ===
+[ 3752.743859] apple-ave 267100000.video-encoder: halt: sending command 14, 64 bytes at IOVA 0x00000000ff829cc0 on IO (no reply is expected)
+[ 3752.744079] apple-ave 267100000.video-encoder: halt: scratch 0 = 0x08042006, the firmware reached its wfi
+[ 3752.744234] apple-ave 267100000.video-encoder: halt: CPU_STATUS 0x0000002e STOPPED after 3 sample(s)
+[ 3752.744271] apple-ave 267100000.video-encoder: iboot: DATA unmapped, 1212416 of 0x128000 bytes
+[ 3752.744504] apple-ave 267100000.video-encoder: me1: venc_me1 released
+[ 3752.744513] apple-ave 267100000.video-encoder: powered off (remove)
+[ 3752.762379] === D2 rmmod returned rc=0 ===
+[ 3755.765368] === D2 alive 3 s after the unload ===
+[ 3762.772373] === D2 alive 10 s after the unload ===

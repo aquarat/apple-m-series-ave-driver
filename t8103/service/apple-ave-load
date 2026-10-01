@@ -20,7 +20,8 @@ case $v in
 *avedapf*) ;;
 *) log "m1n1 stage 2 is '$v', not the DAPF build the encoder needs"; exit 1 ;;
 esac
-for f in "$DIR/apple-ave.ko" "$DIR/ave-overlay.ko" /lib/firmware/apple/ave_h13g.bin; do
+for f in "$DIR/apple-ave.ko" "$DIR/ave-overlay.ko" /lib/firmware/apple/ave_h13g.bin \
+         /lib/firmware/apple/ave-13.5-h13g-data-pristine.bin; do
     [ -f "$f" ] || { log "missing $f (kernel update? rebuild and run install-service.sh)"; exit 1; }
 done
 if [ -e "$FLAG" ]; then
@@ -31,6 +32,10 @@ if lsmod | grep -q '^apple_ave '; then
     log "apple_ave is loaded but has no encoder node; reboot"
     exit 1
 fi
+if systemctl is-active -q apple-ave-nosleep.service; then
+    log "an earlier unload was not clean; the encoder stays off until the next boot"
+    exit 1
+fi
 
 mkdir -p "$(dirname "$FLAG")"
 : > "$FLAG"
@@ -38,9 +43,9 @@ sync
 modprobe -a videodev v4l2-mem2mem videobuf2-common videobuf2-v4l2 videobuf2-dma-contig
 # The overlay cannot be applied twice in one boot.
 lsmod | grep -q '^ave_overlay ' || insmod "$DIR/ave-overlay.ko" variant=8 || { log "overlay failed"; rm -f "$FLAG"; exit 1; }
-# pm_sleep=1: refuse a system suspend while the encoder is powered. Suspend
-# with a running core is untested on the M1, and there is no DATA blob to
-# bring a core back after one.
+# pm_sleep=1: refuse a system suspend while the encoder is powered. The sleep
+# hook unloads the driver first; this is what stops a suspend when it cannot
+# (device in use). Suspend with a running core is untested on the M1.
 insmod "$DIR/apple-ave.ko" pm_sleep=1 || { log "driver failed, see dmesg"; rm -f "$FLAG"; exit 1; }
 for _ in $(seq 100); do
     [ -n "$(node)" ] && break
