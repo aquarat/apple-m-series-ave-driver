@@ -37,9 +37,9 @@ machine cannot suspend with the core running:
   use) the suspend is refused rather than risked.
 - An unclean unload leaves the core powered; the unload script then holds a
   sleep inhibitor until the next boot.
-- The load keeps a flag while the modules go in and for 30 s after; if the
-  machine resets in that window it refuses to load again until
-  `/var/lib/apple-ave/loading` is removed.
+- The load writes the boot id to `/var/lib/apple-ave/loading` and a timer
+  removes it 30 s later; a flag from an earlier boot means the machine went
+  down in that window, and the load refuses until the file is removed.
 
 Either way that leaves `/dev/videoN` (name `apple-ave-enc`) usable without root. With
 ffmpeg, pad to the encoder's grid: its V4L2 encoder cannot crop, and a
