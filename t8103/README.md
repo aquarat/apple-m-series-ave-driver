@@ -7,13 +7,30 @@ works; everything below "Not tested" is exactly that.
 
 ## Use after a boot
 
-The modules are never loaded automatically.
+Nothing loads at boot. Either by hand,
 
 ```sh
 sudo t8103/ave-run.sh C8     # overlay + driver, then a 30-frame self-check
 ```
 
-That leaves `/dev/videoN` (name `apple-ave-enc`) usable without root. With
+or on demand through the unit in `t8103/service/`:
+
+```sh
+sudo t8103/service/install-service.sh install   # once, and again after a kernel update
+systemctl start apple-ave.service               # no sudo: a polkit rule allows the start
+```
+
+The unit runs a root-owned copy of the modules and loader from
+`/usr/local/lib/apple-ave/`, so the passwordless start cannot be used to
+load anything else. It keeps a flag while the modules go in and for 30 s
+after; if the machine resets in that window, it refuses to load again until
+`/var/lib/apple-ave/loading` is removed. It loads the driver with
+`pm_sleep=1`: once the encoder is up, the machine refuses to suspend until
+the next boot (suspend with a running core is untested here, and a core
+cannot be brought back without a pristine DATA blob). `ipadcast` starts the
+unit when its first viewer connects.
+
+Either way that leaves `/dev/videoN` (name `apple-ave-enc`) usable without root. With
 ffmpeg, pad to the encoder's grid: its V4L2 encoder cannot crop, and a
 1080-line frame into the 1088-line buffer makes ffmpeg read past the frame
 and segfault.
