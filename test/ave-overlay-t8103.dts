@@ -1,0 +1,89 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/*
+ * DRAFT, never loaded. t8103 (MacBook Air M1, apple,j313) sibling of
+ * test/ave-overlay-e4.dts, per docs/79 §3 step 5.
+ *
+ * Source: DeviceTree.j313ap.im4p from UniversalMac_13.5_22G74_Restore.ipsw,
+ * nodes /arm-io/ave and /arm-io/dart-ave. CPU physical = ADT bus +
+ * 0x2_00000000; control: ADT ave reg[3] 0x3b708000 lands on the live
+ * /soc/power-management@23b700000 + 0x8000 (venc_dma..venc_me1).
+ *
+ *   ave       reg  0x67100000/0x45c000  0x67800000/0x800000  0x67050000/0x8000
+ *                  0x3b708000/0x4000    0x66000000/0x1000000
+ *             irq  560 554 553 556 555 (only the first is used)
+ *             power-gates 295 296 297 121 122 123 124 120 298
+ *   dart-ave  reg  0x67040000 CPUDART, 0x67030000 DART, 0x67020000 SMMU,
+ *                  0x67044000 DAPF; irq 557; sids 0x8001; power-gate 330
+ *
+ * Differences from t6001:
+ *  - AIC, not AIC2: three interrupt cells, no die cell.
+ *  - DART compatible apple,t8103-dart.
+ *  - reg[3] is 0x4000 long here (0x24 on t6001).
+ *  - 9 power gates, not 11: no counterpart of gates 600/602, so the
+ *    afnc4_ioa sentinel (0xc5) is dropped.
+ *
+ * OPEN before this may be loaded:
+ *  - Gates resolved from the ADT pmgr device table: 120 VENC_DMA,
+ *    121 VENC_PIPE4, 122 VENC_PIPE5, 123 VENC_ME0, 124 VENC_ME1 (all in the
+ *    live DT, parent chain up to 101 VENC_SYS); 295 VENC-SYS-V, 296
+ *    VENC-FAST, 297 VENC-MEM-FAST, 298 VENC-SOC-VMAX and 330 VENC-DART are
+ *    not modelled by Asahi's t8103 pmgr. 295 and 330 have VENC_SYS as
+ *    parent, so venc_sys is used for the DARTs below, as on t6001.
+ *  - iBoot firmware placement (segment-ranges) is unknown; see the SoC row.
+ */
+/dts-v1/;
+/plugin/;
+
+/ {
+	fragment@0 {
+		target-path = "/soc";
+
+		__overlay__ {
+			#address-cells = <2>;
+			#size-cells = <2>;
+
+			dart_ave_0: iommu@267040000 {
+				compatible = "apple,t8103-dart";
+				reg = <0x2 0x67040000 0x0 0x4000>;
+				interrupt-parent = <0xa7e00013>;
+				interrupts = <0 557 4>;
+				#iommu-cells = <1>;
+				power-domains = <0xa7e0001d>;
+			};
+
+			dart_ave_1: iommu@267030000 {
+				compatible = "apple,t8103-dart";
+				reg = <0x2 0x67030000 0x0 0x4000>;
+				interrupt-parent = <0xa7e00013>;
+				interrupts = <0 557 4>;
+				#iommu-cells = <1>;
+				power-domains = <0xa7e0001d>;
+			};
+
+			ave: video-encoder@267100000 {
+				compatible = "apple,t8103-ave", "apple,ave";
+				reg = <0x2 0x67100000 0x0 0x45c000>,
+				      <0x2 0x67800000 0x0 0x800000>,
+				      <0x2 0x67050000 0x0 0x008000>,
+				      <0x2 0x3b708000 0x0 0x004000>,
+				      <0x2 0x66000000 0x0 0x1000000>,
+				      <0x2 0x67040000 0x0 0x4000>,
+				      <0x2 0x67044000 0x0 0x4000>,
+				      <0x2 0x67020000 0x0 0x4000>;
+				reg-names = "dpe", "asc", "sve", "unk3", "axi2af",
+					    "cpudart", "dapf", "smmu";
+				interrupt-parent = <0xa7e00013>;
+				interrupts = <0 560 4>, <0 557 4>;
+				/*
+				 * venc_sys, venc_pipe5, venc_pipe4. venc_me0 and
+				 * venc_me1 have no phandle in this DT; the driver
+				 * powers both through holder devices.
+				 */
+				power-domains = <0xa7e0001d>, <0xa7e000c2>, <0xa7e000c3>;
+				resets = <0xa7e0001d>;
+				iommus = <&dart_ave_0 0>, <&dart_ave_0 1>,
+					 <&dart_ave_1 0>, <&dart_ave_1 1>;
+			};
+		};
+	};
+};
