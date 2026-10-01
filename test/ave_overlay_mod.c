@@ -31,6 +31,7 @@
 #include "ave_overlay_e6_dtbo.h"
 #include "ave_overlay_e7_dtbo.h"
 #include "ave_overlay_pmp_venc_dtbo.h"
+#include "ave_overlay_t8103_dtbo.h"
 
 static int ovcs_id, pmp_ovcs_id;
 
@@ -266,6 +267,11 @@ static int __init ave_ov_init(void)
 		len = ave_overlay_e3_dtbo_len;
 		pr_warn("ave-overlay: variant=3 - with DART, plus cpudart/dapf regs (E2 control / E3)\n");
 		break;
+	case 8:
+		fdt = ave_overlay_t8103_dtbo;
+		len = ave_overlay_t8103_dtbo_len;
+		pr_warn("ave-overlay: variant=8 - t8103 (M1), variant=4's shape, untested\n");
+		break;
 	case 4:
 		fdt = ave_overlay_e4_dtbo;
 		len = ave_overlay_e4_dtbo_len;
@@ -287,7 +293,7 @@ static int __init ave_ov_init(void)
 		pr_warn("ave-overlay: variant=5 - variant=4 plus stream 15, which the ADT declares (sids 0x8001) and nothing has attached (docs/69)\n");
 		break;
 	default:
-		pr_err("ave-overlay: variant=%d is not 0-7; refusing\n", variant);
+		pr_err("ave-overlay: variant=%d is not 0-8; refusing\n", variant);
 		return -EINVAL;
 	}
 
