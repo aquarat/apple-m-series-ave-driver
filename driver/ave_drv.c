@@ -34,7 +34,6 @@
 #include "ave_session.h"
 #include "ave_v4l2.h"
 #include "ave_smmu.h"
-#include "ave_dpe_tables.h"
 
 #define AVE_ASC_IDLE_TIMEOUT_US		100000
 
@@ -595,41 +594,48 @@ static void ave_dpe_apply(struct ave_device *ave, u32 base,
  */
 static int ave_dpe_program(struct ave_device *ave)
 {
+	const struct ave_dpe_set *set = ave->soc->dpe;
 	unsigned int i, bad = 0;
 
 	if (!dpe_tunables)
 		return 0;
+	/* Another SoC's table is not a default: t6001's fails read-back on t8103 */
+	if (!set) {
+		dev_warn(ave->dev, "dpe: no AVE_DPE tunables known for %s; block left at reset defaults\n",
+			 ave->soc->name);
+		return 0;
+	}
 
 	ave_dpe_log(ave, "before");
-	ave_dpe_apply(ave, AVE_DPE_CAT_BASE, ave_dpe_cat_default,
-		      ARRAY_SIZE(ave_dpe_cat_default));
-	ave_dpe_apply(ave, AVE_DPE_CAC_BASE, ave_dpe_cac_default,
-		      ARRAY_SIZE(ave_dpe_cac_default));
-	ave_dpe_apply(ave, AVE_DPE_CAC_BASE, ave_dpe_cac_8bit,
-		      ARRAY_SIZE(ave_dpe_cac_8bit));
+	ave_dpe_apply(ave, AVE_DPE_CAT_BASE, set->cat_default, set->n_cat_default);
+	ave_dpe_apply(ave, AVE_DPE_CAC_BASE, set->cac_default, set->n_cac_default);
+	ave_dpe_apply(ave, AVE_DPE_CAC_BASE, set->cac_8bit, set->n_cac_8bit);
 	ave_write(ave, AVE_BANK_DPE, AVE_DPE_CAC_BASE,
 		  ave_read(ave, AVE_BANK_DPE, AVE_DPE_CAC_BASE) | 3);
 	ave_write(ave, AVE_BANK_DPE, AVE_DPE_CAT_BASE,
 		  ave_read(ave, AVE_BANK_DPE, AVE_DPE_CAT_BASE) | 1);
 
 	/* The 8-bit table is the last word on every offset it names. */
-	for (i = 0; i < ARRAY_SIZE(ave_dpe_cac_8bit); i++) {
-		const struct ave_dpe_tunable *t = &ave_dpe_cac_8bit[i];
+	for (i = 0; i < set->n_cac_8bit; i++) {
+		const struct ave_dpe_tunable *t = &set->cac_8bit[i];
 		u32 v = ave_read(ave, AVE_BANK_DPE, AVE_DPE_CAC_BASE + t->off);
 
 		if (t->off == 0)	/* Enable ORs bits 0-1 in afterwards */
 			v &= ~3u;
-		if ((v & t->clear) != t->set)
+		if ((v & t->clear) != t->set) {
+			if (bad < 8)
+				dev_err(ave->dev, "dpe: CAC+%#x reads %#010x, table wants %#010x under %#010x\n",
+					t->off, v, t->set, t->clear);
 			bad++;
+		}
 	}
 	ave_dpe_log(ave, "after");
 	if (bad) {
 		dev_err(ave->dev, "dpe: %u tunable(s) did not read back\n", bad);
 		return -EIO;
 	}
-	dev_info(ave->dev, "dpe: Castor_6000 tunables applied (%zu+%zu+%zu) and enabled, read back OK\n",
-		 ARRAY_SIZE(ave_dpe_cat_default), ARRAY_SIZE(ave_dpe_cac_default),
-		 ARRAY_SIZE(ave_dpe_cac_8bit));
+	dev_info(ave->dev, "dpe: %s tunables applied (%u+%u+%u) and enabled, read back OK\n",
+		 set->name, set->n_cat_default, set->n_cac_default, set->n_cac_8bit);
 	return 0;
 }
 
@@ -638,25 +644,27 @@ static void ave_me1_holder_release(struct device *dev)
 	kfree(dev);
 }
 
-static int ave_power_me1_on(struct ave_device *ave)
+/*
+ * Attach a holder device to the power domain at @node and switch it on.
+ * For domains the DT cannot hand to the encoder node because they have no
+ * phandle: venc_me1 everywhere, and venc_me0 as well on t8103.
+ */
+static int ave_power_holder_on(struct ave_device *ave, const char *node,
+			       const char *want, struct device **out)
 {
 	struct of_phandle_args args = {};
 	struct device *vdev;
 	const char *label;
 	int ret;
 
-	if (!power_me1 || ave->me1_dev)
-		return 0;
-
-	args.np = of_find_node_by_path(ave->soc->me1_node);
+	args.np = of_find_node_by_path(node);
 	if (!args.np)
-		return dev_err_probe(ave->dev, -ENODEV, "me1: no %s\n", ave->soc->me1_node);
+		return dev_err_probe(ave->dev, -ENODEV, "%s: no %s\n", want, node);
 	if (of_property_read_string(args.np, "label", &label) ||
-	    strcmp(label, ave->soc->me1_label)) {
+	    strcmp(label, want)) {
 		of_node_put(args.np);
 		return dev_err_probe(ave->dev, -ENODEV,
-				     "me1: %s is not %s; refusing\n", ave->soc->me1_node,
-				     ave->soc->me1_label);
+				     "%s: %s is not %s; refusing\n", want, node, want);
 	}
 
 	vdev = kzalloc(sizeof(*vdev), GFP_KERNEL);
@@ -673,20 +681,20 @@ static int ave_power_me1_on(struct ave_device *ave)
 	 * would otherwise collide on the name and fail with -EEXIST - which
 	 * is exactly what F19b did.
 	 */
-	dev_set_name(vdev, "%s-venc_me1.%llu", dev_name(ave->dev),
+	dev_set_name(vdev, "%s-%s.%llu", dev_name(ave->dev), want,
 		     (unsigned long long)ktime_get_boottime_seconds());
 	ret = device_add(vdev);
 	if (ret) {
 		of_node_put(args.np);
 		put_device(vdev);
-		return dev_err_probe(ave->dev, ret, "me1: holder device\n");
+		return dev_err_probe(ave->dev, ret, "%s: holder device\n", want);
 	}
 
 	ret = of_genpd_add_device(&args, vdev);
 	of_node_put(args.np);
 	if (ret) {
 		device_unregister(vdev);
-		return dev_err_probe(ave->dev, ret, "me1: attach to venc_me1\n");
+		return dev_err_probe(ave->dev, ret, "%s: attach\n", want);
 	}
 	pm_runtime_enable(vdev);
 	ret = pm_runtime_resume_and_get(vdev);
@@ -694,9 +702,48 @@ static int ave_power_me1_on(struct ave_device *ave)
 		pm_runtime_disable(vdev);
 		pm_genpd_remove_device(vdev);
 		device_unregister(vdev);
-		return dev_err_probe(ave->dev, ret, "me1: power on\n");
+		return dev_err_probe(ave->dev, ret, "%s: power on\n", want);
 	}
-	ave->me1_dev = vdev;
+	*out = vdev;
+	return 0;
+}
+
+static void ave_power_holder_off(struct device **holder)
+{
+	struct device *vdev = *holder;
+
+	if (!vdev)
+		return;
+	*holder = NULL;
+	pm_runtime_put_sync(vdev);
+	pm_runtime_disable(vdev);
+	pm_genpd_remove_device(vdev);
+	device_unregister(vdev);
+}
+
+static int ave_power_me1_on(struct ave_device *ave)
+{
+	int ret;
+
+	if (!power_me1 || ave->me1_dev)
+		return 0;
+
+	/* t8103: venc_me0 has no phandle either, and is me1's sibling */
+	if (ave->soc->me0_node && !ave->me0_dev) {
+		ret = ave_power_holder_on(ave, ave->soc->me0_node,
+					  ave->soc->me0_label, &ave->me0_dev);
+		if (ret)
+			return ret;
+		dev_info(ave->dev, "me0: %s powered; PMGR PS ME0 = %#010x\n",
+			 ave->soc->me0_label, ave_read(ave, AVE_BANK_PMGR_PS, 0x18));
+	}
+
+	ret = ave_power_holder_on(ave, ave->soc->me1_node, ave->soc->me1_label,
+				  &ave->me1_dev);
+	if (ret) {
+		ave_power_holder_off(&ave->me0_dev);
+		return ret;
+	}
 	dev_info(ave->dev, "me1: %s powered; PMGR PS ME1 = %#010x\n",
 		 ave->soc->me1_label, ave_read(ave, AVE_BANK_PMGR_PS, 0x20));
 	return 0;
@@ -704,15 +751,10 @@ static int ave_power_me1_on(struct ave_device *ave)
 
 static void ave_power_me1_off(struct ave_device *ave)
 {
-	struct device *vdev = ave->me1_dev;
-
-	if (!vdev)
+	if (!ave->me1_dev)
 		return;
-	ave->me1_dev = NULL;
-	pm_runtime_put_sync(vdev);
-	pm_runtime_disable(vdev);
-	pm_genpd_remove_device(vdev);
-	device_unregister(vdev);
+	ave_power_holder_off(&ave->me1_dev);
+	ave_power_holder_off(&ave->me0_dev);
 	dev_info(ave->dev, "me1: venc_me1 released\n");
 }
 
@@ -749,6 +791,7 @@ static void ave_power_me1_abandon(struct ave_device *ave)
 		return;
 	}
 	ave->me1_dev = NULL;
+	ave->me0_dev = NULL;	/* abandoned with it, for the same reason */
 	dev_warn(ave->dev,
 		 "me1: ABANDONING %s, still powered and still attached, to hold venc_me1 -> me0 -> pipe4/5 -> sys up after unload. It can never be freed (its release lives in this module). REBOOT before loading again.\n",
 		 dev_name(vdev));
@@ -2633,6 +2676,7 @@ static void ave_remove(struct platform_device *pdev)
  */
 static const struct of_device_id ave_of_match[] = {
 	{ .compatible = "apple,t6001-ave", .data = &ave_soc_set_t6001 },
+	{ .compatible = "apple,t8103-ave", .data = &ave_soc_set_t8103 },
 	{ .compatible = "apple,ave" },
 	{}
 };
