@@ -3,9 +3,9 @@
 # /usr/local/lib/apple-ave/ and run by apple-ave.service, so that starting the
 # unit can be allowed without a password: nothing here is writable by a user.
 #
-# Guard against a reset loop: a flag is written before the modules go in and
-# removed once the driver has been up for a while. If the machine dies in
-# between, the next start finds the flag and refuses.
+# Guard against a reset loop: a flag holding the boot id is written before the
+# modules go in and removed 30 s later. If the machine dies in between, the
+# next boot's start finds another boot's flag and refuses.
 set -u
 log() { echo "apple-ave: $*"; }
 REL=$(uname -r)
@@ -24,8 +24,11 @@ for f in "$DIR/apple-ave.ko" "$DIR/ave-overlay.ko" /lib/firmware/apple/ave_h13g.
          /lib/firmware/apple/ave-13.5-h13g-data-pristine.bin; do
     [ -f "$f" ] || { log "missing $f (kernel update? rebuild and run install-service.sh)"; exit 1; }
 done
-if [ -e "$FLAG" ]; then
-    log "the last load did not finish (did the machine reset?); not trying again. Remove $FLAG to retry."
+# A flag from another boot means the machine went down during or right after a
+# load. One from this boot only means a load is less than 30 s old.
+BOOT=$(cat /proc/sys/kernel/random/boot_id)
+if [ -e "$FLAG" ] && [ "$(cat "$FLAG")" != "$BOOT" ]; then
+    log "the machine went down within 30 s of the last load; not loading again. Remove $FLAG to retry."
     exit 1
 fi
 if lsmod | grep -q '^apple_ave '; then
@@ -38,7 +41,7 @@ if systemctl is-active -q apple-ave-nosleep.service; then
 fi
 
 mkdir -p "$(dirname "$FLAG")"
-: > "$FLAG"
+echo "$BOOT" > "$FLAG"
 sync
 modprobe -a videodev v4l2-mem2mem videobuf2-common videobuf2-v4l2 videobuf2-dma-contig
 # The overlay cannot be applied twice in one boot.
@@ -57,7 +60,7 @@ if [ -z "$(node)" ]; then
     exit 1
 fi
 log "encoder at /dev/$(basename "$(dirname "$(node)")")"
-# Every reset during the bring-up came within seconds of a load.
-sleep 30
-rm -f "$FLAG"
-sync
+# Every reset during the bring-up came within seconds of a load. Clear the flag
+# once that window has passed - from a timer, so that this unit is active (and
+# can be stopped properly) as soon as the encoder is usable.
+systemd-run --quiet --collect --on-active=30 /bin/rm -f "$FLAG"

@@ -46,7 +46,9 @@ polkit.addRule(function(action, subject) {
 });
 R
     chmod 644 "$RULE"
+    rm -f /var/lib/apple-ave/loading
     systemctl daemon-reload
+    systemctl reset-failed apple-ave.service 2>/dev/null || true
     echo "installed for $REL. Load: systemctl restart apple-ave.service, unload: systemctl stop apple-ave.service (no sudo needed for $U)"
     ;;
 remove)
