@@ -415,50 +415,12 @@ MODULE_PARM_DESC(fw_restore_path,
 		 "request_firmware() path for the pristine DATA blob (default: the SoC's, apple/ave-13.5-data-pristine.bin on t6001)");
 
 /*
- * sha256 of data/blobs/ave-13.5-data-pristine.bin, 0x134000 bytes, as produced
- * by tools/make_ave_data_blob.py (which also re-derives it from the 13.5 image
- * and refuses to emit anything else). Byte-identical to the blob
- * tools/extract_pristine_data.py emits.
- */
-static const u8 ave_pristine_sha256[SHA256_DIGEST_SIZE] = {
-	0xf1, 0xaf, 0x1e, 0xf4, 0x2b, 0xe0, 0x4a, 0x7d,
-	0x60, 0x7b, 0x0b, 0xc1, 0xa2, 0x7d, 0xfd, 0xa5,
-	0x72, 0x68, 0xb4, 0x76, 0xfe, 0xcf, 0x1d, 0x92,
-	0xc8, 0xc1, 0x3c, 0x76, 0x0c, 0x71, 0xa1, 0x03,
-};
-
-/*
- * Three 16 KiB windows of the 13.5 image's __TEXT (file offsets 0x4000 +
- * these), which the pre-boot dump reproduces byte for byte. If the DRAM at
- * ave->soc->iboot.text_phys does not hash to these, the image in memory is not the
- * one this blob's DATA belongs to and the restore is refused.
+ * The pristine blob's sha256, the TEXT windows that identify the image in
+ * DRAM and the STKG offset are per image: ave->soc (ave_soc.c). For t6001
+ * the blob is data/blobs/ave-13.5-data-pristine.bin from
+ * tools/make_ave_data_blob.py; docs/43 §3.4 has the stack guard.
  */
 #define AVE_TEXT_WINDOW_SIZE	SZ_16K
-struct ave_text_window {
-	u32	off;
-	u8	sha[SHA256_DIGEST_SIZE];
-};
-
-static const struct ave_text_window ave_text_windows[] = {
-	{ 0x0, {
-		0x88, 0x5a, 0x78, 0x37, 0x38, 0xb3, 0xf7, 0xf8,
-		0x91, 0xad, 0x16, 0xd3, 0xd5, 0x49, 0xb7, 0xd9,
-		0x0d, 0x11, 0x4f, 0x67, 0x7b, 0xa1, 0x12, 0xc6,
-		0xe3, 0xe5, 0x42, 0xb9, 0x5c, 0x72, 0xb9, 0xbe, } },
-	{ 0x80000, {
-		0x37, 0x54, 0x7c, 0x93, 0x89, 0xfb, 0x84, 0xc3,
-		0x2b, 0x4f, 0x88, 0x8d, 0xde, 0x06, 0x1d, 0xd7,
-		0xd4, 0xcc, 0xb7, 0xf0, 0x3c, 0x1e, 0x49, 0xee,
-		0xd9, 0x65, 0xfd, 0x4e, 0x9b, 0xee, 0x7f, 0xbf, } },
-	{ 0xe8000, {
-		0x4d, 0x57, 0x01, 0x4b, 0xa7, 0x73, 0xd5, 0x76,
-		0xd6, 0x5d, 0x1f, 0xdb, 0xcb, 0x51, 0xa6, 0x6d,
-		0x6d, 0x8c, 0x59, 0x95, 0x9a, 0x48, 0x29, 0x2e,
-		0xf2, 0xcb, 0xb5, 0xb8, 0xf4, 0x17, 0x0d, 0x09, } },
-};
-
-/* Where iBoot's per-boot stack guard sits inside DATA (docs/43 §3.4). */
-#define AVE_DATA_STKG_OFF	0x3a38
 
 #define AVE_IBOOT_DATA_LITERAL_OFF	0x423c	/* image offset, docs/44 §2.4 */
 
@@ -816,7 +778,7 @@ fail:
  * Load the pristine DATA blob into a vmalloc buffer, once.
  *
  * The file must be exactly ave->soc->iboot.data_size bytes and hash to
- * ave_pristine_sha256. A blob that is merely "about the right size" is refused:
+ * ave->soc->fw_pristine_sha256. A blob that is merely "about the right size" is refused:
  * this buffer is about to be written over DRAM the coprocessor executes from,
  * and the only cheap way to know it is the right bytes is to check all of them.
  * Idempotent: a second call is a no-op once the buffer exists.
@@ -855,11 +817,12 @@ static int ave_fw_load_pristine(struct ave_device *ave)
 	}
 
 	sha256(fw->data, fw->size, dig);
-	if (memcmp(dig, ave_pristine_sha256, sizeof(dig))) {
+	if (memcmp(dig, ave->soc->fw_pristine_sha256, sizeof(dig))) {
 		dev_err(ave->dev,
 			"fw_restore_data: REFUSING - %s sha256 %*phN, expected %*phN\n",
 			path, (int)sizeof(dig), dig,
-			(int)sizeof(ave_pristine_sha256), ave_pristine_sha256);
+			(int)sizeof(ave->soc->fw_pristine_sha256),
+			ave->soc->fw_pristine_sha256);
 		ret = -EINVAL;
 		goto out;
 	}
@@ -874,8 +837,8 @@ static int ave_fw_load_pristine(struct ave_device *ave)
 		dev_info(ave->dev,
 			 "fw_restore_data: STKG override %#lx replaces the blob's %#llx (fw_restore_stkg)\n",
 			 fw_restore_stkg,
-			 get_unaligned_le64(buf + AVE_DATA_STKG_OFF));
-		put_unaligned_le64(fw_restore_stkg, buf + AVE_DATA_STKG_OFF);
+			 get_unaligned_le64(buf + ave->soc->data_stkg_off));
+		put_unaligned_le64(fw_restore_stkg, buf + ave->soc->data_stkg_off);
 	}
 	ave->iboot_data_pristine = buf;
 	dev_info(ave->dev,
@@ -902,8 +865,8 @@ static int ave_fw_check_text_identity(struct ave_device *ave)
 	unsigned int i;
 	void *p;
 
-	for (i = 0; i < ARRAY_SIZE(ave_text_windows); i++) {
-		const struct ave_text_window *w = &ave_text_windows[i];
+	for (i = 0; i < ARRAY_SIZE(ave->soc->text_win); i++) {
+		const typeof(ave->soc->text_win[0]) *w = &ave->soc->text_win[i];
 
 		p = memremap(ave->soc->iboot.text_phys + w->off, AVE_TEXT_WINDOW_SIZE,
 			     MEMREMAP_WB);
@@ -927,7 +890,7 @@ static int ave_fw_check_text_identity(struct ave_device *ave)
 	}
 	dev_info(ave->dev,
 		 "  restore: TEXT at %#llx matches the 13.5 image over %u x %#x bytes\n",
-		 ave->soc->iboot.text_phys, (unsigned int)ARRAY_SIZE(ave_text_windows),
+		 ave->soc->iboot.text_phys, (unsigned int)ARRAY_SIZE(ave->soc->text_win),
 		 AVE_TEXT_WINDOW_SIZE);
 	return 0;
 }
@@ -1016,7 +979,7 @@ int ave_fw_data_ran(struct ave_device *ave)
 		return -ENOMEM;
 	for (off = 0; off < ave->soc->iboot.data_size; off++)
 		if (p[off] != ave->iboot_data_pristine[off] &&
-		    (off < AVE_DATA_STKG_OFF || off >= AVE_DATA_STKG_OFF + 8))
+		    (off < ave->soc->data_stkg_off || off >= ave->soc->data_stkg_off + 8))
 			bytes++;
 	memunmap(p);
 	dev_info(ave->dev, "reload: DATA differs from pristine in %llu byte(s) besides STKG: %s\n",
@@ -1124,8 +1087,8 @@ int ave_fw_restore_data(struct ave_device *ave)
 	before = ave_fw_diff_pristine(ave, p, ave->iboot_data_pristine, "before restore vs");
 	dev_info(ave->dev,
 		 "  restore: STKG live %#llx, blob %#llx (random per boot; the blob's value is the dump's boot)\n",
-		 get_unaligned_le64((u8 *)p + AVE_DATA_STKG_OFF),
-		 get_unaligned_le64(ave->iboot_data_pristine + AVE_DATA_STKG_OFF));
+		 get_unaligned_le64((u8 *)p + ave->soc->data_stkg_off),
+		 get_unaligned_le64(ave->iboot_data_pristine + ave->soc->data_stkg_off));
 
 	if (mode == 2) {
 		dev_info(ave->dev,

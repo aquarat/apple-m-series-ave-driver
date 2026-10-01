@@ -76,6 +76,17 @@ struct ave_soc {
 	/* Firmware images for request_firmware() (docs/09) */
 	const char	*fw_name;
 	const char	*fw_pristine_name;	/* 13.5 DATA, fw_restore_data */
+	/*
+	 * What makes that blob this image's (docs/51): the blob's sha256,
+	 * where iBoot's per-boot stack guard sits in DATA, and the sha256 of
+	 * three 16 KiB windows of TEXT as it is in DRAM on this machine.
+	 */
+	u8		fw_pristine_sha256[32];
+	u32		data_stkg_off;
+	struct {
+		u32	off;
+		u8	sha[32];
+	} text_win[3];
 
 	/* Boot handshake device row, per firmware ABI, indexed by enum ave_fw_abi */
 	struct ave_soc_devrow	dev[AVE_ABI_MACOS_26_6 + 1];
