@@ -1,0 +1,168 @@
+--- probe/src/dapf.c	2026-10-01 12:46:45.577789357 +0200
++++ ave/src/dapf.c	2026-10-01 12:48:03.341118290 +0200
+@@ -3,6 +3,7 @@
+ #include "dapf.h"
+ #include "adt.h"
+ #include "assert.h"
++#include "exception.h"
+ #include "malloc.h"
+ #include "memory.h"
+ #include "pmgr.h"
+@@ -19,7 +20,57 @@
+     u32 r4;
+ } PACKED;
+ 
+-static int dapf_init_t8020(const char *path, u64 base, int node)
++/*
++ * AVE (apple-ave-driver, docs/44 and docs/49): the AVE coprocessor boots from a
++ * locked RVBAR at its iBoot-loaded TEXT, physically, like ISP. ISP's live DAPF
++ * carries an iBoot-injected TEXT entry (r0 0x11); the restore ADT for dart-ave0
++ * does not, and Linux cannot write this DAPF at runtime (every write raises a
++ * fatal SError). If the ADT list does not already cover the firmware's TEXT,
++ * append one entry for it from the ASC node's segment-ranges, the same way.
++ */
++static int dapf_append_asc_text(const char *path, u64 base, int count,
++                                const struct dapf_t8020_config *config, const char *asc_path)
++{
++    int asc = adt_path_offset(adt, asc_path);
++    if (asc < 0) {
++        printf("dapf: %s: %s not found, no TEXT entry\n", path, asc_path);
++        return 0;
++    }
++
++    u32 seg_len;
++    const struct adt_segment_ranges *seg = adt_getprop(adt, asc, "segment-ranges", &seg_len);
++    if (!seg || seg_len < sizeof(*seg)) {
++        printf("dapf: %s: no segment-ranges on %s, no TEXT entry\n", path, asc_path);
++        return 0;
++    }
++
++    u64 start = seg[0].phys;
++    u64 end = (seg[0].phys + seg[0].size - 1) & ~3ULL;
++
++    for (int i = 0; i < count; i++) {
++        if (config[i].start <= start && config[i].end >= start) {
++            printf("dapf: %s: TEXT 0x%lx already covered by entry %d\n", path, start, i);
++            return 0;
++        }
++    }
++
++    if (count >= 16 || !seg[0].size) {
++        /* The ADT entries are programmed; report, but do not fail the init. */
++        printf("dapf: %s: cannot add TEXT entry (count %d, size 0x%x)\n", path, count,
++               seg[0].size);
++        return 0;
++    }
++
++    base += 0x40 * count;
++    write32(base + 0x04, 1);
++    write64(base + 0x08, start);
++    write64(base + 0x10, end);
++    write32(base + 0x00, 0x11);
++    printf("dapf: %s: appended TEXT entry %d: 0x%lx-0x%lx r0 0x11\n", path, count, start, end);
++    return 0;
++}
++
++static int dapf_init_t8020(const char *path, u64 base, int node, const char *asc_path)
+ {
+     u32 length;
+     const char *prop = "filter-data-instance-0";
+@@ -39,6 +90,9 @@
+         write32(base + 0x00, (config[i].r0_hi << 4) | config[i].r0_lo);
+         base += 0x40;
+     }
++
++    if (asc_path)
++        return dapf_append_asc_text(path, base - 0x40 * count, count, config, asc_path);
+     return 0;
+ }
+ 
+@@ -123,7 +177,7 @@
+     }
+ }
+ 
+-int dapf_init(const char *path, int index)
++static int dapf_init_asc(const char *path, int index, const char *asc_path)
+ {
+     int ret;
+     int dart_path[8];
+@@ -145,15 +199,38 @@
+         return -1;
+     }
+ 
++    /*
++     * Linux's writes to AVE's DAPF raise an asynchronous SError. If m1n1's do
++     * too, an unguarded SError here reboots (exc_serr, GUARD_OFF) and loops
++     * every boot. Mark instead: exc_serr then logs and returns, the wait lets
++     * an asynchronous SError arrive while the guard is still set, and boot
++     * continues with an unprogrammed AVE DAPF.
++     */
++    int exc_before = exc_count;
++    if (asc_path)
++        exc_guard = GUARD_MARK;
++
+     if (adt_is_compatible(adt, node, "dart,t8020")) {
+-        ret = dapf_init_t8020(path, base, node);
++        ret = dapf_init_t8020(path, base, node, asc_path);
+     } else if (adt_is_compatible(adt, node, "dart,t6000")) {
+-        ret = dapf_init_t8020(path, base, node);
++        ret = dapf_init_t8020(path, base, node, asc_path);
+     } else if (adt_is_compatible(adt, node, "dart,t8110")) {
+         ret = dapf_init_t8110(path, base, node);
+     } else {
+         printf("dapf: DAPF %s at 0x%lx is of an unknown type\n", path, base);
+-        return -1;
++        ret = -1;
++    }
++
++    if (asc_path) {
++        sysop("dsb sy");
++        sysop("isb");
++        udelay(300000);
++        exc_guard = GUARD_OFF;
++        if (exc_count != exc_before) {
++            printf("dapf: %s: %d exception(s) while programming; continuing boot\n", path,
++                   exc_count - exc_before);
++            ret = -1;
++        }
+     }
+ 
+     if (pwr)
+@@ -165,14 +242,26 @@
+     return ret;
+ }
+ 
++int dapf_init(const char *path, int index)
++{
++    return dapf_init_asc(path, index, NULL);
++}
++
+ struct entry {
+     const char *path;
+     int index;
++    const char *asc_path; /* append a TEXT entry for this ASC if needed */
+ };
+ 
+ struct entry dapf_entries[] = {
+-    {"/arm-io/dart-aop", 1}, {"/arm-io/dart-mtp", 1},  {"/arm-io/dart-pmp", 1},
+-    {"/arm-io/dart-isp", 5}, {"/arm-io/dart-isp0", 5}, {NULL, -1},
++    {"/arm-io/dart-aop", 1, NULL},
++    {"/arm-io/dart-mtp", 1, NULL},
++    {"/arm-io/dart-pmp", 1, NULL},
++    {"/arm-io/dart-isp", 5, NULL},
++    {"/arm-io/dart-isp0", 5, NULL},
++    {"/arm-io/dart-ave0", 3, "/arm-io/ave0"},
++    {"/arm-io/dart-ave", 3, "/arm-io/ave"}, /* t8103: one encoder, unnumbered */
++    {NULL, -1, NULL},
+ };
+ 
+ int dapf_init_all(void)
+@@ -186,7 +275,7 @@
+             entry++;
+             continue;
+         }
+-        if (dapf_init(entry->path, entry->index) < 0) {
++        if (dapf_init_asc(entry->path, entry->index, entry->asc_path) < 0) {
+             ret = -1;
+         }
+         entry++;
