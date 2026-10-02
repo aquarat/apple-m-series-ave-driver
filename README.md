@@ -52,6 +52,10 @@ It is a stateful mem2mem encoder, NV12 in:
 - **Checks:** `v4l2-compliance -s` passes 54/54. ffmpeg and GStreamer
   (`v4l2h264enc`/`v4l2h265enc`) work. `testsrc2` comes back at 43-45 dB PSNR
   from 480p to 4K in both codecs.
+- **Compression (docs/88):** HEVC needs ~20 % more bitrate than x265
+  `medium` (CRF) and ~40-75 % more than `slow` for equal quality on the
+  Xiph derf 1080p clips, at ~25x less energy per frame; Main 10 gains at
+  most a few percent. Benchmark and results: `bench/hevc-efficiency/`.
 - **Throughput,** one frame in flight: 1080p ~70 fps, 4K ~19 fps on a stock
   DT (no PMP; ~57/16 fps with the PMP running but no vote). **With a VMAX
   vote,** 1080p ~170 fps and 4K

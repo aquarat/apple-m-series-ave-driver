@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Addresses and messages for AVE's SoC performance request to the PMP (docs/75).
 
-Reads only the ADT. Computes, for ave0 and ave1 on t6001:
+Reads only the ADT. Computes, for ave0 and (where the SoC has one) ave1:
   - the PMP "PTD" dashboard entries macOS 13.5 writes when the AVE kext moves
     between VMin/VMid/VMid2/VMax (SOC-DEV-DVFS) and when VENC_SYS powers up or
     down (SOC-DEV-PS-REQ / -ACK, PMP-STATUS);
@@ -16,7 +16,8 @@ refuses to print results unless its controls pass:
       (0xf80, 0x107c0, 0x1000, 0x10), derived independently
   C3  /arm-io/pmp reg[ptd-update-reg-index] - 0x10000 == pmgr reg[41]
       (RegMap 8 -> ADT reg 0x29, AppleT6001PMGR 0xfffffe0009b8ad78)
-  C4  soc-device names at the computed indices are AVE0 / AVE1
+  C4  soc-device names at the computed indices are AVE0 / AVE1 (AVE1 only
+      where the ADT has VENC1_SYS: t6000 has one encoder, docs/87)
 
 Usage: python3 tools/pmp_ptd_map.py [adt.bin] [--venc-ps ADDR]
 """
@@ -83,8 +84,11 @@ got = (ptd["SOC-DEV-PS-REQ"][1] * 16, ptd["SOC-DEV-PS-REQ"][1] * 8 + 0x10000,
        ptd["SOC-DEV-PS-ACK"][1] * 16, ptd["PMP-STATUS"][1] * 16)
 check("C2", got == (0xf80, 0x107c0, 0x1000, 0x10), "PS-REQ rd/wr, PS-ACK, STATUS = " + ", ".join(hex(x) for x in got))
 check("C3", ptd_wr_pmp == ptd_wr, f"pmp reg[{pmp.ptd_update_reg_index}] {ptd_wr_pmp:#x} vs pmgr reg[41]+0x10000 {ptd_wr:#x}")
-check("C4", by_id[byname["VENC_SYS"].id1]["name"] == "AVE0" and by_id[byname["VENC1_SYS"].id1]["name"] == "AVE1",
-      "soc-device(VENC_SYS.id1, VENC1_SYS.id1) = " + by_id[byname["VENC_SYS"].id1]["name"] + ", " + by_id[byname["VENC1_SYS"].id1]["name"])
+INSTANCES = [(n, i, want) for n, i, want in (("VENC_SYS", "ave0", "AVE0"), ("VENC1_SYS", "ave1", "AVE1"))
+             if n in byname]
+got = [by_id[byname[n].id1]["name"] for n, _, _ in INSTANCES]
+check("C4", bool(INSTANCES) and INSTANCES[0][0] == "VENC_SYS" and got == [w for _, _, w in INSTANCES],
+      "soc-device(" + ", ".join(f"{n}.id1" for n, _, _ in INSTANCES) + ") = " + ", ".join(got))
 if fail:
     sys.exit(f"controls failed: {fail} -- not printing results")
 
@@ -98,7 +102,7 @@ for n in ("PMP-STATUS", "DVFS-STATE", "SOC-DEV-PS-REQ", "SOC-DEV-PS-ACK", "SOC-D
 def msg(soc_lvl, fab0=0):
     return soc_lvl | (fab0 << 32) | (1 << 61)
 
-for sysname, inst in (("VENC_SYS", "ave0"), ("VENC1_SYS", "ave1")):
+for sysname, inst, _ in INSTANCES:
     d = byname[sysname]
     s = by_id[d.id1]
     idx = ptd["SOC-DEV-DVFS"][1] + s["dvfs_slot"]
@@ -120,8 +124,10 @@ print("  (_getSOCPerfCounter 0xfffffe00098633f8..0xfffffe0009863428; m1n1 dump_p
 def pc(blk, idx):
     r = pmgr.perf_regs[blk]
     return pmgr.get_reg(r.reg)[0] + r.offset + 0x100 + idx * 0x10
-for name, blk, idx in (("VENC_SYS device", 9, 36), ("MSR0 device", 9, 33), ("VENC1_SYS device", 10, 35)):
-    print(f"  {name:22s} blk {blk:2d} idx {idx:3d} ctl {pc(blk, idx):#x}")
+for name in ("VENC_SYS", "MSR0", "VENC1_SYS"):
+    if name in byname:
+        d = byname[name]
+        print(f"  {name + ' device':22s} blk {d.perf_block:2d} idx {d.perf_idx:3d} ctl {pc(d.perf_block, d.perf_idx):#x}")
 for c in pmgr.clocks:
     if c.name.startswith("VENC"):
         print(f"  clock {c.name:16s} blk {c.perf_block:2d} idx {c.perf_idx:3d} ctl {pc(c.perf_block, c.perf_idx):#x}")

@@ -2633,6 +2633,7 @@ static void ave_remove(struct platform_device *pdev)
  */
 static const struct of_device_id ave_of_match[] = {
 	{ .compatible = "apple,t6001-ave", .data = &ave_soc_set_t6001 },
+	{ .compatible = "apple,t6000-ave", .data = &ave_soc_set_t6000 },
 	{ .compatible = "apple,ave" },
 	{}
 };

@@ -22,6 +22,12 @@ struct ave_soc_devrow {
 	u32	chip_type;
 };
 
+/* A 16 KiB window of the firmware's TEXT and its sha256 (fw_restore_data) */
+struct ave_soc_textwin {
+	u32	off;
+	u8	sha[32];
+};
+
 /* A DAPF entry's address range (the r0/r4 flags are not SoC-specific) */
 struct ave_soc_range {
 	u64	start;
@@ -77,7 +83,17 @@ struct ave_soc {
 		 */
 		bool		data_owned;
 		u64		tag_cpad, tag_wrad, tag_ioba;
+		/* where iBoot's per-boot stack guard (STKG) sits inside DATA */
+		u64		data_stkg_off;
 	} iboot;
+
+	/*
+	 * fw_restore_data: what the pristine DATA blob hashes to, and three
+	 * TEXT windows that tell this image from every sibling variant
+	 * (docs/43 §3.2). Per firmware variant, so per SoC.
+	 */
+	u8			pristine_sha256[32];
+	struct ave_soc_textwin	text_win[3];
 	/* docs/84 §3: the driver programs this DART's DAPF (m1n1 does not) */
 	bool		dapf_by_driver;
 
@@ -103,6 +119,8 @@ struct ave_soc_set {
 extern const struct ave_soc ave_soc_t6001;
 extern const struct ave_soc ave_soc_t6001_ave1;
 extern const struct ave_soc_set ave_soc_set_t6001;
+extern const struct ave_soc ave_soc_t6000;
+extern const struct ave_soc_set ave_soc_set_t6000;
 
 const struct ave_soc *ave_soc_pick(const struct ave_soc_set *set,
 				   phys_addr_t dpe_phys);

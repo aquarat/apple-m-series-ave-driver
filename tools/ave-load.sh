@@ -6,6 +6,7 @@
 #   sudo tools/ave-load.sh [params] # load, optionally with module parameters
 #   sudo tools/ave-load.sh unload   # rmmod apple-ave (Stop + Close any stream)
 #   sudo OVERLAY_ARGS=pmp_venc=1 tools/ave-load.sh pmp_report=1   # docs/78 R3
+#   sudo VARIANT=8 tools/ave-load.sh   # t6000 (M1 Pro), its one encoder (docs/87)
 #   sudo VARIANT=4 tools/ave-load.sh   # ave0 only; the default 7 loads both
 #   encoders, /dev nodes apple-ave-enc and apple-ave1-enc (docs/82)
 #
