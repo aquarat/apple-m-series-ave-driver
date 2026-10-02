@@ -132,3 +132,57 @@ differently over full-length material. Expect the same ranking, not the
 same decimals. VMAF rewards x265's psychovisual defaults, and PSNR is
 neutral; both are given. One machine, one driver state (docs/87, fixed QP
 with I = P).
+
+## 7. What bitrate for "good" 1080p and 4K? (guidance)
+
+How the results above translate into bitrates for storing ordinary video.
+The published service figures are approximate and from general knowledge,
+not measured here [I]; check the services' current documentation before
+relying on them.
+
+| | 1080p | 4K |
+|---|---|---|
+| YouTube recommended *upload* bitrate (H.264, SDR; 24-30 / 50-60 fps) | 8 / 12 Mbit/s | 35-45 / 53-68 Mbit/s |
+| YouTube *delivery* (VP9/AV1) | ~2.5-4 Mbit/s | ~12-20 Mbit/s |
+| Netflix *delivery* (HEVC/AV1, per-title encoding) | ~3-6 Mbit/s (H.264 up to ~6-8) | ~8-16 Mbit/s (long a fixed ~15 Mbit/s) |
+| Blu-ray / UHD Blu-ray | ~20-40 Mbit/s (H.264) | ~50-100 Mbit/s (HEVC) |
+
+Streaming delivery is "good", not transparent: Netflix aims at roughly
+VMAF 93-95 for its top rung.
+
+Suggested HEVC targets for keeping video at that level (x265 `slow`/`medium`,
+24-30 fps) [I]:
+
+| content | 1080p | 4K |
+|---|---|---|
+| clean digital, animation, talking heads | 2-4 Mbit/s | 6-12 Mbit/s |
+| typical film/TV, streaming-service quality | **4-8 Mbit/s** | **12-20 Mbit/s** |
+| near-transparent, or grainy/noisy film | 8-15 Mbit/s | 20-40 Mbit/s |
+
+- 4K needs roughly 2.5-4x the 1080p bitrate, not the 4x its pixel count
+  suggests. 50/60 fps adds about 30-50 %.
+- **AVE: add ~20 %** (§ Summary): about 5-10 Mbit/s for 1080p and
+  15-25 Mbit/s for 4K at streaming-service quality.
+
+Why the ranges are wide: the bitrate needed for **VMAF 93** at 1080p in
+this benchmark, interpolated from `results.csv` [C]:
+
+| clip | x265 slow CRF | x265 medium CRF | AVE fixed QP |
+|---|---|---|---|
+| cam-a, cam-b (static scenes, already compressed) | 0.4-1.7 Mbit/s | 0.4-2.1 Mbit/s | 0.5-2.0 Mbit/s |
+| in_to_tree, old_town_cross (calmer) | 7-9 Mbit/s | 15-17 Mbit/s | 15-23 Mbit/s |
+| crowd_run, park_joy, ducks_take_off (hardest) | 21-45 Mbit/s | 27-68 Mbit/s | 29-72 Mbit/s |
+
+The derf clips are deliberate torture tests (50 fps, grain, water,
+crowds): an upper bound, not typical content.
+
+In practice:
+- **Target quality, not bitrate.** Use x265 CRF ~20-22 (`slow`) or AVE
+  fixed QP, and let each title find its own size. A fixed bitrate wastes
+  bits on easy material and starves hard material.
+- **The source caps the result.** Re-encoding a lossy file never improves
+  it. HEVC typically keeps an H.264 source's quality at about 50-70 % of
+  its bitrate, and going above the source's own bitrate buys nothing.
+- **Calibrate on a few titles first:** encode two or three representative
+  titles at a couple of settings and score them (`bench.py`'s `measure()`
+  or the `vmaf` tool) before committing a whole collection.
