@@ -1,10 +1,11 @@
 # Driver
 
-**UNTESTED. None of this has run on hardware, and it has not been compiled.**
-
-The `build` symlink on the development machine points at an uninstalled
-`kernel-devel`, so not even a compile check has been done. Treat every file
-here as a first draft.
+**Status (2026-09-30): this is the working driver**, a V4L2 H.264/HEVC
+encoder used on the M1 Max and M1 Pro (top-level README, docs/53 run log,
+docs/84 stability, docs/87 M1 Pro). `make -C driver` builds `apple-ave.ko`
+against the running kernel's `kernel-devel`. The table below is the
+original first-draft file list; later files (`ave_cmd.c`, `ave_session.c`,
+`ave_v4l2.c`, `ave_dapf.c`, `ave_soc.c`, …) are described in the docs.
 
 | File | Contents |
 |---|---|

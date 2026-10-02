@@ -2,7 +2,7 @@
 
 This repository is almost entirely AI-generated (Claude Opus models specifically, some Fable). The purpose of this work is to produce a working H.264 and HEVC Apple Video Encoder hardware driver for Linux running on M-series machines. This work was created in the interests of interoperability and allowing open source software to run efficiently on ageing hardware.
 
-This driver is alpha work and has only been used on an M1 Max machine so far. Before using it, make sure it's right for you.
+This driver is alpha work and has been used on an M1 Max and an M1 Pro machine so far. Before using it, make sure it's right for you.
 
 As per the documents the work has been tested extensively (several hours now), but has some specific shortcomings that I _largely_ don't care about.
 
@@ -16,10 +16,28 @@ this writing there is no public AVE work in Asahi — the encoder is untouched.
 This repository is the starting point for that work.
 
 **Target hardware for the initial effort:** Apple M1 Max (`t6001`, board `j314c`),
-which exposes two independent encoder instances (`ave0`, `ave1`). The approach
-should generalise across the M1 family and forward.
+which exposes two independent encoder instances (`ave0`, `ave1`). The **M1 Pro**
+(`t6000`, board `j314s`, one encoder) followed as the first port (docs/87). The
+approach should generalise across the M1 family and forward.
 
-## Status (2026-09-24)
+## Supported machines (2026-09-30)
+
+| SoC | machines | encoders | firmware (macOS 13.5 stub) | overlay | status |
+|---|---|---|---|---|---|
+| `t6001` M1 Max | MacBookPro18,4/18,2 (`j314c`/`j316c`) | 2 (`apple-ave-enc`, `apple-ave1-enc`) | `AppleAVE2FW_H13C` → `apple/ave_h13c.bin` | `VARIANT=7` (both) or `4` (ave0) | bring-up machine; ave0's DAPF via the patched m1n1 (docs/50) |
+| `t6000` M1 Pro | MacBookPro18,3 (`j314s`); 18,1 (`j316s`) untested | 1 (`apple-ave-enc`) | `AppleAVE2FW_H13S` → `apple/ave_h13s.bin` | `VARIANT=8` | works with stock m1n1 (the driver programs the DAPF), docs/87 |
+| others (M1, M2…) | | | | | not ported: docs/79 is the checklist |
+
+Each SoC needs its firmware variant's Mach-O and its **pristine DATA blob**
+(`apple/ave-13.5-data-pristine.bin` for H13C,
+`apple/ave-13.5-h13s-data-pristine.bin` for H13S) in `/lib/firmware`. The
+blob is iBoot's DATA segment as left before the encoder's first start,
+taken from a cold boot with the read-only `test/physdump.ko` (docs/51,
+docs/87 §3). The driver checks its sha256 and only needs it to reload in
+the same boot. Only macOS 13.5 stub firmware (`asahi,os-fw-version`) has
+been mapped.
+
+## Status (2026-09-30)
 
 A driver exists and runs on real hardware. It brings the block up, starts the
 firmware, completes the command handshake, and encodes a frame: Config, Open,
@@ -30,10 +48,17 @@ decodes, with every macroblock accounted for and no faults.
 
 ```sh
 make -C driver && make -C test          # on the MacBook, Fedora Asahi Remix
-sudo tools/ave-load.sh                  # prints /dev/videoN; once per boot
+sudo tools/ave-load.sh                  # M1 Max: both encoders; prints /dev/videoN; once per boot
+sudo VARIANT=8 tools/ave-load.sh        # M1 Pro
 ffmpeg -i input.mp4 -pix_fmt nv12 -c:v h264_v4l2m2m -b:v 4M out.mp4
 ffmpeg -i input.mp4 -pix_fmt nv12 -c:v hevc_v4l2m2m -b:v 4M out.mp4
 ```
+
+For fixed-QP encoding (the better mode for file size, docs/88) set
+`frame_level_rate_control_enable=0` and `hevc_i_frame_qp_value` (or
+`h264_i_frame_qp_value`). `v4l2-ctl` does this (docs/88 §3, tested);
+GStreamer's `extra-controls` should too (untested). ffmpeg's wrapper always
+turns rate control on.
 
 It is a stateful mem2mem encoder, NV12 in:
 - **H.264:** High with CABAC by default; Main and Baseline selectable.
@@ -52,10 +77,11 @@ It is a stateful mem2mem encoder, NV12 in:
 - **Checks:** `v4l2-compliance -s` passes 54/54. ffmpeg and GStreamer
   (`v4l2h264enc`/`v4l2h265enc`) work. `testsrc2` comes back at 43-45 dB PSNR
   from 480p to 4K in both codecs.
-- **Compression (docs/88):** HEVC needs ~20 % more bitrate than x265
+- **Compression (docs/88, M1 Pro):** HEVC needs ~20 % more bitrate than x265
   `medium` (CRF) and ~40-75 % more than `slow` for equal quality on the
   Xiph derf 1080p clips, at ~25x less energy per frame; Main 10 gains at
-  most a few percent. Benchmark and results: `bench/hevc-efficiency/`.
+  most a few percent. Benchmark, results and bitrate guidance for 1080p/4K:
+  docs/88, `bench/hevc-efficiency/`.
 - **Throughput,** one frame in flight: 1080p ~70 fps, 4K ~19 fps on a stock
   DT (no PMP; ~57/16 fps with the PMP running but no vote). **With a VMAX
   vote,** 1080p ~170 fps and 4K
@@ -65,20 +91,32 @@ It is a stateful mem2mem encoder, NV12 in:
   it only while a stream is open, at the same speed (docs/80), and
   `pmp_vote_always=1` restores the load-time vote. Without a running PMP
   the options are ignored with a warning and the encoder runs at the boot
-  clock.
+  clock. **M1 Pro** (docs/87 t1-t3): 1080p 15.5 → **5.2 ms/frame (~194 fps)**
+  and 4K 55.5 → **18.2 ms (~55 fps)** with the vote, PSNR unchanged. The PMP
+  runs only with a DTB that has the `pmp` alias (Fedora's are built without
+  `APPLE_USE_PMP`; docs/78, docs/87 §6-7).
 - **Not yet:**
   - **B frames**, and more than one reference per frame. The firmware
     reorders as designed, but any frame with two active references stalls
     the pipe, in H.264 and HEVC alike (docs/81; docs/53 bs1-bs6, hb3).
   - System suspend/resume (untested; suspend is masked on the lab machine).
+- **Known issues:** ffmpeg's V4L2 m2m wrapper segfaults on a 1080-line
+  input: the driver rounds the OUTPUT height up to 1088 and the wrapper
+  mishandles it (other non-16-aligned heights likely too; untested). The
+  driver survives it. Pad to a 16-aligned height, or use `v4l2-ctl` with an
+  OUTPUT crop. The HEVC level control defaults
+  to 4, which under-reports 1440p and 4K streams (docs/88 §5).
 - **Stability (docs/84):** a 2-hour campaign (6055 byte-identical streams,
   60 000-frame streams, 300 open/close cycles, 150 random configurations,
   killed and competing clients) passed with no failure. The module reloads
   in the same boot, and a firmware hang recovers by itself when the stream
   is closed.
 - **Porting:** another Apple Silicon machine takes a per-SoC table row and
-  an overlay (docs/79). Fedora's own ffmpeg has no HEVC *decoder*, so check
-  HEVC output elsewhere, or with a full ffmpeg build.
+  an overlay (docs/79). The M1 Pro (docs/87) is the worked example: same
+  encoder block, different firmware variant, so new placement, layout and
+  pristine blob, found from the IPSW and a read-only RAM dump. Fedora's own
+  ffmpeg has no HEVC *decoder*, so check HEVC output elsewhere, or with a
+  full ffmpeg build.
 
 **It encodes correctly (2026-09-24, f48):** a 1280x720 ramp comes back at
 48.6 dB PSNR against the source. The long-standing blank frame (every sample
@@ -187,6 +225,8 @@ information rather than redistributed code.
 python3 -m venv .venv && ./.venv/bin/pip install -r requirements.txt
 git clone --depth 1 https://github.com/AsahiLinux/m1n1 m1n1-src   # ADT parser
 
+# M1 Max shown; M1 Pro: --board j314s --variant H13S. Use the IPSW of the
+# macOS version your Asahi stub runs (13.5: docs/43 gives the URL, --url)
 ./.venv/bin/python tools/fetch_firmware.py --board j314c --variant H13C
 ./.venv/bin/pyimg4 im4p extract -i data/blobs/Firmware/ave/AppleAVE2FW_H13C.im4p \
                                 -o data/blobs/ave_h13c.bin
@@ -204,19 +244,20 @@ python3 tools/kext_classmap.py data/derived/kext-symbols.txt
 Full reproduction steps, including why the ADT cannot simply be read from a
 booted Linux system, are in [docs/05-reproducing.md](docs/05-reproducing.md).
 
-## Building a driver
+## The driver
 
-[docs/22-driver-plan.md](docs/22-driver-plan.md) maps the findings onto the
-components a Linux driver needs, with the bring-up sequence and what still
-blocks first light.
+`driver/` builds `apple-ave.ko` (the V4L2 encoder) against the running
+kernel's `kernel-devel`; `test/` builds `ave-overlay.ko`, which adds the
+encoder's device-tree node (Fedora's DT has none), and read-only
+diagnostics. `driver/ave_soc.c` holds the per-SoC rows. How it was built,
+in order: [docs/22-driver-plan.md](docs/22-driver-plan.md) (the plan),
+docs/53 (the run log), docs/63-68 (teardown, frames, rate control,
+bitstream, V4L2), docs/77 and 83 (HEVC, Main 10).
 
-The confirmed constants are available as compilable headers:
-
-- `driver/ave_hw.h`, `driver/ave_abi.h` — the transcribed constants
-- `driver/ave_drv.c`, `driver/ave_ipc.c` — a first-draft platform driver
-  covering probe, power, firmware adoption, ASC start and the IPC ring.
-  **Untested and not yet compiled** — see `driver/README.md`.
+- `driver/ave_hw.h`, `driver/ave_abi.h` — the transcribed constants, with
+  the instruction address each was read from
 - `dts/apple,ave.yaml`, `dts/t6001-ave.dtsi` — device tree binding and nodes
+  (the overlay in `test/` is what is loaded today)
 
 [docs/23-empirical-bringup.md](docs/23-empirical-bringup.md) covers closing the
 last gaps on hardware, using the firmware's own logging and the output
@@ -230,10 +271,12 @@ power, and the coprocessor is ordinary RTKit.
 ## Layout
 
 ```
-docs/            findings, methodology and the driver plan
-driver/          C headers of confirmed constants
+docs/            findings, methodology, the run log (53) and per-topic notes
+driver/          the apple-ave V4L2 encoder module
+test/            ave-overlay module (DT node for the encoder), read-only diagnostics
 dts/             device tree binding and node fragments
-tools/           extraction and analysis scripts
+tools/           extraction, analysis, lab and test scripts
+bench/           benchmarks (hevc-efficiency: AVE vs x265, docs/88)
 data/derived/    committed: symbols, command tables, ADT dumps (facts)
 data/blobs/      gitignored: Apple proprietary firmware and device tree
 ```
