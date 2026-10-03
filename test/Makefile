@@ -11,7 +11,7 @@ PWD  := $(shell pwd)
 
 all: ave_overlay_dtbo.h ave_overlay_noiommu_dtbo.h ave_overlay_e2_dtbo.h \
      ave_overlay_e3_dtbo.h ave_overlay_e4_dtbo.h \
-     ave_overlay_e5_dtbo.h ave_overlay_e6_dtbo.h ave_overlay_e7_dtbo.h ave_overlay_pmp_venc_dtbo.h \
+     ave_overlay_e5_dtbo.h ave_overlay_e6_dtbo.h ave_overlay_e7_dtbo.h ave_overlay_pmp_venc_dtbo.h ave_overlay_pmp_venc_t8112_dtbo.h \
      ave_overlay_t6000_dtbo.h ave_overlay_t8103_dtbo.h ave_overlay_t8112_dtbo.h
 	$(MAKE) -C $(KDIR) M=$(PWD) modules
 
@@ -109,3 +109,9 @@ ave_overlay_t8112_dtbo.h: ave-overlay-t8112.dtbo
 ave-overlay-t8112.dtbo: ave-overlay-t8112.dts
 	dtc -I dts -O dtb -o $@ $< 2>/dev/null
 
+# pmp_venc=1 on t8112 (docs/90 §9): report@9
+ave_overlay_pmp_venc_t8112_dtbo.h: ave-overlay-pmp-venc-t8112.dtbo
+	python3 mkhdr.py $< ave_overlay_pmp_venc_t8112_dtbo $@
+
+ave-overlay-pmp-venc-t8112.dtbo: ave-overlay-pmp-venc-t8112.dts
+	dtc -I dts -O dtb -o $@ $< 2>/dev/null

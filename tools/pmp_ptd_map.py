@@ -10,14 +10,18 @@ Reads only the ADT. Computes, for ave0 and (where the SoC has one) ave1:
 
 Every rule below is cited to docs/75 (macOS 13.5 kernelcache VAs). The script
 refuses to print results unless its controls pass:
-  C1  VENC_SYS PS register == the Linux DT's venc_sys reg (t6001: 0x28e5803b0,
-      known good; --venc-ps ADDR for another SoC, docs/79 §3)
-  C2  PS-REQ/ACK/STATUS offsets == Asahi pmp-report t600x constants
-      (0xf80, 0x107c0, 0x1000, 0x10), derived independently
-  C3  /arm-io/pmp reg[ptd-update-reg-index] - 0x10000 == pmgr reg[41]
-      (RegMap 8 -> ADT reg 0x29, AppleT6001PMGR 0xfffffe0009b8ad78)
-  C4  soc-device names at the computed indices are AVE0 / AVE1 (AVE1 only
-      where the ADT has VENC1_SYS: t6000 has one encoder, docs/87)
+  C1  VENC_SYS PS register == the Linux DT's venc_sys reg (per SoC below,
+      or --venc-ps ADDR, docs/79 §3)
+  C2  PS-REQ/ACK/STATUS offsets == Asahi pmp-report.c's constants for the
+      SoC (t600x 0xf80/0x107c0/0x1000, t8112 0xa00/0x10500/0xa40; status
+      0x10), derived independently
+  C3  /arm-io/pmp reg[ptd-update-reg-index] - 0x10000 == the PTD read base,
+      pmgr reg[41] on t600x (RegMap 8 -> ADT reg 0x29, AppleT6001PMGR
+      0xfffffe0009b8ad78), reg[39] on t8112 (= Linux pmp_report@23b3c0000,
+      docs/90 §9)
+  C4  soc-device names at the computed indices are AVE0 / AVE1, or AVE
+      on a one-encoder SoC that names it so (t8112); AVE1 only where the
+      ADT has VENC1_SYS
 
 Usage: python3 tools/pmp_ptd_map.py [adt.bin] [--venc-ps ADDR]
 """
@@ -29,14 +33,28 @@ from m1n1.adt import load_adt  # noqa: E402
 
 ap = argparse.ArgumentParser()
 ap.add_argument("adt", nargs="?", default=os.path.join(REPO, "data/blobs/macos-13.5/adt.bin"))
-ap.add_argument("--venc-ps", type=lambda v: int(v, 0), default=0x28e5803b0,
-                help="the Linux DT's venc_sys power-controller address (C1); default t6001's")
+ap.add_argument("--venc-ps", type=lambda v: int(v, 0), default=None,
+                help="the Linux DT's venc_sys power-controller address (C1); default per SoC")
 args = ap.parse_args()
 adt_path = args.adt
 adt = load_adt(open(adt_path, "rb").read())
 pmgr = adt["/arm-io/pmgr"]
 pmp = adt["/arm-io/pmp"]
 nub = adt["/arm-io/pmp/iop-pmp-nub"]._properties
+
+# per SoC (the /arm-io compatible): venc_sys PS (Linux DT), Asahi pmp-report
+# offsets (tgt_read, tgt_write, actual, status), pmgr reg index of the PTD read base
+SOCS = {
+    "arm-io,t6000": (0x28e5803b0, (0xf80, 0x107c0, 0x1000, 0x10), 41),
+    "arm-io,t8110": (0x23b700440, (0xa00, 0x10500, 0xa40, 0x10), 39),   # t8112
+}
+aio = list(adt["/arm-io"].compatible)
+known = [c for c in aio if c in SOCS]
+if not known:
+    sys.exit(f"/arm-io compatible {aio}: no per-SoC constants here yet")
+VENC_PS, PMP_OFFS, PTD_REG = SOCS[known[0]]
+if args.venc_ps is not None:
+    VENC_PS = args.venc_ps
 
 fail = []
 def check(name, ok, detail):
@@ -72,22 +90,25 @@ for i in range(0, len(sd), 124):
     soc.append(dict(index=i // 124, id=w[0], name=name, dvfs_slot=dv, flags=w[2]))
 by_id = {s["id"]: s for s in soc}
 
-ptd_rd = pmgr.get_reg(41)[0]                    # RegMap 8 (read side, 16 B/entry)
+ptd_rd = pmgr.get_reg(PTD_REG)[0]               # RegMap 8 (read side, 16 B/entry)
 ptd_wr_pmp = pmp.get_reg(pmp.ptd_update_reg_index)[0]
 ptd_wr = ptd_rd + 0x10000                        # ApplePTD::_writePTD 0xfffffe000987aa7c
 def rd(idx): return ptd_rd + idx * 16
 def wr(idx): return ptd_wr + idx * 8
 
 print("controls")
-check("C1", ps_addr(byname["VENC_SYS"]) == args.venc_ps, f"VENC_SYS PS {ps_addr(byname['VENC_SYS']):#x}")
+check("C1", ps_addr(byname["VENC_SYS"]) == VENC_PS, f"VENC_SYS PS {ps_addr(byname['VENC_SYS']):#x}")
 got = (ptd["SOC-DEV-PS-REQ"][1] * 16, ptd["SOC-DEV-PS-REQ"][1] * 8 + 0x10000,
        ptd["SOC-DEV-PS-ACK"][1] * 16, ptd["PMP-STATUS"][1] * 16)
-check("C2", got == (0xf80, 0x107c0, 0x1000, 0x10), "PS-REQ rd/wr, PS-ACK, STATUS = " + ", ".join(hex(x) for x in got))
-check("C3", ptd_wr_pmp == ptd_wr, f"pmp reg[{pmp.ptd_update_reg_index}] {ptd_wr_pmp:#x} vs pmgr reg[41]+0x10000 {ptd_wr:#x}")
+check("C2", got == PMP_OFFS, "PS-REQ rd/wr, PS-ACK, STATUS = " + ", ".join(hex(x) for x in got))
+check("C3", ptd_wr_pmp == ptd_wr, f"pmp reg[{pmp.ptd_update_reg_index}] {ptd_wr_pmp:#x} vs pmgr reg[{PTD_REG}]+0x10000 {ptd_wr:#x}")
 INSTANCES = [(n, i, want) for n, i, want in (("VENC_SYS", "ave0", "AVE0"), ("VENC1_SYS", "ave1", "AVE1"))
              if n in byname]
-got = [by_id[byname[n].id1]["name"] for n, _, _ in INSTANCES]
-check("C4", bool(INSTANCES) and INSTANCES[0][0] == "VENC_SYS" and got == [w for _, _, w in INSTANCES],
+got = [by_id[byname[n].id1]["name"].strip("\0 ") for n, _, _ in INSTANCES]
+want = [w for _, _, w in INSTANCES]
+if len(INSTANCES) == 1 and got == ["AVE"]:
+    want = ["AVE"]                                  # t8112: the only encoder is "AVE"
+check("C4", bool(INSTANCES) and INSTANCES[0][0] == "VENC_SYS" and got == want,
       "soc-device(" + ", ".join(f"{n}.id1" for n, _, _ in INSTANCES) + ") = " + ", ".join(got))
 if fail:
     sys.exit(f"controls failed: {fail} -- not printing results")

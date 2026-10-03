@@ -28,7 +28,7 @@ the **M2** (`t8112`, Mac mini `j473`) as the first outside the M1 family
 | `t6001` M1 Max | MacBookPro18,4/18,2 (`j314c`/`j316c`) | 2 (`apple-ave-enc`, `apple-ave1-enc`) | `AppleAVE2FW_H13C` → `apple/ave_h13c.bin` | `VARIANT=7` (both) or `4` (ave0) | bring-up machine; ave0's DAPF via the patched m1n1 (docs/50) |
 | `t6000` M1 Pro | MacBookPro18,3 (`j314s`); 18,1 (`j316s`) untested | 1 (`apple-ave-enc`) | `AppleAVE2FW_H13S` → `apple/ave_h13s.bin` | `VARIANT=8` | works with stock m1n1 (the driver programs the DAPF), docs/87 |
 | `t8103` M1 | MacBook Air M1 (`j313`); other M1 machines: placement per machine (docs/89) | 1 (`apple-ave-enc`) | `AppleAVE2FW_H13G` → `apple/ave_h13g.bin` | `VARIANT=9` | H.264 tested by the fork author (docs/89); merged with driver-side DAPF, untested on stock m1n1 |
-| `t8112` M2 | Mac mini M2 (`j473`); other M2 machines: placement per machine (docs/90) | 1 (`apple-ave-enc`) | `AppleAVE2FW_H14G` → `apple/ave_h14g.bin` | `VARIANT=10` | H.264 and HEVC (Main, Main10) tested on a j473 with stock m1n1, clean boot and reload; no PMP vote yet (docs/90) |
+| `t8112` M2 | Mac mini M2 (`j473`); other M2 machines: placement per machine (docs/90) | 1 (`apple-ave-enc`) | `AppleAVE2FW_H14G` → `apple/ave_h14g.bin` | `VARIANT=10` | H.264 and HEVC (Main, Main10) tested on a j473 with stock m1n1, clean boot and reload; full speed without the PMP, which only slows it here (docs/90 §9) |
 | others (M2 Pro/Max, M3…) | | | | | not ported: docs/79 is the checklist |
 
 Each SoC needs its firmware variant's Mach-O and its **pristine DATA blob**
