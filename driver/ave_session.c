@@ -1031,6 +1031,7 @@ struct ave_sess_bufs {
 	 * the module parameters; the V4L2 layer from its format and controls.
 	 */
 	u32		width, height, qp;
+	u32		qp_p, qp_b;	/* 0 = qp (docs/92) */
 	u32		crop_w, crop_h;	/* SPS-only crop; 0 = none */
 	u32		profile;	/* profile_idc; 0 = 66 */
 	u32		level_floor;	/* level_idc asked for (HEVC: 30 x level); 0 = none */
@@ -1994,7 +1995,9 @@ static int ave_session_start_prep(struct ave_device *ave,
 	s->frame_rate_div = bufs->fps_den ? bufs->fps_den : 1;
 	s->bitrate = bufs->bitrate;
 	s->rc_enable = bufs->bitrate != 0;
-	s->qp_i = s->qp_p = s->qp_b = bufs->qp;
+	s->qp_i = bufs->qp;
+	s->qp_p = bufs->qp_p ? bufs->qp_p : bufs->qp;
+	s->qp_b = bufs->qp_b ? bufs->qp_b : s->qp_p;
 	s->qp_min = min_t(u32, bufs->qp_max ? bufs->qp_min : session_qp_min, 51);
 	s->qp_max = clamp_t(u32, bufs->qp_max ? bufs->qp_max : session_qp_max,
 			    s->qp_min, 51);
@@ -5113,7 +5116,7 @@ int ave_enc_start(struct ave_device *ave, const struct ave_enc_cfg *cfg)
 		return -EBUSY;
 	if (cfg->width < 192 || cfg->width > 4096 || cfg->height < 96 ||
 	    cfg->height > 4096 || (cfg->width & 1) || (cfg->height & 1) ||
-	    cfg->qp > 51 || cfg->qp_min > 51 || cfg->qp_max > 51 ||
+	    cfg->qp > 51 || cfg->qp_p > 51 || cfg->qp_b > 51 || cfg->qp_min > 51 || cfg->qp_max > 51 ||
 	    cfg->codec > AVE_ENC_CODEC_HEVC)
 		return -EINVAL;
 	if (hevc && !ave_sess_hevc_ok(abi))
@@ -5136,6 +5139,8 @@ int ave_enc_start(struct ave_device *ave, const struct ave_enc_cfg *cfg)
 	bufs->level_floor = cfg->level_idc;
 	bufs->cabac = !hevc && cfg->cabac && cfg->profile_idc != 66;
 	bufs->qp = cfg->qp;
+	bufs->qp_p = cfg->qp_p;
+	bufs->qp_b = cfg->qp_b;
 	bufs->qp_min = cfg->qp_min;
 	bufs->qp_max = cfg->qp_max;
 	bufs->bitrate = cfg->bitrate;

@@ -83,3 +83,9 @@ POWER_TESTS=crowd_run:8000 POWER_ENCS=ave python3 power.py | tee power-m2.log
 # charts (host)
 .venv/bin/python bench/plots.py
 ```
+
+## 5. Can it compress better?
+
+docs/92: a separate P-frame QP (now a V4L2 control) buys 1.5-2 %; more
+references and B-frames, worth roughly half of the gap to x265 `medium`,
+stall the pipe on both SoCs and need a trace of macOS to unblock.
