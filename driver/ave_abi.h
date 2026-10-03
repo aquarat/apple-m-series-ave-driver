@@ -1439,6 +1439,7 @@ struct ave_process_avc_layout {
 	u32	in_chroma_addr;
 	u32	in_chroma_size;
 	u32	in_chroma_stride;
+	u32	in_dims;		/* 2 x u32; AVE_OFF_NONE = not sent (docs/90) */
 	u32	out_mode;		/* u8 */
 	u32	out_index;		/* u32 */
 	u32	out_coded;		/* u64 */
@@ -2202,6 +2203,12 @@ const struct ave_cmd_abi ave_cmd_abi_13_5 = {
 		.in_chroma_addr	= 0x8d0,	/* kext 0xfffffe0008eb0910 */
 		.in_chroma_size	= AVE_OFF_NONE,
 		.in_chroma_stride = 0x8d8,	/* kext 0xfffffe0008eb0914 */
+		/*
+		 * docs/85 §1.2: macOS sends FI+0xA4C here every frame (kext
+		 * 0xeb091c); the H13x firmware reads it only for compressed
+		 * input, H14G (t8112) for linear input too (docs/90).
+		 */
+		.in_dims	= 0x964,
 		.out_mode	= 0xc00,	/* kext strb wzr,[x3,#3072] 0xfffffe0008eb051c */
 		.out_index	= 0xc04,	/* kext str w26,[x3,#3076] 0xfffffe0008eb0520 */
 		.out_coded	= 0xc08,	/* kext 0xfffffe0008eb0548; fw 0x58384 */
@@ -2717,6 +2724,7 @@ const struct ave_cmd_abi ave_cmd_abi_26_6 = {
 		.in_chroma_addr	= AVE_PIC_IN_CHROMA_ADDR,
 		.in_chroma_size	= AVE_PIC_IN_CHROMA_SIZE,
 		.in_chroma_stride = AVE_PIC_IN_CHROMA_STRIDE,
+		.in_dims	= AVE_OFF_NONE,
 		.out_mode	= AVE_PIC_OUT_MODE,
 		.out_index	= AVE_PIC_OUT_INDEX,
 		.out_coded	= AVE_PIC_OUT_CODED,

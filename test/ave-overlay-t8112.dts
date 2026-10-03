@@ -1,0 +1,77 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/*
+ * variant=10 (docs/90): t8112 (M2; Mac mini j473), ave. The t8103 overlay
+ * (variant=9, docs/89) with four changes, from DeviceTree.j473ap.im4p of
+ * UniversalMac_13.5_22G74_Restore.ipsw and the live t8112 DT:
+ *
+ *  - the DARTs are "dart,t8110" in the ADT, "apple,t8110-dart" in Linux (as
+ *    the t8112 AVD's DART is);
+ *  - compatible "apple,t8112-ave";
+ *  - AIC2 interrupts 692 (ave) and 689 (dart-ave); Linux's numbers equal the
+ *    ADT's on t8112 (avd 667/668, dart-avd 674 in both). 3 cells, no die.
+ *
+ * Unchanged from t8103, checked against the ADT: every reg (ave
+ * 0x67100000/0x45c000, 0x67800000/0x800000, 0x67050000/0x8000,
+ * 0x3b708000/0x4000, 0x66000000/0x1000000; dart-ave lists DART 0x67030000,
+ * CPUDART 0x67040000, SMMU 0x67020000, DAPF 0x67044000), the power domains
+ * (venc_me0/me1 without a phandle, siblings under pipe4 + pipe5, on
+ * /soc/power-management@23b700000), streams 0 and 1 on both DARTs (the ADT
+ * says sid 0 and 15 of 16, as t8103's 0x8001; t8103 ran with 0 and 1).
+ * The CPUDART is first in iommus: ave_dapf_map checks it.
+ */
+/dts-v1/;
+/plugin/;
+
+/ {
+	fragment@0 {
+		target-path = "/soc";
+
+		__overlay__ {
+			#address-cells = <2>;
+			#size-cells = <2>;
+
+			dart_ave_0: iommu@267040000 {
+				compatible = "apple,t8110-dart";
+				reg = <0x2 0x67040000 0x0 0x4000>;
+				interrupt-parent = <0xa7e00013>;
+				interrupts = <0 689 4>;
+				#iommu-cells = <1>;
+				power-domains = <0xa7e0001d>;
+			};
+
+			dart_ave_1: iommu@267030000 {
+				compatible = "apple,t8110-dart";
+				reg = <0x2 0x67030000 0x0 0x4000>;
+				interrupt-parent = <0xa7e00013>;
+				interrupts = <0 689 4>;
+				#iommu-cells = <1>;
+				power-domains = <0xa7e0001d>;
+			};
+
+			ave: video-encoder@267100000 {
+				compatible = "apple,t8112-ave", "apple,ave";
+				reg = <0x2 0x67100000 0x0 0x45c000>,
+				      <0x2 0x67800000 0x0 0x800000>,
+				      <0x2 0x67050000 0x0 0x008000>,
+				      <0x2 0x3b708000 0x0 0x004000>,
+				      <0x2 0x66000000 0x0 0x1000000>,
+				      <0x2 0x67040000 0x0 0x4000>,
+				      <0x2 0x67044000 0x0 0x4000>,
+				      <0x2 0x67020000 0x0 0x4000>;
+				reg-names = "dpe", "asc", "sve", "unk3", "axi2af",
+					    "cpudart", "dapf", "smmu";
+				interrupt-parent = <0xa7e00013>;
+				interrupts = <0 692 4>, <0 689 4>;
+				/*
+				 * venc_sys, venc_pipe5, venc_pipe4. venc_me0 and
+				 * venc_me1 have no phandle in this DT; the driver
+				 * powers both through holder devices.
+				 */
+				power-domains = <0xa7e0001d>, <0xa7e000c2>, <0xa7e000c3>;
+				resets = <0xa7e0001d>;
+				iommus = <&dart_ave_0 0>, <&dart_ave_0 1>,
+					 <&dart_ave_1 0>, <&dart_ave_1 1>;
+			};
+		};
+	};
+};
