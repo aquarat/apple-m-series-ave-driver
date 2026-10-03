@@ -260,6 +260,7 @@ struct ave_avc_frame {
 	u32	in_luma_size;		/* 26.6.2: != 0 */
 	u64	in_chroma_addr;		/* % 64 */
 	u32	in_chroma_stride;	/* % 64 */
+	u32	in_dims[2];		/* PICMGMT +0x964 (13.5); both 0 = not sent */
 	u32	in_chroma_size;
 
 	u32	coded_index;		/* index into the Start-time coded table */

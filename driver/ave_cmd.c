@@ -1266,6 +1266,10 @@ static int ave_pic_fill(struct ave_wr *w, const struct ave_process_avc_layout *l
 		wr32(w, base + l->in_luma_size, f->in_luma_size);
 	if (l->in_chroma_size != AVE_OFF_NONE)
 		wr32(w, base + l->in_chroma_size, f->in_chroma_size);
+	if (l->in_dims != AVE_OFF_NONE && (f->in_dims[0] || f->in_dims[1])) {
+		wr32(w, base + l->in_dims, f->in_dims[0]);
+		wr32(w, base + l->in_dims + 4, f->in_dims[1]);
+	}
 
 	wr8(w, base + l->out_mode, 0);		/* Coded == CodedData[index] arm */
 	wr32(w, base + l->out_index, f->coded_index);

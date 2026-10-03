@@ -38,6 +38,9 @@ that matches only `"apple,ave"` is refused at probe with a pointer here.
 | `cpudart_phys`, `dart1_phys`, `smmu_phys`, `dapf_phys` | `0x40d040000`, `…30000`, `…20000`, `…44000` | ADT `dart-ave0` reg[0..3] + `/arm-io` ranges (`tools/check_addrs.py`) | DAPF = CPUDART + 0x4000 is checked |
 | `dapf_window`, `dapf_mmio_own`, `dapf_mmio_adt` | docs/44 addendum | ADT `dart-ave*` `filter-data-instance-*`, masked | only the driver-side DAPF experiments use these; m1n1 programs the real DAPF |
 | `iboot.*` | TEXT `0x10000b28000`/`0xec000`, DATA `0x10001a90000`/`0x134000` | the live RVBAR and docs/43-44 | **per machine and boot chain**, not just per SoC; the driver checks the live RVBAR against `text_phys` first |
+| `iboot.translated` | false | the live RVBAR: a DART address (`dart-ave` `vm-base`) instead of TEXT's physical one | t8112: the core fetches TEXT/DATA through the CPUDART; `text_dva`/`data_dva` are then full DVAs and the RVBAR is checked against `text_dva` (docs/90 §3) |
+| `dart_t8110` | false | ADT `dart-ave` `compatible`: `dart,t8020`/`t6000` vs `dart,t8110` | the register layout every TCR/TTBR/ERROR access uses, the DAPF entry's `r20`, and the reload's stream-enable + TLB flush (docs/90 §4) |
+| `src_dims` | false | the firmware: does `CDMAController::ConfigPipeRdDMA` read PICMGMT `+0x964` on the linear-input arm? | true on t8112 (H14G); without it the source reader reads a 0x0 picture and the encoder codes black, with no fault (docs/90 §5) |
 | `me1_node` | `/soc/power-management@28e580000/power-controller@8020` | Asahi DT, label `venc_me1` | checked by label before use |
 | `pmp_report_node` | `/soc/pmp_report@28e3c0000/report@10` | Asahi DT, label `pmp-venc-sys` | checked by label |
 | `pmp_ps_reg`, `pmp_report_base`, `pmp_dvfs_wr/rd`, `pmgr_perf_blk` | `0x28e0802d8`, `0x28e3c0000`, `0x28e3d0888`/`0x28e3c1110`, `0x28e5d8000` | `tools/pmp_ptd_map.py` from the ADT (docs/75) | 0 = unknown: `perf_dump`, `pmp_report` and `pmp_vote` then refuse instead of guessing |
@@ -45,8 +48,19 @@ that matches only `"apple,ave"` is refused at probe with a pointer here.
 ## 3. Bring-up checklist for a new machine (M1 Mac mini as the example)
 
 Worked ports since: **t6000** M1 Pro (docs/87: firmware found from the IPSW and a
-cold RAM dump, driver-side DAPF) and **t8103** M1 MacBook Air (docs/89: placement
-from the live ADT, per-SoC DPE tunables, a second ME power holder, `pipe_diag`).
+cold RAM dump, driver-side DAPF), **t8103** M1 MacBook Air (docs/89: placement
+from the live ADT, per-SoC DPE tunables, a second ME power holder, `pipe_diag`)
+and **t8112** M2 Mac mini (docs/90: `t8110` DART, firmware fetched through the
+CPUDART, the source size in PICMGMT `+0x964`).
+
+Three checks the M2 added, cheap to do first on any new SoC:
+- the `dart-ave` compatible (`dart,t8110` needs `dart_t8110`);
+- whether the RVBAR from a `stop_after=10` probe is TEXT's physical address
+  or a DVA (then `iboot.translated`, and find TEXT/DATA with physdump);
+- diff the firmware's symbols against a known variant: the firmware images
+  carry symbol tables, and a function that changed size on the source path
+  (`ConfigPipeRdDMA`, `setPipe*`, `InitEncodingParameters`) is where a new
+  host field hides (docs/90 §5.3).
 
 Static first, on the host, with the new Mac's IPSW:
 
