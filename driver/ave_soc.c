@@ -478,7 +478,19 @@ const struct ave_soc ave_soc_t8112 = {
 	.me1_node		= "/soc/power-management@23b700000/power-controller@8020",
 	.me1_label		= "venc_me1",
 
-	/* Asahi has a t8112 PMP report (pmp-venc-sys); fields to be mapped later (docs/79 §4) */
+	/*
+	 * PMP (docs/90 §9): tools/pmp_ptd_map.py on the j473 ADT, controls
+	 * C1-C4 against Asahi's t8112 pmp-report offsets. VENC votes in its
+	 * own perf domain (1), levels VNOM 1 / VMAX 2, no FAB0 pseudo-device:
+	 * macOS's VMax message is 0x2000000000000002. Measured, nothing
+	 * should use it: the encoder is fastest with the PMP off (docs/90 §9).
+	 */
+	.pmp_report_node	= "/soc/pmp_report@23b3c0000/report@9",
+	.pmp_ps_reg		= 0x23b700410ULL,	/* ADT ps-regs[9], psidx 2/3 */
+	.pmp_report_base	= 0x23b3c0000ULL,	/* pmgr reg[39] */
+	.pmp_dvfs_wr		= 0x23b3d0578ULL,	/* entry 175 = 168 + slot 7 */
+	.pmp_dvfs_rd		= 0x23b3c0af0ULL,
+	.pmgr_perf_blk		= 0x23b758000ULL,	/* perf-regs[1] */
 };
 
 static const struct ave_soc *const ave_soc_t8112_rows[] = {

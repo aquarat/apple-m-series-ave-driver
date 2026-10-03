@@ -31,6 +31,7 @@
 #include "ave_overlay_e6_dtbo.h"
 #include "ave_overlay_e7_dtbo.h"
 #include "ave_overlay_pmp_venc_dtbo.h"
+#include "ave_overlay_pmp_venc_t8112_dtbo.h"
 #include "ave_overlay_t6000_dtbo.h"
 #include "ave_overlay_t8103_dtbo.h"
 #include "ave_overlay_t8112_dtbo.h"
@@ -40,7 +41,19 @@ static int ovcs_id, pmp_ovcs_id;
 static bool pmp_venc;
 module_param(pmp_venc, bool, 0444);
 MODULE_PARM_DESC(pmp_venc,
-		 "also enable the PMP report entry pmp-venc-sys (report@10) for apple-ave pmp_report=1 (docs/75 R3, docs/78); needs a DT with the PMP running");
+		 "also enable the PMP report entry pmp-venc-sys (t600x report@10, t8112 report@9) for apple-ave pmp_report=1 (docs/75 R3, docs/78, docs/90); needs a DT with the PMP running");
+
+/* Per SoC: the pmp-venc-sys entry's path and the overlay that enables it */
+static const struct {
+	const char	*path;
+	const void	*dtbo;
+	const unsigned int *len;
+} ave_ov_pmp_venc[] = {
+	{ "/soc/pmp_report@28e3c0000/report@10", ave_overlay_pmp_venc_dtbo,
+	  &ave_overlay_pmp_venc_dtbo_len },
+	{ "/soc/pmp_report@23b3c0000/report@9", ave_overlay_pmp_venc_t8112_dtbo,
+	  &ave_overlay_pmp_venc_t8112_dtbo_len },
+};
 
 /*
  * The dtbos cannot say &aic or &ps_venc_sys: the base tree has no
@@ -321,6 +334,7 @@ static int __init ave_ov_init(void)
 		struct device_node *soc = of_find_node_by_path("/soc");
 		struct device_node *np;
 		bool pmp_up = false;
+		unsigned int i;
 
 		/* The PMP node, pmp@<unit>, whatever the SoC puts it at */
 		for_each_child_of_node(soc, np)
@@ -331,15 +345,33 @@ static int __init ave_ov_init(void)
 			pr_err("ave-overlay: pmp_venc=1 but the PMP node is not enabled (docs/78); refusing\n");
 			return -ENODEV;
 		}
-		ret = of_overlay_fdt_apply((void *)ave_overlay_pmp_venc_dtbo,
-					   ave_overlay_pmp_venc_dtbo_len,
+		/* the entry must exist here and be labelled pmp-venc-sys */
+		for (i = 0; i < ARRAY_SIZE(ave_ov_pmp_venc); i++) {
+			const char *label;
+			bool ok;
+
+			np = of_find_node_by_path(ave_ov_pmp_venc[i].path);
+			if (!np)
+				continue;
+			ok = !of_property_read_string(np, "label", &label) &&
+			     !strcmp(label, "pmp-venc-sys");
+			of_node_put(np);
+			if (ok)
+				break;
+		}
+		if (i == ARRAY_SIZE(ave_ov_pmp_venc)) {
+			pr_err("ave-overlay: pmp_venc=1 but no known pmp-venc-sys entry on this SoC; refusing\n");
+			return -ENODEV;
+		}
+		ret = of_overlay_fdt_apply(ave_ov_pmp_venc[i].dtbo,
+					   *ave_ov_pmp_venc[i].len,
 					   &pmp_ovcs_id, NULL);
 		if (ret) {
 			pr_err("ave-overlay: pmp-venc-sys apply failed: %d\n", ret);
 			return ret;
 		}
-		pr_info("ave-overlay: pmp-venc-sys (report@10) enabled, ovcs_id=%d\n",
-			pmp_ovcs_id);
+		pr_info("ave-overlay: pmp-venc-sys (%s) enabled, ovcs_id=%d\n",
+			ave_ov_pmp_venc[i].path, pmp_ovcs_id);
 	}
 
 	fixed = ave_ov_fixup(fdt, len);
