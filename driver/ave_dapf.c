@@ -922,13 +922,21 @@ int ave_dapf_program_instance(struct ave_device *ave)
 		  .end = soc->iboot.text_phys + soc->iboot.text_size - 4,
 		  .r0 = 0x11, .r4 = 1, .what = "iBoot TEXT" },
 		{ .start = soc->dapf_window.start, .end = soc->dapf_window.end,
-		  .r0 = 0x33, .r4 = 1, .what = "0x1f0 window" },
-		{ .start = soc->dapf_mmio_adt.start, .end = soc->dapf_mmio_adt.end,
-		  .r0 = 0x31, .r4 = 1, .what = "ADT MMIO" },
+		  .r0 = 0x33, .r4 = 1, .what = "DVA window" },
 	};
 
 	if (!soc->dapf_by_driver || !soc->iboot.text_phys)
 		return 0;
+	/*
+	 * The ADT's MMIO entry, where the SoC has one (t600x). t8103's
+	 * dart-ave lists only the window; an all-zero range would otherwise
+	 * be written as an enabled entry at address 0. Unused slots stay
+	 * zero, i.e. cleared.
+	 */
+	if (soc->dapf_mmio_adt.end)
+		ent[2] = (struct ave_dapf_entry){
+			.start = soc->dapf_mmio_adt.start, .end = soc->dapf_mmio_adt.end,
+			.r0 = 0x31, .r4 = 1, .what = "ADT MMIO" };
 	dev_info(ave->dev, "dapf: programming %s's DAPF (m1n1 does not)\n", soc->name);
 	return ave_dapf_program(ave, ent, AVE_DAPF_MAX_ENTRIES, false);
 }

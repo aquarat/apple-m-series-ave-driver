@@ -27,6 +27,7 @@
 #ifndef __AVE_ABI_H__
 #define __AVE_ABI_H__
 
+#include <linux/bits.h>
 #include <linux/compiler_attributes.h>
 #include <linux/types.h>
 

@@ -7,6 +7,7 @@
  * gs_sAVE_DPE_CfgSet_Castor_6000 (0xfffffe0007bc3018), tables
  *   CAT Default 0xfffffe00072309c0 (1), CAC Default 0xfffffe00072309d8 (0x7c),
  *   CAC 8bit    0xfffffe0007231198 (0x7b).
+ * This header defines data: include it from ave_soc.c only.
  * Each entry is {offset, clear, set}, applied by AVE_DPE::ApplyTunables
  * (0xfffffe0008ee3e4c) as a read-modify-write at base + offset, with CAT base
  * 0xDC000 and CAC base 0xDC400 inside AVE_DPE (bank 0, 0x40D100000).
@@ -16,14 +17,9 @@
 
 #include <linux/types.h>
 
-struct ave_dpe_tunable {
-	u16	off;
-	u32	clear;
-	u32	set;
-};
+#include <linux/kernel.h>
 
-#define AVE_DPE_CAT_BASE	0xdc000
-#define AVE_DPE_CAC_BASE	0xdc400
+#include "ave_soc.h"
 
 static const struct ave_dpe_tunable ave_dpe_cat_default[] = {
 	{ 0x004, 0xffffffff, 0x00001000 },
@@ -280,6 +276,76 @@ static const struct ave_dpe_tunable ave_dpe_cac_8bit[] = {
 	{ 0x1e4, 0x000001ff, 0x0000000d },
 	{ 0x1e8, 0x000001ff, 0x00000000 },
 	{ 0x1ec, 0x000001ff, 0x00000000 },
+};
+
+/*
+ * t8103 (DevID 13, "Acis_8103"), macOS 13.5: gs_sAVE_DPE_CfgSet_Acis_8103
+ * (0xfffffe0007bc2f98). Same CAT/CAC bases as Castor_6000, no CAT tables,
+ *   CAC Default 0xfffffe00072304d0 (1), CAC 8bit 0xfffffe00072304e0 (0x27).
+ * Dumped with the docs/58 section 9 script.
+ */
+static const struct ave_dpe_tunable ave_dpe_t8103_cac_default[] = {
+	{ 0x000, 0x01ff0000, 0x00000000 },
+};
+
+static const struct ave_dpe_tunable ave_dpe_t8103_cac_8bit[] = {
+	{ 0x004, 0x1ff1ff01, 0x00100101 },
+	{ 0x008, 0x1ff1ff01, 0x00000001 },
+	{ 0x00c, 0x1ff1ff01, 0x00100101 },
+	{ 0x018, 0x1ff1ff01, 0x00000001 },
+	{ 0x020, 0x1ff1ff01, 0x00000001 },
+	{ 0x02c, 0x1ff1ff01, 0x00400601 },
+	{ 0x034, 0x1ff1ff01, 0x00200201 },
+	{ 0x03c, 0x1ff1ff01, 0x00200201 },
+	{ 0x048, 0x1ff1ff01, 0x00700701 },
+	{ 0x054, 0x1ff1ff01, 0x00300401 },
+	{ 0x058, 0x1ff1ff01, 0x00400401 },
+	{ 0x060, 0x1ff1ff01, 0x00000001 },
+	{ 0x064, 0x1ff1ff01, 0x00000001 },
+	{ 0x070, 0x1ff1ff01, 0x00500501 },
+	{ 0x098, 0x1ff1ff01, 0x02604001 },
+	{ 0x09c, 0x1ff1ff01, 0x00300301 },
+	{ 0x010, 0x1ff1ff01, 0x00100101 },
+	{ 0x014, 0x1ff1ff01, 0x00300401 },
+	{ 0x01c, 0x1ff1ff01, 0x00200201 },
+	{ 0x024, 0x1ff1ff01, 0x00200201 },
+	{ 0x028, 0x1ff1ff01, 0x00300301 },
+	{ 0x030, 0x1ff1ff01, 0x00200201 },
+	{ 0x038, 0x1ff1ff01, 0x00300201 },
+	{ 0x040, 0x1ff1ff01, 0x00100001 },
+	{ 0x044, 0x1ff1ff01, 0x00100001 },
+	{ 0x04c, 0x1ff1ff01, 0x00c00b01 },
+	{ 0x050, 0x1ff1ff01, 0x00800701 },
+	{ 0x05c, 0x1ff1ff01, 0x00500501 },
+	{ 0x068, 0x1ff1ff01, 0x00300401 },
+	{ 0x06c, 0x1ff1ff01, 0x00200501 },
+	{ 0x074, 0x1ff1ff01, 0x00400401 },
+	{ 0x078, 0x1ff1ff01, 0x00800901 },
+	{ 0x07c, 0x1ff1ff01, 0x00800801 },
+	{ 0x080, 0x1ff1ff01, 0x00e00e01 },
+	{ 0x084, 0x1ff1ff01, 0x00f00e01 },
+	{ 0x088, 0x1ff1ff01, 0x01002001 },
+	{ 0x08c, 0x1ff1ff01, 0x01002001 },
+	{ 0x090, 0x1ff1ff01, 0x00200101 },
+	{ 0x094, 0x1ff1ff01, 0x01a02901 },
+};
+
+const struct ave_dpe_set ave_dpe_set_castor_6000 = {
+	.name		= "Castor_6000",
+	.cat_default	= ave_dpe_cat_default,
+	.n_cat_default	= ARRAY_SIZE(ave_dpe_cat_default),
+	.cac_default	= ave_dpe_cac_default,
+	.n_cac_default	= ARRAY_SIZE(ave_dpe_cac_default),
+	.cac_8bit	= ave_dpe_cac_8bit,
+	.n_cac_8bit	= ARRAY_SIZE(ave_dpe_cac_8bit),
+};
+
+const struct ave_dpe_set ave_dpe_set_acis_8103 = {
+	.name		= "Acis_8103",
+	.cac_default	= ave_dpe_t8103_cac_default,
+	.n_cac_default	= ARRAY_SIZE(ave_dpe_t8103_cac_default),
+	.cac_8bit	= ave_dpe_t8103_cac_8bit,
+	.n_cac_8bit	= ARRAY_SIZE(ave_dpe_t8103_cac_8bit),
 };
 
 #endif /* __AVE_DPE_TABLES_H__ */

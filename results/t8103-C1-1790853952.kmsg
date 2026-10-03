@@ -1,0 +1,108 @@
+=== t8103-C1 2026-10-01T13:25:52+02:00 commit 0e37f6f: insmod driver/apple-ave.ko stop_after=6 step_ms=100 ===
+=== applying overlay variant=8  ===
+[  533.762688] === applying overlay variant=8  ===
+[  533.789003] ave-overlay: variant=8 - t8103 (M1), variant=4's shape, untested
+[  533.789124] ave-overlay: aic -> phandle 0xf (x3)
+[  533.789126] ave-overlay: venc_sys -> phandle 0x7e (x4)
+[  533.789126] ave-overlay: venc_pipe5 -> phandle 0x81 (x1)
+[  533.789127] ave-overlay: venc_pipe4 -> phandle 0x80 (x1)
+[  533.789721] apple-dart 267040000.iommu: DART [pagesize 4000, 16 streams, bypass support: 1, bypass forced: 0, locked: 0, AS 32 -> 36] initialized
+ SUBSYSTEM=platform
+ DEVICE=+platform:267040000.iommu
+[  533.789928] apple-dart 267030000.iommu: DART [pagesize 4000, 16 streams, bypass support: 0, bypass forced: 0, locked: 0, AS 32 -> 36] initialized
+ SUBSYSTEM=platform
+ DEVICE=+platform:267030000.iommu
+[  533.790163] platform 267100000.video-encoder: Adding to iommu group 15
+ SUBSYSTEM=platform
+ DEVICE=+platform:267100000.video-encoder
+[  533.792807] ave-overlay: applied, ovcs_id=1
+=== overlay insmod returned rc=0 ===
+[  533.808959] === overlay insmod returned rc=0 ===
+=== insmod driver/apple-ave.ko stop_after=6 step_ms=100 ===
+[  533.835787] === insmod driver/apple-ave.ko stop_after=6 step_ms=100 ===
+[  533.853697] apple-ave 267100000.video-encoder: probe: SoC row t8103 (encoder 0)
+ SUBSYSTEM=platform
+ DEVICE=+platform:267100000.video-encoder
+=== insmod returned rc=0 ===
+[  533.853702] apple-ave 267100000.video-encoder: probe: staged bring-up, stop_after=6 (max 16)
+ SUBSYSTEM=platform
+ DEVICE=+platform:267100000.video-encoder
+[  533.853707] apple-ave 267100000.video-encoder: OS firmware 13.5: using macOS 13.5 AVE ABI
+ SUBSYSTEM=platform
+ DEVICE=+platform:267100000.video-encoder
+[  533.853708] apple-ave 267100000.video-encoder: stage 1 (map-banks): starting
+ SUBSYSTEM=platform
+ DEVICE=+platform:267100000.video-encoder
+[  533.853709] apple-ave 267100000.video-encoder:   mapping bank 0 (dpe)
+ SUBSYSTEM=platform
+ DEVICE=+platform:267100000.video-encoder
+[  533.853720] apple-ave 267100000.video-encoder:   mapping bank 1 (asc)
+ SUBSYSTEM=platform
+ DEVICE=+platform:267100000.video-encoder
+[  533.853725] apple-ave 267100000.video-encoder:   mapping bank 2 (sve)
+ SUBSYSTEM=platform
+ DEVICE=+platform:267100000.video-encoder
+[  533.853728] apple-ave 267100000.video-encoder:   mapping bank 3 (unk3)
+ SUBSYSTEM=platform
+ DEVICE=+platform:267100000.video-encoder
+[  533.853731] apple-ave 267100000.video-encoder:   mapping bank 4 (axi2af)
+ SUBSYSTEM=platform
+ DEVICE=+platform:267100000.video-encoder
+[  533.853737] apple-ave 267100000.video-encoder: stage 1 (map-banks): OK
+ SUBSYSTEM=platform
+ DEVICE=+platform:267100000.video-encoder
+[  533.853738] apple-ave 267100000.video-encoder: stage 2 (dma-mask): starting
+ SUBSYSTEM=platform
+ DEVICE=+platform:267100000.video-encoder
+[  533.853739] apple-ave 267100000.video-encoder: stage 2 (dma-mask): OK
+ SUBSYSTEM=platform
+ DEVICE=+platform:267100000.video-encoder
+[  533.853740] apple-ave 267100000.video-encoder: stage 3 (get-irq): starting
+ SUBSYSTEM=platform
+ DEVICE=+platform:267100000.video-encoder
+[  533.853759] apple-ave 267100000.video-encoder:   irq = 119
+ SUBSYSTEM=platform
+ DEVICE=+platform:267100000.video-encoder
+[  533.853760] apple-ave 267100000.video-encoder: stage 3 (get-irq): OK
+ SUBSYSTEM=platform
+ DEVICE=+platform:267100000.video-encoder
+[  533.853761] apple-ave 267100000.video-encoder: stage 4 (request-irq): starting
+ SUBSYSTEM=platform
+ DEVICE=+platform:267100000.video-encoder
+[  533.853771] apple-ave 267100000.video-encoder: stage 4 (request-irq): OK
+ SUBSYSTEM=platform
+ DEVICE=+platform:267100000.video-encoder
+[  533.853772] apple-ave 267100000.video-encoder: stage 5 (power-attach): starting
+ SUBSYSTEM=platform
+ DEVICE=+platform:267100000.video-encoder
+[  533.853918] apple-ave 267100000.video-encoder:   attached 3 power domain(s)
+ SUBSYSTEM=platform
+ DEVICE=+platform:267100000.video-encoder
+[  533.853919] apple-ave 267100000.video-encoder: stage 5 (power-attach): OK
+ SUBSYSTEM=platform
+ DEVICE=+platform:267100000.video-encoder
+[  533.853920] apple-ave 267100000.video-encoder: stage 6 (power-on): starting
+ SUBSYSTEM=platform
+ DEVICE=+platform:267100000.video-encoder
+[  533.853924] apple-ave 267100000.video-encoder:   resumed; left powered for inspection
+ SUBSYSTEM=platform
+ DEVICE=+platform:267100000.video-encoder
+[  533.853953] apple-ave 267100000.video-encoder: me0: venc_me0 powered; PMGR PS ME0 = 0x000003ff
+ SUBSYSTEM=platform
+ DEVICE=+platform:267100000.video-encoder
+[  533.853979] apple-ave 267100000.video-encoder: me1: venc_me1 powered; PMGR PS ME1 = 0x000003ff
+ SUBSYSTEM=platform
+ DEVICE=+platform:267100000.video-encoder
+[  533.853980] apple-ave 267100000.video-encoder: stage 6 (power-on): OK
+ SUBSYSTEM=platform
+ DEVICE=+platform:267100000.video-encoder
+[  533.853980] apple-ave 267100000.video-encoder: stage 7 (write-sve-idle): SKIPPED (stop_after=6)
+ SUBSYSTEM=platform
+ DEVICE=+platform:267100000.video-encoder
+[  533.866782] e3-run heartbeat t8103-C1 t=0s
+[  538.875087] kauditd_printk_skb: 36 callbacks suppressed
+[  538.881573] e3-run heartbeat t8103-C1 t=5s
+[  543.899622] e3-run heartbeat t8103-C1 t=10s
+=== insmod rc=0 ===
+=== e3-run done: t8103-C1 ===
+[  548.961458] === e3-run done: t8103-C1 ===
