@@ -48,6 +48,14 @@ QUALITY_LADDER = {"ave-cqp": [22, 26, 30, 34, 38],
                   "x265-medium-crf-10bit": [18, 22, 26, 30, 34],
                   "x265-medium-crf": [18, 22, 26, 30, 34],
                   "x265-slow-crf": [18, 22, 26, 30, 34]}
+
+
+def base_enc(enc):
+    """ave-cqp-poff<N>[-<tag>]: ave-cqp with P QP = QP + N (docs/92); -<tag> names an
+    AVE_EXTRA_CTRLS experiment. Both use ave-cqp's QP ladder."""
+    return "ave-cqp" if enc.startswith("ave-cqp-poff") or enc.startswith("ave-cqp-x-") else enc
+
+
 NICE = ["nice", "-n", "10"]   # software encodes yield to whatever else the machine runs
 
 
@@ -118,7 +126,7 @@ def encode(enc, clip, kbps, out):
                "--stream-mmap", "--stream-out-mmap",
                f"--stream-from={p010_padded(clip) if p010 else SRC + '/' + base + '.nv12'}",
                f"--stream-to={out}", f"--stream-count={n}"]
-    elif enc == "ave-cqp":
+    elif base_enc(enc) == "ave-cqp":
         # v4l2-ctl, rate control off (the driver's default): fixed QP. A
         # 16-unaligned height goes through the OUTPUT crop, which v4l2-ctl
         # fills from h-line frames of the NV12 file.
@@ -127,7 +135,10 @@ def encode(enc, clip, kbps, out):
                f"--set-fmt-video-out=width={w},height={h16},pixelformat=NV12",
                "--set-fmt-video=pixelformat=HEVC",
                f"--set-selection-output=target=crop,width={w},height={h}",
-               f"--set-ctrl=video_gop_size={KEYINT},hevc_i_frame_qp_value={kbps},frame_level_rate_control_enable=0",
+               f"--set-ctrl=video_gop_size={KEYINT},hevc_i_frame_qp_value={kbps},frame_level_rate_control_enable=0"
+               + (f",hevc_p_frame_qp_value={min(51, kbps + int(re.match(r'ave-cqp-poff(\d+)', enc)[1]))}"
+                  if enc.startswith("ave-cqp-poff") else "")
+               + (("," + os.environ["AVE_EXTRA_CTRLS"]) if os.environ.get("AVE_EXTRA_CTRLS") else ""),
                "--stream-mmap", "--stream-out-mmap", f"--stream-from={SRC}/{base}.nv12",
                f"--stream-to={out}", f"--stream-count={n}"]
     else:
@@ -182,7 +193,7 @@ def run(clips, encoders):
         for clip in clips:
             base, w, h, fps, n, ladder = CLIPS[clip]
             for enc in encoders:
-                for kbps in QUALITY_LADDER.get(enc, ladder):
+                for kbps in QUALITY_LADDER.get(base_enc(enc), ladder):
                     out = f"{OUT}/{clip}.{enc}.{kbps}.hevc"
                     wall, cpu = encode(enc, clip, kbps, out)
                     rate = os.path.getsize(out) * 8 * fps / n / 1000

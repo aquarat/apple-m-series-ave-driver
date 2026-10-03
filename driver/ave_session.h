@@ -69,6 +69,7 @@ struct ave_enc_cfg {
 	u32	width, height;		/* the buffer, MB-aligned */
 	u32	crop_w, crop_h;		/* SPS crop; 0 = none */
 	u32	qp;			/* fixed QP, or the RC's starting QP */
+	u32	qp_p, qp_b;		/* fixed QP of P / B frames; 0 = qp (docs/92) */
 	u32	qp_min, qp_max;		/* RC clamp; 0,0 = 10..51 */
 	u32	bitrate;		/* bit/s; 0 = fixed QP */
 	u32	fps_num;		/* integer Hz (wire 0xFF4C); 0 = 30 */

@@ -87,7 +87,7 @@ struct ave_ctx {
 	struct v4l2_fract	timeperframe;
 	/* The application's colorimetry: set on OUTPUT, echoed on CAPTURE. */
 	u32			colorspace, ycbcr_enc, quantization, xfer_func;
-	u32			qp;
+	u32			qp, qp_p, qp_b;	/* P/B: 0 = qp */
 	u32			profile_idc;	/* 66, 77 or 100 */
 	u32			level_idc;
 	bool			cabac;
@@ -104,6 +104,7 @@ struct ave_ctx {
 	 */
 	u32			codec;
 	u32			hevc_qp, hevc_qp_min, hevc_qp_max;
+	u32			hevc_qp_p, hevc_qp_b;
 	u32			hevc_level_idc;	/* general_level_idc floor */
 	bool			hevc_main10;	/* HEVC_PROFILE = MAIN_10 (docs/83) */
 	struct v4l2_ctrl	*hevc_profile;
@@ -505,6 +506,12 @@ static int ave_s_ctrl(struct v4l2_ctrl *c)
 	case V4L2_CID_MPEG_VIDEO_BITRATE_MODE:
 		ctx->bitrate_mode = c->val;
 		break;
+	case V4L2_CID_MPEG_VIDEO_H264_P_FRAME_QP:
+		ctx->qp_p = c->val;	/* docs/92: Start wire 0xFFB8 */
+		break;
+	case V4L2_CID_MPEG_VIDEO_H264_B_FRAME_QP:
+		ctx->qp_b = c->val;
+		break;
 	case V4L2_CID_MPEG_VIDEO_H264_MIN_QP:
 		ctx->qp_min = c->val;
 		break;
@@ -519,6 +526,12 @@ static int ave_s_ctrl(struct v4l2_ctrl *c)
 		break;
 	case V4L2_CID_MPEG_VIDEO_HEVC_I_FRAME_QP:
 		ctx->hevc_qp = c->val;	/* one QP for I and P, as H.264 */
+		break;
+	case V4L2_CID_MPEG_VIDEO_HEVC_P_FRAME_QP:
+		ctx->hevc_qp_p = c->val;
+		break;
+	case V4L2_CID_MPEG_VIDEO_HEVC_B_FRAME_QP:
+		ctx->hevc_qp_b = c->val;
 		break;
 	case V4L2_CID_MPEG_VIDEO_HEVC_MIN_QP:
 		ctx->hevc_qp_min = c->val;
@@ -565,6 +578,9 @@ static int ave_init_ctrls(struct ave_ctx *ctx)
 	v4l2_ctrl_new_std(h, o, V4L2_CID_MPEG_VIDEO_FORCE_KEY_FRAME, 0, 0, 0, 0);
 	v4l2_ctrl_new_std(h, o, V4L2_CID_MPEG_VIDEO_H264_I_FRAME_QP, 0, 51, 1,
 			  AVE_DEF_QP);
+	/* 0 = the I-frame QP (docs/92) */
+	v4l2_ctrl_new_std(h, o, V4L2_CID_MPEG_VIDEO_H264_P_FRAME_QP, 0, 51, 1, 0);
+	v4l2_ctrl_new_std(h, o, V4L2_CID_MPEG_VIDEO_H264_B_FRAME_QP, 0, 51, 1, 0);
 	v4l2_ctrl_new_std(h, o, V4L2_CID_MPEG_VIDEO_H264_MIN_QP, 0, 51, 1, 10);
 	v4l2_ctrl_new_std(h, o, V4L2_CID_MPEG_VIDEO_H264_MAX_QP, 0, 51, 1, 51);
 	v4l2_ctrl_new_std(h, o, V4L2_CID_MPEG_VIDEO_BITRATE, 1, 400000000, 1,
@@ -631,6 +647,10 @@ static int ave_init_ctrls(struct ave_ctx *ctx)
 				       V4L2_MPEG_VIDEO_HEVC_LEVEL_4);
 		v4l2_ctrl_new_std(h, o, V4L2_CID_MPEG_VIDEO_HEVC_I_FRAME_QP,
 				  0, 51, 1, AVE_DEF_QP);
+		v4l2_ctrl_new_std(h, o, V4L2_CID_MPEG_VIDEO_HEVC_P_FRAME_QP,
+				  0, 51, 1, 0);
+		v4l2_ctrl_new_std(h, o, V4L2_CID_MPEG_VIDEO_HEVC_B_FRAME_QP,
+				  0, 51, 1, 0);
 		v4l2_ctrl_new_std(h, o, V4L2_CID_MPEG_VIDEO_HEVC_MIN_QP,
 				  0, 51, 1, 10);
 		v4l2_ctrl_new_std(h, o, V4L2_CID_MPEG_VIDEO_HEVC_MAX_QP,
@@ -763,6 +783,8 @@ static int ave_start_streaming(struct vb2_queue *q, unsigned int count)
 			.width = ctx->width, .height = ctx->height,
 			.crop_w = ctx->crop.width, .crop_h = ctx->crop.height,
 			.qp = hevc ? ctx->hevc_qp : ctx->qp,
+			.qp_p = hevc ? ctx->hevc_qp_p : ctx->qp_p,
+			.qp_b = hevc ? ctx->hevc_qp_b : ctx->qp_b,
 			.qp_min = hevc ? ctx->hevc_qp_min : ctx->qp_min,
 			.qp_max = hevc ? ctx->hevc_qp_max : ctx->qp_max,
 			/*
