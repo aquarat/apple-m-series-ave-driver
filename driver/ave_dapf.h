@@ -32,6 +32,7 @@ struct ave_dapf_entry {
 	u64		end;		/* inclusive */
 	u32		r0;
 	u32		r4;
+	u32		r20;		/* t8110 DARTs only (+0x20) */
 	const char	*what;
 };
 
@@ -49,6 +50,9 @@ struct ave_dapf_entry {
  * Requires ave->powered (the stage 6 runtime-PM reference).
  */
 int ave_dapf_dump(struct ave_device *ave);
+void ave_dapf_dump_on_close(struct ave_device *ave);
+void ave_regdump(struct ave_device *ave, const char *tag);
+void ave_regdump_iova(struct ave_device *ave, const char *what, dma_addr_t iova);
 
 /*
  * The same dump, ungated, tagged with @tag. For callers with their own gate -

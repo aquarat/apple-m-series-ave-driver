@@ -986,6 +986,18 @@ static void test_process_13_5(void)
 	f.in_chroma_size = 0;
 	expect_int(ave_cmd_build_process_avc(a, buf, sizeof(buf), &CTX, 21, &f), 0x1940,
 		   "13.5 has no plane size (docs/47 §1.2)");
+	/* docs/90: the source size, sent on t8112 only (PICMGMT 0x9C8 + 0x964) */
+	f = frame_idr();
+	expect_int(ave_cmd_build_process_avc(a, buf, sizeof(buf), &CTX, 21, &f), 0x1940,
+		   "in_dims unset builds");
+	E32(buf, 0x9c8 + 0x964, 0, "in_dims unset: PICMGMT+0x964 stays 0");
+	E32(buf, 0x9c8 + 0x968, 0, "in_dims unset: PICMGMT+0x968 stays 0");
+	f.in_dims[0] = 1920;
+	f.in_dims[1] = 1080;
+	expect_int(ave_cmd_build_process_avc(a, buf, sizeof(buf), &CTX, 21, &f), 0x1940,
+		   "in_dims set builds");
+	E32(buf, 0x9c8 + 0x964, 1920, "PICMGMT+0x964 = width (docs/90)");
+	E32(buf, 0x9c8 + 0x968, 1080, "PICMGMT+0x968 = height (docs/90)");
 	f = frame_idr();
 	f.coded_index = 20;
 	expect_int(ave_cmd_build_process_avc(a, buf, sizeof(buf), &CTX, 21, &f), -EINVAL,

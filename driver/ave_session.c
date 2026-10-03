@@ -378,6 +378,11 @@ MODULE_PARM_DESC(session_poc0,
  * Both registers appear in the 0x20000 channel windows the diagnostics
  * already dump, so a sweep is observable: set a value, read the register.
  */
+static unsigned int session_src_dims;
+module_param(session_src_dims, uint, 0644);
+MODULE_PARM_DESC(session_src_dims,
+	"PICMGMT +0x964/+0x968, the source size, per frame (docs/90): 0 = the SoC's default (sent on t8112 only), 1 = visible size, 2 = MB-aligned size, 3 = not sent");
+
 static unsigned int session_src_mode;
 module_param(session_src_mode, uint, 0444);
 MODULE_PARM_DESC(session_src_mode,
@@ -3635,6 +3640,17 @@ static int ave_session_process_build(struct ave_device *ave,
 	f.in_luma_size = luma_bytes;
 	f.in_chroma_addr = chroma_iova;
 	f.in_chroma_stride = stride;
+	/*
+	 * docs/90: PICMGMT +0x964/+0x968, the source picture's size. macOS
+	 * sends it every frame; the H13x firmware reads it only for compressed
+	 * input, the t8112 (H14G) source reader for linear input as well, and
+	 * without it reads a 0x0 picture: every pixel 0, no fault.
+	 */
+	switch (session_src_dims ? session_src_dims : ave->soc->src_dims ? 1 : 3) {
+	case 1: f.in_dims[0] = bufs->width; f.in_dims[1] = bufs->height; break;
+	case 2: f.in_dims[0] = cw; f.in_dims[1] = ch; break;
+	default: break;
+	}
 	f.in_chroma_size = chroma_bytes;
 
 	/* out_mode is left 0, so the size check is against the Start table. */
@@ -3744,6 +3760,10 @@ static int ave_session_process_build(struct ave_device *ave,
 	 * the run can only end in an SMMU fault storm - F4's did, and the
 	 * machine reset shortly after. Check first, refuse on a mismatch.
 	 */
+	ave_regdump(ave, "pre");
+	ave_regdump_iova(ave, "src luma", luma_iova);
+	ave_regdump_iova(ave, "src chroma", chroma_iova);
+	ave_regdump_iova(ave, "coded", bufs->coded[idx].iova);
 	if (!session_ignore_dart) {
 		ret = ave_dart_datapath_check(ave, "before Process");
 		if (ret) {
@@ -4220,6 +4240,7 @@ static int ave_session_process(struct ave_device *ave,
 	}
 	if (!bufs->quiet)
 		ave_step(ave, "frame result logged; next: post-frame diagnostics");
+	ave_regdump(ave, "frame");
 
 	/*
 	 * docs/57 #3 and #4, read-only, at the moment Process gave up:
@@ -4812,6 +4833,7 @@ int ave_session_close_client(struct ave_device *ave)
 	dev_info(ave->dev,
 		 "close: client %u returned (Stop -> UNINIT_DONE, Close -> STOP_DONE); the firmware has let go of its buffers\n",
 		 AVE_SESS_CLIENT_ID);
+	ave_dapf_dump_on_close(ave);
 	return 0;
 }
 
