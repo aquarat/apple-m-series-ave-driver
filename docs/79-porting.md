@@ -44,6 +44,10 @@ that matches only `"apple,ave"` is refused at probe with a pointer here.
 
 ## 3. Bring-up checklist for a new machine (M1 Mac mini as the example)
 
+Worked ports since: **t6000** M1 Pro (docs/87: firmware found from the IPSW and a
+cold RAM dump, driver-side DAPF) and **t8103** M1 MacBook Air (docs/89: placement
+from the live ADT, per-SoC DPE tunables, a second ME power holder, `pipe_diag`).
+
 Static first, on the host, with the new Mac's IPSW:
 
 1. **ADT.** `tools/fetch_firmware.py --board j274 --list`, then extract

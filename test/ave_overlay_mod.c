@@ -32,6 +32,7 @@
 #include "ave_overlay_e7_dtbo.h"
 #include "ave_overlay_pmp_venc_dtbo.h"
 #include "ave_overlay_t6000_dtbo.h"
+#include "ave_overlay_t8103_dtbo.h"
 
 static int ovcs_id, pmp_ovcs_id;
 
@@ -230,6 +231,9 @@ fail:
  *                      encoder datapath's DART carries the same mappings as
  *                      the CPUDART - the way Linux attaches ISP's DARTs.
  *
+ * variant=9 (docs/89): variant=4 for t8103 (M1), from the t8103-port
+ *                      fork; its own AIC/DART numbers and the ME0 holder.
+ *
  * variant=8 (docs/87): variant=4 for t6000 (M1 Pro): compatible
  *                      "apple,t6000-ave" and no afnc4_ioa, which t6000 lacks.
  *
@@ -241,7 +245,7 @@ fail:
 static int variant;
 module_param(variant, int, 0444);
 MODULE_PARM_DESC(variant,
-		 "0 = with DART (default), 1 = no IOMMU: preserves iBoot's DART config, NO backstop, 2 = 1 + cpudart/dapf regs (E2), 3 = 0 + cpudart/dapf regs (E3), 4 = 3 with both DARTs in iommus (docs/56), 5 = 4 + stream 15 (docs/69), 6 = ave1 alone, 7 = both encoders (docs/82), 8 = t6000 (M1 Pro) ave0 (docs/87)");
+		 "0 = with DART (default), 1 = no IOMMU: preserves iBoot's DART config, NO backstop, 2 = 1 + cpudart/dapf regs (E2), 3 = 0 + cpudart/dapf regs (E3), 4 = 3 with both DARTs in iommus (docs/56), 5 = 4 + stream 15 (docs/69), 6 = ave1 alone, 7 = both encoders (docs/82), 8 = t6000 (M1 Pro) ave0 (docs/87), 9 = t8103 (M1)");
 
 static int __init ave_ov_init(void)
 {
@@ -270,6 +274,11 @@ static int __init ave_ov_init(void)
 		len = ave_overlay_e3_dtbo_len;
 		pr_warn("ave-overlay: variant=3 - with DART, plus cpudart/dapf regs (E2 control / E3)\n");
 		break;
+	case 9:
+		fdt = ave_overlay_t8103_dtbo;
+		len = ave_overlay_t8103_dtbo_len;
+		pr_warn("ave-overlay: variant=9 - t8103 (M1), variant=4's shape (docs/89)\n");
+		break;
 	case 4:
 		fdt = ave_overlay_e4_dtbo;
 		len = ave_overlay_e4_dtbo_len;
@@ -296,7 +305,7 @@ static int __init ave_ov_init(void)
 		pr_warn("ave-overlay: variant=8 - t6000 (M1 Pro) ave0, variant=4's shape (docs/87)\n");
 		break;
 	default:
-		pr_err("ave-overlay: variant=%d is not 0-8; refusing\n", variant);
+		pr_err("ave-overlay: variant=%d is not 0-9; refusing\n", variant);
 		return -EINVAL;
 	}
 

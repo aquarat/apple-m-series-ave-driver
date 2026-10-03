@@ -15,17 +15,35 @@
 
 #include "ave_version.h"
 
+/* AVE_DPE tunables, one kext CfgSet (ave_dpe_tables.h, docs/58 5.1) */
+struct ave_dpe_tunable {
+	u16	off;
+	u32	clear;
+	u32	set;
+};
+
+/* Inside AVE_DPE (bank 0); the same on every CfgSet seen so far */
+#define AVE_DPE_CAT_BASE	0xdc000
+#define AVE_DPE_CAC_BASE	0xdc400
+
+struct ave_dpe_set {
+	const char			*name;	/* the kext's, "Castor_6000" */
+	const struct ave_dpe_tunable	*cat_default;
+	unsigned int			n_cat_default;
+	const struct ave_dpe_tunable	*cac_default;
+	unsigned int			n_cac_default;
+	const struct ave_dpe_tunable	*cac_8bit;
+	unsigned int			n_cac_8bit;
+};
+
+extern const struct ave_dpe_set ave_dpe_set_castor_6000;
+extern const struct ave_dpe_set ave_dpe_set_acis_8103;
+
 /* One row of the kext's AVE_DevInfo table, as sent in the boot handshake */
 struct ave_soc_devrow {
 	u32	dev_id;
 	u32	dev_type;
 	u32	chip_type;
-};
-
-/* A 16 KiB window of the firmware's TEXT and its sha256 (fw_restore_data) */
-struct ave_soc_textwin {
-	u32	off;
-	u8	sha[32];
 };
 
 /* A DAPF entry's address range (the r0/r4 flags are not SoC-specific) */
@@ -44,9 +62,31 @@ struct ave_soc {
 	phys_addr_t	dpe_phys;
 	u8		inst;
 
+	/* AVE_DPE tunables for this SoC; NULL = unknown, dpe_tunables is refused */
+	const struct ave_dpe_set *dpe;
+
+	/*
+	 * The session diagnostics read pipe registers (AVE_DPE +0x10140,
+	 * +0x20010, the MCPU blocks, ...) at offsets taken from the H13C
+	 * firmware. true = that map holds on this SoC. A read outside a real
+	 * block is an SError and a reset (f38), so it is off until shown.
+	 */
+	bool		pipe_diag;
+
 	/* Firmware images for request_firmware() (docs/09) */
 	const char	*fw_name;
 	const char	*fw_pristine_name;	/* 13.5 DATA, fw_restore_data */
+	/*
+	 * What makes that blob this image's (docs/51): the blob's sha256,
+	 * where iBoot's per-boot stack guard sits in DATA, and the sha256 of
+	 * three 16 KiB windows of TEXT as it is in DRAM on this machine.
+	 */
+	u8		fw_pristine_sha256[32];
+	u32		data_stkg_off;
+	struct {
+		u32	off;
+		u8	sha[32];
+	} text_win[3];
 
 	/* Boot handshake device row, per firmware ABI, indexed by enum ave_fw_abi */
 	struct ave_soc_devrow	dev[AVE_ABI_MACOS_26_6 + 1];
@@ -83,23 +123,16 @@ struct ave_soc {
 		 */
 		bool		data_owned;
 		u64		tag_cpad, tag_wrad, tag_ioba;
-		/* where iBoot's per-boot stack guard (STKG) sits inside DATA */
-		u64		data_stkg_off;
 	} iboot;
-
-	/*
-	 * fw_restore_data: what the pristine DATA blob hashes to, and three
-	 * TEXT windows that tell this image from every sibling variant
-	 * (docs/43 §3.2). Per firmware variant, so per SoC.
-	 */
-	u8			pristine_sha256[32];
-	struct ave_soc_textwin	text_win[3];
 	/* docs/84 §3: the driver programs this DART's DAPF (m1n1 does not) */
 	bool		dapf_by_driver;
 
 	/* Power domains the DT cannot hand to the node (docs/57 #3, docs/78) */
 	const char	*me1_node;		/* venc_me1 */
 	const char	*me1_label;		/* checked before use */
+	/* venc_me0, where it has no phandle either (t8103); NULL = in the DT node */
+	const char	*me0_node;
+	const char	*me0_label;
 	const char	*pmp_report_node;	/* pmp-venc-sys, report@10 */
 
 	/* PMP and PMGR (docs/75); 0 = not known for this SoC, feature refused */
@@ -121,6 +154,8 @@ extern const struct ave_soc ave_soc_t6001_ave1;
 extern const struct ave_soc_set ave_soc_set_t6001;
 extern const struct ave_soc ave_soc_t6000;
 extern const struct ave_soc_set ave_soc_set_t6000;
+extern const struct ave_soc ave_soc_t8103;
+extern const struct ave_soc_set ave_soc_set_t8103;
 
 const struct ave_soc *ave_soc_pick(const struct ave_soc_set *set,
 				   phys_addr_t dpe_phys);

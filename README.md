@@ -2,7 +2,7 @@
 
 This repository is almost entirely AI-generated (Claude Opus models specifically, some Fable). The purpose of this work is to produce a working H.264 and HEVC Apple Video Encoder hardware driver for Linux running on M-series machines. This work was created in the interests of interoperability and allowing open source software to run efficiently on ageing hardware.
 
-This driver is alpha work and has been used on an M1 Max and an M1 Pro machine so far. Before using it, make sure it's right for you.
+This driver is alpha work and has been used on an M1 Max, an M1 Pro and (by a fork's author) an M1 machine so far. Before using it, make sure it's right for you.
 
 As per the documents the work has been tested extensively (several hours now), but has some specific shortcomings that I _largely_ don't care about.
 
@@ -26,11 +26,13 @@ approach should generalise across the M1 family and forward.
 |---|---|---|---|---|---|
 | `t6001` M1 Max | MacBookPro18,4/18,2 (`j314c`/`j316c`) | 2 (`apple-ave-enc`, `apple-ave1-enc`) | `AppleAVE2FW_H13C` → `apple/ave_h13c.bin` | `VARIANT=7` (both) or `4` (ave0) | bring-up machine; ave0's DAPF via the patched m1n1 (docs/50) |
 | `t6000` M1 Pro | MacBookPro18,3 (`j314s`); 18,1 (`j316s`) untested | 1 (`apple-ave-enc`) | `AppleAVE2FW_H13S` → `apple/ave_h13s.bin` | `VARIANT=8` | works with stock m1n1 (the driver programs the DAPF), docs/87 |
-| others (M1, M2…) | | | | | not ported: docs/79 is the checklist |
+| `t8103` M1 | MacBook Air M1 (`j313`); other M1 machines: placement per machine (docs/89) | 1 (`apple-ave-enc`) | `AppleAVE2FW_H13G` → `apple/ave_h13g.bin` | `VARIANT=9` | H.264 tested by the fork author (docs/89); merged with driver-side DAPF, untested on stock m1n1 |
+| others (M2…) | | | | | not ported: docs/79 is the checklist |
 
 Each SoC needs its firmware variant's Mach-O and its **pristine DATA blob**
 (`apple/ave-13.5-data-pristine.bin` for H13C,
-`apple/ave-13.5-h13s-data-pristine.bin` for H13S) in `/lib/firmware`. The
+`apple/ave-13.5-h13s-data-pristine.bin` for H13S,
+`apple/ave-13.5-h13g-data-pristine.bin` for H13G) in `/lib/firmware`. The
 blob is iBoot's DATA segment as left before the encoder's first start,
 taken from a cold boot with the read-only `test/physdump.ko` (docs/51,
 docs/87 §3). The driver checks its sha256 and only needs it to reload in
@@ -50,6 +52,7 @@ decodes, with every macroblock accounted for and no faults.
 make -C driver && make -C test          # on the MacBook, Fedora Asahi Remix
 sudo tools/ave-load.sh                  # M1 Max: both encoders; prints /dev/videoN; once per boot
 sudo VARIANT=8 tools/ave-load.sh        # M1 Pro
+sudo VARIANT=9 tools/ave-load.sh        # M1 (docs/89)
 ffmpeg -i input.mp4 -pix_fmt nv12 -c:v h264_v4l2m2m -b:v 4M out.mp4
 ffmpeg -i input.mp4 -pix_fmt nv12 -c:v hevc_v4l2m2m -b:v 4M out.mp4
 ```
