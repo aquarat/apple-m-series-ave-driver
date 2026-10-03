@@ -38,6 +38,7 @@ struct ave_dpe_set {
 
 extern const struct ave_dpe_set ave_dpe_set_castor_6000;
 extern const struct ave_dpe_set ave_dpe_set_acis_8103;
+extern const struct ave_dpe_set ave_dpe_set_atlas_8112;
 
 /* One row of the kext's AVE_DevInfo table, as sent in the boot handshake */
 struct ave_soc_devrow {
@@ -122,10 +123,28 @@ struct ave_soc {
 		 * blob with the tags below - in memory it owns (data_phys 0).
 		 */
 		bool		data_owned;
+		/*
+		 * docs/90 (t8112): RVBAR holds TEXT's DVA (text_dva, full width),
+		 * not its physical address, and the core fetches TEXT and DATA
+		 * through the DART; TEXT is always mapped at text_dva.
+		 */
+		bool		translated;
 		u64		tag_cpad, tag_wrad, tag_ioba;
 	} iboot;
 	/* docs/84 §3: the driver programs this DART's DAPF (m1n1 does not) */
 	bool		dapf_by_driver;
+	/*
+	 * dart-ave is a "dart,t8110" (t8112 and later): the newer register
+	 * layout (ave_dapf.c ave_dart_t8110) and a DAPF entry with r20 at +0x20.
+	 * false = the t8020/t6000 layout every earlier row uses.
+	 */
+	bool		dart_t8110;
+	/*
+	 * docs/90: the firmware's source reader needs the picture size from
+	 * PICMGMT +0x964 for linear input too (H14G); the H13x builds read it
+	 * only for compressed input, so it is not sent there.
+	 */
+	bool		src_dims;
 
 	/* Power domains the DT cannot hand to the node (docs/57 #3, docs/78) */
 	const char	*me1_node;		/* venc_me1 */
@@ -156,6 +175,8 @@ extern const struct ave_soc ave_soc_t6000;
 extern const struct ave_soc_set ave_soc_set_t6000;
 extern const struct ave_soc ave_soc_t8103;
 extern const struct ave_soc_set ave_soc_set_t8103;
+extern const struct ave_soc ave_soc_t8112;
+extern const struct ave_soc_set ave_soc_set_t8112;
 
 const struct ave_soc *ave_soc_pick(const struct ave_soc_set *set,
 				   phys_addr_t dpe_phys);

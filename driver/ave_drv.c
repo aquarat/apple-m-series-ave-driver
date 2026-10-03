@@ -1361,7 +1361,12 @@ static int ave_core_reset(struct ave_device *ave, bool *pulsed, bool resume)
 		dev_info(dev, "core reset: core_reset_only=1, stopping probe here\n");
 		return -ECANCELED;
 	}
-	if (after != before || !admits) {
+	/*
+	 * docs/90: a translated firmware fetch (t8112) goes through the DART,
+	 * not past a DAPF entry, and iBoot leaves that DAPF empty; what must
+	 * hold there is only that the reset did not change it.
+	 */
+	if (after != before || (!admits && !ave->soc->iboot.translated)) {
 		dev_err(dev, "core reset: the DAPF changed; not starting the core - Linux cannot put those entries back (docs/49), only a reboot can\n");
 		return -ENODEV;
 	}
@@ -2678,6 +2683,7 @@ static const struct of_device_id ave_of_match[] = {
 	{ .compatible = "apple,t6001-ave", .data = &ave_soc_set_t6001 },
 	{ .compatible = "apple,t6000-ave", .data = &ave_soc_set_t6000 },
 	{ .compatible = "apple,t8103-ave", .data = &ave_soc_set_t8103 },
+	{ .compatible = "apple,t8112-ave", .data = &ave_soc_set_t8112 },
 	{ .compatible = "apple,ave" },
 	{}
 };

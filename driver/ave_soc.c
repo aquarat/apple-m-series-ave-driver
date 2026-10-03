@@ -398,6 +398,98 @@ const struct ave_soc_set ave_soc_set_t6000 = {
 	.n	= ARRAY_SIZE(ave_soc_t6000_rows),
 };
 
+/*
+ * t8112, M2 (Mac mini j473), macOS 13.5 firmware (docs/90).
+ *
+ * AppleAVE2FW_H14G (same build tag as H13x), TEXT 0xd0000 / DATA vm 0xd0000
+ * +0x128000 like H13S, STKG at DATA+0x35d8; device row 18/15/10 from the
+ * 13.5 kext table; AVE_DPE tunables Atlas_8112 from the M2's own
+ * kernelcache; the same MMIO, DART and power-domain addresses as t8103.
+ *
+ * What differs (docs/90 §3): dart-ave is a "dart,t8110" (dart_t8110), and
+ * the core fetches its firmware through it. RVBAR holds 0x800000000, the
+ * dart-ave vm-base, not a physical address; the DATA literal is
+ * 0x8000d0000, vm-base + 0xd0000. iBoot put TEXT at 0x8008e0000 and DATA at
+ * 0x800e88000, both below Linux's RAM, and left the DAPF empty (the ADT has
+ * no dapf-instance for dart-ave). Placement read on one j473 (docs/90 §3).
+ */
+const struct ave_soc ave_soc_t8112 = {
+	.name			= "t8112",
+	.dpe			= &ave_dpe_set_atlas_8112,
+	.pipe_diag		= false,	/* pipe register map not checked on t8112 */
+	.dpe_phys		= 0x267100000ULL,
+	.inst			= 0,
+	.fw_name		= "apple/ave_h14g.bin",
+	.fw_pristine_name	= "apple/ave-13.5-h14g-data-pristine.bin",
+	.fw_pristine_sha256	= {
+		0xfe, 0x2d, 0x5e, 0xc1, 0xb2, 0xf9, 0x27, 0x98,
+		0xe5, 0x84, 0x7e, 0x0f, 0xc0, 0x66, 0xfc, 0x95,
+		0xdb, 0xbd, 0xd5, 0xe3, 0x52, 0x66, 0x51, 0xba,
+		0x00, 0x21, 0x6b, 0x45, 0xb7, 0x83, 0x9f, 0x3d,
+	},
+	.data_stkg_off		= 0x35d8,
+	.text_win = {
+		{ 0x0, {
+			0x86, 0xc3, 0x55, 0xf3, 0x40, 0x47, 0x6c, 0xc3,
+			0xac, 0x9b, 0x6a, 0x57, 0x79, 0x28, 0xb5, 0x10,
+			0x9e, 0xb9, 0x5b, 0xb4, 0x49, 0x72, 0x3d, 0x34,
+			0x1b, 0x2c, 0xc6, 0xc9, 0x1d, 0x32, 0x13, 0xef, } },
+		{ 0x80000, {
+			0x7a, 0x5d, 0x76, 0x5e, 0x2a, 0x20, 0xc1, 0xc6,
+			0x83, 0xcc, 0xc5, 0x8d, 0x5f, 0x5e, 0x71, 0x15,
+			0x77, 0xb3, 0xea, 0x00, 0xaa, 0x2f, 0x73, 0x53,
+			0x66, 0x41, 0x0e, 0xc0, 0x18, 0x1d, 0x31, 0xbb, } },
+		{ 0xcc000, {
+			0x34, 0xbb, 0x1e, 0x48, 0x8f, 0x4c, 0x27, 0x09,
+			0x19, 0x9c, 0x54, 0x0c, 0x02, 0x0c, 0x48, 0x66,
+			0xe8, 0xf8, 0x62, 0xc7, 0x9e, 0xfd, 0xf7, 0x6f,
+			0xb3, 0xff, 0x8a, 0xb6, 0x8b, 0x69, 0x70, 0xa1, } },
+	},
+
+	/* 13.5 kext AVE_DevInfo (docs/09): t8112 = chipType 10, devType 15, DevID 18 */
+	.dev = {
+		[AVE_ABI_MACOS_13_5] = { .dev_id = 18, .dev_type = 15, .chip_type = 10 },
+	},
+
+	/* ADT dart-ave: reg[0] DART, [1] CPUDART, [2] SMMU, [3] CPU_DAPF; bus + 0x2_0000_0000 */
+	.cpudart_phys		= 0x267040000ULL,
+	.dapf_phys		= 0x267044000ULL,
+	.dart1_phys		= 0x267030000ULL,
+	.smmu_phys		= 0x267020000ULL,
+	.dart_t8110		= true,
+	.src_dims		= true,
+
+	.dapf_mmio_own		= { 0x267050000ULL, 0x267c69000ULL },
+
+	.iboot = {
+		.text_phys	= 0x8008e0000ULL,
+		.text_size	= 0xd0000ULL,
+		.text_dva	= 0x800000000ULL,
+		.data_phys	= 0x800e88000ULL,
+		.data_size	= 0x128000ULL,
+		.data_dva	= 0x8000d0000ULL,
+		.data_literal	= 0x8000d0000ULL,
+		.translated	= true,
+	},
+
+	/* As on t8103: neither ME domain has a phandle; siblings under pipe4 + pipe5 */
+	.me0_node		= "/soc/power-management@23b700000/power-controller@8018",
+	.me0_label		= "venc_me0",
+	.me1_node		= "/soc/power-management@23b700000/power-controller@8020",
+	.me1_label		= "venc_me1",
+
+	/* Asahi has a t8112 PMP report (pmp-venc-sys); fields to be mapped later (docs/79 §4) */
+};
+
+static const struct ave_soc *const ave_soc_t8112_rows[] = {
+	&ave_soc_t8112,
+};
+
+const struct ave_soc_set ave_soc_set_t8112 = {
+	.rows	= ave_soc_t8112_rows,
+	.n	= ARRAY_SIZE(ave_soc_t8112_rows),
+};
+
 const struct ave_soc *ave_soc_pick(const struct ave_soc_set *set,
 				   phys_addr_t dpe_phys)
 {

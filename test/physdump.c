@@ -55,6 +55,16 @@ MODULE_PARM_DESC(size, "bytes to copy when base= is given");
 static const struct { u64 base, size; const char *what; } pd_ok[] = {
 	{ 0x8009f4000ULL, 0xcc000, "t8103 j313 13.5 H13G TEXT" },
 	{ 0x8019b0000ULL, 0x128000, "t8103 j313 13.5 H13G DATA" },
+	/*
+	 * t8112 j473 (docs/90): the carve-outs below Linux RAM (0x801120000)
+	 * that no reserved-memory node claims. The first is where RVBAR points
+	 * (0x800000000); the AVE TEXT and DATA are looked for in these.
+	 */
+	{ 0x800000000ULL, 0x214000, "t8112 j473 carve-out 0x800000000 (RVBAR)" },
+	{ 0x800818000ULL, 0x1ec000, "t8112 j473 carve-out 0x800818000" },
+	{ 0x800a20000ULL, 0x608000, "t8112 j473 carve-out 0x800a20000" },
+	{ 0x8008e0000ULL, 0xd0000, "t8112 j473 13.5 H14G TEXT" },
+	{ 0x800e88000ULL, 0x128000, "t8112 j473 13.5 H14G DATA" },
 };
 
 static struct dentry *pd_dir;

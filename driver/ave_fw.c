@@ -299,6 +299,17 @@ int ave_fw_map_text_mode(void)
 }
 
 /*
+ * docs/90: on t8112 RVBAR holds TEXT's DART address (the dart-ave vm-base,
+ * 0x800000000), and the core fetches TEXT and DATA through the DART. TEXT
+ * must then be mapped read-only at that DVA (mode 1) whatever fw_map_text
+ * says: there is no physical fetch to leave it to.
+ */
+static int ave_fw_text_mode(struct ave_device *ave)
+{
+	return ave->soc->iboot.translated ? 1 : fw_map_text;
+}
+
+/*
  * DATA restore (fw_restore_data), mirroring macOS.
  *
  * The firmware's DATA segment is iBoot-preloaded once per boot. The FIRST
@@ -515,10 +526,13 @@ static int ave_fw_check_iboot_placement(struct ave_device *ave)
 			ave->soc->name, fwreg);
 		return -EINVAL;
 	}
-	if (base != ave->soc->iboot.text_phys) {
+	if (base != (ave->soc->iboot.translated ? ave->soc->iboot.text_dva
+						 : ave->soc->iboot.text_phys)) {
 		dev_err(ave->dev,
-			"  iboot: REFUSING - RVBAR %#llx base %#llx, constants assume %#llx\n",
-			fwreg, base, ave->soc->iboot.text_phys);
+			"  iboot: REFUSING - RVBAR %#llx base %#llx, constants assume %#llx (%s)\n",
+			fwreg, base,
+			ave->soc->iboot.translated ? ave->soc->iboot.text_dva : ave->soc->iboot.text_phys,
+			ave->soc->iboot.translated ? "TEXT DVA" : "TEXT phys");
 		return -EINVAL;
 	}
 
@@ -712,13 +726,14 @@ static int ave_fw_map_owned_data(struct ave_device *ave,
 static int ave_fw_map_iboot(struct ave_device *ave, struct iommu_domain *domain,
 			    u64 map_iova)
 {
+	int text_mode = ave_fw_text_mode(ave);
 	int ret;
 
 	if (fw_map_text < 0 || fw_map_text > 2) {
 		dev_err(ave->dev, "fw_map_text=%d: must be 0, 1 or 2\n", fw_map_text);
 		return -EINVAL;
 	}
-	if (!fw_map_data && !fw_map_text)
+	if (!fw_map_data && !text_mode)
 		return 0;
 
 	if (!(domain->type & __IOMMU_DOMAIN_PAGING)) {
@@ -727,7 +742,7 @@ static int ave_fw_map_iboot(struct ave_device *ave, struct iommu_domain *domain,
 			domain->type);
 		return -EINVAL;
 	}
-	if (fw_map_text && map_iova != ave->soc->iboot.text_dva) {
+	if (text_mode && map_iova != ave->soc->iboot.text_dva) {
 		dev_err(ave->dev,
 			"iboot: REFUSING - RVBAR-derived DVA %#llx, TEXT option assumes %#llx\n",
 			map_iova, ave->soc->iboot.text_dva);
@@ -754,14 +769,14 @@ static int ave_fw_map_iboot(struct ave_device *ave, struct iommu_domain *domain,
 		ave->iboot_data_mapped = true;
 	}
 
-	if (fw_map_text == 1) {
+	if (text_mode == 1) {
 		ret = ave_fw_map_one(ave, domain, ave->soc->iboot.text_dva,
 				     ave->soc->iboot.text_phys, ave->soc->iboot.text_size,
 				     IOMMU_READ, "iboot TEXT");
 		if (ret)
 			goto fail;
 		ave->iboot_text_mapped = true;
-	} else if (fw_map_text == 2) {
+	} else if (text_mode == 2) {
 		dev_info(ave->dev,
 			 "  iboot TEXT: leaving DVA %#llx UNMAPPED (discriminating run: a translated fetch must fault there)\n",
 			 ave->soc->iboot.text_dva);
@@ -1228,7 +1243,8 @@ int ave_fw_load(struct ave_device *ave)
 	 * the address filter, not a translation failure. See ave_fw_map_iboot()
 	 * for what that changes.
 	 */
-	map_iova = fwreg & 0xfffff000ULL;
+	map_iova = ave->soc->iboot.translated ? fwreg & AVE_ASC_FW_BASE_MASK
+					       : fwreg & 0xfffff000ULL;
 	if (!map_iova) {
 		dev_warn(ave->dev,
 			 "fw-base register is %#llx; falling back to IOVA 0\n", fwreg);
@@ -1266,7 +1282,7 @@ int ave_fw_load(struct ave_device *ave)
 		return 0;
 	}
 
-	if (fw_map_text) {
+	if (ave_fw_text_mode(ave)) {
 		/*
 		 * DVA map_iova now holds iBoot's TEXT (1) or deliberately
 		 * nothing (2). Our image stays allocated - the identify scan
@@ -1274,7 +1290,7 @@ int ave_fw_load(struct ave_device *ave)
 		 */
 		dev_info(ave->dev,
 			 "  fw_map_text=%d: NOT mapping our image at IOVA %#llx\n",
-			 fw_map_text, map_iova);
+			 ave_fw_text_mode(ave), map_iova);
 		ave->fw.mapped_at_zero = false;
 		release_firmware(fw);
 		return 0;
@@ -1394,6 +1410,9 @@ void ave_fw_peek_phys(struct ave_device *ave)
 	pa = fwreg & AVE_ASC_FW_BASE_MASK;
 	if (!pa)
 		return;
+	/* docs/90: there RVBAR is a DART address, and TEXT is at text_phys */
+	if (ave->soc->iboot.translated)
+		pa = ave->soc->iboot.text_phys;
 
 	p = memremap(pa, SZ_4K, MEMREMAP_WB);
 	if (!p)

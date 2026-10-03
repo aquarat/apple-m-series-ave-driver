@@ -35,6 +35,7 @@
 
 #include <linux/iommu.h>
 #include <linux/io.h>
+#include <linux/iopoll.h>
 #include <linux/of.h>
 #include <linux/of_address.h>
 #include <linux/platform_device.h>
@@ -88,12 +89,83 @@
 #define DART_ERR_NO_PMD		BIT(1)
 #define DART_ERR_NO_TTBR	BIT(0)
 
+/*
+ * DART register layouts. The defines above are the t8020/t6000 DART's
+ * (apple-dart.c DART_T8020_*), which t8103, t6000 and t6001 use. t8112's
+ * dart-ave is a "dart,t8110" (ADT), the newer layout (apple-dart.c
+ * DART_T8110_*): TCR/TTBR elsewhere, one TTBR per stream, other bits.
+ * Every TCR/TTBR/ERROR access below goes through the SoC's layout.
+ */
+struct ave_dart_layout {
+	const char	*name;
+	u32		tcr, tcr_translate, tcr_bypass_dart, tcr_bypass_dapf;
+	u32		ttbr, ttbr_sid_stride, ttbr_count, ttbr_valid;
+	u32		error, error_addr_lo, error_addr_hi;
+	u32		map_size;	/* bytes of the DART mapped */
+	bool		t8020;		/* PARAMS/CONFIG/REMAP/DAPF_LOCK exist as above */
+};
+
+static const struct ave_dart_layout ave_dart_t8020 = {
+	.name = "t8020", .tcr = DART_TCR(0), .tcr_translate = DART_TCR_TRANSLATE,
+	.tcr_bypass_dart = DART_TCR_BYPASS_DART, .tcr_bypass_dapf = DART_TCR_BYPASS_DAPF,
+	.ttbr = DART_TTBR(0, 0), .ttbr_sid_stride = 0x10, .ttbr_count = 4,
+	.ttbr_valid = DART_TTBR_VALID, .error = DART_ERROR,
+	.error_addr_lo = DART_ERROR_ADDR_LO, .error_addr_hi = DART_ERROR_ADDR_HI,
+	.map_size = DART_MAP_SIZE, .t8020 = true,
+};
+
+/* apple-dart.c DART_T8110_TCR 0x1000, _TTBR 0x1400 (ttbr_count 1), _ERROR 0x100 */
+static const struct ave_dart_layout ave_dart_t8110 = {
+	.name = "t8110", .tcr = 0x1000, .tcr_translate = BIT(0),
+	.tcr_bypass_dart = BIT(1), .tcr_bypass_dapf = BIT(2),
+	.ttbr = 0x1400, .ttbr_sid_stride = 4, .ttbr_count = 1,
+	.ttbr_valid = BIT(0), .error = 0x100,
+	.error_addr_lo = 0x170, .error_addr_hi = 0x174,
+	.map_size = 0x4000, .t8020 = false,
+};
+
+static const struct ave_dart_layout *ave_dart(const struct ave_device *ave)
+{
+	return ave->soc->dart_t8110 ? &ave_dart_t8110 : &ave_dart_t8020;
+}
+
+#define DL_TCR(l, sid)		((l)->tcr + 4 * (sid))
+#define DL_TTBR(l, sid, i)	((l)->ttbr + (l)->ttbr_sid_stride * (sid) + 4 * (i))
+
+/* apple-dart.c DART_T8110_TLB_CMD / _ENABLE_STREAMS */
+#define DART_T8110_TLB_CMD		0x80
+#define DART_T8110_TLB_CMD_BUSY		BIT(31)
+#define DART_T8110_TLB_CMD_FLUSH_SID	(1 << 8)
+#define DART_T8110_ENABLE_STREAMS	0xc00
+
+/*
+ * A t8110 DART caches its stream state: rewritten TTBR/TCR registers read
+ * back right but are not used until that stream's TLB is flushed (docs/90:
+ * "NO TTBR FOR IOVA" from a TTBR that read back VALID). apple-dart.c
+ * apple_dart_t8110_hw_tlb_command, one stream.
+ */
+static int ave_dart_t8110_flush_sid(struct ave_device *ave, void __iomem *base,
+				    unsigned int sid)
+{
+	u32 v;
+	int ret;
+
+	writel(DART_T8110_TLB_CMD_FLUSH_SID | sid, base + DART_T8110_TLB_CMD);
+	ret = readl_poll_timeout_atomic(base + DART_T8110_TLB_CMD, v,
+					!(v & DART_T8110_TLB_CMD_BUSY), 1, 100);
+	if (ret)
+		dev_err(ave->dev, "dart: t8110 TLB flush of SID %u did not complete (%#x)\n",
+			sid, v);
+	return ret;
+}
+
 /* DAPF entry layout, m1n1 src/dapf.c:35-41 (dapf_init_t8020). */
 #define DAPF_ENTRY(i)		(0x40 * (i))
 #define DAPF_R0			0x00	/* 32-bit, written last */
 #define DAPF_R4			0x04	/* 32-bit */
 #define DAPF_START		0x08	/* 64-bit */
 #define DAPF_END		0x10	/* 64-bit, inclusive */
+#define DAPF_R20		0x20	/* 32-bit, t8110 DARTs only (m1n1 dapf_init_t8110a) */
 #define DAPF_MAP_SIZE		(0x40 * AVE_DAPF_MAX_ENTRIES)
 
 /*
@@ -285,7 +357,7 @@ static int ave_dapf_map(struct ave_device *ave)
 			AVE_DAPF_OFFSET);
 		return -EINVAL;
 	}
-	if (resource_size(rd) < DART_MAP_SIZE || resource_size(rf) < DAPF_MAP_SIZE) {
+	if (resource_size(rd) < ave_dart(ave)->map_size || resource_size(rf) < DAPF_MAP_SIZE) {
 		dev_err(ave->dev, "dapf: REFUSING - cpudart %pR or dapf %pR too small\n",
 			rd, rf);
 		return -EINVAL;
@@ -314,7 +386,7 @@ static int ave_dapf_map(struct ave_device *ave)
 	 * went through a posted devm_ioremap() - the mistake f93/f94 made on
 	 * the PMP (docs/75 §11 row 2, docs/84 R2).
 	 */
-	ave->cpudart = ave_devm_ioremap_np(ave->dev, rd->start, DART_MAP_SIZE);
+	ave->cpudart = ave_devm_ioremap_np(ave->dev, rd->start, ave_dart(ave)->map_size);
 	ave->dapf = ave_devm_ioremap_np(ave->dev, rf->start, DAPF_MAP_SIZE);
 	if (!ave->cpudart || !ave->dapf) {
 		dev_err(ave->dev, "dapf: ioremap failed\n");
@@ -344,7 +416,7 @@ static int ave_dapf_map(struct ave_device *ave)
 		ret = of_address_to_resource(args.np, 0, &ri);
 		of_node_put(args.np);
 		if (!ret && ri.start == ave->soc->dart1_phys) {
-			ave->dart1 = ave_devm_ioremap_np(ave->dev, ri.start, DART_MAP_SIZE);
+			ave->dart1 = ave_devm_ioremap_np(ave->dev, ri.start, ave_dart(ave)->map_size);
 			if (ave->dart1)
 				dev_info(ave->dev, "dapf: mapped datapath DART %#llx (not requested)\n",
 					 (u64)ave->soc->dart1_phys);
@@ -357,18 +429,19 @@ static int ave_dapf_map(struct ave_device *ave)
 static void ave_dart_dump_tcr(struct ave_device *ave, void __iomem *base,
 			      const char *name, unsigned int sid)
 {
-	u32 tcr = readl(base + DART_TCR(sid));
+	const struct ave_dart_layout *l = ave_dart(ave);
+	u32 tcr = readl(base + DL_TCR(l, sid));
 	unsigned int i;
 
 	dev_info(ave->dev, "dapf:   %s TCR[%2u]  = %#010x%s%s%s\n", name, sid, tcr,
-		 tcr & DART_TCR_TRANSLATE ? " TRANSLATE" : "",
-		 tcr & DART_TCR_BYPASS_DART ? " BYPASS_DART" : "",
-		 tcr & DART_TCR_BYPASS_DAPF ? " BYPASS_DAPF" : "");
-	for (i = 0; i < 4; i++) {
-		u32 t = readl(base + DART_TTBR(sid, i));
+		 tcr & l->tcr_translate ? " TRANSLATE" : "",
+		 tcr & l->tcr_bypass_dart ? " BYPASS_DART" : "",
+		 tcr & l->tcr_bypass_dapf ? " BYPASS_DAPF" : "");
+	for (i = 0; i < l->ttbr_count; i++) {
+		u32 t = readl(base + DL_TTBR(l, sid, i));
 
 		dev_info(ave->dev, "dapf:   %s TTBR[%2u][%u] = %#010x%s\n", name,
-			 sid, i, t, t & DART_TTBR_VALID ? " VALID" : "");
+			 sid, i, t, t & l->ttbr_valid ? " VALID" : "");
 	}
 }
 
@@ -379,16 +452,35 @@ static void ave_dapf_dump_tcr(struct ave_device *ave, unsigned int sid)
 
 static void ave_dapf_dump_dart(struct ave_device *ave, const char *tag)
 {
+	const struct ave_dart_layout *l = ave_dart(ave);
 	unsigned int sid;
 
-	u32 err = readl(ave->cpudart + DART_ERROR);
-	u64 eaddr = ((u64)readl(ave->cpudart + DART_ERROR_ADDR_HI) << 32) |
-		    readl(ave->cpudart + DART_ERROR_ADDR_LO);
-	u32 cfg = readl(ave->cpudart + DART_CONFIG);
+	u32 err = readl(ave->cpudart + l->error);
+	u64 eaddr = ((u64)readl(ave->cpudart + l->error_addr_hi) << 32) |
+		    readl(ave->cpudart + l->error_addr_lo);
+	u32 cfg;
 	u32 dlock;
 	unsigned int i;
 
-	dev_info(ave->dev, "dapf: [%s] CPUDART %pa\n", tag, &ave->cpudart_phys);
+	dev_info(ave->dev, "dapf: [%s] CPUDART %pa (%s layout)\n", tag, &ave->cpudart_phys, l->name);
+	if (!l->t8020) {
+		/* apple-dart.c DART_T8110_ERROR: stream [27:20], code [14:0] */
+		dev_info(ave->dev, "dapf:   ERROR   = %#010x%s stream %u code %#x  addr %#llx\n",
+			 err, err & BIT(31) ? " FLAG" : "", (err >> 20) & 0xff, err & 0x7fff, eaddr);
+		for (sid = 0; sid < DART_STREAM_COUNT; sid++)
+			ave_dapf_dump_tcr(ave, sid);
+		if (ave->dart1) {
+			u32 e1 = readl(ave->dart1 + l->error);
+
+			for (sid = 0; sid < DART_STREAM_COUNT; sid++)
+				ave_dart_dump_tcr(ave, ave->dart1, "DART1", sid);
+			dev_info(ave->dev, "dapf: [%s] DART1 ERROR %#010x addr %#018llx\n", tag, e1,
+				 ((u64)readl(ave->dart1 + l->error_addr_hi) << 32) |
+				 readl(ave->dart1 + l->error_addr_lo));
+		}
+		return;
+	}
+	cfg = readl(ave->cpudart + DART_CONFIG);
 	dev_info(ave->dev, "dapf:   PARAMS1 = %#010x  PARAMS2 = %#010x\n",
 		 readl(ave->cpudart + DART_PARAMS1),
 		 readl(ave->cpudart + DART_PARAMS2));
@@ -488,10 +580,25 @@ int ave_dart_restore_datapath(struct ave_device *ave)
 	if (!ave->dart1)
 		return -ENODEV;
 
+	/*
+	 * t8110: a block reset also clears the global stream enables, which
+	 * apple-dart sets to all-ones once at its own reset (TCR does the
+	 * isolation). Put that back first.
+	 */
+	if (!ave_dart(ave)->t8020) {
+		u32 en = readl(ave->dart1 + DART_T8110_ENABLE_STREAMS);
+
+		if (en != U32_MAX) {
+			dev_info(ave->dev, "dart: DART1 ENABLE_STREAMS %#x -> all\n", en);
+			writel(U32_MAX, ave->dart1 + DART_T8110_ENABLE_STREAMS);
+		}
+	}
+
 	for (i = 0; i < DART_STREAM_COUNT; i++) {
+		const struct ave_dart_layout *l = ave_dart(ave);
 		unsigned int sid = i;
-		u32 ctcr = readl(ave->cpudart + DART_TCR(sid));
-		u32 dtcr = readl(ave->dart1 + DART_TCR(sid));
+		u32 ctcr = readl(ave->cpudart + DL_TCR(l, sid));
+		u32 dtcr = readl(ave->dart1 + DL_TCR(l, sid));
 		bool same = ctcr == dtcr;
 
 		/*
@@ -499,29 +606,31 @@ int ave_dart_restore_datapath(struct ave_device *ave)
 		 * translates is one nothing attached, and mirroring a zero
 		 * TCR would be a no-op anyway.
 		 */
-		if (!(ctcr & DART_TCR_TRANSLATE) && !(dtcr & DART_TCR_TRANSLATE))
+		if (!(ctcr & l->tcr_translate) && !(dtcr & l->tcr_translate))
 			continue;
 		mirrored++;
 
-		for (k = 0; k < 4; k++)
-			same &= readl(ave->cpudart + DART_TTBR(sid, k)) ==
-				readl(ave->dart1 + DART_TTBR(sid, k));
+		for (k = 0; k < l->ttbr_count; k++)
+			same &= readl(ave->cpudart + DL_TTBR(l, sid, k)) ==
+				readl(ave->dart1 + DL_TTBR(l, sid, k));
 		if (same)
 			continue;
 
 		dev_info(ave->dev, "dart: restoring DART1 SID %u: TCR %#x -> %#x, TTBR[0] %#010x -> %#010x\n",
-			 sid, dtcr, ctcr, readl(ave->dart1 + DART_TTBR(sid, 0)),
-			 readl(ave->cpudart + DART_TTBR(sid, 0)));
-		for (k = 0; k < 4; k++)
-			writel(readl(ave->cpudart + DART_TTBR(sid, k)),
-			       ave->dart1 + DART_TTBR(sid, k));
-		writel(ctcr, ave->dart1 + DART_TCR(sid));
+			 sid, dtcr, ctcr, readl(ave->dart1 + DL_TTBR(l, sid, 0)),
+			 readl(ave->cpudart + DL_TTBR(l, sid, 0)));
+		for (k = 0; k < l->ttbr_count; k++)
+			writel(readl(ave->cpudart + DL_TTBR(l, sid, k)),
+			       ave->dart1 + DL_TTBR(l, sid, k));
+		writel(ctcr, ave->dart1 + DL_TCR(l, sid));
 		wrote++;
+		if (!l->t8020 && ave_dart_t8110_flush_sid(ave, ave->dart1, sid))
+			bad++;
 
-		for (k = 0; k < 4; k++)
-			bad += readl(ave->dart1 + DART_TTBR(sid, k)) !=
-			       readl(ave->cpudart + DART_TTBR(sid, k));
-		bad += readl(ave->dart1 + DART_TCR(sid)) != ctcr;
+		for (k = 0; k < l->ttbr_count; k++)
+			bad += readl(ave->dart1 + DL_TTBR(l, sid, k)) !=
+			       readl(ave->cpudart + DL_TTBR(l, sid, k));
+		bad += readl(ave->dart1 + DL_TCR(l, sid)) != ctcr;
 	}
 
 	if (bad) {
@@ -568,11 +677,11 @@ int ave_dart_datapath_check(struct ave_device *ave, const char *tag)
 		return -ENODEV;
 	}
 
-	c_tcr = readl(ave->cpudart + DART_TCR(0));
-	c_ttbr = readl(ave->cpudart + DART_TTBR(0, 0));
-	d_tcr = readl(ave->dart1 + DART_TCR(0));
-	d_ttbr = readl(ave->dart1 + DART_TTBR(0, 0));
-	match = d_ttbr == c_ttbr && d_tcr == c_tcr && (d_ttbr & DART_TTBR_VALID);
+	c_tcr = readl(ave->cpudart + DL_TCR(ave_dart(ave), 0));
+	c_ttbr = readl(ave->cpudart + DL_TTBR(ave_dart(ave), 0, 0));
+	d_tcr = readl(ave->dart1 + DL_TCR(ave_dart(ave), 0));
+	d_ttbr = readl(ave->dart1 + DL_TTBR(ave_dart(ave), 0, 0));
+	match = d_ttbr == c_ttbr && d_tcr == c_tcr && (d_ttbr & ave_dart(ave)->ttbr_valid);
 	/* Checked every frame; only a mismatch is news while streaming. */
 	if (!match || !ave->dart_check_quiet)
 		dev_info(ave->dev, "dart: [%s] SID0 CPUDART TCR %#x TTBR %#010x | DART1 TCR %#x TTBR %#010x -> %s\n",
@@ -590,7 +699,8 @@ static bool ave_dapf_slot_read(struct ave_device *ave, unsigned int i,
 	e->r4 = readl(b + DAPF_R4);
 	e->start = readq(b + DAPF_START);
 	e->end = readq(b + DAPF_END);
-	return e->r0 || e->r4 || e->start || e->end;
+	e->r20 = ave->soc->dart_t8110 ? readl(b + DAPF_R20) : 0;
+	return e->r0 || e->r4 || e->start || e->end || e->r20;
 }
 
 static bool ave_dapf_covers(const struct ave_dapf_entry *e, u64 addr)
@@ -632,6 +742,8 @@ static unsigned int ave_dapf_dump_entries(struct ave_device *ave, const char *ta
 		}
 		dev_info(ave->dev, "dapf:   [%2u] r0 %#06x r4 %#06x  %#013llx - %#013llx%s\n",
 			 i, e.r0, e.r4, e.start, e.end, hits);
+		if (ave->soc->dart_t8110)
+			dev_info(ave->dev, "dapf:   [%2u] r20 %#010x\n", i, e.r20);
 	}
 	dev_info(ave->dev, "dapf: [%s] %u non-empty slot(s)\n", tag, used);
 	return used;
@@ -659,13 +771,13 @@ static u64 ave_dapf_fingerprint(struct ave_device *ave, bool *admits_fetch)
 	*admits_fetch = false;
 	for (i = 0; i < AVE_DAPF_MAX_ENTRIES; i++) {
 		struct ave_dapf_entry e = {};
-		u64 f[4];
+		u64 f[5];
 		unsigned int k, b;
 
 		if (ave_dapf_slot_read(ave, i, &e) &&
 		    ave_dapf_covers(&e, ave->soc->iboot.text_phys + 0x200))
 			*admits_fetch = true;
-		f[0] = e.r0; f[1] = e.r4; f[2] = e.start; f[3] = e.end;
+		f[0] = e.r0; f[1] = e.r4; f[2] = e.start; f[3] = e.end; f[4] = e.r20;
 		for (k = 0; k < ARRAY_SIZE(f); k++)
 			for (b = 0; b < 64; b += 8) {
 				h ^= (f[k] >> b) & 0xff;
@@ -705,6 +817,80 @@ int ave_dapf_dump_now(struct ave_device *ave, const char *tag,
 	if (admits_fetch)
 		*admits_fetch = admits;
 	return 0;
+}
+
+static bool dart_dump_close;
+module_param(dart_dump_close, bool, 0644);
+MODULE_PARM_DESC(dart_dump_close,
+		 "after each session close, log both DARTs' TCR/TTBR/ERROR (read-only; docs/90)");
+
+static bool regdump;
+module_param(regdump, bool, 0644);
+MODULE_PARM_DESC(regdump,
+		 "after each probe-time frame and session close, log every non-zero word of the SMMU and both DARTs (read-only; docs/90)");
+
+static void ave_regdump_block(struct ave_device *ave, const char *name,
+			      phys_addr_t pa, const char *tag)
+{
+	void __iomem *b;
+	unsigned int o, n = 0;
+
+	if (!pa)
+		return;
+	b = ioremap_np(pa, SZ_16K);
+	if (!b)
+		return;
+	for (o = 0; o < SZ_16K; o += 4) {
+		u32 v = readl(b + o);
+
+		if (v) {
+			dev_info(ave->dev, "regdump[%s] %s+%#06x = %#010x\n", tag, name, o, v);
+			n++;
+		}
+	}
+	dev_info(ave->dev, "regdump[%s] %s %pa: %u non-zero word(s)\n", tag, name, &pa, n);
+	iounmap(b);
+}
+
+void ave_regdump_iova(struct ave_device *ave, const char *what, dma_addr_t iova)
+{
+	struct iommu_domain *dom = iommu_get_domain_for_dev(ave->dev);
+	phys_addr_t pa;
+
+	if (!regdump || !dom)
+		return;
+	pa = iommu_iova_to_phys(dom, iova);
+	dev_info(ave->dev, "regdump: %s iova %pad -> pa %pa (16K page %#llx)\n", what, &iova, &pa,
+		 (u64)pa >> 14);
+}
+
+void ave_regdump(struct ave_device *ave, const char *tag)
+{
+	struct iommu_domain *dom = iommu_get_domain_for_dev(ave->dev);
+
+	if (!regdump)
+		return;
+	/* docs/90 §5: IOVA -> 16K page, to read the SMMU's cached entries against */
+	if (dom && !strcmp(tag, "frame")) {
+		u64 iova;
+
+		for (iova = 0xf0000000ULL; iova < 0x100000000ULL; iova += SZ_16K) {
+			phys_addr_t pa = iommu_iova_to_phys(dom, iova);
+
+			if (pa)
+				dev_info(ave->dev, "pmap %#llx %#llx\n", iova, (u64)pa >> 14);
+		}
+	}
+	ave_regdump_block(ave, "SMMU", ave->soc->smmu_phys, tag);
+	ave_regdump_block(ave, "DART1", ave->soc->dart1_phys, tag);
+	ave_regdump_block(ave, "CPUDART", ave->soc->cpudart_phys, tag);
+}
+
+void ave_dapf_dump_on_close(struct ave_device *ave)
+{
+	ave_regdump(ave, "close");
+	if (dart_dump_close && ave->cpudart)
+		ave_dapf_dump_dart(ave, "close");
 }
 
 int ave_dapf_dump(struct ave_device *ave)
@@ -798,7 +984,9 @@ int ave_dapf_pm_restore(struct ave_device *ave)
 		 fp, ave->dapf_boot_fp, admits ? "admitted" : "NOT ADMITTED");
 	ave_dapf_dump_entries(ave, "resume, before restore");
 
-	if (readl(ave->cpudart + DART_DAPF_LOCK) & DART_DAPF_LOCK_BIT) {
+	/* t8020 DAPF_LOCK; the t8110 DART has no such register at 0xf0 */
+	if (ave_dart(ave)->t8020 &&
+	    readl(ave->cpudart + DART_DAPF_LOCK) & DART_DAPF_LOCK_BIT) {
 		dev_err(ave->dev, "pm: resume: DAPF_LOCK is set; cannot restore the DAPF\n");
 		return -EPERM;
 	}
@@ -1001,6 +1189,9 @@ int ave_dapf_program(struct ave_device *ave,
 		writeq(ent[i].start, b + DAPF_START);
 		writeq(ent[i].end, b + DAPF_END);
 		writel(ent[i].r0, b + DAPF_R0);
+		/* m1n1 dapf_init_t8110a order: r20 after r0 */
+		if (ave->soc->dart_t8110)
+			writel(ent[i].r20, b + DAPF_R20);
 	}
 
 	ave_step(ave, "all %u DAPF slots written; next: readback", n);
@@ -1010,7 +1201,8 @@ int ave_dapf_program(struct ave_device *ave,
 
 		ave_dapf_slot_read(ave, i, &back);
 		ok = back.r0 == ent[i].r0 && back.r4 == ent[i].r4 &&
-		     back.start == ent[i].start && back.end == ent[i].end;
+		     back.start == ent[i].start && back.end == ent[i].end &&
+		     back.r20 == ent[i].r20;
 		if (!ok) {
 			bad++;
 			dev_err(ave->dev,
@@ -1051,6 +1243,11 @@ int ave_dapf_write_probe(struct ave_device *ave)
 
 	if (!dapf_probe)
 		return 0;
+	if (!ave_dart(ave)->t8020) {
+		dev_err(ave->dev, "dapf_probe: REFUSING - TCR[0] at the t8020 offset; this DART is %s\n",
+			ave_dart(ave)->name);
+		return -EINVAL;
+	}
 	ret = ave_dapf_check_power(ave);
 	if (ret)
 		return ret;
