@@ -10,6 +10,7 @@ conclusions are in docs/88; this is how to rerun it.
 | `power.py` | energy per frame (SMC "Total System Power"; Apple silicon, macsmc-hwmon) |
 | `results.csv` | every run from 2026-09-30 (315 rows): clip, encoder, target (kbit/s, QP or CRF), kbit/s, wall/CPU s, fps, PSNR-Y, PSNR avg, SSIM, VMAF |
 | `power.log` | the energy run |
+| `results-m2.csv`, `power-m2.log` | the M2 rerun of the AVE modes and its energy run (docs/91): identical to the M1 Pro's rows |
 | `x265-4.1-cmake4.patch` | x265 4.1 sets two CMake policies to OLD, which CMake 4 refuses; this sets them NEW |
 
 ## Rerun

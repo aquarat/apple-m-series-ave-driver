@@ -42,6 +42,34 @@ docs/87 §3). The driver checks its sha256 and only needs it to reload in
 the same boot. Only macOS 13.5 stub firmware (`asahi,os-fw-version`) has
 been mapped.
 
+## Benchmarks (2026-10-03)
+
+Measured on an M1 Pro and an M2 Mac mini; method, tables and reruns in
+[docs/91](docs/91-benchmarks.md).
+
+**Speed**: one stream, fixed QP, hardware time per frame. The M1 Pro needs
+the PMP performance vote (docs/87); the M2 is at full speed without it.
+
+![AVE encode speed](docs/img/speed.svg)
+
+**Compression**: AVE HEVC against x265 on five Xiph 1080p50 clips. AVE needs
+~20 % more bitrate than x265 `--preset medium` for the same VMAF (docs/88).
+
+![rate-distortion](docs/img/rd-vmaf.svg)
+
+![BD-rate vs x265 medium](docs/img/bdrate.svg)
+
+**Per device**: the M1 Pro and the M2 produce identical output. All 50
+points (5 clips, 8-bit and Main 10, 5 QPs) match in bitrate and every
+quality metric.
+
+![per-device rate-distortion](docs/img/rd-per-device.svg)
+
+**Energy** per 1080p frame, whole machine above idle: AVE uses 25-70x less
+than x265 `medium`.
+
+![energy per frame](docs/img/energy.svg)
+
 ## Status (2026-09-30)
 
 A driver exists and runs on real hardware. It brings the block up, starts the
