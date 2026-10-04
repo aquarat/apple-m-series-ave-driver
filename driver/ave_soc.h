@@ -118,18 +118,36 @@ struct ave_soc {
 		u64		data_dva;
 		u64		data_literal;	/* DATA's DVA as the image spells it */
 		/*
-		 * docs/82 ave1: iBoot loads DATA for ave0 only. true = the
-		 * driver builds this instance's DATA itself - the pristine
-		 * blob with the tags below - in memory it owns (data_phys 0).
+		 * Where this instance's DATA comes from (AVE_DATA_*).
+		 * docs/82 ave1: iBoot loads DATA for ave0 only, so ave1's is
+		 * AVE_DATA_OWNED (= true): the driver builds it itself - the
+		 * pristine blob with the tags below - in memory it owns
+		 * (data_phys 0). docs/89 §6: on a stock-m1n1 Mac mini iBoot's
+		 * DATA lies in Linux's System RAM, so t8103 is
+		 * AVE_DATA_OWNED_IF_RAM, decided at probe.
 		 */
-		bool		data_owned;
+		u8		data_owned;
 		/*
 		 * docs/90 (t8112): RVBAR holds TEXT's DVA (text_dva, full width),
 		 * not its physical address, and the core fetches TEXT and DATA
 		 * through the DART; TEXT is always mapped at text_dva.
 		 */
 		bool		translated;
+		/*
+		 * Owned DATA: the tag values this instance's DATA must carry
+		 * (CpAd = the ASC bank, WrAd = CpAd + 0x400000, IOBA = the
+		 * fabric bank or 0), and the SoC id (SOC_, 0 = not checked).
+		 */
 		u64		tag_cpad, tag_wrad, tag_ioba;
+		u32		tag_soc;
+		/*
+		 * Owned DATA only: also accept a pristine blob that is not the
+		 * pinned fw_pristine_sha256 if it verifies against fw_name's
+		 * __DATA byte for byte outside iBoot's fill set (the tag
+		 * payloads and the _rtk_tunables region) and carries the tags
+		 * above (tools/data_blob_from_image.py, docs/89 §6).
+		 */
+		bool		blob_by_image;
 	} iboot;
 	/* docs/84 §3: the driver programs this DART's DAPF (m1n1 does not) */
 	bool		dapf_by_driver;
@@ -161,6 +179,11 @@ struct ave_soc {
 	phys_addr_t	pmp_dvfs_rd;		/* the same entry, read side */
 	phys_addr_t	pmgr_perf_blk;		/* PMGR perf block 9 (perf_dump) */
 };
+
+/* ave_soc.iboot.data_owned */
+#define AVE_DATA_IBOOT		0	/* iBoot's DATA at data_phys, mapped in place */
+#define AVE_DATA_OWNED		1	/* always the driver's own copy (= true) */
+#define AVE_DATA_OWNED_IF_RAM	2	/* own copy iff iBoot's DATA is in System RAM */
 
 /* The rows of one SoC, one per encoder instance */
 struct ave_soc_set {
