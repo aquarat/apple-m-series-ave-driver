@@ -1333,6 +1333,12 @@ VBR, negative = fewer bits:
 |---|---|---|---|
 | all 20 points | 7.3 % (17.8) | 13.5 % (46.2) | **4.3 % (14.9)** |
 
+**The M1 Pro** (H13S) ran the same bench, all three modes
+(`results-m1pro-2pass.csv`): **all 60 points are identical to the M2's**
+in bitrate, PSNR, SSIM and VMAF, so the clamp and the fix behave the same
+on both SoCs, as the firmware comparison in §12 predicted. Its loop is
+faster (VBR 136 against 98 fps; 2-pass 68 against 47).
+
 So the fix turns the final pass from 5-11 % worse than 1-pass VBR into
 slightly better (best on the fast clips, where the clamp did the damage),
 with a closer size match. It is still a bitrate mode: fixed QP with B
