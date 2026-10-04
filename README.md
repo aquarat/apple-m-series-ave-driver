@@ -179,21 +179,20 @@ It is a stateful mem2mem encoder, NV12 in:
     --scene-qscale bits` it beats 1-pass VBR slightly (−0.6 % VMAF,
     −1.8 % PSNR-Y) and hits its size within 4 % on average. Not in V4L2 yet.
   - System suspend/resume (untested; suspend is masked on the lab machine).
-- **Widths that are not a multiple of 64** (e.g. 720-wide SD) work since
-  2026-10-04 (the driver used to round the width to 64, which left a
-  754-wide picture): through `v4l2-ctl` or `tools/ave-transcode.sh`
-  (HEVC fixed QP with B frames, into Matroska with the source's audio and
-  metadata), **not through ffmpeg's `hevc_v4l2m2m`/`h264_v4l2m2m`**, which
-  ignores the line stride (bytesperline 768 for 720) and produces a broken
-  picture. ffmpeg also picks the encoder node itself (one stream at a time
-  unless each process sees one node, e.g. `systemd-run --scope -p
-  DevicePolicy=closed -p "DeviceAllow=/dev/videoN rw" ffmpeg ...`) and has
-  no global header for Matroska (encode to `-f hevc`, then remux).
-- **Known issues:** ffmpeg's V4L2 m2m wrapper segfaults on a 1080-line
-  input: the driver rounds the OUTPUT height up to 1088 and the wrapper
-  mishandles it (other non-16-aligned heights likely too; untested). The
-  driver survives it. Pad to a 16-aligned height, or use `v4l2-ctl` with an
-  OUTPUT crop. The HEVC level control defaults
+- **ffmpeg** (2026-10-04): stock ffmpeg's `hevc_v4l2m2m`/`h264_v4l2m2m`
+  has no fixed QP, forces B frames off, ignores the line stride (a
+  720-wide source comes out broken), crashes on 1080-line input, picks the
+  encoder node itself and gives Matroska no codec header. **`ffmpeg/` fixes
+  all of that**: seven patches on FFmpeg 8.1 and a native build script
+  (`-qp`, `-qp_b_offset`, `-bf`, `-device`, direct `.mkv`/`.mp4`; tested on
+  the M1 Ultra, `ffmpeg/README.md`). With several encoders (M1 Max, M1
+  Ultra) the driver's `open_balance` (docs/98 §12) gives each concurrent
+  client a free encoder. `tools/ave-transcode.sh` (v4l2-ctl + mkvmerge)
+  remains as a stock-ffmpeg alternative. The driver takes any width that is
+  a multiple of 16 (it used to round to 64, which broke 720-wide SD).
+- **Known issues:** stock ffmpeg's V4L2 m2m wrapper segfaults on a 1080-line
+  input (fixed by `ffmpeg/`; with stock ffmpeg pad to 1088 or use
+  `v4l2-ctl` with an OUTPUT crop). The HEVC level control defaults
   to 4, which under-reports 1440p and 4K streams (docs/88 §5).
 - **Stability (docs/84):** a 2-hour campaign (6055 byte-identical streams,
   60 000-frame streams, 300 open/close cycles, 150 random configurations,
