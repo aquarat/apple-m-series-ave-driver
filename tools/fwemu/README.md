@@ -11,6 +11,7 @@ memory, and log every register it programs (docs/93).
 | `locate.py` | host | the `CAVCController` and a frame's `sCmdInformation` in a snapshot |
 | `emu.py` | host | call a firmware function, log MMIO (needs `pip install unicorn`) |
 | `diff.py` | host | compare two emulations' final register values |
+| `synth.py` | host | call a firmware function on synthetic (zeroed) state, no snapshot: compare builds or settings (docs/89 §9.4; preset `avc-setpipe` for H13G/H13S) |
 | `fwsyms.py` | host | function symbols and sizes from the firmware Mach-O |
 
 `mp/` holds the multipass tools of docs/95: `fd.py` (firmware disassembly by
