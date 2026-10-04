@@ -1,0 +1,4 @@
+test                                W mean W over idle     fps  J/frame CPU s/frame
+idle (before)                        13.01
+crowd_run 8000k ave                  13.54        0.53    42.3    0.013      0.0076
+idle (after)                         12.17   (J/frame above use the before-idle; with the mean idle 12.59 W they shift by +0.42 W x time/frame)

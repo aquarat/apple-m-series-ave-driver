@@ -27,9 +27,9 @@ the **M2** (`t8112`, Mac mini `j473`) as the first outside the M1 family
 |---|---|---|---|---|---|
 | `t6001` M1 Max | MacBookPro18,4/18,2 (`j314c`/`j316c`) | 2 (`apple-ave-enc`, `apple-ave1-enc`) | `AppleAVE2FW_H13C` → `apple/ave_h13c.bin` | `VARIANT=7` (both) or `4` (ave0) | bring-up machine; ave0's DAPF via the patched m1n1 (docs/50) |
 | `t6000` M1 Pro | MacBookPro18,3 (`j314s`); 18,1 (`j316s`) untested | 1 (`apple-ave-enc`) | `AppleAVE2FW_H13S` → `apple/ave_h13s.bin` | `VARIANT=8` | works with stock m1n1 (the driver programs the DAPF), docs/87 |
-| `t8103` M1 | MacBook Air M1 (`j313`); Mac mini M1 (`j274`) being brought up; other M1 machines: placement per machine (docs/89) | 1 (`apple-ave-enc`) | `AppleAVE2FW_H13G` → `apple/ave_h13g.bin` | `VARIANT=9` | H.264 tested by the fork author (docs/89); on a stock-m1n1 Mac mini the driver-side DAPF works (stage 8) and the driver builds DATA itself (docs/89 §6), core start not yet run |
+| `t8103` M1 | MacBook Air M1 (`j313`); Mac mini M1 (`j274`); other M1 machines: placement per machine (docs/89) | 1 (`apple-ave-enc`) | `AppleAVE2FW_H13G` → `apple/ave_h13g.bin` | `VARIANT=9` | H.264 tested by the fork author (docs/89); **Mac mini on stock m1n1: works** (2026-10-04, docs/89 §8): driver-side DAPF, the driver builds DATA itself (iBoot's lies in Linux RAM), H.264/HEVC through V4L2, reload; 308 fps at 720p, 10 mJ/frame. **B frames hang on the M1** (under analysis) |
 | `t8112` M2 | Mac mini M2 (`j473`); other M2 machines: placement per machine (docs/90) | 1 (`apple-ave-enc`) | `AppleAVE2FW_H14G` → `apple/ave_h14g.bin` | `VARIANT=10` | H.264 and HEVC (Main, Main10) tested on a j473 with stock m1n1, clean boot and reload; full speed without the PMP, which only slows it here (docs/90 §9) |
-| `t6002` M1 Ultra | Mac Studio (`j375d`) | 4: two per die (`apple-ave-enc`, `apple-ave1-enc`, `apple-ave2-enc`, `apple-ave3-enc`) | `AppleAVE2FW_H13D` → `apple/ave_h13d.bin` | `VARIANT=11` (ave0), `12` (die 0), `13` (ave0 + ave2), `14` (all four) | **ported, untested on hardware** (docs/98): stock m1n1 and DTB; the iBoot placement is read from the live ADT first (docs/98 U0); no PMP vote (the stock DT has the PMP off) |
+| `t6002` M1 Ultra | Mac Studio (`j375d`) | 4: two per die (`apple-ave-enc`, `apple-ave1-enc`, `apple-ave2-enc`, `apple-ave3-enc`) | `AppleAVE2FW_H13D` → `apple/ave_h13d.bin` | `VARIANT=11` (ave0), `12` (die 0), `13` (ave0 + ave2), `14` (all four) | **works, all four encoders** (2026-10-04, docs/98 §11): stock m1n1 and DTB; the iBoot placement read from the live ADT (docs/98 U0) and compiled in (per machine); output identical to the M1 Pro's, B frames included; no PMP vote (the stock DT has the PMP off): 57 fps per encoder at 1080p, ~230 fps with all four |
 | others (M2 Pro/Max, M3…) | | | | | not ported: docs/79 is the checklist |
 
 Each SoC needs its firmware variant's Mach-O and its **pristine DATA blob**
@@ -49,13 +49,16 @@ iBoot's DATA lies in Linux's RAM (an M1 Mac mini on stock m1n1), to build the
 core's DATA itself. Only macOS 13.5 stub firmware (`asahi,os-fw-version`) has
 been mapped.
 
-## Benchmarks (2026-10-03, B frames 2026-10-04)
+## Benchmarks (2026-10-03; B frames, 2-pass, M1 and M1 Ultra 2026-10-04)
 
 Measured on an M1 Pro and an M2 Mac mini; method, tables and reruns in
 [docs/91](docs/91-benchmarks.md).
 
 **Speed**: one stream, fixed QP, hardware time per frame. The M1 Pro needs
-the PMP performance vote (docs/87); the M2 is at full speed without it.
+the PMP performance vote (docs/87); the M2 and the M1 are at full speed
+without it. The M1 Ultra has no vote on its stock DT, so each of its four
+encoders runs at the boot clock; all four together give ~230 fps at 1080p
+(docs/98).
 
 ![AVE encode speed](docs/img/speed.svg)
 
@@ -82,14 +85,16 @@ lands closer to its target size.
 
 ![park_joy frame by frame](docs/img/finalpass.svg)
 
-**Per device**: the M1 Pro and the M2 produce identical output. All 50
-points (5 clips, 8-bit and Main 10, 5 QPs) match in bitrate and every
-quality metric.
+**Per device**: the M1 Pro, the M2 and the M1 Ultra produce identical
+output: all 50 points (5 clips, 8-bit and Main 10, 5 QPs) match in bitrate
+and every quality metric. The M1's streams differ slightly, within ±0.2 %
+BD-rate per clip and +0.01 % on average (docs/89 §8).
 
 ![per-device rate-distortion](docs/img/rd-per-device.svg)
 
-**Energy** per 1080p frame, whole machine above idle: AVE uses 25-70x less
-than x265 `medium`.
+**Energy** per 1080p frame, whole machine above idle: AVE uses 25-75x less
+than x265 `medium` (10 mJ on the M1, 11 on the M2, 13 on the M1 Ultra, 31
+on the M1 Pro, against 759 mJ).
 
 ![energy per frame](docs/img/energy.svg)
 

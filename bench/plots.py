@@ -33,6 +33,7 @@ import bench  # noqa: E402
 
 XIPH = ["crowd_run", "park_joy", "ducks_take_off", "in_to_tree", "old_town_cross"]
 C = {"M1 Pro": "#1f77b4", "M1 Pro + PMP vote": "#0b3d91", "M2": "#d62728",
+     "M1": "#17becf", "M1 Ultra": "#e377c2",
      "x265 medium": "#7f7f7f", "x265 slow": "#2ca02c", "x265 ultrafast": "#bcbd22",
      "x265 fast": "#9467bd", "B frames": "#ff7f0e"}
 # AVE's best measured setting: one B frame per P, B QP = I QP + 3 (docs/96)
@@ -67,7 +68,7 @@ def speed():
         return
     sizes = ["1280x720", "1920x1080", "3840x2160"]
     series = list(dict.fromkeys((x["machine"], x["codec"]) for x in r))
-    fig, ax = plt.subplots(figsize=(8, 4))
+    fig, ax = plt.subplots(figsize=(12, 4.4))
     w = 0.8 / len(series)
     for i, (m, c) in enumerate(series):
         v = {x["size"]: float(x["fps"]) for x in r if x["machine"] == m and x["codec"] == c}
@@ -76,13 +77,13 @@ def speed():
         col = C.get(m, "#888")
         b = ax.bar(xs, ys, w, label=f"{m}, {'H.264' if c == 'h264' else 'HEVC'}", color=col,
                    alpha=1.0 if c == "h264" else 0.55, edgecolor=col)
-        ax.bar_label(b, labels=[f"{y:.0f}" if y else "" for y in ys], fontsize=8, padding=2)
+        ax.bar_label(b, labels=[f"{y:.0f}" if y else "" for y in ys], fontsize=7, padding=2)
     ax.axhline(60, color="k", lw=0.8, ls=":")
     ax.text(2.45, 62, "60 fps", fontsize=8, ha="right")
     ax.set_xticks(range(len(sizes)), ["720p", "1080p", "2160p (4K)"])
     ax.set_ylabel("frames per second (hardware, one stream)")
     ax.set_title("AVE encode speed, fixed QP")
-    ax.legend(fontsize=8, ncol=2)
+    ax.legend(fontsize=8, ncol=3)
     save(fig, "speed.svg")
 
 
@@ -251,13 +252,17 @@ def energy():
         return out
     m1 = parse(os.path.join(HERE, "hevc-efficiency", "power.log"))
     m2 = parse(os.path.join(HERE, "hevc-efficiency", "power-m2.log"))
+    m1b = parse(os.path.join(HERE, "hevc-efficiency", "power-m1.log"))
+    mu = parse(os.path.join(HERE, "hevc-efficiency", "power-ultra.log"))
     bars = [("x265 medium", m1.get(("crowd_run", "x265-medium"))),
             ("x265 fast", m1.get(("crowd_run", "x265-fast"))),
             ("x265 ultrafast", m1.get(("crowd_run", "x265-ultrafast"))),
             ("AVE M1 Pro", m1.get(("crowd_run", "ave"))),
-            ("AVE M2", m2.get(("crowd_run", "ave")))]
+            ("AVE M2", m2.get(("crowd_run", "ave"))),
+            ("AVE M1", m1b.get(("crowd_run", "ave"))),
+            ("AVE M1 Ultra", mu.get(("crowd_run", "ave")))]
     bars = [(n, v) for n, v in bars if v]
-    fig, ax = plt.subplots(figsize=(7, 3.2))
+    fig, ax = plt.subplots(figsize=(7, 3.8))
     cols = [C.get(n.replace("AVE ", ""), C.get(n, "#888")) for n, _ in bars]
     b = ax.barh([n for n, _ in bars], [v[1] * 1000 for _, v in bars], color=cols)
     ax.bar_label(b, labels=[f"{v[1] * 1000:.0f} mJ  ({v[0]:.0f} fps)" for _, v in bars], fontsize=8, padding=3)
@@ -269,33 +274,38 @@ def energy():
 
 
 def device():
-    """Quality per bitrate per hardware device: the same encoder on the M1 Pro and the M2."""
-    m1 = rows(bench.RESULTS)
-    m2 = rows(os.path.join(HERE, "hevc-efficiency", "results-m2.csv"))
-    if not m2:
+    """Quality per bitrate per hardware device: the same QP ladder on every SoC measured."""
+    devs = [("M1 Pro", rows(bench.RESULTS), "o"),
+            ("M2", rows(os.path.join(HERE, "hevc-efficiency", "results-m2.csv")), "x"),
+            ("M1 Ultra", rows(os.path.join(HERE, "hevc-efficiency", "results-ultra.csv")), "+"),
+            ("M1", rows(os.path.join(HERE, "hevc-efficiency", "results-m1.csv")), "s")]
+    devs = [d for d in devs if d[1]]
+    if len(devs) < 2:
         return
+    ref = devs[0][1]
     fig, axs = plt.subplots(1, len(XIPH), figsize=(16, 3.6), sharey=True)
-    print("BD-rate, AVE M2 vs AVE M1 Pro (positive = the M2 needs more bitrate)")
+    print("BD-rate against the M1 Pro (positive = needs more bitrate), ave-cqp / ave-cqp-main10, VMAF and PSNR-Y")
     for ax, clip in zip(axs, XIPH):
-        line = f"  {clip:15s}"
-        for enc, lab, ls in (("ave-cqp", "8-bit", "-"), ("ave-cqp-main10", "Main10 (P010 source)", ":")):
-            for dev, rs in (("M1 Pro", m1), ("M2", m2)):
+        for enc, lab, ls in (("ave-cqp", "8-bit", "-"), ("ave-cqp-main10", "Main10", ":")):
+            for dev, rs, mk in devs:
                 x, y = pts(rs, clip, enc, "vmaf")
                 if x:
-                    ax.plot(x, y, marker="o" if dev == "M1 Pro" else "x", ms=4, lw=1.3, ls=ls,
-                            color=C[dev], label=f"{dev}, {lab}")
-            for metric, qmax in (("vmaf", 99.0), ("psnr_y", None)):
-                v, ov = bench.bd_rate_pchip(*pts(m1, clip, enc, metric), *pts(m2, clip, enc, metric), qmax=qmax)
-                line += f"  {enc} {metric} {v:+6.2f}% [{ov:.0%}]"
-        print(line)
+                    ax.plot(x, y, marker=mk, ms=4, lw=1.2, ls=ls, color=C[dev], label=f"{dev}, {lab}")
+        for dev, rs, _ in devs[1:]:
+            line = f"  {clip:15s} {dev:9s}"
+            for enc in ("ave-cqp", "ave-cqp-main10"):
+                for metric, qmax in (("vmaf", 99.0), ("psnr_y", None)):
+                    v, ov = bench.bd_rate_pchip(*pts(ref, clip, enc, metric), *pts(rs, clip, enc, metric), qmax=qmax)
+                    line += f"  {enc} {metric} {v:+6.2f}%"
+            print(line)
         ax.set_xscale("log")
         ax.xaxis.set_minor_formatter(NullFormatter())
         ax.set_title(clip, fontsize=10)
         ax.set_xlabel("kbit/s")
     axs[0].set_ylabel("VMAF")
-    axs[0].legend(fontsize=7, loc="lower right")
-    fig.suptitle("AVE HEVC per device: M1 Pro (t6000) vs M2 (t8112), same QP ladder. "
-                 "The curves coincide: all 50 points are identical (BD-rate 0.00 %)", y=1.02)
+    axs[0].legend(fontsize=6, loc="lower right", ncol=2)
+    fig.suptitle("AVE HEVC per device, same QP ladder: M1 Pro, M2 and M1 Ultra give identical points; "
+                 "the M1 (H13G) differs by at most 0.5 % BD-rate, 0.0 % on average (docs/89)", y=1.02)
     save(fig, "rd-per-device.svg")
 
 

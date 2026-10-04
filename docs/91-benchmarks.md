@@ -1,7 +1,8 @@
-# 91. Benchmarks: M1 Pro and M2
+# 91. Benchmarks: M1 Pro, M2, M1 and M1 Ultra
 
-*Speed, compression and energy of the AVE encoder on the two machines it
-has been measured on, with charts. 2026-10-03.*
+*Speed, compression and energy of the AVE encoder on the machines it has
+been measured on (M1 Pro, M2; M1 and M1 Ultra added 2026-10-04), with
+charts. 2026-10-03.*
 
 Machines: an M1 Pro (t6000, MacBookPro18,3, docs/87) and an M2 Mac mini
 (t8112, j473, docs/90), both Fedora Asahi Remix 44, kernel 7.1.13 (16K),
@@ -22,6 +23,14 @@ QP, `testsrc2` source (`bench/speed/run.sh`; the M1 Pro rows are docs/87
 | M1 Pro, H.264, PMP vote | 2.87 ms (348 fps) | 5.15 ms (194 fps) | 18.3 ms (55 fps) |
 | M2, H.264 | 3.22 ms (310 fps) | 6.35 ms (158 fps) | 23.6 ms (42 fps) |
 | M2, HEVC | 4.32 ms (232 fps) | 8.50 ms (118 fps) | 31.1 ms (32 fps) |
+| M1, H.264 | 3.25 ms (308 fps) | 6.42 ms (156 fps) | 23.7 ms (42 fps) |
+| M1, HEVC | 4.32 ms (231 fps) | 8.51 ms (118 fps) | 31.0 ms (32 fps) |
+| M1 Ultra, H.264, one encoder | 8.95 ms (112 fps) | 17.4 ms (57 fps) | 64.2 ms (16 fps) |
+| M1 Ultra, HEVC, one encoder | 10.4 ms (97 fps) | 20.3 ms (49 fps) | 73.8 ms (14 fps) |
+
+The M1 (docs/89) runs at the M2's speed without a vote. The M1 Ultra
+(docs/98) has no vote on the stock DT and runs each encoder at the M1 Pro's
+no-vote speed, but has four: all four at once give ~230 fps at 1080p.
 
 The M1 Pro needs the PMP vote (docs/87 §6) for its speed; the M2 runs at
 full speed without it, and is slower with the PMP running (docs/90 §9).
@@ -42,8 +51,11 @@ P010 source (`ave-cqp-main10`, QP 34-50), with the M1 Pro's QP ladders
 bitrate, PSNR-Y, PSNR, SSIM and VMAF, to every printed digit: BD-rate M2 vs
 M1 Pro is 0.00 % on every clip, in both modes and both metrics. The two
 SoCs' encoders produce the same streams from the same input and settings;
-only their speed and power differ. So docs/88's comparison with x265 holds
-for the M2 as well:
+only their speed and power differ. **The M1 Ultra's 50 points are identical
+too** (`results-ultra.csv`, docs/98). **The M1** (`results-m1.csv`,
+docs/89) is the exception that proves little: its streams differ slightly,
+but within ±0.2 % BD-rate per clip and +0.01 % on average. So docs/88's
+comparison with x265 holds for every SoC measured:
 
 ![BD-rate](img/bdrate.svg)
 
@@ -62,7 +74,9 @@ ffmpeg's `hevc_v4l2m2m`, 60 s phases):
 | | idle | over idle while encoding | fps | per frame |
 |---|---|---|---|---|
 | M1 Pro, AVE | 6.1 W | 3.6 W | 117 | 31 mJ |
-| M2, AVE | 3.1 W | 0.9 W | 87 | **11 mJ** |
+| M2, AVE | 3.1 W | 0.9 W | 87 | 11 mJ |
+| M1, AVE | 3.9 W | 0.8 W | 85 | **10 mJ** |
+| M1 Ultra, AVE (one encoder) | 12.6 W | 0.5 W | 42 | 13 mJ |
 | M1 Pro, x265 `ultrafast` / `medium` | | 23.8 / 24.6 W | 73 / 33 | 328 / 759 mJ |
 
 (`power.log`, `power-m2.log`.) The fps here is ffmpeg's whole loop, not the
