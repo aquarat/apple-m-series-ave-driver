@@ -562,3 +562,162 @@ AVE_HEVC_Update_POClsb_SliceType (0x211b4), called at 0x6ae3c:
 3. Write the full set table for the GOP type: IbP 7, IbbP 10, IbBbP 9 sets, syntax plus derived fields (+0xB8/+0xBC/+0xC0/+0xD0/+0xE0/+0x120/+0x160 per docs/77 §18). With a 2-3 slot DPB, the sets could be trimmed to 1 L0 + 1 L1 ref, e.g. IbP P {-2}, B {-1|+1}. The indices must still exist [I].
 4. Submit in coding order with frameNumber = display index. HEVC_ENCODE frame type 2 for B, 1 for P. Driver ave_cmd.c:1002 currently refuses type 2.
 5. S+0x28 is cosmetic unless PICMGMT+0xF54 is set.
+
+---
+
+## 8. V4L2 implementation (2026-10-04)
+
+After docs/94 (both ME units, Start wire 0xFCEA) made two-reference frames
+work, the V4L2 node gets B frames and two-reference P frames. **Built and
+checked offline only; nothing below has run on hardware yet.** The test
+list is §8.6.
+
+### 8.1 Controls
+
+| control (v4l2-ctl name) | range | default | latched |
+|---|---|---|---|
+| `V4L2_CID_MPEG_VIDEO_B_FRAMES` (`video_b_frames`) | 0..2 | **0** | at STREAMON |
+| `V4L2_CID_MPEG_VIDEO_REF_NUMBER_FOR_PFRAMES` (`reference_frames_for_a_p_frame`) | 1..2 | **1** | at STREAMON |
+| `V4L2_CID_MIN_BUFFERS_FOR_OUTPUT` (read-only) | 1..4 | 1 | follows B_FRAMES: B + 2 |
+
+Refused or clamped at STREAMON, with a kernel warning: B with H.264
+Baseline/CBP becomes 0 (R16); a GOP_SIZE with no room for a mini-GOP and
+the anchor before its IDR (GOP < B + 2) clamps B to GOP − 2. ffmpeg still
+sets B_FRAMES 0 and reads 0 back (§3.2).
+
+Either control above its default configures the session
+(`ave_enc_start()`, `struct ave_enc_cfg.bframes/p_refs`):
+
+| | H.264 | HEVC |
+|---|---|---|
+| DPB slots | 3 (`max(session_dpb, 3)`) | 3 |
+| references | SPS max_num_ref_frames 2 | numRefs (0xFD2C) 2, VPS/SPS max_dec_pic_buffering_minus1 2 |
+| two-reference P | RefSpacingP 2 (bs1) | RefSpacingP 2 (hb3) and the IPPP sets {-1,-2}; not with B |
+| B | POC type 0, lsb 8 bits; profile >= Main (V4L2 default High); colocated pad (R9, as b4); BFrames on the wire (0x78) **only under rate control**: fixed QP keeps b4's 0 | BFrames (0x78) = B, the GOP type IbP/IbbP; the trimmed sets of §1.3; num_reorder 1; IdrPeriod 30 (R2) |
+| MultiME (0xFCEA) | 1 | 1 |
+
+The module parameters still win where they are set (`session_multi_me`,
+`session_ref_spacing_p`, `session_hevc_refs`, `session_dpb` as a floor,
+`session_poc0`), so experiments run as before. With both controls at
+their defaults every one of these values is what it was: the Start and
+Process commands are unchanged (abi_selftest pins the default commands as
+before, and the new fields' zero state), and frames take the old
+one-at-a-time path.
+
+### 8.2 Mini-GOP batching (`driver/ave_gop.h`, `ave_v4l2.c`)
+
+- **Holding.** A B source stays in the m2m OUTPUT ready queue: the held
+  sources are always its head, oldest first, so STREAMOFF returns them like
+  any queued buffer and a drain sees them as queued (the m2m core's
+  `last_src_buf` can be a held one). A `job_ready` callback runs a job only
+  when there is something to do and one CAPTURE buffer for every frame it
+  will code. A hold job codes nothing.
+- **The planner** (pure, `ave_gop.h`) decides per new source, in display
+  order: hold it; send the held and it as {B.., P}; or close the held as
+  {B.., P} and send it alone as an IDR. IDR: the first frame, a forced key
+  frame, a GOP boundary (frames since the last IDR = GOP_SIZE). The frame
+  before a GOP-boundary IDR is planned as an anchor, so a GOP ends
+  `...B P P I` when it does not divide evenly. A drain closes the held with
+  the last as P; when the STOP comes after the last source was already
+  held, `ave_encoder_cmd` reschedules so that a CLOSE job runs. **The
+  firmware never gets a B without its anchor in the same batch, and never
+  holds one across jobs** (R1).
+- **frameNumber is not the display index.** Every mini-GOP spans B + 1
+  numbers whether full or not: the Bs at anchor + 1.., the anchor at
+  anchor + B + 1. A short mini-GOP (drain, GOP end, forced key) leaves a
+  POC gap, which both standards allow. The reason is HEVC: SetRpsVars picks
+  a frame's set by its POC distance from the IDR (Appendix B §2), so a P
+  must sit at a multiple of B + 1, or it would get a B set and an L1
+  picture that does not exist. A regular stream numbers densely
+  (frameNumber = display index). The H.264 firmware chooses references by
+  recency (§0 #5) and does not care; both codecs number the same way.
+- **Completions** (`ave_enc_encode_batch`, through
+  `ave_session_process_batch` with per-frame source planes): routed by the
+  reply's slot; the coded header's frameNumber (+0x10C) must equal that
+  frame's, or the batch fails with -EPROTO (R14). CAPTURE buffers are
+  filled in completion order (decode order), each takes
+  `v4l2_m2m_buf_copy_metadata()` from its own source, and KEYFRAME / PFRAME
+  / **BFRAME** from the type as coded. CAPTURE `sequence` is monotone,
+  OUTPUT `sequence` display order. On a drain the batch's last frame in
+  decode order carries LAST. A batch that fails returns its uncompleted
+  frames in error, one CAPTURE buffer each; a timeout marks the firmware
+  hung, as before.
+- **Buffers.** `queue_setup` raises OUTPUT to B + 2 and CAPTURE to B + 1
+  when B > 0. Coded slots stay `AVE_CODED_SLOTS` 4 >= B + 1: a batch's
+  frameNumbers span at most B + 1 < 4, so its slots (n % 4) differ.
+- **Test aid:** `v4l2_test_key_every=N` (0644) acts as FORCE_KEY_FRAME on
+  every Nth OUTPUT buffer of a B stream; v4l2-ctl cannot set the control
+  in the middle of a stream.
+
+### 8.3 HEVC B
+
+`ave_hevc_session.bframes` writes IbP (8 sets: even P {-2}, odd B
+{-1|+1}, index 7 included) or IbbP (10 sets: index%3 = 0 P {-3}, 1 B
+{-1|+2}, 2 B {-2|+1}), syntax and derived fields, the S1 half included.
+The syntax S1 offsets (+0x68 delta_poc_s1_minus1 u32, +0xA8 used_s1) are
+new in `ave_abi.h`; they come from the kext's entry layout (Appendix B
+header) and sit exactly between the proven neighbours [I]. HEVC_ENCODE
+accepts type 2 only in such a session, with sps_flag 1 / index 0 as for P
+(the firmware picks the index). With B, P frames keep one reference. The
+probe-time self-test now runs **hb1**: `session_bframes=1` with
+`session_codec=1` (H.264's b4 Start is unchanged).
+
+### 8.4 Checked offline
+
+- `abi_selftest` 2241 checks (+281): BFrames 0x78, MultiME 0xFCEA (u16),
+  B refusals (pyramid, Baseline, 26.6.2); HEVC IbP and IbbP, every set's
+  syntax and derived S0/S1 fields at literal offsets, num_reorder at VPS
+  0x10C4C / SPS 0x24920, the IPPP control unchanged, refusals (set count,
+  one reference, IdrPeriod 1, 3 B, type 7); HEVC_ENCODE with B.
+- `session_selftest` 650160 checks: the planner over B 1..2, GOP 0..13,
+  1..40 frames, with and without forced keys and late STOPs: display order
+  kept, every B before its anchor in its batch, frameNumbers rising, every
+  P at a multiple of B + 1 from its IDR, every B's past anchor the one sent
+  before it, no B before an IDR, no GOP overrun. Two deliberate planner
+  mutations (no drain anchor; anchor numbered by the short count) fail it.
+- `./session_selftest plan B GOP N [KEY_EVERY]` prints the expected
+  display-order types for §8.6.
+
+### 8.5 Not done, or uncertain
+
+- **Nothing has run on hardware.** HEVC B has never run at all (hb1 was
+  never reached); the S1 offsets and the trimmed sets are its risk (R3, R4).
+- H.264 B together with RefSpacingP 2 is allowed but untested; H.264 B
+  under rate control writes 0x78 (b8, b10).
+- No H.264 VUI (bitstream_restriction, max_num_reorder_frames 1): decoders
+  then assume the level's DPB for reordering, which is correct with more
+  output delay. b4 decoded without it. R13 makes it a step of its own.
+- `tools/h264_parse.py` still misparses B slices (§2): grade with
+  ffprobe/ffmpeg. GStreamer with B is untried.
+- CAPTURE through DMABUF needs a kernel mapping, as the one-frame path
+  already does.
+
+### 8.6 Hardware tests for the lead
+
+Fresh boot, the driver loaded as for the usual V4L2 runs (no `session_*`
+overrides), then on the target. Grade each run with what
+`tools/v4l2-test.sh` prints (decoded frame count, PSNR against the source;
+with `CTRLS` also the display-order frame types) and the kernel log
+(`dmesg | grep -E "Start_AVC|HEVC_INIT|batch|v4l2:"`; after a failure, the
+netconsole receiver for PIPE HANG / DPB ERROR). The expected type strings
+come from `tools/session_selftest/session_selftest plan ...`.
+
+| run | command | yes | no |
+|---|---|---|---|
+| v0 control | `tools/v4l2-test.sh 60 ctl`, then `... 60 ffmpeg` | file size and PSNR identical to the last baseline; no B/MultiME log line | anything different: the default path changed; stop |
+| v1 H.264 2 refs | `CTRLS=reference_frames_for_a_p_frame=2 tools/v4l2-test.sh 60 ctl` | log "0 B frame(s) ... 2 reference(s) ... RefSpacingP 2, MultiME 1"; 60 frames; PSNR >= v0 | a hang at frame 2: MultiME not on the wire |
+| v2 H.264 B=1 | `CTRLS=video_b_frames=1 tools/v4l2-test.sh 61 ctl` | types `IBPBP...BP` (61); 61 frames decode; PSNR >= v0 − 0.5 dB | timeout on the first batch: R1 (a B held); a "frameNumber" error: R14 |
+| v2r | repeat v2 | identical file | - |
+| v3 H.264 B=2 | `CTRLS=video_b_frames=2 tools/v4l2-test.sh 61 ctl` | `IBBPBBP...BBP` | DPB ERROR on the second B (b6) |
+| v4 drain | `CTRLS=video_b_frames=2 tools/v4l2-test.sh 60 ctl`, `... 59 ctl`; `CTRLS=video_b_frames=1 ... 60 ctl` | B=2/60 ends `...BBPBP`, B=2/59 `...BBPP`, B=1/60 `...BPP`; every frame decodes; v4l2-ctl ends on LAST, well inside its 60 s timeout | fewer frames, or v4l2-ctl waiting: the drain close or LAST |
+| v5 GOP | `CTRLS=video_b_frames=1,video_gop_size=30 tools/v4l2-test.sh 61 ctl` | `IBPB...BPPIBPB...BPPI`: I at 0, 30, 60; frame 29 P; decodes across both IDRs | a decode break at frame 30: the closed-GOP close |
+| v6 forced key | `echo 6 > /sys/module/apple_ave/parameters/v4l2_test_key_every`; `CTRLS=video_b_frames=2 tools/v4l2-test.sh 40 ctl`; then back to 0 | `IBBPBPIBBPBPI...` (`plan 2 0 40 6`): IDR at 6, 12, ...; decodes | a B right before an I, or a decode error after an IDR |
+| v7 timestamps | v2 with a client that prints CAPTURE timestamps (v4l2-ctl `--verbose`) | decode order: 0, 2, 1, 4, 3, ... frame periods | display order: the metadata copy is wrong |
+| v8 HEVC 2 refs | `CODEC=hevc CTRLS=reference_frames_for_a_p_frame=2 tools/v4l2-test.sh 60 ctl` | as the verified module-parameter run: `refs l0 2` (hevc_parse) | - |
+| v9 hb1 (self-test first) | `session_selftest=1 session_frame=1 session_codec=1 session_dpb=3 session_bframes=1 session_multi_me=1 session_frames=5` | completion order 0, 2, 1, 4, 3; B slices with num_positive 1; decodes I B P B P | **PIPE HANG** with the L1 readers idle: the S1 fields (R3); **DPB ERROR L1**: POC/frameNumber |
+| v10 HEVC B=1 | after v9: `CODEC=hevc CTRLS=video_b_frames=1 tools/v4l2-test.sh 61 ctl`, then `... 60 ctl` (the drain's POC gap) | `IBPB...BP`; decodes; PSNR >= the HEVC baseline − 0.5 dB | as v9; on the 60-frame run only: the POC gap (frameNumber 60 for display 59) |
+| v11 HEVC B=2 | `CODEC=hevc CTRLS=video_b_frames=2 tools/v4l2-test.sh 61 ctl` | `IBBP...` | a set-index miss (IbbP) |
+| v12 ffmpeg | `tools/v4l2-test.sh 60 ffmpeg`, and with `CODEC=hevc` (B stays 0) | as v0 | ffmpeg refusing the node: the B_FRAMES range change |
+
+One variable per run; v2 and v3 before v4-v7; v9 before v10 and v11.
+Record each in docs/53.

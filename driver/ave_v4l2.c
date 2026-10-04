@@ -14,6 +14,13 @@
  * is synchronous - one Process in flight - so device_run() hands the job to
  * a work item that may sleep on the reply.
  *
+ * B frames (docs/81 "V4L2 implementation"): with VIDEO_B_FRAMES > 0 a job
+ * may hold its OUTPUT buffer, still in the m2m ready queue, until the
+ * buffer that will be its anchor arrives; then the held buffers and the
+ * anchor go to the firmware as one batch in display order, and the CAPTURE
+ * buffers come back in decode order, each with its own source's timestamp.
+ * ave_gop.h plans it. With B_FRAMES 0 nothing here changes.
+ *
  * Format policy, from docs/68 §3.3: width a multiple of 64 and height a
  * multiple of 16. The hardware needs a 64-byte stride and fetches
  * 16*ceil(H/16) rows with chroma right after them; ffmpeg packs planes at
@@ -31,6 +38,7 @@
 #include <media/videobuf2-dma-contig.h>
 
 #include "ave.h"
+#include "ave_gop.h"
 #include "ave_session.h"
 #include "ave_v4l2.h"
 
@@ -56,6 +64,16 @@
 static bool rc_nondrop;
 module_param(rc_nondrop, bool, 0444);
 MODULE_PARM_DESC(rc_nondrop, "send the frame rate as the non-droppable frame rate (wire 0xFF48; macOS-equivalent) instead of 1");
+
+/*
+ * A test aid for docs/81's forced-key-frame run: v4l2-ctl cannot set
+ * FORCE_KEY_FRAME in the middle of a stream, so this does it for every Nth
+ * OUTPUT buffer (display index). B-frame streams only; 0 = off.
+ */
+static unsigned int v4l2_test_key_every;
+module_param(v4l2_test_key_every, uint, 0644);
+MODULE_PARM_DESC(v4l2_test_key_every,
+		 "test aid, B-frame streams only: act as if FORCE_KEY_FRAME were set for every Nth OUTPUT buffer (0 = off; docs/81)");
 
 struct ave_v4l2 {
 	struct ave_device	*ave;
@@ -97,6 +115,16 @@ struct ave_ctx {
 	u32			qp_min, qp_max;
 	u32			gop;
 	bool			force_key;
+	/*
+	 * docs/81: VIDEO_B_FRAMES and REF_NUMBER_FOR_PFRAMES as set, and
+	 * MIN_BUFFERS_FOR_OUTPUT, which follows B_FRAMES. nb is B_FRAMES as
+	 * latched at STREAMON (0 = the one-frame path); plan is its mini-GOP
+	 * state (ave_gop.h).
+	 */
+	u32			b_frames, p_refs;
+	struct v4l2_ctrl	*min_out;
+	u32			nb;
+	struct ave_gop		plan;
 	/*
 	 * The codec (AVE_ENC_CODEC_*), from the CAPTURE format, and HEVC's own
 	 * controls. H.264's are the fields above; GOP, bitrate, RC and the
@@ -436,6 +464,21 @@ static int ave_subscribe_event(struct v4l2_fh *fh,
 	}
 }
 
+/*
+ * STOP, and with B frames a nudge: when the drain's last source is a held B
+ * no new buffer will arrive to schedule the job that closes its mini-GOP.
+ */
+static int ave_encoder_cmd(struct file *file, void *priv,
+			   struct v4l2_encoder_cmd *ec)
+{
+	struct ave_ctx *ctx = fh_to_ctx(file);
+	int ret = v4l2_m2m_ioctl_encoder_cmd(file, priv, ec);
+
+	if (!ret && ctx->nb && ec->cmd == V4L2_ENC_CMD_STOP)
+		v4l2_m2m_try_schedule(ctx->fh.m2m_ctx);
+	return ret;
+}
+
 static const struct v4l2_ioctl_ops ave_ioctl_ops = {
 	.vidioc_querycap		= ave_querycap,
 	.vidioc_enum_fmt_vid_out	= ave_enum_fmt,
@@ -462,7 +505,7 @@ static const struct v4l2_ioctl_ops ave_ioctl_ops = {
 	.vidioc_streamon		= v4l2_m2m_ioctl_streamon,
 	.vidioc_streamoff		= v4l2_m2m_ioctl_streamoff,
 
-	.vidioc_encoder_cmd		= v4l2_m2m_ioctl_encoder_cmd,
+	.vidioc_encoder_cmd		= ave_encoder_cmd,
 	.vidioc_try_encoder_cmd		= v4l2_m2m_ioctl_try_encoder_cmd,
 
 	.vidioc_subscribe_event		= ave_subscribe_event,
@@ -524,6 +567,15 @@ static int ave_s_ctrl(struct v4l2_ctrl *c)
 	case V4L2_CID_MPEG_VIDEO_FORCE_KEY_FRAME:
 		ctx->force_key = true;
 		break;
+	case V4L2_CID_MPEG_VIDEO_B_FRAMES:
+		ctx->b_frames = c->val;
+		/* the held Bs, their anchor, and one being filled */
+		if (ctx->min_out)
+			__v4l2_ctrl_s_ctrl(ctx->min_out, c->val ? c->val + 2 : 1);
+		break;
+	case V4L2_CID_MPEG_VIDEO_REF_NUMBER_FOR_PFRAMES:
+		ctx->p_refs = c->val;
+		break;
 	case V4L2_CID_MPEG_VIDEO_HEVC_I_FRAME_QP:
 		ctx->hevc_qp = c->val;	/* one QP for I and P, as H.264 */
 		break;
@@ -571,9 +623,16 @@ static int ave_init_ctrls(struct ave_ctx *ctx)
 	struct v4l2_ctrl_handler *h = &ctx->hdl;
 	const struct v4l2_ctrl_ops *o = &ave_ctrl_ops;
 
-	v4l2_ctrl_handler_init(h, 20);
-	/* ffmpeg sets 0 and reads it back; non-zero fails its open (§3.1). */
-	v4l2_ctrl_new_std(h, o, V4L2_CID_MPEG_VIDEO_B_FRAMES, 0, 0, 1, 0);
+	v4l2_ctrl_handler_init(h, 22);
+	/*
+	 * ffmpeg sets 0 and reads it back; non-zero fails its open (docs/81
+	 * §3.2), so 0 stays the default. 1..2 (docs/81 "V4L2 implementation").
+	 */
+	v4l2_ctrl_new_std(h, o, V4L2_CID_MPEG_VIDEO_B_FRAMES, 0, AVE_GOP_B_MAX,
+			  1, 0);
+	/* 2: two L0 references per P frame (docs/94) */
+	v4l2_ctrl_new_std(h, o, V4L2_CID_MPEG_VIDEO_REF_NUMBER_FOR_PFRAMES,
+			  1, 2, 1, 1);
 	v4l2_ctrl_new_std(h, o, V4L2_CID_MPEG_VIDEO_GOP_SIZE, 0, 65535, 1, 0);
 	v4l2_ctrl_new_std(h, o, V4L2_CID_MPEG_VIDEO_FORCE_KEY_FRAME, 0, 0, 0, 0);
 	v4l2_ctrl_new_std(h, o, V4L2_CID_MPEG_VIDEO_H264_I_FRAME_QP, 0, 51, 1,
@@ -622,7 +681,9 @@ static int ave_init_ctrls(struct ave_ctx *ctx)
 			       V4L2_MPEG_VIDEO_HEADER_MODE_JOINED_WITH_1ST_FRAME,
 			       ~BIT(V4L2_MPEG_VIDEO_HEADER_MODE_JOINED_WITH_1ST_FRAME),
 			       V4L2_MPEG_VIDEO_HEADER_MODE_JOINED_WITH_1ST_FRAME);
-	v4l2_ctrl_new_std(h, o, V4L2_CID_MIN_BUFFERS_FOR_OUTPUT, 1, 1, 1, 1);
+	/* 1, or B_FRAMES + 2 (ave_s_ctrl) */
+	ctx->min_out = v4l2_ctrl_new_std(h, o, V4L2_CID_MIN_BUFFERS_FOR_OUTPUT,
+					 1, AVE_GOP_B_MAX + 2, 1, 1);
 	/*
 	 * HEVC (docs/77 §19), only where the firmware can run it. Main, Main
 	 * tier: what the builder writes. The level is a floor, as H.264's -
@@ -681,6 +742,13 @@ static int ave_queue_setup(struct vb2_queue *vq, unsigned int *nbuf,
 		return sizes[0] < size ? -EINVAL : 0;
 	*nplanes = 1;
 	sizes[0] = size;
+	/*
+	 * B frames: the held sources, their anchor and one more on OUTPUT;
+	 * one CAPTURE buffer per frame of a mini-GOP, which completes at once.
+	 */
+	if (ctx->b_frames)
+		*nbuf = max_t(unsigned int, *nbuf, V4L2_TYPE_IS_OUTPUT(vq->type) ?
+			      ctx->b_frames + 2 : ctx->b_frames + 1);
 	return 0;
 }
 
@@ -745,10 +813,35 @@ static void ave_return_bufs(struct ave_ctx *ctx, struct vb2_queue *q,
 	}
 }
 
+/*
+ * VIDEO_B_FRAMES for the stream about to start, refused (to 0, logged) or
+ * clamped where it cannot work (docs/81 §3.3 #1): Baseline/CBP has no B
+ * slices; a GOP needs room for a mini-GOP and the anchor before its IDR.
+ */
+static u32 ave_latch_bframes(struct ave_ctx *ctx)
+{
+	struct device *dev = ctx->av->ave->dev;
+	u32 nb = ctx->b_frames;
+
+	if (nb && ctx->codec == AVE_ENC_CODEC_H264 && ctx->profile_idc == 66) {
+		dev_warn(dev, "v4l2: B frames need H.264 Main or High; Baseline gets none\n");
+		nb = 0;
+	}
+	if (nb && ctx->gop && ctx->gop < nb + 2) {
+		u32 fit = ctx->gop >= 3 ? ctx->gop - 2 : 0;
+
+		dev_warn(dev, "v4l2: GOP %u leaves no room for %u B frame(s); using %u\n",
+			 ctx->gop, nb, fit);
+		nb = fit;
+	}
+	return nb;
+}
+
 static int ave_start_streaming(struct vb2_queue *q, unsigned int count)
 {
 	struct ave_ctx *ctx = vb2_get_drv_priv(q);
 	struct ave_v4l2 *av = ctx->av;
+	u32 nb;
 	struct vb2_queue *other = v4l2_m2m_get_vq(ctx->fh.m2m_ctx,
 		V4L2_TYPE_IS_OUTPUT(q->type) ? V4L2_BUF_TYPE_VIDEO_CAPTURE :
 					       V4L2_BUF_TYPE_VIDEO_OUTPUT);
@@ -770,6 +863,7 @@ static int ave_start_streaming(struct vb2_queue *q, unsigned int count)
 		return -EINVAL;
 	}
 
+	nb = ave_latch_bframes(ctx);
 	mutex_lock(&av->hw_mutex);
 	if (av->owner && av->owner != ctx) {
 		ret = -EBUSY;
@@ -806,6 +900,8 @@ static int ave_start_streaming(struct vb2_queue *q, unsigned int count)
 					V4L2_PIX_FMT_P010 ? 10 : 8,
 			.level_idc = hevc ? ctx->hevc_level_idc : ctx->level_idc,
 			.cabac = !hevc && ctx->cabac,
+			.bframes = nb,
+			.p_refs = ctx->p_refs,
 		};
 
 		ret = ave_enc_start(av->ave, &cfg);
@@ -814,6 +910,9 @@ static int ave_start_streaming(struct vb2_queue *q, unsigned int count)
 			ctx->session = true;
 			ctx->pm_lost = false;
 			ctx->frame_n = 0;
+			/* held sources of an earlier session start over */
+			ctx->nb = nb;
+			ave_gop_init(&ctx->plan, nb, ctx->gop);
 		}
 	}
 	mutex_unlock(&av->hw_mutex);
@@ -901,6 +1000,208 @@ static int ave_queue_init(void *priv, struct vb2_queue *src,
 /* Running a job                                                          */
 /* ---------------------------------------------------------------------- */
 
+/* ---------------------------------------------------------------------- */
+/* B frames (docs/81 "V4L2 implementation")                               */
+/* ---------------------------------------------------------------------- */
+
+/* The @n-th buffer of a ready queue (0 = the head), or NULL; not removed. */
+static struct vb2_v4l2_buffer *ave_nth_buf(struct v4l2_m2m_queue_ctx *q, u32 n)
+{
+	struct vb2_v4l2_buffer *vb = NULL;
+	struct v4l2_m2m_buffer *b;
+	unsigned long flags;
+
+	spin_lock_irqsave(&q->rdy_spinlock, flags);
+	list_for_each_entry(b, &q->rdy_queue, list)
+		if (!n--) {
+			vb = &b->vb;
+			break;
+		}
+	spin_unlock_irqrestore(&q->rdy_spinlock, flags);
+	return vb;
+}
+
+/*
+ * What the planner would do now. The held sources are the head of the
+ * OUTPUT ready queue, oldest first; src[n_held] is the next new one (or
+ * NULL). Fills src[0..n_held].
+ */
+static enum ave_gop_act ave_b_next(struct ave_ctx *ctx,
+				   struct vb2_v4l2_buffer **src)
+{
+	struct v4l2_m2m_ctx *m2m = ctx->fh.m2m_ctx;
+	const struct ave_gop *g = &ctx->plan;
+	bool force;
+	u32 i;
+
+	if (g->n_held >= AVE_GOP_BATCH_MAX)
+		return AVE_GOP_NONE;	/* cannot happen: nb <= AVE_GOP_B_MAX */
+	for (i = 0; i <= g->n_held; i++)
+		src[i] = ave_nth_buf(&m2m->out_q_ctx, i);
+	if (g->n_held && !src[g->n_held - 1])
+		return AVE_GOP_NONE;	/* cannot happen: the held are queued */
+	if (!src[g->n_held])
+		return ave_gop_decide(g, false, false, g->n_held &&
+			v4l2_m2m_is_last_draining_src_buf(m2m, src[g->n_held - 1]));
+	force = ctx->force_key ||
+		(v4l2_test_key_every && ctx->frame_n &&
+		 !(ctx->frame_n % v4l2_test_key_every));
+	return ave_gop_decide(g, true, force,
+			      v4l2_m2m_is_last_draining_src_buf(m2m, src[g->n_held]));
+}
+
+/*
+ * m2m asks before every job. One-frame path: always (m2m has already seen a
+ * source and a destination). B frames: only when there is something to do
+ * and a CAPTURE buffer for every frame it will code.
+ */
+static int ave_job_ready(void *priv)
+{
+	struct ave_ctx *ctx = priv;
+	struct vb2_v4l2_buffer *src[AVE_GOP_BATCH_MAX];
+	enum ave_gop_act a;
+
+	if (!ctx->nb || !ctx->session)
+		return 1;
+	a = ave_b_next(ctx, src);
+	if (a == AVE_GOP_NONE)
+		return 0;
+	return v4l2_m2m_num_dst_bufs_ready(ctx->fh.m2m_ctx) >=
+	       max_t(u32, ave_gop_need(&ctx->plan, a), 1);
+}
+
+/*
+ * One batch to the firmware and its completions to CAPTURE, in completion
+ * (decode) order, each with the metadata of the source it came from; then
+ * the sources, in display order (batch order).
+ */
+static void ave_b_batch(struct ave_ctx *ctx, const struct ave_gop_batch *b,
+			struct vb2_v4l2_buffer **src)
+{
+	struct ave_v4l2 *av = ctx->av;
+	struct v4l2_m2m_ctx *m2m = ctx->fh.m2m_ctx;
+	struct vb2_v4l2_buffer *dst[AVE_GOP_BATCH_MAX], *s, *d;
+	struct ave_enc_frame fr[AVE_GOP_BATCH_MAX];
+	struct ave_enc_out out[AVE_GOP_BATCH_MAX];
+	bool coded[AVE_GOP_BATCH_MAX] = {}, last = false;
+	u32 i, k, n_out = 0;
+	int ret;
+
+	for (i = 0; i < b->n; i++) {
+		dma_addr_t luma;
+
+		s = src[b->f[i].src];
+		luma = vb2_dma_contig_plane_dma_addr(&s->vb2_buf, 0);
+		fr[i] = (struct ave_enc_frame){
+			.fn = b->f[i].fn, .type = b->f[i].type, .luma = luma,
+			.chroma = luma + (dma_addr_t)ctx->bytesperline * ctx->height,
+			.stride = ctx->bytesperline,
+		};
+		/* job_ready counted them; the work re-checked */
+		dst[i] = ave_nth_buf(&m2m->cap_q_ctx, i);
+		out[i] = (struct ave_enc_out){
+			.buf = vb2_plane_vaddr(&dst[i]->vb2_buf, 0),
+			.size = vb2_plane_size(&dst[i]->vb2_buf, 0),
+		};
+	}
+
+	mutex_lock(&av->hw_mutex);
+	ret = ctx->session ?
+		ave_enc_encode_batch(av->ave, fr, b->n, out, &n_out) : -EIO;
+	mutex_unlock(&av->hw_mutex);
+	/*
+	 * After the encode, as the one-frame path does: a STOP that arrived
+	 * meanwhile names one of these sources as the last (f66).
+	 */
+	for (i = 0; i < b->n; i++)
+		last |= v4l2_m2m_is_last_draining_src_buf(m2m, src[b->f[i].src]);
+	if (ret) {
+		dev_err(av->ave->dev,
+			"v4l2: batch of %u from frameNumber %u failed after %u completion(s): %d\n",
+			b->n, b->f[0].fn, n_out, ret);
+		/* No later frame can succeed: tell the client now (EPOLLERR) */
+		if (av->ave->fw_hung || ctx->pm_lost) {
+			vb2_queue_error(v4l2_m2m_get_src_vq(m2m));
+			vb2_queue_error(v4l2_m2m_get_dst_vq(m2m));
+		}
+	}
+
+	/*
+	 * CAPTURE in completion order; frames that did not complete follow,
+	 * empty and in error, so every source still has its buffer.
+	 */
+	for (k = 0; k < b->n; k++) {
+		const bool ok = k < n_out;
+
+		i = 0;
+		if (ok)
+			i = out[k].frame;
+		else
+			while (i < b->n - 1 && coded[i])
+				i++;
+		coded[i] = true;
+		s = src[b->f[i].src];
+		d = dst[k];
+		d->sequence = ctx->cap_seq++;
+		v4l2_m2m_buf_copy_metadata(s, d);
+		d->field = V4L2_FIELD_NONE;
+		vb2_set_plane_payload(&d->vb2_buf, 0, ok ? out[k].len : 0);
+		d->flags &= ~(V4L2_BUF_FLAG_KEYFRAME | V4L2_BUF_FLAG_PFRAME |
+			      V4L2_BUF_FLAG_BFRAME);
+		if (ok)
+			d->flags |= out[k].type == AVE_GOP_IDR ?
+					V4L2_BUF_FLAG_KEYFRAME :
+				    out[k].type == AVE_GOP_B ?
+					V4L2_BUF_FLAG_BFRAME : V4L2_BUF_FLAG_PFRAME;
+		/* the drain's last frame in decode order carries LAST */
+		if (last && k == b->n - 1) {
+			static const struct v4l2_event eos = { .type = V4L2_EVENT_EOS };
+
+			d->flags |= V4L2_BUF_FLAG_LAST;
+			v4l2_event_queue_fh(&ctx->fh, &eos);
+			v4l2_m2m_mark_stopped(m2m);
+		}
+		v4l2_m2m_dst_buf_remove_by_buf(m2m, d);
+		v4l2_m2m_buf_done(d, ok ? VB2_BUF_STATE_DONE : VB2_BUF_STATE_ERROR);
+	}
+	for (i = 0; i < b->n; i++) {
+		bool ok = false;
+
+		for (k = 0; k < n_out; k++)
+			ok |= out[k].frame == i;
+		s = src[b->f[i].src];
+		v4l2_m2m_src_buf_remove_by_buf(m2m, s);
+		v4l2_m2m_buf_done(s, ok ? VB2_BUF_STATE_DONE : VB2_BUF_STATE_ERROR);
+	}
+}
+
+/* The B-frame job: hold one source, or code a batch (two: a forced IDR). */
+static void ave_run_work_b(struct ave_ctx *ctx)
+{
+	struct v4l2_m2m_ctx *m2m = ctx->fh.m2m_ctx;
+	struct vb2_v4l2_buffer *src[AVE_GOP_BATCH_MAX];
+	struct ave_gop_batch b[2];
+	enum ave_gop_act a;
+	u32 nbat, i;
+
+	a = ave_b_next(ctx, src);
+	/* job_ready said yes; a forced key may have changed the plan since */
+	if (a == AVE_GOP_NONE ||
+	    v4l2_m2m_num_dst_bufs_ready(m2m) <
+	    max_t(u32, ave_gop_need(&ctx->plan, a), 1))
+		return;
+	if (a != AVE_GOP_CLOSE) {
+		/* the new source, numbered in display order */
+		src[ctx->plan.n_held]->sequence = ctx->out_seq++;
+		ctx->frame_n++;
+	}
+	if (a == AVE_GOP_KEY)
+		ctx->force_key = false;
+	nbat = ave_gop_commit(&ctx->plan, a, b);
+	for (i = 0; i < nbat; i++)
+		ave_b_batch(ctx, &b[i], src);
+}
+
 static void ave_run_work(struct work_struct *work)
 {
 	struct ave_ctx *ctx = container_of(work, struct ave_ctx, run_work);
@@ -912,6 +1213,11 @@ static void ave_run_work(struct work_struct *work)
 	size_t len = 0;
 	bool key = false, idr;
 	int ret;
+
+	if (ctx->nb && ctx->session) {
+		ave_run_work_b(ctx);
+		goto finish;
+	}
 
 	/*
 	 * Peek, and take the buffers off the ready queues only when the frame
@@ -984,6 +1290,7 @@ static void ave_device_run(void *priv)
 
 static const struct v4l2_m2m_ops ave_m2m_ops = {
 	.device_run = ave_device_run,
+	.job_ready = ave_job_ready,
 };
 
 /* ---------------------------------------------------------------------- */

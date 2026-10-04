@@ -131,9 +131,11 @@ It is a stateful mem2mem encoder, NV12 in:
   runs only with a DTB that has the `pmp` alias (Fedora's are built without
   `APPLE_USE_PMP`; docs/78, docs/87 §6-7).
 - **Not yet:**
-  - **B frames**, and more than one reference per frame. The firmware
-    reorders as designed, but any frame with two active references stalls
-    the pipe, in H.264 and HEVC alike (docs/81; docs/53 bs1-bs6, hb3).
+  - **B frames**, and more than one reference per frame, through V4L2.
+    Two references need both motion-estimation units (docs/94); the
+    `video_b_frames` (0..2) and `reference_frames_for_a_p_frame` (1..2)
+    controls are implemented (docs/81 §8) but not yet run on hardware.
+    Both default to the one-reference IPPP stream.
   - System suspend/resume (untested; suspend is masked on the lab machine).
 - **Known issues:** ffmpeg's V4L2 m2m wrapper segfaults on a 1080-line
   input: the driver rounds the OUTPUT height up to 1088 and the wrapper

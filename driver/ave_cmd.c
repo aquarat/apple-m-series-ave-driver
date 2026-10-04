@@ -681,6 +681,10 @@ int ave_cmd_build_start_avc(const struct ave_cmd_abi *abi, u8 *buf, size_t len,
 	    (s->max_mvs_per_2mb && abi->start_avc.max_mvs_per_2mb == AVE_OFF_NONE) ||
 	    (s->search_range && abi->start_avc.search_range == AVE_OFF_NONE))
 		return -EINVAL;
+	/* B frames: 0..2 (3+ is the pyramid, R5); illegal in Baseline */
+	if (s->bframes > 2 ||
+	    (s->bframes && (l->bframes == AVE_OFF_NONE || s->profile_idc == 66)))
+		return -EINVAL;
 	ret = ave_macos_check(abi->macos_start_avc, abi->n_macos_start_avc,
 			      s->macos);
 	if (ret)
@@ -724,6 +728,8 @@ int ave_cmd_build_start_avc(const struct ave_cmd_abi *abi, u8 *buf, size_t len,
 		wr16(&w, l->search_range, s->search_range);
 	if (s->max_mvs_per_2mb)
 		wr32(&w, l->max_mvs_per_2mb, s->max_mvs_per_2mb);
+	if (s->bframes)
+		wr32(&w, l->bframes, s->bframes);
 
 	/* ---- SPS ---- */
 	wr32(&w, sps->profile, sps->enum_profile_level ? (u32)prof : s->profile_idc);
@@ -833,8 +839,50 @@ int ave_cmd_build_start_avc(const struct ave_cmd_abi *abi, u8 *buf, size_t len,
 
 #define AVE_HEVC_PROFILE_MAIN	1	/* general_profile_idc */
 #define AVE_HEVC_PROFILE_MAIN10	2
-/* Short-term sets the builder writes at most; the IPPP selector needs 4. */
-#define AVE_HEVC_ST_RPS_MAX	4
+/*
+ * Short-term sets the builder writes: the IPPP selector needs 4, IbP 8 and
+ * IbbP 10 (docs/81 §1.3).
+ */
+#define AVE_HEVC_ST_RPS_IPPP	4
+#define AVE_HEVC_ST_RPS_MAX	10
+
+static u32 ave_hevc_b_sets(u32 bframes)
+{
+	return bframes == 1 ? 8 : bframes == 2 ? 10 : 0;
+}
+
+/*
+ * One short-term set of a B GOP (ave_hevc_session.bframes), syntax and
+ * derived fields, at entry @e. @idx is the set index SetRpsVars would pick:
+ * with g = bframes + 1, idx % g == 0 is a P {-g}; r = idx % g > 0 is a B
+ * {-r | +(g - r)}: the anchor before it and the one after. The kext's sets
+ * (docs/81 App. B §1) keep more past anchors; one per list fits 3 slots.
+ */
+static void ave_hevc_b_set(struct ave_wr *w, const struct ave_hevc_ps_layout *p,
+			   u32 e, u32 bframes, u32 idx)
+{
+	const u32 g = bframes + 1, r = idx % g;
+	const u32 neg = r ? r : g;	/* distance to the past anchor */
+
+	wr8(w, e + p->rps_inter_pred, 0);
+	wr32(w, e + p->rps_num_neg, 1);
+	wr32(w, e + p->rps_num_pos, r ? 1 : 0);
+	wr32(w, e + p->rps_num_delta_pocs, r ? 2 : 1);
+	/* S0: delta_poc_s0_minus1[0] = neg - 1, so DeltaPocS0[0] = -neg */
+	wr16(w, e + p->rps_dpoc_s0_m1, neg - 1);
+	wr8(w, e + p->rps_used_s0, 1);
+	wr32(w, e + p->rps_d_num_neg, 1);
+	wr8(w, e + p->rps_d_used_s0, 1);
+	wr32(w, e + p->rps_d_delta_poc_s0, (u32)-(int)neg);
+	wr32(w, e + p->rps_d_num_pos, r ? 1 : 0);
+	if (!r)
+		return;
+	/* S1: DeltaPocS1[0] = g - r, the next anchor */
+	wr32(w, e + p->rps_dpoc_s1_m1, g - r - 1);
+	wr8(w, e + p->rps_used_s1, 1);
+	wr8(w, e + p->rps_d_used_s1, 1);
+	wr32(w, e + p->rps_d_delta_poc_s1, g - r);
+}
 
 /* general_level_idc values of Table A.8 (30 x level). */
 static bool ave_hevc_level_ok(u8 idc)
@@ -971,7 +1019,8 @@ int ave_cmd_build_start_hevc(const struct ave_cmd_abi *abi, u8 *buf,
 	if (ret)
 		return ret;
 	/* AVC-only members: meaningless here, so a set one is a caller bug. */
-	if (s->profile_idc || s->level_idc || s->cabac || s->scaling_flat)
+	if (s->profile_idc || s->level_idc || s->cabac || s->scaling_flat ||
+	    s->bframes)
 		return -EINVAL;
 	if (!ave_hevc_level_ok(h->level_idc))
 		return -EINVAL;
@@ -985,6 +1034,18 @@ int ave_cmd_build_start_hevc(const struct ave_cmd_abi *abi, u8 *buf,
 	/* QP modulation is a rate-control setting (macOS clears it for FIXQP). */
 	if (h->qp_mod && (!s->rc_enable || hl->qp_mod == AVE_OFF_NONE ||
 			  !hl->qp_mod))
+		return -EINVAL;
+	/*
+	 * B (docs/81 §1.3): every set index the GOP type can produce (R4), two
+	 * references in the DPB, the S1 offsets, and an inter IdrPeriod (R2).
+	 */
+	if (h->bframes > 2 ||
+	    (h->bframes &&
+	     (h->n_st_rps != ave_hevc_b_sets(h->bframes) ||
+	      h->max_num_ref_frames < 2 || s->key_interval == 1 ||
+	      l->bframes == AVE_OFF_NONE || !p->rps_dpoc_s1_m1 ||
+	      !p->rps_used_s1)) ||
+	    (!h->bframes && h->n_st_rps > AVE_HEVC_ST_RPS_IPPP))
 		return -EINVAL;
 	if (h->log2_max_poc_lsb_minus4 > 12 || h->n_st_rps > AVE_HEVC_ST_RPS_MAX ||
 	    (h->n_st_rps && !h->max_num_ref_frames) ||
@@ -1039,6 +1100,9 @@ int ave_cmd_build_start_hevc(const struct ave_cmd_abi *abi, u8 *buf,
 		wr32(&w, l->ref_spacing, s->ref_spacing_p);
 	}
 	wr32(&w, hl->max_num_ref_frames, h->max_num_ref_frames);
+	/* GOP type ctrl+0x1218 = BFrames + 1 (fw 0x84e30-0x84e38) */
+	if (h->bframes)
+		wr32(&w, l->bframes, h->bframes);
 	wr32(&w, hl->slice_map_height, ch);
 	for (i = 0; i < h->n_transcoded; i++)
 		wr64(&w, hl->transcoded_set + i * hl->transcoded_stride,
@@ -1054,6 +1118,9 @@ int ave_cmd_build_start_hevc(const struct ave_cmd_abi *abi, u8 *buf,
 	ave_hevc_ptl(&w, p, vps + p->ptl, h->level_idc, main10);
 	wr8(&w, vps + p->vps_sublayer_info, 1);
 	wr32(&w, vps + p->vps_max_dec_pic_buf_m1, h->max_num_ref_frames);
+	/* One B between anchors is one picture held back (docs/81 App. B §3) */
+	if (h->bframes)
+		wr32(&w, vps + p->vps_num_reorder, 1);
 	/* num_hrd_parameters, timing, extension: all 0 (0x1d50c) */
 
 	/* ---- SPS[0] (seq_parameter_set_rbsp 0x1e380) ---- */
@@ -1077,6 +1144,8 @@ int ave_cmd_build_start_hevc(const struct ave_cmd_abi *abi, u8 *buf,
 	wr32(&w, sps + p->log2_max_poc_lsb_m4, h->log2_max_poc_lsb_minus4);
 	wr8(&w, sps + p->sps_sublayer_info, 1);
 	wr32(&w, sps + p->sps_max_dec_pic_buf_m1, h->max_num_ref_frames);
+	if (h->bframes)
+		wr32(&w, sps + p->sps_num_reorder, 1);
 	/* CTB 32, min CB 8, TB 4..32, depth 1/0: what the pipe does (§0 #6). */
 	wr32(&w, sps + p->log2_min_cb_m3, 0);
 	wr32(&w, sps + p->log2_diff_cb, 2);
@@ -1100,7 +1169,10 @@ int ave_cmd_build_start_hevc(const struct ave_cmd_abi *abi, u8 *buf,
 	 * "frames since the IDR" while that is <= 3, else set 0 (fw
 	 * 0x6c7d4 -> 0x6c974) - so sets 0..3 must all exist (docs/77 §18).
 	 */
-	for (i = 0; i < h->n_st_rps; i++) {
+	for (i = 0; i < h->n_st_rps && h->bframes; i++)
+		ave_hevc_b_set(&w, p, rps + p->rps_entry0 + i * p->rps_entry_stride,
+			       h->bframes, i);
+	for (i = 0; i < h->n_st_rps && !h->bframes; i++) {
 		u32 e = rps + p->rps_entry0 + i * p->rps_entry_stride;
 		/* hb2: set 1 is the first P after an IDR, which has one picture */
 		u32 nr = h->st_rps_refs == 2 && i != 1 ? 2 : 1, j;
@@ -1431,8 +1503,11 @@ int ave_cmd_build_process_hevc(const struct ave_cmd_abi *abi, u8 *buf,
 	ret = ave_pic_check(abi, &hf->pic, align);
 	if (ret)
 		return ret;
-	/* HEVC B needs the RPS sets with positive pictures (docs/81 §1.3) */
-	if (hf->pic.frame_type == AVE_FRAME_TYPE_B)
+	/*
+	 * HEVC B needs the RPS sets with positive pictures (docs/81 §1.3),
+	 * which HEVC_INIT wrote only for a B GOP (ave_hevc_session.bframes).
+	 */
+	if (hf->pic.frame_type == AVE_FRAME_TYPE_B && !hf->bframes)
 		return -EINVAL;
 	/* SetTranscode :7597/:7598 */
 	if (hf->pic.coded_addr & (align - 1))
@@ -1480,8 +1555,13 @@ int ave_cmd_build_process_hevc(const struct ave_cmd_abi *abi, u8 *buf,
 	if (hf->single_xc)
 		wr8(&w, hp->picmgmt + hp->pic_single_xc, 1);
 
-	/* P: the SPS short-term set 0 (docs/77 §3.2); I/IDR carry none. */
-	if (hf->pic.frame_type == AVE_FRAME_TYPE_P) {
+	/*
+	 * P (and B): an SPS short-term set (docs/77 §3.2); I/IDR carry none.
+	 * The index is the firmware's to pick (SetRpsVars, by POC distance
+	 * from the IDR), so 0 here as for P.
+	 */
+	if (hf->pic.frame_type == AVE_FRAME_TYPE_P ||
+	    hf->pic.frame_type == AVE_FRAME_TYPE_B) {
 		wr8(&w, hp->st_rps + hp->st_rps_sps_flag, 1);
 		wr32(&w, hp->st_rps + hp->st_rps_idx, 0);
 	}

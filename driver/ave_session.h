@@ -83,12 +83,57 @@ struct ave_enc_cfg {
 	 */
 	u32	level_idc;
 	bool	cabac;			/* H.264 only; HEVC is always CABAC */
+	/*
+	 * docs/81 "V4L2 implementation". Both 0 = the stream every release so
+	 * far has sent. Either above its default turns on what the hardware
+	 * needs for two references (3 DPB slots, both ME units: Start wire
+	 * 0xFCEA, docs/94); B frames also POC type 0 (H.264) or the B RPS
+	 * sets (HEVC). B frames then go through ave_enc_encode_batch();
+	 * two-reference P frames still go through ave_enc_encode().
+	 */
+	u32	bframes;		/* B frames between anchors, 0..2 */
+	u32	p_refs;			/* references per P frame, 1..2; 0 = 1 */
 };
 int ave_enc_start(struct ave_device *ave, const struct ave_enc_cfg *cfg);
 int ave_enc_encode(struct ave_device *ave, u32 n, bool idr,
 		   dma_addr_t luma, dma_addr_t chroma, u32 stride,
 		   void *out, size_t out_size, size_t *out_len, bool *keyframe);
 int ave_enc_stop(struct ave_device *ave);
+
+/*
+ * One frame of a batch (ave_gop.h plans them): frameNumber, which is also
+ * its POC; AVE_GOP_{P,B,IDR}; the source planes, as ave_enc_encode().
+ */
+struct ave_enc_frame {
+	u32		fn;
+	u32		type;
+	dma_addr_t	luma, chroma;
+	u32		stride;
+};
+
+/*
+ * One completion. @buf/@size: the caller's k-th output buffer, filled by
+ * the k-th frame to complete (completion order = decode order). Returned:
+ * @len, @frame (its index in the frames[] array, found from the reply's
+ * slot and checked against the frameNumber the firmware echoes in the coded
+ * header) and @type as coded (an HEVC frame the firmware made an IDR says so).
+ */
+struct ave_enc_out {
+	void		*buf;
+	size_t		size;
+	size_t		len;
+	u32		frame;
+	u32		type;
+};
+
+/*
+ * Send @count frames back to back in the order given - display order: the
+ * firmware reorders a B behind its anchor (docs/81 §0 #1), so a batch must
+ * end with that anchor - and collect @count completions into out[0..].
+ * *@n_out: completions delivered, also on failure. 0 when all completed.
+ */
+int ave_enc_encode_batch(struct ave_device *ave, const struct ave_enc_frame *f,
+			 u32 count, struct ave_enc_out *out, u32 *n_out);
 
 /*
  * Ask the firmware to halt itself (command 14) so that the next load can

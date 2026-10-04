@@ -1696,6 +1696,14 @@ struct ave_hevc_ps_layout {
 	u32	rps_num_neg, rps_num_pos;
 	u32	rps_dpoc_s0_m1;				/* u16[] */
 	u32	rps_used_s0;				/* u8[] */
+	/*
+	 * The positive (S1) half of the syntax, for B frames (docs/81 §1.3,
+	 * Appendix B: kext HEVC_RPS entry +0x68+4j delta_poc_s1_minus1 u32,
+	 * +0xA8+j used_s1). Sits between used_s0 (16 bytes) and the derived
+	 * NumNegativePics, so the layout leaves no other place for it.
+	 */
+	u32	rps_dpoc_s1_m1;				/* u32[] */
+	u32	rps_used_s1;				/* u8[] */
 	u32	rps_num_delta_pocs;
 	/*
 	 * The derived half of each entry (H.265 7.4.8: NumNegativePics,
@@ -2470,6 +2478,8 @@ const struct ave_cmd_abi ave_cmd_abi_13_5 = {
 		.rps_num_pos		= 0x34,
 		.rps_dpoc_s0_m1		= 0x38,
 		.rps_used_s0		= 0x58,
+		.rps_dpoc_s1_m1		= 0x68,	/* docs/81 App. B (kext entry) */
+		.rps_used_s1		= 0xa8,
 		.rps_num_delta_pocs	= 0x160,
 		/* derived: fw 0x6de64 stp w8,w9,[x1,#184]; strb [x1,#192]/[#208];
 		 * stp [x1,#224] (S0) / str [x1,#288] (S1); kext 0xf504a4 */

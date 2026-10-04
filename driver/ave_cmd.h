@@ -111,6 +111,13 @@ struct ave_avc_session {
 	u8	search_range;		/* 0 widest (default) .. 2 (docs/81 bs2) */
 	u8	max_mvs_per_2mb;	/* 0 = not sent (default); macOS 16 (bs7) */
 	/*
+	 * Wire 0x78 (VP+0x18) BFrames, 0..2; 0 = not written (every run to
+	 * date). H.264: only the rate controller's anchor/B budget reads it
+	 * (docs/81 §1.2, fw 0x40a78). HEVC: it is the GOP type the firmware
+	 * picks its RPS set index by (ave_hevc_session.bframes writes it).
+	 */
+	u8	bframes;
+	/*
 	 * docs/85: bitmask of enum ave_macos_group - send what a plain macOS
 	 * VideoToolbox session sends, one group of fields per bit. 0 (the
 	 * default) builds exactly the command every run to date sent. The
@@ -391,6 +398,20 @@ struct ave_hevc_session {
 	 */
 	u8	st_rps_refs;
 	/*
+	 * docs/81 §1.3: B frames. 0 = the IPPP sets above. 1 = IbP, 2 = IbbP:
+	 * BFrames (wire 0x78) = this, which is the GOP type SetRpsVars picks
+	 * the set index by (fw 0x6c7e8 / 0x6c808), and every index that GOP
+	 * type can produce is written, trimmed to one picture per list so a
+	 * 3-slot DPB holds it (docs/81 §1.3, "trimmed sets"):
+	 *   IbP  (8 sets): even index P {-2}; odd index B {-1 | +1}
+	 *                  (index 7 is the w6 arm's, cheap insurance);
+	 *   IbbP (10 sets): index%3 0 P {-3}, 1 B {-1 | +2}, 2 B {-2 | +1}.
+	 * Also VPS/SPS num_reorder 1. Needs n_st_rps = 8 / 10,
+	 * max_num_ref_frames >= 2, ui32IdrPeriod != 1 (R2). st_rps_refs is
+	 * ignored (P frames keep one reference).
+	 */
+	u8	bframes;
+	/*
 	 * TranscodedData (docs/77 §14): the two transcoders' output buffers,
 	 * session-wide, 128-aligned, transcoded_size bytes each (the kext:
 	 * align4K(CodedData / 2)). Required - exactly transcoded_max of them -
@@ -432,6 +453,12 @@ struct ave_hevc_frame {
 	 * TranscodedData pair (what the kext does when it allocates that pair).
 	 */
 	bool	single_xc;
+	/*
+	 * The session's HEVC_INIT bframes. A B frame is refused unless it is
+	 * non-zero: without the S1 sets the firmware finds no L1 picture
+	 * (docs/81 R3).
+	 */
+	u8	bframes;
 };
 
 /* What ave_cmd_coded_length() recovers from a completed frame's header. */

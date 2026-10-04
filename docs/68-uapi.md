@@ -479,7 +479,7 @@ Two more format rules from the same code:
 | `S_FMT(CAPTURE)` pixelformat | yes | — | — | `V4L2_PIX_FMT_H264` only (not `H264_NO_SC`, not `H264_SLICE`) |
 | `S_FMT(CAPTURE)` sizeimage | yes, `FFALIGN(h,32)*FFALIGN(w,32)*3/4` rounded to 4 KiB | coded buffer size | `Start_AVC` (table at `0x558`) | treat ffmpeg's value as a **floor**; use `AVE_CalcBufSizeOfCodedData` (1 384 448 at 720p), which is larger |
 | `S_PARM(OUTPUT)` timeperframe | yes, if `-r`/input fps known | `frame_rate` `0xFF4C`, `frame_rate_div` `0xFF48` | `Start_AVC` | `0 < fps < 100000`; reject 0; also sets the CAPTURE interval per the spec |
-| `V4L2_CID_MPEG_VIDEO_B_FRAMES` | **yes, and reads it back** | — | — | range 0..0. Non-zero readback **fails the encoder open** |
+| `V4L2_CID_MPEG_VIDEO_B_FRAMES` | **yes, and reads it back** | — | — | default 0 (range 0..2 since docs/81 §8). Non-zero readback **fails the encoder open** |
 | `V4L2_CID_MPEG_VIDEO_GOP_SIZE` | yes (default 12) | *none* — the driver emits frame type 3 every N frames | per-frame (`0xCAC`) | free to change at any time (§4.2) |
 | `V4L2_CID_MPEG_VIDEO_H264_I_PERIOD` | no | same as GOP_SIZE | per-frame | implement as an alias; note `ui32IdrPeriod` (`0xFF34`) is an **RC input, not the GOP driver** ([66](66-ratecontrol-sizing.md) §2.2) |
 | `V4L2_CID_MPEG_VIDEO_FORCE_KEY_FRAME` | yes, but only when the frame is already tagged I | frame type 3 / `forceKeyFrame` `0xA00` | per-frame | free; applies to the next queued OUTPUT buffer |
@@ -647,7 +647,7 @@ full teardown, so our hardware's hardest constraint costs us nothing here.
 | `FRAME_RC_ENABLE` | `S_CTRL` | Start-latched | grab |
 | `H264_PROFILE`, `H264_LEVEL` | `S_CTRL` | SPS fields, generated once at Start | grab |
 | `H264_ENTROPY_MODE` | `S_CTRL` | Start-latched; CABAC needs `profile_idc >= 77` and is untested | grab, and expose CAVLC only until someone runs it |
-| `B_FRAMES` | `S_CTRL` | B-frames never attempted | range 0..0 |
+| `B_FRAMES` | `S_CTRL` | B-frames never attempted | range 0..0; now 0..2, default 0 (docs/81 §8) |
 | `MULTI_SLICE_MODE` | `S_CTRL` | slice map is Start-latched; multi-slice untested and would expose the `bytesToRemove` hole problem | `SINGLE` only |
 | `MAX_REF_PIC` | `S_CTRL` | `max_num_ref_frames`, Start-latched, bounded by the level's `MaxDpbMbs` | grab; clamp to what the level allows |
 | `GOP_SIZE`, `H264_I_PERIOD` | `S_CTRL` | **the driver owns the GOP** — it picks the per-frame type | **free** |

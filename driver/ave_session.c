@@ -52,6 +52,7 @@
 #include "ave_cmd.h"
 #include "ave_dapf.h"
 #include "ave_session.h"
+#include "ave_gop.h"
 
 /* ------------------------------------------------------------------------ */
 /* Module parameters - the gate and the values we cannot read from the fw   */
@@ -566,7 +567,7 @@ MODULE_PARM_DESC(session_ftype5,
 static bool session_bframes;
 module_param(session_bframes, bool, 0444);
 MODULE_PARM_DESC(session_bframes,
-	"H.264 self-test: IDR then {B, P} pairs (docs/81 b4); needs session_poc0=1 session_dpb=3 and profile >= 77");
+	"self-test: IDR then {B, P} pairs (docs/81 b4, HEVC hb1); needs session_dpb=3, and for H.264 session_poc0=1 and profile >= 77");
 
 /*
  * docs/81 R9: a B frame's colocated read starts 20 * 64 bytes below the
@@ -1045,6 +1046,23 @@ struct ave_sess_bufs {
 	u32		fps_num, fps_den;
 	u32		qp_min, qp_max;	/* 0,0 = the module parameters */
 	u32		req_slots;	/* coded slots to publish at Start_AVC */
+	/*
+	 * docs/81 "V4L2 implementation" (ave_enc_cfg). All 0 in the
+	 * self-test, which keeps its module parameters.
+	 */
+	u32		bframes;	/* B frames per mini-GOP */
+	u32		p_refs;		/* references per P frame; 0/1 = one */
+	u32		req_dpb;	/* DPB slots; 0 = session_dpb */
+	u16		multi_me;	/* wire 0xFCEA; session_multi_me wins */
+	u8		hevc_bframes;	/* HEVC_INIT's B GOP, for HEVC_ENCODE */
+	u32		coded_type;	/* the last result's type, as coded */
+	/* A batch's completions, in completion order (ave_enc_encode_batch) */
+	struct {
+		u32	j;		/* index of the frame in the batch */
+		u32	off, len;	/* its bytes in stream[] */
+		u32	type;
+	}		bdone[AVE_SESS_RX_Q];
+	u32		n_bdone;
 	bool		quiet;		/* streaming: no per-frame chatter or diag */
 	/*
 	 * An open-ended V4L2 stream (ave_enc_start): P frames will follow
@@ -1575,11 +1593,13 @@ static void ave_session_alloc_dpb(struct ave_device *ave,
 	cw = ave_mb_align(bufs->width);
 	ch = ave_mb_align(bufs->height);
 
-	n = session_dpb;
+	/* No stale slots of the previous stream if this allocation fails */
+	bufs->n_dpb = 0;
+	n = bufs->req_dpb ? bufs->req_dpb : session_dpb;
 	if (!n || n > AVE_SESS_DPB_MAX) {
 		dev_warn(ave->dev,
-			 "session: session_dpb=%u out of range (1..%u); using 1\n",
-			 session_dpb, AVE_SESS_DPB_MAX);
+			 "session: %u DPB slots out of range (1..%u); using 1\n",
+			 n, AVE_SESS_DPB_MAX);
 		n = 1;
 	}
 
@@ -1949,7 +1969,8 @@ static int ave_session_start_prep(struct ave_device *ave,
 	if (!session_src_cfg && bufs->src_bitdepth == 10)
 		s->src_cfg_byte = 1;
 	s->src_go_bit3 = (u8)session_src_bit3;
-	s->multi_me = (u16)session_multi_me;
+	/* docs/94: both ME units; the module parameter overrides the stream */
+	s->multi_me = session_multi_me ? (u16)session_multi_me : bufs->multi_me;
 	s->src_go_bits = (u8)session_src_go;
 	s->dbg_bits = session_dbg;
 	s->ipcm_islice = (u8)session_ipcm;
@@ -2077,7 +2098,8 @@ static int ave_session_start_prep(struct ave_device *ave,
 			? ALIGN((size_t)128 * DIV_ROUND_UP(cw, 32) *
 				DIV_ROUND_UP(ch, 64), SZ_4K)
 			: ALIGN((size_t)128 * (cw / 16) * (ch / 16), SZ_4K);
-		const size_t pad = !hevc && (session_bframes || session_ftype5) ?
+		const size_t pad = !hevc && (session_bframes || session_ftype5 ||
+					     bufs->bframes) ?
 				   AVE_SESS_COLOC_PAD : 0;
 
 		for (i = 0; i < bufs->n_dpb; i++) {
@@ -2229,12 +2251,33 @@ static int ave_session_start_avc(struct ave_device *ave,
 			 abi->start_avc.transcoded_set);
 	}
 	s.cabac = bufs->cabac;			/* never with Baseline (builder refuses) */
-	s.poc_type0 = session_poc0;
-	s.ref_spacing_p = min_t(u32, session_ref_spacing_p, 255);
+	/* B frames need POC type 0: type 2 cannot code a reordered picture */
+	s.poc_type0 = session_poc0 || bufs->bframes;
+	/* Two L0 references: RefSpacingP 2 (docs/81 bs1); the parameter wins */
+	s.ref_spacing_p = min_t(u32, session_ref_spacing_p ? session_ref_spacing_p :
+				bufs->p_refs >= 2 ? 2 : 0, 255);
+	/*
+	 * Wire 0x78 BFrames: only the rate controller's anchor/B budget reads
+	 * it (docs/81 §1.2). Under fixed QP it stays 0, as in b4, the run
+	 * that showed B frames work.
+	 */
+	s.bframes = s.rc_enable ? bufs->bframes : 0;
 	s.search_range = min_t(u32, session_search_range, 255);
 	s.max_mvs_per_2mb = min_t(u32, session_max_mvs, 255);
 	/* The firmware reads max_num_ref_frames + 1 slots (see session_dpb) */
 	s.max_refs = bufs->n_dpb > 2 ? bufs->n_dpb - 1 : 1;
+	if ((bufs->bframes || bufs->p_refs >= 2) && s.max_refs < 2) {
+		dev_err(ave->dev,
+			"session: Start_AVC: B frames / two references need 3 DPB slots, have %u\n",
+			bufs->n_dpb);
+		return -ENOMEM;
+	}
+	if (bufs->bframes || bufs->p_refs >= 2)
+		dev_info(ave->dev,
+			 "session: Start_AVC: %u B frame(s) per anchor, %u reference(s) per P: POC type %u, max_num_ref_frames %u, RefSpacingP %u, MultiME %u (wire 0xFCEA, docs/94), BFrames on the wire %u\n",
+			 bufs->bframes, s.ref_spacing_p >= 2 ? 2 : 1,
+			 s.poc_type0 ? 0 : 2, s.max_refs, s.ref_spacing_p,
+			 s.multi_me, s.bframes);
 
 	ret = ave_cmd_build_start_avc(abi, st.cmd, st.cmd_len, &ctx, &s);
 	if (ret < 0) {
@@ -2394,9 +2437,22 @@ static int ave_session_start_hevc(struct ave_device *ave,
 			 "session: HEVC_INIT: session_hevc_xc=1: one transcoder straight into the coded buffer (PICMGMT+0xF65 = 1), no TranscodedData\n");
 	}
 
-	/* docs/81 hb2: session_hevc_refs=2 gives two-reference P frames */
+	/*
+	 * docs/81 hb2: session_hevc_refs=2 gives two-reference P frames; so do
+	 * the V4L2 controls (two references, or B frames: a B has one picture
+	 * in each list).
+	 */
 	bufs->hevc_refs = bufs->n_dpb >= 2 ?
-		clamp_t(u32, session_hevc_refs, 1, bufs->n_dpb - 1) : 0;
+		clamp_t(u32, max_t(u32, session_hevc_refs,
+				   bufs->bframes || bufs->p_refs >= 2 ? 2 : 1),
+			1, bufs->n_dpb - 1) : 0;
+	if ((bufs->bframes || bufs->p_refs >= 2) && bufs->hevc_refs < 2) {
+		dev_err(ave->dev,
+			"session: HEVC_INIT: B frames / two references need 3 DPB slots, have %u\n",
+			bufs->n_dpb);
+		return -ENOMEM;
+	}
+	bufs->hevc_bframes = bufs->bframes;
 	bufs->hevc_poc_mask = (1u << (AVE_SESS_HEVC_POC_LSB_M4 + 4)) - 1;
 	bufs->hevc_sao = session_hevc_sao;
 	bufs->last_idr = 0;
@@ -2404,7 +2460,13 @@ static int ave_session_start_hevc(struct ave_device *ave,
 	h->level_idc = max_t(u32, ave_hevc_level_for(st.cw, st.ch),
 			     bufs->level_floor);
 	h->input_format_word = AVE_SESS_HEVC_INPUT_FMT;
-	h->vp.ref_spacing_p = min_t(u32, session_ref_spacing_p, 255);	/* hb3 */
+	/*
+	 * hb3: the second reference is used only with RefSpacingP 2 (hb2 kept
+	 * both pictures and coded refs l0 1). Not with B frames, whose P
+	 * frames keep one reference (below).
+	 */
+	h->vp.ref_spacing_p = min_t(u32, session_ref_spacing_p ? session_ref_spacing_p :
+				    bufs->p_refs >= 2 && !bufs->bframes ? 2 : 0, 255);
 	h->bit_depth = bufs->bit_depth;		/* docs/83; 0 = 8 */
 	h->input_bitdepth = bufs->src_bitdepth == 10 ? 10 : 8;	/* P010 : NV12 */
 	h->max_num_ref_frames = bufs->hevc_refs;
@@ -2417,6 +2479,19 @@ static int ave_session_start_hevc(struct ave_device *ave,
 	/* the firmware picks set 0..3 per frame itself (docs/77 §18) */
 	h->n_st_rps = bufs->hevc_refs ? 4 : 0;
 	h->st_rps_refs = bufs->hevc_refs >= 2 ? 2 : 1;
+	/*
+	 * docs/81 §1.3: B frames. The firmware picks the set by POC distance
+	 * from the IDR for the GOP type BFrames selects: IbP 8 sets, IbbP 10,
+	 * one picture per list. P frames keep one reference then (a second
+	 * would need a fourth DPB slot).
+	 */
+	h->bframes = bufs->hevc_bframes;
+	if (h->bframes) {
+		h->n_st_rps = h->bframes == 1 ? 8 : 10;
+		if (bufs->p_refs >= 2 || session_hevc_refs >= 2)
+			dev_info(ave->dev,
+				 "session: HEVC_INIT: with B frames, P frames keep one reference (the B sets fit 3 DPB slots)\n");
+	}
 	/*
 	 * ui32IdrPeriod (wire 0xFF34) = 1 is an all-intra session to the HEVC
 	 * firmware, not just to the rate model (docs/76): IEP copies it to
@@ -2441,6 +2516,12 @@ static int ave_session_start_hevc(struct ave_device *ave,
 		dev_warn(ave->dev,
 			 "session: HEVC_INIT: %u DPB slot(s) leave no reference; every frame will be an IDR\n",
 			 bufs->n_dpb);
+	if (bufs->bframes || bufs->p_refs >= 2)
+		dev_info(ave->dev,
+			 "session: HEVC_INIT: %u B frame(s) per anchor (%s, %u SPS sets, num_reorder %u), numRefs %u, MultiME %u (wire 0xFCEA, docs/94)\n",
+			 h->bframes, h->bframes == 2 ? "IbbP" : h->bframes ? "IbP" : "IPPP",
+			 h->n_st_rps, h->bframes ? 1 : 0, h->max_num_ref_frames,
+			 h->vp.multi_me);
 
 	ret = ave_cmd_build_start_hevc(abi, st.cmd, st.cmd_len, &ctx, h);
 	if (ret < 0) {
@@ -3731,6 +3812,7 @@ static int ave_session_process_build(struct ave_device *ave,
 		hf->hdr_slot_base = bufs->slice_hdr[idx].iova;
 		hf->hdr_slot_size = bufs->slice_hdr[idx].size;
 		hf->single_xc = bufs->hevc_single_xc;
+		hf->bframes = bufs->hevc_bframes;
 		/* A stale header must not pass for this frame's. */
 		if (bufs->slice_hdr[idx].cpu)
 			memset(bufs->slice_hdr[idx].cpu, 0, bufs->slice_hdr[idx].size);
@@ -4000,6 +4082,7 @@ static int ave_session_process_result(struct ave_device *ave,
 	       bufs->coded[idx].n_slice * sizeof(info->slice[0]));
 	bufs->psets_len = psets_len;
 	bufs->n_done = n + 1;
+	bufs->coded_type = frame_type;
 	return ave_sess_stream_append(bufs, idx,
 				      frame_type == AVE_FRAME_TYPE_IDR);
 }
@@ -4011,11 +4094,16 @@ static int ave_session_process_result(struct ave_device *ave,
  * each frame to the stream in that (decode) order. Each reply names its
  * Process slot (+0x1C), which names the frame; the coded header's
  * frameNumber is cross-checked by the result path.
+ *
+ * @ext (V4L2, ave_enc_encode_batch): each frame's source planes, and a
+ * frameNumber echo that disagrees with the slot's frame is an error, not
+ * a warning. Every completion is recorded in bufs->bdone[].
  */
 static int ave_session_process_batch(struct ave_device *ave,
 				     const struct ave_cmd_abi *abi,
 				     struct ave_sess_bufs *bufs, u64 client_id,
-				     const u32 *ns, const int *types, u32 count)
+				     const u32 *ns, const int *types, u32 count,
+				     const struct ave_enc_frame *ext)
 {
 	const bool hevc = bufs->codec == AVE_SESS_CODEC_HEVC;
 	const enum ave_op op = hevc ? AVE_OP_PROCESS_HEVC : AVE_OP_PROCESS_AVC;
@@ -4024,15 +4112,23 @@ static int ave_session_process_batch(struct ave_device *ave,
 	bool done[AVE_SESS_RX_Q] = {};
 	char order[48];
 	int len = 0;
-	u32 k, j;
+	u32 k, j, start;
 	u64 t0;
 	int ret;
 
+	bufs->n_bdone = 0;
 	if (!count || count > AVE_SESS_RX_Q || count > bufs->n_coded)
 		return -EINVAL;
 	for (k = 0; k < count; k++) {
+		if (ext) {
+			bufs->ext_src = true;
+			bufs->ext_luma = ext[k].luma;
+			bufs->ext_chroma = ext[k].chroma;
+			bufs->ext_stride = ext[k].stride;
+		}
 		ret = ave_session_process_build(ave, abi, bufs, client_id,
 						ns[k], types[k], &job[k]);
+		bufs->ext_src = false;
 		if (ret)
 			return ret;
 		for (j = 0; j < k; j++)
@@ -4113,9 +4209,27 @@ static int ave_session_process_batch(struct ave_device *ave,
 				 ns[j], job[j].frame_type);
 			ave_session_diag_hevc_inter(ave);
 		}
+		start = bufs->stream_len;
 		ret = ave_session_process_result(ave, abi, bufs, &job[j]);
 		if (ret)
 			goto out;
+		/*
+		 * The slot names the frame; the coded header's frameNumber
+		 * (+0x10C) must say the same, or a completion would carry
+		 * another source's timestamp (docs/81 R14).
+		 */
+		if (ext && bufs->coded_info.frame_num != ns[j]) {
+			dev_err(ave->dev,
+				"session: batch: slot %u is frame %u, but its coded header says frameNumber %u\n",
+				slot, ns[j], bufs->coded_info.frame_num);
+			ret = -EPROTO;
+			goto out;
+		}
+		bufs->bdone[k].j = j;
+		bufs->bdone[k].off = start;
+		bufs->bdone[k].len = bufs->stream_len - start;
+		bufs->bdone[k].type = bufs->coded_type;
+		bufs->n_bdone = k + 1;
 	}
 	t0 = ktime_get_ns() - t0;
 	bufs->t_cmd += t0;
@@ -4508,10 +4622,10 @@ int ave_session_selftest(struct ave_device *ave)
 	 * ave_remove() frees them after ave_power_off(). (Review finding 2.)
 	 */
 	if (session_bframes &&
-	    (session_codec || session_profile < 77 || !session_poc0 ||
-	     session_dpb < 3)) {
+	    (session_dpb < 3 ||
+	     (!session_codec && (session_profile < 77 || !session_poc0)))) {
 		dev_err(ave->dev,
-			"session: session_bframes needs H.264, profile >= 77, session_poc0=1 and session_dpb>=3 (docs/81); not running\n");
+			"session: session_bframes needs session_dpb>=3, and for H.264 profile >= 77 and session_poc0=1 (docs/81); not running\n");
 		return -EINVAL;
 	}
 	bufs = kzalloc(sizeof(*bufs), GFP_KERNEL);
@@ -4529,6 +4643,12 @@ int ave_session_selftest(struct ave_device *ave)
 	bufs->fps_num = session_fps;
 	bufs->fps_den = session_fps_div;
 	bufs->codec = session_codec;
+	/*
+	 * docs/81 hb1: HEVC B needs the IbP sets at HEVC_INIT. H.264 keeps
+	 * b4's Start exactly (its B frames need nothing there but POC type 0
+	 * and the DPB, which the parameters give).
+	 */
+	bufs->bframes = session_bframes && session_codec ? 1 : 0;
 	bufs->bit_depth = session_codec ? session_hevc_bitdepth : 0;
 	bufs->src_bitdepth = session_codec ? session_src_bitdepth : 0;
 	ave_session_release(ave);	/* a previous run's, if any */
@@ -4617,7 +4737,7 @@ int ave_session_selftest(struct ave_device *ave)
 			}
 			ret = ave_session_process_batch(ave, abi, bufs,
 							AVE_SESS_CLIENT_ID,
-							ns, types, k);
+							ns, types, k, NULL);
 		} else {
 			ret = ave_session_process(ave, abi, bufs,
 						  AVE_SESS_CLIENT_ID, frame);
@@ -5132,6 +5252,10 @@ int ave_enc_start(struct ave_device *ave, const struct ave_enc_cfg *cfg)
 	if ((hevc && cfg->profile_idc > 2) ||
 	    (cfg->src_bitdepth == 10 && !hevc))
 		return -EINVAL;
+	/* docs/81: up to 2 B frames (3+ is the pyramid, R5), never Baseline */
+	if (cfg->bframes > AVE_GOP_B_MAX || cfg->p_refs > 2 ||
+	    (cfg->bframes && !hevc && cfg->profile_idc < 77))
+		return -EINVAL;
 
 	bufs->codec = cfg->codec;
 	/* docs/83: Main 10 by profile; P010 input by format (m1-m3b) */
@@ -5154,6 +5278,17 @@ int ave_enc_start(struct ave_device *ave, const struct ave_enc_cfg *cfg)
 	bufs->fps_num = cfg->fps_num;
 	bufs->fps_den = cfg->fps_den;
 	bufs->req_slots = cfg->slots;
+	/*
+	 * docs/81 "V4L2 implementation": two references in the DPB (3 slots)
+	 * and both ME units (docs/94) for B frames or two-reference P frames.
+	 * Zero for the default stream, so its Start is what it always was.
+	 */
+	bufs->bframes = cfg->bframes;
+	bufs->p_refs = cfg->p_refs;
+	bufs->req_dpb = cfg->bframes || cfg->p_refs >= 2 ?
+			max_t(u32, session_dpb, 3) : 0;
+	bufs->multi_me = cfg->bframes || cfg->p_refs >= 2 ? 1 : 0;
+	bufs->hevc_bframes = 0;
 	bufs->quiet = true;
 	bufs->open_ended = true;
 	ave->dart_check_quiet = true;
@@ -5231,6 +5366,77 @@ int ave_enc_encode(struct ave_device *ave, u32 n, bool idr,
 	bufs->t_total += ktime_get_ns() - t_start;
 	bufs->t_frames++;
 	return 0;
+}
+
+/*
+ * A mini-GOP (ave_gop.h), or an IDR, in one batch: see ave_session.h. The
+ * batch must be one the firmware will finish: a B only in a B session and
+ * only before a later non-B frame of a higher frameNumber in the same
+ * batch (docs/81 R1: a B without its anchor is held forever), an IDR only
+ * alone.
+ */
+int ave_enc_encode_batch(struct ave_device *ave, const struct ave_enc_frame *f,
+			 u32 count, struct ave_enc_out *out, u32 *n_out)
+{
+	const struct ave_cmd_abi *abi = ave_cmd_abi_get(ave->fw_abi);
+	struct ave_sess_bufs *bufs = ave->session_bufs;
+	u32 ns[AVE_SESS_RX_Q], k;
+	int types[AVE_SESS_RX_Q];
+	u64 t_start;
+	int ret;
+
+	BUILD_BUG_ON(AVE_GOP_P != AVE_FRAME_TYPE_P ||
+		     AVE_GOP_B != AVE_FRAME_TYPE_B ||
+		     AVE_GOP_IDR != AVE_FRAME_TYPE_IDR);
+	BUILD_BUG_ON(AVE_GOP_BATCH_MAX > AVE_SESS_RX_Q);
+	*n_out = 0;
+	if (ave->fw_hung || READ_ONCE(ave->pm_state) != AVE_PM_ON)
+		return -EIO;
+	if (!abi || !bufs || !ave->client_open || !count ||
+	    count > AVE_SESS_RX_Q)
+		return -EINVAL;
+	for (k = 0; k < count; k++) {
+		const struct ave_enc_frame *a = &f[count - 1];
+
+		if (!f[k].stride || (f[k].stride & (AVE_STRIDE_ALIGN - 1)))
+			return -EINVAL;
+		if (f[k].type == AVE_GOP_B ?
+		    !bufs->bframes || k == count - 1 || a->type == AVE_GOP_B ||
+		    f[k].fn >= a->fn :
+		    f[k].type == AVE_GOP_IDR ? count != 1 :
+		    f[k].type != AVE_GOP_P)
+			return -EINVAL;
+		ns[k] = f[k].fn;
+		types[k] = f[k].type;
+	}
+
+	t_start = ktime_get_ns();
+	bufs->force_idr = false;
+	bufs->stream_len = 0;
+	ret = ave_session_process_batch(ave, abi, bufs, AVE_SESS_CLIENT_ID,
+					ns, types, count, f);
+	if (ret == -ETIMEDOUT) {
+		/* R1: nothing answers after this but a core reset */
+		ave->fw_hung = true;
+		dev_err(ave->dev,
+			"enc: batch of %u from frameNumber %u timed out: the encoder firmware is hung. Failing this stream; the device resets itself when its last user closes it (docs/84)\n",
+			count, ns[0]);
+	}
+	for (k = 0; k < bufs->n_bdone; k++) {
+		if (bufs->bdone[k].len > out[k].size) {
+			ret = ret ? ret : -ENOSPC;
+			break;
+		}
+		memcpy(out[k].buf, bufs->stream + bufs->bdone[k].off,
+		       bufs->bdone[k].len);
+		out[k].len = bufs->bdone[k].len;
+		out[k].frame = bufs->bdone[k].j;
+		out[k].type = bufs->bdone[k].type;
+		*n_out = k + 1;
+	}
+	bufs->t_total += ktime_get_ns() - t_start;
+	bufs->t_frames += count;
+	return ret;
 }
 
 /*

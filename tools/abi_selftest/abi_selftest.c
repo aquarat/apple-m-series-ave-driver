@@ -2394,6 +2394,196 @@ static void test_negative_control(void)
 		   "13.5 Start into a 26.6.2-sized buffer refused");
 }
 
+/*
+ * docs/81 "V4L2 implementation": the Start and Process fields B frames and
+ * two references add. Offsets typed in from docs/81 §1 / Appendix B and
+ * docs/94, not computed from ave_abi.h.
+ */
+static void expect_b_set(u32 k, int neg, int pos)
+{
+	const u32 e = 0x2cfbc + 4 + 0x164 * k;	/* RPS block + entry k */
+
+	E32(buf, e + 0x30, 1, "num_negative_pics 1");
+	E32(buf, e + 0x34, pos ? 1 : 0, "num_positive_pics");
+	E16(buf, e + 0x38, -neg - 1, "delta_poc_s0_minus1[0]");
+	E8(buf, e + 0x58, 1, "used_by_curr_pic_s0[0]");
+	E32(buf, e + 0x68, pos ? pos - 1 : 0, "delta_poc_s1_minus1[0] (+0x68, u32)");
+	E8(buf, e + 0xa8, pos ? 1 : 0, "used_by_curr_pic_s1[0] (+0xA8)");
+	E32(buf, e + 0xb8, 1, "derived NumNegativePics");
+	E32(buf, e + 0xbc, pos ? 1 : 0, "derived NumPositivePics (+0xBC)");
+	E8(buf, e + 0xc0, 1, "derived UsedByCurrPicS0[0]");
+	E8(buf, e + 0xd0, pos ? 1 : 0, "derived UsedByCurrPicS1[0] (+0xD0)");
+	E32(buf, e + 0xe0, (u32)neg, "derived DeltaPocS0[0]");
+	E32(buf, e + 0x120, (u32)pos, "derived DeltaPocS1[0] (+0x120)");
+	E32(buf, e + 0x160, pos ? 2 : 1, "NumDeltaPocs");
+}
+
+static struct ave_hevc_session hevc_b(u8 bframes)
+{
+	static struct ave_recon_buf recon3[3] = {
+		{ 0x0000000200000000ull, 0, 0x0000000200300000ull },
+		{ 0x0000000200400000ull, 0, 0x0000000200700000ull },
+		{ 0x0000000200800000ull, 0, 0x0000000200b00000ull },
+	};
+	struct ave_hevc_session h = hevc_720p();
+
+	h.max_num_ref_frames = 2;
+	h.vp.recon = recon3;
+	h.vp.n_recon = 3;
+	h.vp.n_low_res_ref = 3;
+	h.vp.low_res_ref[2] = 0x0000000210200000ull;
+	h.vp.n_colocated = 3;
+	h.vp.colocated[2] = 0x0000000230020000ull;
+	h.vp.key_interval = 30;		/* R2: 1 is all-intra to HEVC */
+	h.vp.multi_me = 1;
+	h.bframes = bframes;
+	h.n_st_rps = bframes == 1 ? 8 : 10;
+	return h;
+}
+
+static void test_bframes_13_5(void)
+{
+	const struct ave_cmd_abi *a = ave_cmd_abi_get(AVE_ABI_MACOS_13_5);
+	const struct ave_cmd_abi *a26 = ave_cmd_abi_get(AVE_ABI_MACOS_26_6);
+	struct ave_avc_session s = session_1080p(true);
+	struct ave_hevc_session h;
+	struct ave_hevc_frame f = {
+		.pic = frame_idr(),
+		.poc_lsb = 1,
+		.sao = true,
+		.hdr_slot_base = 0x0000000a00000000ull,
+		.hdr_slot_size = 0x40000,
+	};
+	u32 k;
+
+	begin("13.5 start_avc B frames, MultiME");
+	memset(buf, 0, sizeof(buf));
+	ave_cmd_build_start_avc(a, buf, sizeof(buf), &CTX, &s);
+	E32(buf, 0x78, 0, "BFrames 0 unless asked");
+	E16(buf, 0xfcea, 0, "MultiME 0 unless asked");
+	s.poc_type0 = true;
+	s.max_refs = 2;
+	s.bframes = 1;
+	s.multi_me = 1;
+	memset(buf, 0, sizeof(buf));
+	expect_int(ave_cmd_build_start_avc(a, buf, sizeof(buf), &CTX, &s), 0x10e10, "size");
+	E32(buf, 0x78, 1, "BFrames (VP+0x18, fw 0x5dab4 -> rc+700)");
+	E16(buf, 0xfcea, 1, "MultiME u16 (VP+0xFC8A, fw ldrh 0x4e930; docs/94)");
+	E8(buf, 0xfce9, 0, "SRCDMAGO bit 3 untouched");
+	E32(buf, 0x7c, 0, "bEnableAdaptB etc. untouched (R: AdaptB 0)");
+	E32(buf, 0x80, 0, "VP+0x20 (reference B) 0");
+	E32(buf, 0x109d0, 0, "POC type 0");
+	E32(buf, 0x109dc, 2, "max_num_ref_frames 2");
+	s.bframes = 2;
+	expect_int(ave_cmd_build_start_avc(a, buf, sizeof(buf), &CTX, &s), 0x10e10, "2 B frames");
+	s.bframes = 3;
+	expect_int(ave_cmd_build_start_avc(a, buf, sizeof(buf), &CTX, &s), -EINVAL,
+		   "3 B frames (the pyramid, R5)");
+	s.bframes = 1;
+	s.profile_idc = 66;
+	s.cabac = false;
+	expect_int(ave_cmd_build_start_avc(a, buf, sizeof(buf), &CTX, &s), -EINVAL,
+		   "B with Baseline (R16)");
+	s = session_1080p(false);
+	s.bframes = 1;
+	expect_int(ave_cmd_build_start_avc(a26, buf, sizeof(buf), &CTX, &s), -EINVAL,
+		   "26.6: BFrames not located");
+	s.bframes = 0;
+	s.multi_me = 1;
+	expect_int(ave_cmd_build_start_avc(a26, buf, sizeof(buf), &CTX, &s), -EINVAL,
+		   "26.6: MultiME not located");
+
+	begin("13.5 start_hevc IPPP control: no B fields");
+	h = hevc_720p();
+	memset(buf, 0, sizeof(buf));
+	expect_int(ave_cmd_build_start_hevc(a, buf, sizeof(buf), &CTX, &h), 0x32dc8, "size");
+	E32(buf, 0x78, 0, "BFrames 0");
+	E32(buf, 0x10c4c, 0, "VPS num_reorder 0");
+	E32(buf, 0x24920, 0, "SPS num_reorder 0");
+	E32(buf, 0x2cfbc, 4, "4 IPPP sets");
+
+	begin("13.5 start_hevc IbP (docs/81 §1.3)");
+	h = hevc_b(1);
+	memset(buf, 0, sizeof(buf));
+	expect_int(ave_cmd_build_start_hevc(a, buf, sizeof(buf), &CTX, &h), 0x32dc8, "size");
+	E32(buf, 0x78, 1, "BFrames 1 -> GOP type IbP (fw 0x84e30-0x84e38)");
+	E16(buf, 0xfcea, 1, "MultiME (shared VP)");
+	E32(buf, 0xfd2c, 2, "numRefs 2");
+	E32(buf, 0x10c4c, 1, "VPS sps_max_num_reorder_pics 1 (VPS+0x69C)");
+	E32(buf, 0x24920, 1, "SPS sps_max_num_reorder_pics 1 (SPS+0x294)");
+	E32(buf, 0x10c2c, 2, "VPS max_dec_pic_buffering_minus1 2");
+	E32(buf, 0x24904, 2, "SPS max_dec_pic_buffering_minus1 2");
+	E32(buf, 0x2cfbc, 8, "8 sets: IbP 0..6 and the w6 arm's 7");
+	for (k = 0; k < 8; k++)
+		if (k & 1)
+			expect_b_set(k, -1, 1);		/* B {-1 | +1} */
+		else
+			expect_b_set(k, -2, 0);		/* P {-2} */
+	E32(buf, 0x2cfbc + 4 + 0x164 * 8 + 0x30, 0, "no set 8");
+
+	begin("13.5 start_hevc IbbP");
+	h = hevc_b(2);
+	memset(buf, 0, sizeof(buf));
+	expect_int(ave_cmd_build_start_hevc(a, buf, sizeof(buf), &CTX, &h), 0x32dc8, "size");
+	E32(buf, 0x78, 2, "BFrames 2 -> GOP type IbbP (fw 0x6c808)");
+	E32(buf, 0x2cfbc, 10, "10 sets");
+	for (k = 0; k < 10; k++)
+		if (k % 3 == 1)
+			expect_b_set(k, -1, 2);		/* first B {-1 | +2} */
+		else if (k % 3 == 2)
+			expect_b_set(k, -2, 1);		/* second B {-2 | +1} */
+		else
+			expect_b_set(k, -3, 0);		/* P {-3} */
+
+	begin("13.5 start_hevc B refusals");
+	h = hevc_b(1);
+	h.n_st_rps = 4;
+	expect_int(ave_cmd_build_start_hevc(a, buf, sizeof(buf), &CTX, &h), -EINVAL,
+		   "IbP with 4 sets (R4)");
+	h = hevc_b(2);
+	h.n_st_rps = 8;
+	expect_int(ave_cmd_build_start_hevc(a, buf, sizeof(buf), &CTX, &h), -EINVAL,
+		   "IbbP with 8 sets (R4)");
+	h = hevc_b(1);
+	h.max_num_ref_frames = 1;
+	expect_int(ave_cmd_build_start_hevc(a, buf, sizeof(buf), &CTX, &h), -EINVAL,
+		   "B with one reference");
+	h = hevc_b(1);
+	h.vp.key_interval = 1;
+	expect_int(ave_cmd_build_start_hevc(a, buf, sizeof(buf), &CTX, &h), -EINVAL,
+		   "B with IdrPeriod 1 (R2)");
+	h = hevc_b(3);
+	h.n_st_rps = 10;
+	expect_int(ave_cmd_build_start_hevc(a, buf, sizeof(buf), &CTX, &h), -EINVAL,
+		   "3 B frames (R5: asserts at fw 0x6c8b0)");
+	h = hevc_b(1);
+	h.vp.bframes = 1;
+	expect_int(ave_cmd_build_start_hevc(a, buf, sizeof(buf), &CTX, &h), -EINVAL,
+		   "the AVC bframes member set on HEVC");
+	h = hevc_720p();
+	h.n_st_rps = 8;
+	expect_int(ave_cmd_build_start_hevc(a, buf, sizeof(buf), &CTX, &h), -EINVAL,
+		   "8 IPPP sets");
+
+	begin("13.5 process_hevc B");
+	f.pic.frame_type = AVE_FRAME_TYPE_B;
+	f.pic.recon_luma_lsb_addr = 0x0000000200300000ull;
+	f.pic.recon_chroma_lsb_addr = 0x0000000200380000ull;
+	expect_int(ave_cmd_build_process_hevc(a, buf, sizeof(buf), &CTX, 21, &f),
+		   -EINVAL, "B in an IPPP session");
+	f.bframes = 1;
+	memset(buf, 0, sizeof(buf));
+	expect_int(ave_cmd_build_process_hevc(a, buf, sizeof(buf), &CTX, 21, &f),
+		   0x6838, "B in an IbP session");
+	E32(buf, 0x55b0 + 0xcac, 2, "PICMGMT frame type 2 (docs/81 §1.1)");
+	E32(buf, 0x55b0 + 0xca8, 7, "PICMGMT frameNumber");
+	E8(buf, 0x6524, 1, "slice short_term_ref_pic_set_sps_flag");
+	E32(buf, 0x6528, 0, "slice set index 0 (the firmware picks it)");
+	f.pic.frame_type = 7;
+	expect_int(ave_cmd_build_process_hevc(a, buf, sizeof(buf), &CTX, 21, &f),
+		   -EINVAL, "type 7 (reference B, R12)");
+}
+
 int main(void)
 {
 	test_simple();
@@ -2411,6 +2601,7 @@ int main(void)
 	test_process_hevc_13_5();
 	test_hevc_simple();
 	test_coded_length_hevc();
+	test_bframes_13_5();
 
 	printf("%s: %d checks, %d failures\n", failures ? "FAIL" : "PASS",
 	       checks, failures);

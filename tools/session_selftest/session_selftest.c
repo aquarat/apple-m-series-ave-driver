@@ -25,6 +25,7 @@
 
 #include "kshim.h"
 #include "../../driver/ave_cmd.h"
+#include "../../driver/ave_gop.h"
 
 /* Values duplicated from driver/ave_session.c (kept in sync by hand). */
 #define SESS_CLIENT_ID		1u
@@ -902,8 +903,224 @@ static void test_hevc(void)
 	      "Close codec 1 (ret %d)", ret);
 }
 
-int main(void)
+/* ------------------------------------------------------------------------ */
+/* The V4L2 B-frame planner (driver/ave_gop.h, docs/81 "V4L2 implementation") */
+/* ------------------------------------------------------------------------ */
+
+#define GOP_N_MAX	200
+
+/*
+ * Run one stream of @n sources through the planner as ave_v4l2.c does: one
+ * decision per source, in display order, with the m2m drain flag on the
+ * last. @stop_late: the STOP comes after the last source was already
+ * planned (held), so a CLOSE has to finish the stream. @force[d]: a key
+ * frame asked for at display index d. Checks every invariant the firmware
+ * and the bitstream need; @types gets the coded type per display index.
+ */
+static void gop_run(u32 nb, u32 gop, u32 n, const bool *force, bool stop_late,
+		    u32 *types, u32 *fns)
 {
+	struct ave_gop g;
+	struct ave_gop_batch b[2];
+	u32 held[AVE_GOP_BATCH_MAX], next = 0, seen = 0, last_fn = 0;
+	u32 fn_idr = 0, prev_anchor_fn = 0, d_idr = 0, i, k, nbat;
+	bool any = false, prev_b = false;
+	static char tag[96];
+
+	snprintf(tag, sizeof(tag), "planner nb %u gop %u n %u%s", nb, gop, n,
+		 stop_late ? " (late STOP)" : "");
+	ctx = tag;
+	ave_gop_init(&g, nb, gop);
+	for (;;) {
+		bool has_new = next < n;
+		bool last = has_new ? (!stop_late && next == n - 1) :
+				      g.n_held && held[g.n_held - 1] == n - 1;
+		enum ave_gop_act a = ave_gop_decide(&g, has_new,
+						    has_new && force && force[next],
+						    last);
+		u32 need = ave_gop_need(&g, a), got = 0;
+
+		if (a == AVE_GOP_NONE)
+			break;
+		if (has_new)
+			held[g.n_held] = next;	/* src index n_held = the new one */
+		CHECK(g.n_held <= nb, "more than nb held (%u)", g.n_held);
+		nbat = ave_gop_commit(&g, a, b);
+		if (a == AVE_GOP_HOLD) {
+			CHECK(!last, "the drain's last source held");
+			next++;
+			continue;
+		}
+		for (k = 0; k < nbat; k++) {
+			got += b[k].n;
+			CHECK(b[k].n >= 1 && b[k].n <= nb + 1, "batch of %u", b[k].n);
+			for (i = 0; i < b[k].n; i++) {
+				const struct ave_gop_frame *f = &b[k].f[i];
+				u32 d = held[f->src];
+
+				/* display order across and within batches */
+				CHECK(d == seen, "display %u sent where %u was due", d, seen);
+				seen++;
+				CHECK(!any || f->fn > last_fn || (f->type == AVE_GOP_B),
+				      "frameNumber %u not above %u", f->fn, last_fn);
+				if (f->type == AVE_GOP_B) {
+					/* a B: never last; its anchor follows in the batch */
+					CHECK(i < b[k].n - 1, "B last in its batch");
+					CHECK(f->fn < b[k].f[b[k].n - 1].fn,
+					      "B fn %u not below its anchor's %u",
+					      f->fn, b[k].f[b[k].n - 1].fn);
+					CHECK(f->fn > prev_anchor_fn, "B fn below its past anchor");
+					/* HEVC set index: a B's distance is 1..nb */
+					CHECK((f->fn - fn_idr) % (nb + 1) >= 1,
+					      "B at an anchor's distance");
+					/* its past anchor is the one sent before */
+					CHECK(f->fn - (f->fn - fn_idr) % (nb + 1) == prev_anchor_fn,
+					      "B %u: no anchor at %u", f->fn,
+					      f->fn - (f->fn - fn_idr) % (nb + 1));
+				} else {
+					CHECK(i == b[k].n - 1, "anchor not last in its batch");
+					if (f->type == AVE_GOP_IDR) {
+						CHECK(b[k].n == 1, "IDR in a batch of %u", b[k].n);
+						CHECK(!prev_b, "a B right before an IDR in display order");
+						fn_idr = f->fn;
+						d_idr = d;
+					} else {
+						CHECK(f->type == AVE_GOP_P, "type %u", f->type);
+						/* HEVC: a P's set by POC distance (SetRpsVars) */
+						CHECK((f->fn - fn_idr) % (nb + 1) == 0,
+						      "P at distance %u from its IDR", f->fn - fn_idr);
+					}
+					prev_anchor_fn = f->fn;
+					last_fn = f->fn;
+					any = true;
+				}
+				prev_b = f->type == AVE_GOP_B;
+				types[d] = f->type;
+				fns[d] = f->fn;
+				if (d == 0)
+					CHECK(f->type == AVE_GOP_IDR, "first frame not an IDR");
+				if (gop && d - d_idr >= gop)
+					CHECK(0, "GOP %u overrun at %u (IDR at %u)", gop, d, d_idr);
+			}
+		}
+		CHECK(got == need, "need %u, coded %u", need, got);
+		if (has_new)
+			next++;
+	}
+	CHECK(seen == n, "%u of %u frames coded", seen, n);
+	CHECK(g.n_held == 0, "%u left held", g.n_held);
+}
+
+static void test_gop(void)
+{
+	static u32 types[GOP_N_MAX], fns[GOP_N_MAX];
+	static bool force[GOP_N_MAX];
+	u32 nb, gop, n, i;
+	bool late;
+
+	/* Every combination of the shapes the V4L2 layer can see. */
+	for (nb = 1; nb <= AVE_GOP_B_MAX; nb++)
+		for (gop = 0; gop <= 13; gop++) {
+			if (gop && gop < nb + 2)
+				continue;	/* ave_v4l2.c clamps those */
+			for (n = 1; n <= 40; n++)
+				for (late = false; ; late = true) {
+					memset(force, 0, sizeof(force));
+					gop_run(nb, gop, n, NULL, late, types, fns);
+					/* and with forced key frames */
+					for (i = 3; i < n; i += 5)
+						force[i] = true;
+					gop_run(nb, gop, n, force, late, types, fns);
+					if (late)
+						break;
+				}
+		}
+
+	/* A regular stream: I, then (B.., P), frameNumber = display index. */
+	ctx = "planner: regular IbP";
+	gop_run(1, 0, 61, NULL, false, types, fns);
+	for (i = 0; i < 61; i++) {
+		CHECK(types[i] == (!i ? AVE_GOP_IDR : i % 2 ? AVE_GOP_B : AVE_GOP_P),
+		      "IbP frame %u type %u", i, types[i]);
+		CHECK(fns[i] == i, "IbP frame %u frameNumber %u", i, fns[i]);
+	}
+	ctx = "planner: regular IbbP";
+	gop_run(2, 0, 61, NULL, false, types, fns);
+	for (i = 0; i < 61; i++) {
+		CHECK(types[i] == (!i ? AVE_GOP_IDR : i % 3 ? AVE_GOP_B : AVE_GOP_P),
+		      "IbbP frame %u type %u", i, types[i]);
+		CHECK(fns[i] == i, "IbbP frame %u frameNumber %u", i, fns[i]);
+	}
+	/* Drain of an even count: the last frame is a P, numbered as an anchor. */
+	ctx = "planner: drain IbP 60";
+	gop_run(1, 0, 60, NULL, false, types, fns);
+	CHECK(types[59] == AVE_GOP_P && fns[59] == 60,
+	      "frame 59: type %u frameNumber %u (want P 60)", types[59], fns[59]);
+	ctx = "planner: drain IbP 60, late STOP";
+	gop_run(1, 0, 60, NULL, true, types, fns);
+	CHECK(types[59] == AVE_GOP_P && fns[59] == 60,
+	      "frame 59: type %u frameNumber %u (want P 60)", types[59], fns[59]);
+	/* GOP 30, IbP: frame 29 closes the GOP as a P, frame 30 is an IDR. */
+	ctx = "planner: GOP 30 IbP";
+	gop_run(1, 30, 61, NULL, false, types, fns);
+	CHECK(types[28] == AVE_GOP_P && types[29] == AVE_GOP_P &&
+	      types[30] == AVE_GOP_IDR && types[31] == AVE_GOP_B &&
+	      types[60] == AVE_GOP_IDR,
+	      "28..31, 60: %u %u %u %u, %u", types[28], types[29], types[30],
+	      types[31], types[60]);
+	CHECK(fns[29] == 30 && fns[30] == 31,
+	      "frame 29/30 frameNumber %u %u (want 30 31)", fns[29], fns[30]);
+	/* A forced key with two Bs pending: they close as {B, P}, then the IDR. */
+	ctx = "planner: forced key IbbP";
+	memset(force, 0, sizeof(force));
+	force[6] = true;
+	gop_run(2, 0, 10, force, false, types, fns);
+	CHECK(types[4] == AVE_GOP_B && types[5] == AVE_GOP_P &&
+	      types[6] == AVE_GOP_IDR && types[7] == AVE_GOP_B,
+	      "4..7: %u %u %u %u", types[4], types[5], types[6], types[7]);
+	CHECK(fns[4] == 4 && fns[5] == 6 && fns[6] == 7,
+	      "4..6 frameNumbers %u %u %u (want 4 6 7)", fns[4], fns[5], fns[6]);
+}
+
+/*
+ * `./session_selftest plan NB GOP N [KEY_EVERY]`: what a V4L2 stream of N
+ * frames with VIDEO_B_FRAMES=NB, VIDEO_GOP_SIZE=GOP (and the driver's
+ * v4l2_test_key_every=KEY_EVERY) should code: the frame types in display
+ * order, as ffprobe prints them, and the batches in submission order. The
+ * expected answer for the hardware tests in docs/81 "V4L2 implementation".
+ * The STOP is taken to arrive with the last source queued.
+ */
+static int plan_print(u32 nb, u32 gop, u32 n, u32 key_every)
+{
+	static u32 types[GOP_N_MAX], fns[GOP_N_MAX];
+	static bool force[GOP_N_MAX];
+	u32 i;
+
+	if (!nb || nb > AVE_GOP_B_MAX || !n || n > GOP_N_MAX ||
+	    (gop && gop < nb + 2)) {
+		printf("plan: NB 1..%u, N 1..%u, GOP 0 or >= NB + 2\n",
+		       AVE_GOP_B_MAX, GOP_N_MAX);
+		return 2;
+	}
+	for (i = 1; key_every && i < n; i++)
+		force[i] = !(i % key_every);
+	gop_run(nb, gop, n, force, false, types, fns);
+	printf("display order: ");
+	for (i = 0; i < n; i++)
+		putchar(types[i] == AVE_GOP_IDR ? 'I' : types[i] == AVE_GOP_B ? 'B' : 'P');
+	printf("\nframeNumber (= POC since the IDR + the IDR's):");
+	for (i = 0; i < n; i++)
+		printf(" %u", fns[i]);
+	printf("\n%s\n", failures ? "PLANNER INVARIANT FAILED" : "planner invariants hold");
+	return failures ? 1 : 0;
+}
+
+int main(int argc, char **argv)
+{
+	if (argc >= 5 && !strcmp(argv[1], "plan"))
+		return plan_print(strtoul(argv[2], NULL, 0), strtoul(argv[3], NULL, 0),
+				  strtoul(argv[4], NULL, 0),
+				  argc > 5 ? strtoul(argv[5], NULL, 0) : 0);
 	/* NULL ABI must be handled, not crash (mirrors the driver's guard). */
 	ctx = "null-abi";
 	CHECK(ave_cmd_abi_get(AVE_ABI_UNKNOWN) == NULL,
@@ -912,6 +1129,7 @@ int main(void)
 	test_abi(AVE_ABI_MACOS_13_5, "macOS 13.5");
 	test_abi(AVE_ABI_MACOS_26_6, "macOS 26.6.2");
 	test_hevc();
+	test_gop();
 
 	printf("\n%d checks, %d failures\n", checks, failures);
 	return failures ? 1 : 0;

@@ -9,9 +9,13 @@
 # defaults (no crop).
 # CODEC=hevc (docs/77 §19) writes a raw .h265 in every mode and decodes it
 # with -f hevc; CODEC=h264 (the default) is unchanged.
+# CTRLS="video_b_frames=1,video_gop_size=30" (ctl mode): extra controls for
+# v4l2-ctl --set-ctrl, and the decoded frame types are printed in display
+# order (docs/81 "V4L2 implementation").
 set -u
 N=${1:-60}; MODE=${2:-ctl}
 CODEC=${CODEC:-h264}
+CTRLS=${CTRLS:-}
 # SRCFMT=p010 (HEVC only, docs/83): a 10-bit P010 source, which also sets
 # the HEVC profile to Main 10. Graded on the host (no HEVC decoder here).
 SRCFMT=${SRCFMT:-nv12}
@@ -78,6 +82,7 @@ ctl)
         --set-fmt-video-out=width=$W,height=$H,pixelformat=$VPIX \
         --set-fmt-video=pixelformat=$PIX \
         --set-selection-output=target=crop,width=$W,height=$CROP_H \
+        ${CTRLS:+--set-ctrl=$CTRLS} \
         --stream-mmap --stream-out-mmap --stream-from="$IN" \
         --stream-to=$RAW --stream-count="$N" 2>&1 | tail -3
     OUT=$RAW; FMT="-f $RAWFMT -framerate 30" ;;
@@ -102,6 +107,8 @@ gst)
 esac
 ls -l "$OUT"
 ffprobe -v error -show_entries stream=codec_name,width,height,profile,level -of compact $FMT "$OUT"
+[ -n "$CTRLS" ] && echo "frame types (display order): $(ffprobe -v error $FMT \
+    -show_entries frame=pict_type -of csv=p=0 "$OUT" | tr -d '\n')"
 echo "decoded frames: $(ffmpeg -v error $FMT -i "$OUT" -f rawvideo -pix_fmt nv12 - | wc -c | awk -v s=$((W*CROP_H*3/2)) '{print $1/s}')"
 # -r 30 on the raw input: psnr pairs frames by timestamp, and rawvideo
 # defaults to 25 fps (f66 graded a correct stream at 25 dB without it).
