@@ -9,7 +9,14 @@ touched.*
 > **Update (docs/94, same day):** B-frames and multiple references now work
 > (both motion-estimation units, wire 0xFCEA). Where this document says the
 > adaptive B placement is blocked by the two-reference stall, that blocker
-> is gone; the multi-pass tests below are still to be run.
+> is gone.
+>
+> **Update (hardware, same day): §11.** The interface works on the M2 and
+> the M1 Pro as mapped here (T1-T5, byte-identical across the two), with
+> two corrections: the LRME collector is not unconditional (§2.3), and the
+> final pass needs MaxKeyFrameIntervalDuration (§2.7). The benchmark says
+> the firmware's 2-pass, driven this way, is **worse** than its own 1-pass
+> VBR (+5 % VMAF / +11 % PSNR-Y BD-rate, and a worse size match): §11.4.
 
 ## Result
 
@@ -23,7 +30,7 @@ touched.*
 | What pass 2 does with the stats | Only with **frame type 5** (firmware decides): it loads the records, runs `CFrameType::FrameType(MPQueue)`, and places IDRs at the scene cuts the host marked. The rate controller allocates bits from first-pass complexity (`MpFinalPassAccumulate`, `finalPassSequenceLevel`, `finalPassSceneLevel`). Multi-pass **forces the bitrate RC arm**: there is no fixed-QP final pass | C |
 | B-frames needed? | **No.** With BFrames (VP+0x18) = 0, the final-pass frame typing produces IDR and P only, scene IDRs included (emulated). Adaptive B placement (`LookAheadBFrames`) needs B-frames, which the two-reference stall blocks (docs/81) | C (emulated) |
 | Firmware lookahead | No multi-frame lookahead in single pass. The M2's **LRME-RC** (H14G only) is a per-frame low-resolution pre-analysis (RC and weighted prediction). It is turned on by VP+0xFE6D `lrme_rc_pass_num` and **requires wire 0xFCE9 = 1** (async LRME pipe). docs/93 found that this flag hangs the M2 today | C / I |
-| Benefit | Against AVE's 1-pass bitrate mode: most of the gap to fixed QP (docs/88: +31 % vs +21 % BD-rate against x265 `medium`), so roughly **5-10 %** in bitrate mode, with accurate size targeting. Against fixed QP: **0-3 %**, from scene-cut IDRs and complexity-based frame QPs. The larger lever, B-frames (~9 %, docs/92), stays blocked | I |
+| Benefit | Expected: 5-10 % over 1-pass bitrate mode, with accurate size targeting [I]. **Measured (§11.4, H.264, M2): +5.2 % VMAF / +11.3 % PSNR-Y BD-rate against 1-pass VBR, i.e. worse, and a 13.5 % mean size miss against 7.3 %.** The final pass front-loads its bits; why is open (§11.5) | C (measured) |
 
 What the host has to compute between passes is the expensive part: scene
 detection, scene accumulation, bit corrections, and the sequence header.
@@ -186,7 +193,9 @@ bits 3, 9 and 11 select constants (fw 0x2c9c0-0x2ca34); their meaning is [U].
   - `CollectMultiPassStats_LRME` (fw 0x2ced8) writes rec+0xA0.. and a
     **1 KiB histogram at rec+0xB0** (fw 0x2cf30-0x2cf5c). It is called
     **unconditionally** from `ProcessLRMEDone` (fw 0x44084). So even
-    single-pass coded headers carry that part. [C]
+    single-pass coded headers carry that part. [C] **Not so on hardware
+    (§11.1): a single-pass coded header is written only in its first
+    0x190 bytes; the record appears with the multi-pass enable.**
 - `docs/54` #55 applies: with enable && (pass|8) == 9, the firmware asserts
   `sSVEMap.iNum == 1`. The driver already writes 1 (`ave_cmd.c:482`). [C]
 
@@ -784,7 +793,7 @@ and the probe-time self-test at 1280×720. Repeat each one before believing it.
 
 | # | change (one) | expect (success) | a "no" looks like |
 |---|---|---|---|
-| T0 | none (control): current bitrate-mode self-test, N = 30, plus a dump of CodedHeader+0x22638..+0x22C5E per frame | frames encode as today; rec+0xB0..0x4AF (LRME histogram) non-zero, because that collector is unconditional; rec+0x2C..0x40 **zero or stale** | histogram zero too → the LRME collector did not run; recheck before T1 |
+| T0 | none (control): current bitrate-mode self-test, N = 30, plus a dump of CodedHeader+0x22638..+0x22C5E per frame | frames encode as today; rec+0xB0..0x4AF (LRME histogram) non-zero, because that collector is unconditional; rec+0x2C..0x40 **zero or stale** | histogram zero too → the LRME collector did not run; recheck before T1. **Run: all zero (§11.1)** |
 | T1 | wire 0xFEFC = 1, 0xFF00 = 1 (0xFF04..0xFF10 = −1) | all 30 frames complete; rec+0x2C = frame index, rec+0x1C/0x20 = 1280/720, rec+0x24 = the frame rate as a float, rec+0x40 ≈ 8 × coded bytes; optionally read back MCPU word 0x267408000 = bit 24 set (a register the firmware wrote, so safe, docs/93 §4) | hang or assert (watch `sSVEMap`), or rec+0x2C still zero → the gate is not what §2.3 says |
 | T2 | T1 + 0xFF04 = 30, 0xFF08 = 0 (pass 9) | records as in T1; slice QP ≈ 30 in every frame (`h264_parse.py`) | QPs still move under RC → pass 9 not taken |
 | T3 | second session: 0xFF00 = 2, every frame type 5, BFrames 0, PICMGMT+0x900 → buffer built from T1's records and a **zero** header | 30 frames complete, IDR then P (FrameTypeReturned 3, 1, …), no assert | assert/hang (0x900 not seen, or the header zero is fatal); QP pinned at min/max → the header is needed (go to T4) |
@@ -839,9 +848,94 @@ S=tools/fwemu/mp
 PATCH="0xffffffff8080426c:01000000;0xffffffff80827724:01;0xffffffff80827728:01000000" \
   .venv/bin/python $S/emu_mp.py <snap>/S3 __ZN14CAVCController16ProcessPipeStartEPv \
   0xffffffff80803760 0x1a2b00 > rc1.txt     # then tools/fwemu/diff.py rc0.txt rc1.txt
+# hardware (§11, root, the driver loaded with V4L2): pass 1, table, pass 2
+echo 1 > /sys/module/apple_ave/parameters/session_mp_pass   # then encode (bitrate mode)
+cat /sys/kernel/debug/apple_ave_mp_rec > recs.bin
+python3 tools/ave2pass/ave2pass.py build recs.bin $(( $(stat -c%s recs.bin) / 0x626 )) -o table.bin
+cat table.bin > /sys/kernel/debug/apple_ave_mp_table
+echo 2 > /sys/module/apple_ave/parameters/session_mp_pass   # encode again, same settings
+# the bench: ENCODERS=ave264-cqp,ave264-vbr,ave264-2pass python3 bench/hevc-efficiency/bench.py run ...
 A=tools/ave2pass/ave2pass.py                # §2.4: pass-1 records -> pass-2 table and buffers
 .venv/bin/python $A synth 40 -o recs.bin --cuts 12
 .venv/bin/python $A build recs.bin 40 -o table.bin --backend both   # port == Apple's code under Unicorn
 .venv/bin/python $A dump table.bin; .venv/bin/python $A frames table.bin out/
 .venv/bin/python tools/ave2pass/selftest.py
 ```
+
+## 11. Hardware results (2026-10-04)
+
+M2 (t8112, H14G) unless noted; the M1 Pro (t6000, H13S) repeated T1, T3
+and T5 with **byte-identical** records and streams. Driver: the lab path of
+§6.3 (`session_mp_pass`, `session_mp_const_qp`, `session_mp_qpmod`,
+`session_mp_rec`; debugfs `apple_ave_mp_rec` and `apple_ave_mp_table`),
+H.264 only. Pass 1 and pass 2 are separate V4L2 sessions (no RESET); the
+self-test covers T0-T2.
+
+### 11.1 The tests
+
+| # | what | result |
+|---|---|---|
+| T0 | bitrate-mode self-test, 30 frames, records kept, no multi-pass | encodes as before; **every record is zero**, LRME histogram included: the coded header is written only in its first 0x190 bytes. §2.3's "unconditional" LRME collector is gated after all |
+| T1 | wire 0xFEFC = 1, 0xFF00 = 1 | all 30 frames; every record filled: rec+0x2C = 0..29, rec+0x1C/0x20 = 1280/720, rec+0x24 = 30.0f, **rec+0x40 = 8 × the coded bytes exactly** on every frame, rec+0x34 = 2 on the IDR and 0 on P, the LRME histogram sums to 57600 (1280 × 720 / 16, one count per 4x4 low-res pixel) |
+| T2 | T1 + ConstantQP 30, QPModLevel 0 (pass 9) | slice QP 30 on every frame (T1's moved 21 → 16 under the rate controller): pass 9 is taken |
+| T3 | final pass (0xFF00 = 2, type 5, PICMGMT+0x900) with T1's records and a zero header | all frames, no assert, no hang. Two driver fixes found here: type-5 frames must take FrameTypeReturned for the parameter sets (the stream had no SPS/PPS), and IdrPeriod 1, which the V4L2 path sent, makes **every** frame an I frame |
+| T4 | the table from `tools/ave2pass` (§2.4) | 720p `testsrc2`, 2 and 4 Mbit/s: 493 KB for a 500 KB target, 1041 KB for 1000 KB; 90 frames at 2 Mbit/s: 730 KB for 750 KB. IPPP |
+| T5 | scene cuts marked by hand at 12 and 20 | IDRs at exactly 0, 12, 20 |
+| T6 | the RESET command | not run: a new session per pass works |
+| T7 | bench | §11.4 |
+
+### 11.2 Two things the driver must send
+
+- **IdrPeriod (wire 0xFF34) > the clip.** CFrameType reads 1 as "every
+  frame a key frame". The driver sends twice the table length in the final
+  pass.
+- **MaxKeyFrameIntervalDuration (wire 0xFF38, f64 s) non-zero.** At 0 (the
+  default, also macOS's) the final pass caps the key interval at the frame
+  rate: an IDR every second whatever IdrPeriod says (§2.7; found on
+  hardware as IDRs at 0, 30, 60 of a 90-frame 30 fps stream, then traced).
+  The driver sends 2^20 s in the final pass; one IDR per 90 frames after.
+
+### 11.3 The bench
+
+`bench/hevc-efficiency`, five Xiph 1080p50 clips, 200 frames, H.264 High
+CABAC through V4L2 (`v4l2-ctl`, with `--set-output-parm=50`: without it
+the rate controller assumes 30 fps and every bitrate lands 1.67x high).
+`ave264-vbr` = 1-pass VBR, `ave264-2pass` = pass 1 at the same target,
+`ave2pass build`, pass 2 (`results-m2-h264-vbr.csv`,
+`results-m2-2pass.csv`; fixed QP in `results-m2-h264.csv`).
+
+![2-pass vs 1-pass](img/multipass.svg)
+
+### 11.4 Result
+
+| | crowd | park | ducks | tree | town | mean |
+|---|---|---|---|---|---|---|
+| 2-pass vs 1-pass VBR, BD-rate at equal VMAF | +4.2 | +9.2 | −2.3 | +9.0 | +5.9 | **+5.2 %** |
+| same, at equal PSNR-Y | +6.7 | +28.8 | +10.4 | +4.6 | +6.0 | **+11.3 %** |
+| size miss, 1-pass VBR (mean of 4 rates) | 9 | 2 | 5 | 8 | 13 | 7.3 % (max 17.8) |
+| size miss, 2-pass | 11 | 10 | 13 | 14 | 19 | 13.5 % (max 46.2) |
+
+Positive = 2-pass needs more bits. Two passes also halve the throughput
+(48 against 98 fps for the whole V4L2 loop).
+
+### 11.5 Why: the final pass front-loads
+
+Per 40 frames of `park_joy` at 8 Mbit/s: 1-pass VBR spends 0.96, 0.65,
+0.73, 0.80, 0.81 MB; the final pass 1.48, 1.16, 0.28, 0.20, 0.32 MB.
+`crowd_run` is the same shape; `in_to_tree` is not. What was ruled out:
+
+- **The first pass's start-up.** Pass 1 does spend 4 MB on its first 40
+  frames before it settles, but a constant-QP first pass (pass 9, QP 30
+  or 36) leaves the final pass's shape almost unchanged (park_joy 1.46,
+  0.99, 0.27, 0.27, 0.45 MB).
+- **The PTS in the records.** Tables with 30 fps, 50 fps or the
+  firmware's own PTS give byte-identical final passes.
+- **The tool.** `ave2pass` matches Apple's own host code under emulation
+  (§2.4.8); a hand-made single-scene table behaves the same.
+
+Left: how the firmware's final-pass controller (`MpFinalPassAccumulate`,
+`finalPassSequenceLevel`, `finalPassSceneLevel`, §2.2) spends the
+header's totals over the clip; the RESET path macOS uses instead of a new
+session (T6); and the header fields whose meaning is still [U] (§2.4.6).
+Until then the lab path stays a lab path: nothing in the V4L2 interface
+exposes it, and AVE's best mode remains fixed QP with B frames (docs/96).

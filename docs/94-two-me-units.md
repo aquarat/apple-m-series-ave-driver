@@ -80,7 +80,12 @@ x265 `medium` the gap stays ~20 %.
 
 What macOS does differently is that it powers ME1 only while such a session
 runs; the driver keeps ME1 on whenever it is loaded, which is harmless (T1/T2).
-Not yet measured: the power cost of ME1 while idle.
+**ME1's idle power, measured** (M2, 2026-10-04): whole-machine "Total
+System Power" (SMC), idle, 90 s per phase after 15 s to settle, three rounds
+of driver loaded / loaded with `me1_off=1` / unloaded: 3.157 / 3.145 /
+3.116 W (means; the rounds spread by ±0.03 W). Holding ME1 on costs ~12 mW,
+below the noise; the whole loaded driver ~40 mW. Not worth per-session
+power switching for now.
 
 ---
 

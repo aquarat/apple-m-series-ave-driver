@@ -9,6 +9,8 @@ Inputs (all in git):
   bench/hevc-efficiency/results-m2.csv M2: AVE (docs/91)
   bench/hevc-efficiency/results-m2-{poff,2ref,bframes,bframes2}.csv
                                        M2: P/B QP offsets, two references, B frames (docs/92, 94, 96)
+  bench/hevc-efficiency/results-m2-h264{,-vbr}.csv, results-m2-2pass.csv
+                                       M2: H.264 fixed QP, 1-pass VBR, 2-pass VBR (docs/95 §11)
   bench/hevc-efficiency/power.log      M1 Pro energy per frame (docs/88)
   bench/hevc-efficiency/power-m2.log   M2 energy per frame (docs/91)
 BD-rates use bench.py's PCHIP implementation, the one docs/88's tables use.
@@ -165,6 +167,44 @@ def levers():
     save(fig, "levers.svg")
 
 
+def multipass():
+    """H.264 on the M2: 2-pass against 1-pass VBR, and how close each lands to its target."""
+    rs = [r for f in ("results-m2-h264.csv", "results-m2-h264-vbr.csv", "results-m2-2pass.csv")
+          for r in rows(os.path.join(HERE, "hevc-efficiency", f))]
+    if not any(r["encoder"] == "ave264-2pass" for r in rs):
+        return
+    fig, axs = plt.subplots(1, 2, figsize=(12, 3.8))
+    w = 0.38
+    ax = axs[0]
+    for i, (metric, qmax, mname, col) in enumerate((("vmaf", 99.0, "VMAF", "#ff7f0e"),
+                                                    ("psnr_y", None, "PSNR-Y", "#8c564b"))):
+        vals = [bench.bd_rate_pchip(*pts(rs, c, "ave264-vbr", metric), *pts(rs, c, "ave264-2pass", metric),
+                                    qmax=qmax)[0] for c in XIPH]
+        b = ax.bar([k + (i - 0.5) * w for k in range(len(XIPH))], vals, w, color=col, label=f"by {mname}")
+        ax.bar_label(b, labels=[f"{v:+.0f}%" for v in vals], fontsize=8, padding=2)
+    ax.axhline(0, color="k", lw=0.8)
+    ax.set_xticks(range(len(XIPH)), [c.replace("_", "\n") for c in XIPH], fontsize=8)
+    ax.set_ylabel("2-pass bitrate vs 1-pass VBR\nat equal quality (BD-rate)")
+    ax.set_title("2-pass against 1-pass (positive = 2-pass needs more bits)")
+    ax.legend(fontsize=8)
+    ax = axs[1]
+    for i, (enc, lab, col) in enumerate((("ave264-vbr", "1-pass VBR", "#9467bd"),
+                                         ("ave264-2pass", "2-pass VBR", "#2ca02c"))):
+        errs = []
+        for clip in XIPH:
+            e = [100 * (float(r["kbps"]) / float(r["target_kbps"]) - 1) for r in rs
+                 if r["clip"] == clip and r["encoder"] == enc]
+            errs.append(sum(abs(x) for x in e) / len(e) if e else float("nan"))
+        b = ax.bar([k + (i - 0.5) * w for k in range(len(XIPH))], errs, w, color=col, label=lab)
+        ax.bar_label(b, labels=[f"{v:.0f}%" for v in errs], fontsize=8, padding=2)
+    ax.set_xticks(range(len(XIPH)), [c.replace("_", "\n") for c in XIPH], fontsize=8)
+    ax.set_title("miss of the bitrate target (mean |error|, 2-16 Mbit/s)")
+    ax.set_ylabel("%")
+    ax.legend(fontsize=8)
+    fig.suptitle("AVE H.264 on the M2: the firmware's 2-pass mode against its 1-pass VBR (docs/95 §11)", y=1.02)
+    save(fig, "multipass.svg")
+
+
 def energy():
     def parse(path):
         out = {}
@@ -231,4 +271,5 @@ if __name__ == "__main__":
     device()
     bdrate()
     levers()
+    multipass()
     energy()

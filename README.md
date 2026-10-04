@@ -66,6 +66,11 @@ docs/96):
 
 ![compression settings](docs/img/levers.svg)
 
+The firmware's 2-pass mode against its 1-pass VBR (H.264, docs/95 §11):
+it works, but needs more bits, not fewer.
+
+![2-pass vs 1-pass](docs/img/multipass.svg)
+
 **Per device**: the M1 Pro and the M2 produce identical output. All 50
 points (5 clips, 8-bit and Main 10, 5 QPs) match in bitrate and every
 quality metric.
@@ -145,6 +150,11 @@ It is a stateful mem2mem encoder, NV12 in:
   the one-reference IPPP stream; ffmpeg's V4L2 wrapper always asks for 0 B
   frames.
 - **Not yet:**
+  - **2-pass** (docs/95): the firmware's multi-pass mode is mapped and runs
+    on both SoCs through a lab path (module parameter `session_mp_pass`,
+    debugfs, `tools/ave2pass` for the between-pass step, H.264), but it
+    compresses worse than 1-pass VBR so far (docs/95 §11), so V4L2 does
+    not expose it.
   - System suspend/resume (untested; suspend is masked on the lab machine).
 - **Known issues:** ffmpeg's V4L2 m2m wrapper segfaults on a 1080-line
   input: the driver rounds the OUTPUT height up to 1088 and the wrapper

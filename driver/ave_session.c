@@ -2302,11 +2302,13 @@ static int ave_session_start_prep(struct ave_device *ave,
 	/*
 	 * docs/95: the final pass types frames itself (type 5), and
 	 * CFrameType reads IdrPeriod 1 as "every frame a key frame". Unless
-	 * one is asked for, one IDR period for the whole table: IDRs only at
-	 * frame 0 and at the scene cuts the records mark.
+	 * one is asked for, twice the table's length: IDRs only at frame 0
+	 * and at the scene cuts the records mark (a scene as long as the
+	 * period is split in two, docs/95 §3.1). The V4L2 GOP size does not
+	 * reach the final pass.
 	 */
 	if (bufs->mp_pass == 2 && s->key_interval == 1)
-		s->key_interval = max_t(u32, bufs->mp_frames, 2);
+		s->key_interval = max_t(u32, 2 * bufs->mp_frames, 2);
 	if (s->rc_enable)
 		dev_info(ave->dev,
 			 "session: %s: rate control ON (ui32RCFlag %u), target %u bit/s at %u/%u fps, QP %u..%u starting at %u - watch the slice QP, which under fixed QP cannot vary\n",

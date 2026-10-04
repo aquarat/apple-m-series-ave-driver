@@ -2454,6 +2454,7 @@ static void test_multipass_13_5(void)
 	memset(buf, 0, sizeof(buf));
 	ave_cmd_build_start_avc(a, buf, sizeof(buf), &CTX, &s);
 	E8(buf, 0xfefc, 0, "bEnableMultipass 0 unless asked");
+	E64(buf, 0xff38, 0, "MaxKeyFrameIntervalDuration 0 unless a final pass");
 	E32(buf, 0xff00, 0, "pass 0 unless asked");
 	s.mp_pass = 2;
 	s.mp_const_qp = -1;
@@ -2468,6 +2469,8 @@ static void test_multipass_13_5(void)
 	E32(buf, 0xff08, 0xffffffff, "QPModLevel -1 (VP+0xFEA8)");
 	E32(buf, 0xff0c, 4, "MaxQPModLevel (VP+0xFEAC)");
 	E32(buf, 0xff10, 0xffffffff, "Options -1 (VP+0xFEB0)");
+	E64(buf, 0xff38, 0x4130000000000000ull,
+	    "final pass: MaxKeyFrameIntervalDuration 2^20 s (docs/95 §2.7)");
 	s.mp_pass = 3;
 	expect_int(ave_cmd_build_start_avc(a, buf, sizeof(buf), &CTX, &s), -EINVAL,
 		   "pass 3 (9 is the firmware's own)");

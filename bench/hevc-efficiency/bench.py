@@ -52,7 +52,7 @@ QUALITY_LADDER = {"ave-cqp": [22, 26, 30, 34, 38],
 
 # H.264 on AVE (docs/97): fixed QP, 1-pass VBR, and 2-pass VBR (docs/95). The
 # 2-pass runs pass 1, reads its records from debugfs, builds the final pass's
-# table with MP_BUILD (RECS TABLE), writes it back and runs pass 2. Needs root.
+# table with MP_BUILD (RECS N -o TABLE), writes it back and runs pass 2. Needs root.
 MP_BUILD = E("MP_BUILD", f"python3 {os.path.join(HERE, '..', '..', 'tools', 'ave2pass', 'ave2pass.py')} build")
 MP_PARAM = "/sys/module/apple_ave/parameters/session_mp_pass"
 MP_REC = "/sys/kernel/debug/apple_ave_mp_rec"
@@ -116,6 +116,7 @@ def ave264_cmd(enc, clip, kbps, out):
     return ["v4l2-ctl", "-d", ave_dev(),
             f"--set-fmt-video-out=width={w},height={h16},pixelformat=NV12",
             "--set-fmt-video=pixelformat=H264",
+            f"--set-output-parm={fps}",    # the rate controller's frame rate (default 30)
             f"--set-selection-output=target=crop,width={w},height={h}",
             f"--set-ctrl=video_gop_size={KEYINT},h264_profile=4,h264_entropy_mode=1,{rc}",
             "--stream-mmap", "--stream-out-mmap", f"--stream-from={SRC}/{base}.nv12",
@@ -127,17 +128,30 @@ def mp_pass(p):
         f.write(str(p))
 
 
+def mp_const_qp(qp):
+    """ave264-2pass-cq<N>: a constant-QP first pass (the firmware's pass 9, docs/95 §2.2)."""
+    for name, v in (("session_mp_const_qp", qp), ("session_mp_qpmod", 0 if qp >= 0 else -1)):
+        with open(os.path.join(os.path.dirname(MP_PARAM), name), "w") as f:
+            f.write(str(v))
+
+
 def encode_2pass(enc, clip, kbps, out):
     """docs/95: pass 1, records -> table (MP_BUILD), pass 2."""
     c0, t0 = child_cpu(), time.monotonic()
     rec, tab = out + ".rec", out + ".tab"
+    cq = re.search(r"-cq(\d+)$", enc)
     try:
+        if cq:
+            mp_const_qp(int(cq[1]))
         mp_pass(1)
         subprocess.run(ave264_cmd(enc, clip, kbps, out + ".p1"), check=True,
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         with open(MP_REC, "rb") as f, open(rec, "wb") as g:
             g.write(f.read())
-        subprocess.run(MP_BUILD.split() + [rec, tab], check=True, stdout=subprocess.DEVNULL)
+        if cq:
+            mp_const_qp(-1)
+        subprocess.run(MP_BUILD.split() + [rec, str(os.path.getsize(rec) // 0x626), "-o", tab],
+                       check=True, stdout=subprocess.DEVNULL)
         with open(tab, "rb") as f, open(MP_TAB, "wb") as g:
             g.write(f.read())
         mp_pass(2)
@@ -145,12 +159,14 @@ def encode_2pass(enc, clip, kbps, out):
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     finally:
         mp_pass(0)
+        if cq:
+            mp_const_qp(-1)
     return time.monotonic() - t0, child_cpu() - c0
 
 
 def encode(enc, clip, kbps, out):
     base, w, h, fps, n, _ = CLIPS[clip]
-    if enc == "ave264-2pass":
+    if enc.startswith("ave264-2pass"):
         return encode_2pass(enc, clip, kbps, out)
     if enc == "ave" and h % 16:
         # ffmpeg's V4L2 m2m wrapper segfaults when the driver rounds the height

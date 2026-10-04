@@ -90,6 +90,8 @@ Yes, with B frames: one B frame per P at B QP +3 needs 7.6 % (VMAF) /
 9.7 % (PSNR-Y) less bitrate than P frames only, at the same hardware time
 per frame; the gap to x265 `medium` drops from 20 % to 11 % (docs/96). A
 separate P-frame QP buys 1.5-2 % (docs/92), a second reference 0.1-0.6 %
-(docs/94).
+(docs/94). The firmware's 2-pass mode works through the driver's lab path
+but is worse than its 1-pass VBR (+5 % VMAF, +11 % PSNR-Y BD-rate, docs/95
+§11), so it is not a lever yet.
 
 ![compression settings](img/levers.svg)

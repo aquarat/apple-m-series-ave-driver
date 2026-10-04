@@ -1018,6 +1018,12 @@ struct ave_start_avc_layout {
 	u32	qp_min, qp_max;		/* u32 */
 	u32	key_interval;		/* u32 MaxKeyFrameInterval / IdrPeriod */
 	u32	key_interval_strict;	/* u32, 26.6.2 only */
+	/*
+	 * MaxKeyFrameIntervalDuration, f64 seconds (RC+0x08). 0 = macOS's
+	 * default; the final pass of docs/95 then caps the key interval at
+	 * the frame rate: an IDR every second (docs/95 §2.7).
+	 */
+	u32	key_interval_dur;
 	u32	slice_num;		/* s32 sSliceMap.iNum */
 	/*
 	 * Where the firmware writes the SPS+PPS NAL bytes it generates
@@ -2076,6 +2082,7 @@ const struct ave_cmd_abi ave_cmd_abi_13_5 = {
 		.qp_max		= 0xff8c,	/* fw 0x5da00 (1..51), name INFERRED */
 		.key_interval	= 0xff34,	/* ui32IdrPeriod, fw 0x5d9e8 */
 		.key_interval_strict = AVE_OFF_NONE,
+		.key_interval_dur = 0xff38,	/* fw 0x4f43c -> ft+0x78, docs/95 §2.7 */
 		.slice_num	= 0xfdac,	/* 0x104 sSliceMap copy fw 0x14414;
 						 * iNum at +0 INFERRED */
 		.recon_set	= 0x88,		/* fw ldr x8,[x20,#40] 0x5d6ac (x20 = cmd+0x60) */

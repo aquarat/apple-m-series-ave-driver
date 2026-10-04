@@ -557,6 +557,13 @@ static void ave_vp_fill(struct ave_wr *w, const struct ave_start_avc_layout *l,
 		wr32(w, l->mp_qpmod, (u32)s->mp_qpmod);
 		wr32(w, l->mp_max_qpmod, (u32)s->mp_max_qpmod);
 		wr32(w, l->mp_options, (u32)s->mp_options);
+		/*
+		 * The final pass's key interval is min(IdrPeriod, the frame
+		 * rate) while this is 0 (docs/95 §2.7). 2^20 s: IdrPeriod
+		 * alone decides. Single pass keeps macOS's 0.
+		 */
+		if (s->mp_pass == 2 && l->key_interval_dur != AVE_OFF_NONE)
+			wr64(w, l->key_interval_dur, 0x4130000000000000ull);
 	}
 	if (s->src_go_bits)
 		wr8(w, l->src_go_bits, s->src_go_bits);
