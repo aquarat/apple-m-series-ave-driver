@@ -164,10 +164,11 @@ struct ave_soc {
 	 */
 	bool		src_dims;
 	/*
-	 * docs/89 §9: frames with two references (B frames, two-reference P
-	 * frames) hang the encoder on this SoC as the driver sends them, so
-	 * the stream API refuses them and V4L2 offers B_FRAMES 0 and one
-	 * reference only. enc_two_refs=1 overrides it (lab runs).
+	 * docs/89 §9: H.264 frames with two references (B frames,
+	 * two-reference P frames) hang the encoder on this SoC as the driver
+	 * sends them (HEVC's work), so the stream API refuses them for H.264
+	 * and V4L2 clamps an H.264 stream to IPPP at STREAMON.
+	 * enc_two_refs=1 overrides it (lab runs).
 	 */
 	bool		two_refs_hang;
 

@@ -424,7 +424,7 @@ MODULE_PARM_DESC(session_multi_me_auto,
 static int enc_two_refs = -1;
 module_param(enc_two_refs, int, 0444);
 MODULE_PARM_DESC(enc_two_refs,
-	"stream API: B frames and two-reference P frames; -1 = per SoC (off on t8103, docs/89 §9), 0 = off, 1 = on");
+	"stream API: B frames and two-reference P frames; -1 = per SoC (H.264 off on t8103, docs/89 §9), 0 = off, 1 = on");
 
 /*
  * Multi-pass (docs/95), the lab path: for the self-test and for V4L2
@@ -5548,11 +5548,12 @@ bool ave_enc_hevc_supported(struct ave_device *ave)
 	return ave_sess_hevc_ok(ave_cmd_abi_get(ave->fw_abi));
 }
 
-bool ave_enc_two_refs_supported(struct ave_device *ave)
+bool ave_enc_two_refs_supported(struct ave_device *ave, u32 codec)
 {
 	if (enc_two_refs >= 0)
 		return enc_two_refs > 0;
-	return !ave->soc->two_refs_hang;
+	/* docs/89 §9: on t8103 only H.264's hang; HEVC B and 2 refs work */
+	return codec == AVE_ENC_CODEC_HEVC || !ave->soc->two_refs_hang;
 }
 
 /*
@@ -5597,8 +5598,8 @@ int ave_enc_start(struct ave_device *ave, const struct ave_enc_cfg *cfg)
 	    (cfg->bframes && !hevc && cfg->profile_idc < 77))
 		return -EINVAL;
 	/* docs/89 §9: refused where they hang (the V4L2 controls stop at 0/1) */
-	if ((cfg->bframes || cfg->p_refs >= 2) && !ave_enc_two_refs_supported(ave)) {
-		dev_err(ave->dev, "enc: %u B frame(s), %u reference(s) per P: two-reference frames are off on %s (docs/89 §9; enc_two_refs=1 to try)\n",
+	if ((cfg->bframes || cfg->p_refs >= 2) && !ave_enc_two_refs_supported(ave, cfg->codec)) {
+		dev_err(ave->dev, "enc: %u B frame(s), %u reference(s) per P: H.264 two-reference frames are off on %s (docs/89 §9; HEVC has them; enc_two_refs=1 to try)\n",
 			cfg->bframes, cfg->p_refs, ave->soc->name);
 		return -EOPNOTSUPP;
 	}

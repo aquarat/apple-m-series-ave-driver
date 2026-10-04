@@ -837,6 +837,12 @@ static u32 ave_latch_bframes(struct ave_ctx *ctx)
 		dev_warn(dev, "v4l2: B frames need H.264 Main or High; Baseline gets none\n");
 		nb = 0;
 	}
+	if (nb && ctx->codec == AVE_ENC_CODEC_H264 &&
+	    !ave_enc_two_refs_supported(ctx->av->ave, AVE_ENC_CODEC_H264)) {
+		dev_warn(dev, "v4l2: H.264 B frames hang on %s (docs/89 §9); none (HEVC has them)\n",
+			 ctx->av->ave->soc->name);
+		nb = 0;
+	}
 	if (nb && ctx->gop && ctx->gop < nb + 2) {
 		u32 fit = ctx->gop >= 3 ? ctx->gop - 2 : 0;
 
@@ -911,7 +917,10 @@ static int ave_start_streaming(struct vb2_queue *q, unsigned int count)
 			.level_idc = hevc ? ctx->hevc_level_idc : ctx->level_idc,
 			.cabac = !hevc && ctx->cabac,
 			.bframes = nb,
-			.p_refs = ctx->p_refs,
+			/* docs/89 §9: H.264 on t8103 keeps one reference */
+			.p_refs = ctx->codec == AVE_ENC_CODEC_H264 &&
+				  !ave_enc_two_refs_supported(av->ave, AVE_ENC_CODEC_H264) ?
+				  1 : ctx->p_refs,
 		};
 
 		/*
@@ -1410,9 +1419,11 @@ int ave_v4l2_register(struct ave_device *ave)
 		return -ENOMEM;
 	av->ave = ave;
 	av->hevc = ave_enc_hevc_supported(ave);
-	av->two_refs = ave_enc_two_refs_supported(ave);
-	if (!av->two_refs)
-		dev_info(ave->dev, "v4l2: B frames and two-reference P frames off on %s (docs/89 §9): VIDEO_B_FRAMES 0, REF_NUMBER_FOR_PFRAMES 1\n",
+	/* the controls' ranges: what either codec can do; H.264 is clamped at STREAMON */
+	av->two_refs = ave_enc_two_refs_supported(ave, av->hevc ? AVE_ENC_CODEC_HEVC :
+						  AVE_ENC_CODEC_H264);
+	if (!ave_enc_two_refs_supported(ave, AVE_ENC_CODEC_H264))
+		dev_info(ave->dev, "v4l2: H.264 B frames and two-reference P frames off on %s (docs/89 §9): an H.264 stream is clamped to IPPP; HEVC has them\n",
 			 ave->soc->name);
 	mutex_init(&av->dev_mutex);
 	mutex_init(&av->hw_mutex);

@@ -302,7 +302,7 @@ const struct ave_soc ave_soc_t8103 = {
 	.me1_label		= "venc_me1",
 
 	/*
-	 * docs/89 §8: an H.264 B frame hangs the encoder here with both ME
+	 * docs/89 §9: an H.264 B frame hangs the encoder here with both ME
 	 * units programmed (wire 0xFCEA = 1), the fix that works on t6000 and
 	 * t8112 (docs/94). Until a configuration is shown to work, streams get
 	 * one reference per frame; enc_two_refs=1 lets the lab try.
