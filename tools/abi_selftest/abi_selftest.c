@@ -2441,6 +2441,60 @@ static struct ave_hevc_session hevc_b(u8 bframes)
 	return h;
 }
 
+/* docs/95: the multi-pass fields */
+static void test_multipass_13_5(void)
+{
+	const struct ave_cmd_abi *a = ave_cmd_abi_get(AVE_ABI_MACOS_13_5);
+	const struct ave_cmd_abi *a26 = ave_cmd_abi_get(AVE_ABI_MACOS_26_6);
+	struct ave_avc_session s = session_1080p(true);
+	struct ave_avc_frame f = frame_idr();
+	const u32 P = 0x9c8;	/* PICMGMT in AVC_ENCODE */
+
+	begin("13.5 start_avc multi-pass");
+	memset(buf, 0, sizeof(buf));
+	ave_cmd_build_start_avc(a, buf, sizeof(buf), &CTX, &s);
+	E8(buf, 0xfefc, 0, "bEnableMultipass 0 unless asked");
+	E32(buf, 0xff00, 0, "pass 0 unless asked");
+	s.mp_pass = 2;
+	s.mp_const_qp = -1;
+	s.mp_qpmod = -1;
+	s.mp_max_qpmod = 4;
+	s.mp_options = -1;
+	memset(buf, 0, sizeof(buf));
+	expect_int(ave_cmd_build_start_avc(a, buf, sizeof(buf), &CTX, &s), 0x10e10, "size");
+	E8(buf, 0xfefc, 1, "bEnableMultipass (VP+0xFE9C, fw 0x4e6a0)");
+	E32(buf, 0xff00, 2, "pass (VP+0xFEA0)");
+	E32(buf, 0xff04, 0xffffffff, "ConstantQP -1 (VP+0xFEA4)");
+	E32(buf, 0xff08, 0xffffffff, "QPModLevel -1 (VP+0xFEA8)");
+	E32(buf, 0xff0c, 4, "MaxQPModLevel (VP+0xFEAC)");
+	E32(buf, 0xff10, 0xffffffff, "Options -1 (VP+0xFEB0)");
+	s.mp_pass = 3;
+	expect_int(ave_cmd_build_start_avc(a, buf, sizeof(buf), &CTX, &s), -EINVAL,
+		   "pass 3 (9 is the firmware's own)");
+	s = session_1080p(false);
+	s.mp_pass = 1;
+	expect_int(ave_cmd_build_start_avc(a26, buf, sizeof(buf), &CTX, &s), -EINVAL,
+		   "26.6: multi-pass not located");
+
+	begin("13.5 process_avc MultiPassStatsInBuffer");
+	memset(buf, 0, sizeof(buf));
+	ave_cmd_build_process_avc(a, buf, sizeof(buf), &CTX, 40, &f);
+	E64(buf, P + 0x900, 0, "not sent unless asked");
+	f.mp_stats_in_addr = 0x00000000f1230000ull;
+	memset(buf, 0, sizeof(buf));
+	expect_int(ave_cmd_build_process_avc(a, buf, sizeof(buf), &CTX, 40, &f), 0x1940, "size");
+	E64(buf, P + 0x900, 0x00000000f1230000ull,
+	    "PICMGMT+0x900 = wire 0x12C8 (kext 0xfffffe0008e92fe0)");
+	f.in_luma_size = 1920 * 1088;
+	f.in_chroma_size = 1920 * 544;
+	f.mp_stats_in_addr = 0;
+	expect_int(ave_cmd_build_process_avc(a26, buf, sizeof(buf), &CTX, 40, &f) > 0, 1,
+		   "26.6: builds without it");
+	f.mp_stats_in_addr = 0x00000000f1230000ull;
+	expect_int(ave_cmd_build_process_avc(a26, buf, sizeof(buf), &CTX, 40, &f), -EINVAL,
+		   "26.6: not located");
+}
+
 static void test_bframes_13_5(void)
 {
 	const struct ave_cmd_abi *a = ave_cmd_abi_get(AVE_ABI_MACOS_13_5);
@@ -2602,6 +2656,7 @@ int main(void)
 	test_hevc_simple();
 	test_coded_length_hevc();
 	test_bframes_13_5();
+	test_multipass_13_5();
 
 	printf("%s: %d checks, %d failures\n", failures ? "FAIL" : "PASS",
 	       checks, failures);

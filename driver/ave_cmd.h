@@ -167,6 +167,13 @@ struct ave_avc_session {
 	/* SRCDMAGO bit 3 and bits 4+ (docs/69); 0 = what every run has sent. */
 	u8	src_go_bit3;
 	u16	multi_me;	/* docs/94 */
+	/*
+	 * Multi-pass (docs/95): pass 0 = off (nothing written), 1 = first,
+	 * 2 = final. The four s32 tunables are written only with a pass,
+	 * -1 = the firmware's default.
+	 */
+	u32	mp_pass;
+	s32	mp_const_qp, mp_qpmod, mp_max_qpmod, mp_options;
 	u8	src_go_bits;
 	/*
 	 * Controller debug verbosity (wire 0xFCD8). Bit 5 is what lets the
@@ -269,6 +276,7 @@ struct ave_avc_frame {
 	u64	in_chroma_addr;		/* % 64 */
 	u32	in_chroma_stride;	/* % 64 */
 	u32	in_dims[2];		/* PICMGMT +0x964 (13.5); both 0 = not sent */
+	u64	mp_stats_in_addr;	/* PICMGMT +0x900, final pass; 0 = not sent */
 	u32	in_chroma_size;
 
 	u32	coded_index;		/* index into the Start-time coded table */

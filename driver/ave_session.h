@@ -53,6 +53,10 @@ void ave_session_hide(struct ave_device *ave);
  */
 int ave_session_close_client(struct ave_device *ave);
 
+/* docs/95: apple_ave_mp_rec / apple_ave_mp_table, module-wide */
+void ave_mp_debugfs_init(void);
+void ave_mp_debugfs_exit(void);
+
 /* The encoder API the V4L2 layer drives (ave_v4l2.c, docs/68). */
 int ave_enc_init(struct ave_device *ave);
 /*

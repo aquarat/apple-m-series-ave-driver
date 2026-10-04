@@ -2221,6 +2221,7 @@ iop_config_done:
 			return dev_err_probe(dev, ret, "coprocessor start\n");
 		dev_info(dev, "Apple AVE video encoder ready\n");
 		ave_dva_debugfs_init(ave);	/* docs/93, off by default */
+		ave_mp_debugfs_init();		/* docs/95 */
 
 		/*
 		 * First commands over the IO channel: Config -> Open ->
@@ -2548,6 +2549,7 @@ static void ave_remove(struct platform_device *pdev)
 	bool clean_teardown = true;
 
 	ave_dva_debugfs_exit(ave);
+	ave_mp_debugfs_exit();
 
 	/*
 	 * Ask the firmware to halt itself before anything is torn down. It

@@ -405,6 +405,40 @@ module_param(session_multi_me, uint, 0644);
 MODULE_PARM_DESC(session_multi_me,
 	"H.264 Start wire 0xFCEA (u16, the kext's iMultiMECnt): the firmware also programs the second ME unit (DPE+0xF0000); docs/94. 0 = as macOS's default");
 
+/*
+ * Multi-pass (docs/95), the lab path: for the self-test and for V4L2
+ * streams alike. session_mp_pass 1 = first pass (each frame's record goes
+ * to apple_ave_mp_rec), 2 = final pass (each frame gets its input buffer
+ * from the table written to apple_ave_mp_table). Both need bitrate mode:
+ * the firmware forces the bitrate arm for any pass (docs/95 §5). H.264 only.
+ */
+static unsigned int session_mp_pass;
+module_param(session_mp_pass, uint, 0644);
+MODULE_PARM_DESC(session_mp_pass,
+	"multi-pass (docs/95): 0 = off, 1 = first pass, 2 = final pass (needs a table in apple_ave_mp_table); H.264, bitrate mode");
+
+static int session_mp_const_qp = -1;
+module_param(session_mp_const_qp, int, 0644);
+MODULE_PARM_DESC(session_mp_const_qp,
+	"multi-pass ConstantQP (wire 0xFF04); with session_mp_qpmod >= 0 the first pass is constant QP (pass 9). -1 = off");
+
+static int session_mp_qpmod = -1;
+module_param(session_mp_qpmod, int, 0644);
+MODULE_PARM_DESC(session_mp_qpmod, "multi-pass QPModLevel (wire 0xFF08), -1 = off");
+
+static int session_mp_max_qpmod = -1;
+module_param(session_mp_max_qpmod, int, 0644);
+MODULE_PARM_DESC(session_mp_max_qpmod, "multi-pass MaxQPModLevel (wire 0xFF0C), -1 = the firmware's 6");
+
+static int session_mp_options = -1;
+module_param(session_mp_options, int, 0644);
+MODULE_PARM_DESC(session_mp_options, "multi-pass Options (wire 0xFF10), -1 = the firmware's 0x1305");
+
+static bool session_mp_rec;
+module_param(session_mp_rec, bool, 0644);
+MODULE_PARM_DESC(session_mp_rec,
+	"keep every frame's multi-pass record (CodedHeader+0x22638) in apple_ave_mp_rec without a pass (docs/95 T0)");
+
 static unsigned int session_src_bit3;
 module_param(session_src_bit3, uint, 0444);
 MODULE_PARM_DESC(session_src_bit3,
@@ -1054,6 +1088,11 @@ struct ave_sess_bufs {
 	u32		p_refs;		/* references per P frame; 0/1 = one */
 	u32		req_dpb;	/* DPB slots; 0 = session_dpb */
 	u16		multi_me;	/* wire 0xFCEA; session_multi_me wins */
+	/* docs/95: the multi-pass pass of this session, and its buffers */
+	u32		mp_pass;
+	u32		mp_frames;	/* records in the final pass's table */
+	bool		mp_rec;		/* keep each frame's record */
+	struct { void *cpu; dma_addr_t iova; } mp_in[AVE_SESS_FRAMES_MAX];
 	u8		hevc_bframes;	/* HEVC_INIT's B GOP, for HEVC_ENCODE */
 	u32		coded_type;	/* the last result's type, as coded */
 	/* A batch's completions, in completion order (ave_enc_encode_batch) */
@@ -1844,6 +1883,227 @@ struct ave_sess_start {
 };
 
 /*
+ * Multi-pass (docs/95), the lab path. The records and the table are kept per
+ * module, not per encoder: one lab stream at a time.
+ *
+ *   apple_ave_mp_rec    read: the first pass's records, AVE_MP_REC_SIZE bytes
+ *                       per frame, at frameNumber * AVE_MP_REC_SIZE
+ *   apple_ave_mp_table  write (truncating) / read: the final pass's table,
+ *                       AVE_MP_HDR_SIZE bytes of sequence header, then one
+ *                       record per frame in display order (tools/ave2pass)
+ */
+#define AVE_MP_FRAMES_MAX	2048
+
+static DEFINE_MUTEX(ave_mp_lock);
+static u8 *ave_mp_rec;			/* AVE_MP_FRAMES_MAX records */
+static u32 ave_mp_n_rec;		/* highest frame kept + 1 */
+static u8 *ave_mp_tab;			/* header + AVE_MP_FRAMES_MAX records */
+static size_t ave_mp_tab_len;
+static struct dentry *ave_mp_rec_dentry, *ave_mp_tab_dentry;
+
+#define AVE_MP_TAB_MAX	(AVE_MP_HDR_SIZE + AVE_MP_FRAMES_MAX * AVE_MP_REC_SIZE)
+#define AVE_MP_IN_BYTES	SZ_32K		/* >= AVE_MP_IN_FIRST */
+
+static int ave_mp_session_start(struct ave_device *ave,
+				const struct ave_cmd_abi *abi,
+				struct ave_sess_bufs *bufs)
+{
+	const bool hevc = bufs->codec == AVE_SESS_CODEC_HEVC;
+	u32 i;
+
+	bufs->mp_pass = session_mp_pass;
+	bufs->mp_rec = session_mp_rec || session_mp_pass == 1;
+	if (!bufs->mp_pass && !bufs->mp_rec)
+		return 0;
+	if (abi->start_avc.coded_hdr_bytes < AVE_MP_REC_OFF + AVE_MP_REC_SIZE ||
+	    (bufs->mp_pass && (abi->start_avc.mp_enable == AVE_OFF_NONE ||
+			       abi->process_avc.mp_stats_in == AVE_OFF_NONE))) {
+		dev_err(ave->dev, "session: multi-pass: not located for this firmware ABI\n");
+		return -EINVAL;
+	}
+	if (bufs->mp_pass > 2 || (bufs->mp_pass && (hevc || !bufs->bitrate))) {
+		dev_err(ave->dev,
+			"session: multi-pass: pass %u needs H.264 in bitrate mode (docs/95 §5)\n",
+			bufs->mp_pass);
+		return -EINVAL;
+	}
+	mutex_lock(&ave_mp_lock);
+	if (bufs->mp_rec) {
+		if (!ave_mp_rec)
+			ave_mp_rec = vzalloc(AVE_MP_FRAMES_MAX * AVE_MP_REC_SIZE);
+		ave_mp_n_rec = 0;
+	}
+	i = ave_mp_tab_len;
+	mutex_unlock(&ave_mp_lock);
+	if (bufs->mp_rec && !ave_mp_rec)
+		return -ENOMEM;
+	if (bufs->mp_pass == 2) {
+		/* a final pass without records would assert (fw 0x45d40) */
+		if (i < AVE_MP_HDR_SIZE + AVE_MP_REC_SIZE) {
+			dev_err(ave->dev,
+				"session: multi-pass: final pass without a table (apple_ave_mp_table: %u bytes)\n",
+				i);
+			return -EINVAL;
+		}
+		bufs->mp_frames = (i - AVE_MP_HDR_SIZE) / AVE_MP_REC_SIZE;
+		for (i = 0; i < ARRAY_SIZE(bufs->mp_in); i++) {
+			bufs->mp_in[i].cpu = ave_sess_dma_alloc(bufs, AVE_MP_IN_BYTES,
+								&bufs->mp_in[i].iova);
+			if (!bufs->mp_in[i].cpu)
+				return -ENOMEM;
+		}
+	}
+	dev_info(ave->dev,
+		 "session: multi-pass: pass %u (ConstantQP %d, QPModLevel %d, MaxQPModLevel %d, Options %d), records %s, table %zu bytes\n",
+		 bufs->mp_pass, session_mp_const_qp, session_mp_qpmod,
+		 session_mp_max_qpmod, session_mp_options,
+		 bufs->mp_rec ? "kept" : "not kept", ave_mp_tab_len);
+	return 0;
+}
+
+/* After frame @n's completion: keep its record, indexed by frame number. */
+static void ave_mp_keep_record(const struct ave_cmd_abi *abi,
+			       struct ave_sess_bufs *bufs, u32 idx, u32 n)
+{
+	if (n >= AVE_MP_FRAMES_MAX)
+		return;
+	mutex_lock(&ave_mp_lock);
+	if (ave_mp_rec) {
+		memcpy(ave_mp_rec + n * AVE_MP_REC_SIZE,
+		       (u8 *)bufs->coded_hdr[idx].cpu + AVE_MP_REC_OFF,
+		       AVE_MP_REC_SIZE);
+		ave_mp_n_rec = max(ave_mp_n_rec, n + 1);
+	}
+	mutex_unlock(&ave_mp_lock);
+}
+
+/*
+ * Frame @n's final-pass input (docs/95 §2.5): the header, then frame 0's
+ * eleven records (0..10) or, for frame n >= 1, the one record
+ * AVE_MP_WINDOW ahead. Past the table's end the last record is repeated,
+ * as macOS does (UA 0x39fb0). Returns the buffer's IOVA, 0 on no table.
+ */
+static dma_addr_t ave_mp_fill_input(struct ave_sess_bufs *bufs, u32 idx, u32 n)
+{
+	u8 *d = bufs->mp_in[idx].cpu;
+	dma_addr_t iova = 0;
+	u32 nrec, i;
+
+	mutex_lock(&ave_mp_lock);
+	nrec = ave_mp_tab_len >= AVE_MP_HDR_SIZE ?
+	       (ave_mp_tab_len - AVE_MP_HDR_SIZE) / AVE_MP_REC_SIZE : 0;
+	if (d && nrec) {
+		const u8 *rec = ave_mp_tab + AVE_MP_HDR_SIZE;
+
+		memset(d, 0, AVE_MP_IN_FIRST);
+		memcpy(d, ave_mp_tab, AVE_MP_HDR_SIZE);
+		if (!n)
+			for (i = 0; i <= AVE_MP_WINDOW; i++)
+				memcpy(d + AVE_MP_HDR_SIZE + i * AVE_MP_REC_SIZE,
+				       rec + min(i, nrec - 1) * AVE_MP_REC_SIZE,
+				       AVE_MP_REC_SIZE);
+		else
+			memcpy(d + AVE_MP_HDR_SIZE,
+			       rec + min(n + AVE_MP_WINDOW, nrec - 1) * AVE_MP_REC_SIZE,
+			       AVE_MP_REC_SIZE);
+		iova = bufs->mp_in[idx].iova;
+	}
+	mutex_unlock(&ave_mp_lock);
+	dma_wmb();
+	if (!iova)
+		dev_err(bufs->ave->dev, "session: multi-pass: frame %u: no table\n", n);
+	return iova;
+}
+
+static ssize_t ave_mp_rec_read(struct file *file, char __user *ubuf,
+			       size_t count, loff_t *ppos)
+{
+	ssize_t ret;
+
+	mutex_lock(&ave_mp_lock);
+	ret = ave_mp_rec ? simple_read_from_buffer(ubuf, count, ppos, ave_mp_rec,
+						   (size_t)ave_mp_n_rec * AVE_MP_REC_SIZE) : 0;
+	mutex_unlock(&ave_mp_lock);
+	return ret;
+}
+
+static const struct file_operations ave_mp_rec_fops = {
+	.owner	= THIS_MODULE,
+	.read	= ave_mp_rec_read,
+	.llseek	= default_llseek,
+};
+
+static int ave_mp_tab_open(struct inode *inode, struct file *file)
+{
+	if ((file->f_mode & FMODE_WRITE) && (file->f_flags & O_TRUNC)) {
+		mutex_lock(&ave_mp_lock);
+		ave_mp_tab_len = 0;
+		mutex_unlock(&ave_mp_lock);
+	}
+	return 0;
+}
+
+static ssize_t ave_mp_tab_read(struct file *file, char __user *ubuf,
+			       size_t count, loff_t *ppos)
+{
+	ssize_t ret;
+
+	mutex_lock(&ave_mp_lock);
+	ret = ave_mp_tab ? simple_read_from_buffer(ubuf, count, ppos, ave_mp_tab,
+						   ave_mp_tab_len) : 0;
+	mutex_unlock(&ave_mp_lock);
+	return ret;
+}
+
+static ssize_t ave_mp_tab_write(struct file *file, const char __user *ubuf,
+				size_t count, loff_t *ppos)
+{
+	ssize_t ret;
+
+	mutex_lock(&ave_mp_lock);
+	if (!ave_mp_tab)
+		ave_mp_tab = vzalloc(AVE_MP_TAB_MAX);
+	ret = ave_mp_tab ? simple_write_to_buffer(ave_mp_tab, AVE_MP_TAB_MAX,
+						  ppos, ubuf, count) : -ENOMEM;
+	if (ret > 0)
+		ave_mp_tab_len = max_t(size_t, ave_mp_tab_len, *ppos);
+	mutex_unlock(&ave_mp_lock);
+	return ret;
+}
+
+static const struct file_operations ave_mp_tab_fops = {
+	.owner	= THIS_MODULE,
+	.open	= ave_mp_tab_open,
+	.read	= ave_mp_tab_read,
+	.write	= ave_mp_tab_write,
+	.llseek	= default_llseek,
+};
+
+void ave_mp_debugfs_init(void)
+{
+	if (ave_mp_rec_dentry)
+		return;
+	ave_mp_rec_dentry = debugfs_create_file("apple_ave_mp_rec", 0400, NULL,
+						NULL, &ave_mp_rec_fops);
+	ave_mp_tab_dentry = debugfs_create_file("apple_ave_mp_table", 0600, NULL,
+						NULL, &ave_mp_tab_fops);
+}
+
+void ave_mp_debugfs_exit(void)
+{
+	debugfs_remove(ave_mp_rec_dentry);
+	debugfs_remove(ave_mp_tab_dentry);
+	ave_mp_rec_dentry = ave_mp_tab_dentry = NULL;
+	mutex_lock(&ave_mp_lock);
+	vfree(ave_mp_rec);
+	vfree(ave_mp_tab);
+	ave_mp_rec = ave_mp_tab = NULL;
+	ave_mp_n_rec = 0;
+	ave_mp_tab_len = 0;
+	mutex_unlock(&ave_mp_lock);
+}
+
+/*
  * The shared half of Start_AVC, moved out of ave_session_start_avc(). @name
  * is the command's name in the log ("Start_AVC" keeps every AVC line as it
  * was). The only codec branches are the colocated size, the AVC-only SPS
@@ -1862,6 +2122,11 @@ static int ave_session_start_prep(struct ave_device *ave,
 	u32 cw, ch, i, n;
 	size_t coded_size;
 	void *psets_cpu;
+	int ret;
+
+	ret = ave_mp_session_start(ave, abi, bufs);
+	if (ret)
+		return ret;
 
 	st->cmd_len = ave_cmd_size(abi, op);
 	st->cmd = ave_sess_ipc_alloc(bufs, st->cmd_len, &st->cmd_iova);
@@ -1971,6 +2236,11 @@ static int ave_session_start_prep(struct ave_device *ave,
 	s->src_go_bit3 = (u8)session_src_bit3;
 	/* docs/94: both ME units; the module parameter overrides the stream */
 	s->multi_me = session_multi_me ? (u16)session_multi_me : bufs->multi_me;
+	s->mp_pass = bufs->mp_pass;
+	s->mp_const_qp = session_mp_const_qp;
+	s->mp_qpmod = session_mp_qpmod;
+	s->mp_max_qpmod = session_mp_max_qpmod;
+	s->mp_options = session_mp_options;
 	s->src_go_bits = (u8)session_src_go;
 	s->dbg_bits = session_dbg;
 	s->ipcm_islice = (u8)session_ipcm;
@@ -2029,6 +2299,14 @@ static int ave_session_start_prep(struct ave_device *ave,
 	s->qp_max = clamp_t(u32, bufs->qp_max ? bufs->qp_max : session_qp_max,
 			    s->qp_min, 51);
 	s->key_interval = session_idr_period ? session_idr_period : 1;
+	/*
+	 * docs/95: the final pass types frames itself (type 5), and
+	 * CFrameType reads IdrPeriod 1 as "every frame a key frame". Unless
+	 * one is asked for, one IDR period for the whole table: IDRs only at
+	 * frame 0 and at the scene cuts the records mark.
+	 */
+	if (bufs->mp_pass == 2 && s->key_interval == 1)
+		s->key_interval = max_t(u32, bufs->mp_frames, 2);
 	if (s->rc_enable)
 		dev_info(ave->dev,
 			 "session: %s: rate control ON (ui32RCFlag %u), target %u bit/s at %u/%u fps, QP %u..%u starting at %u - watch the slice QP, which under fixed QP cannot vary\n",
@@ -3758,6 +4036,14 @@ static int ave_session_process_build(struct ave_device *ave,
 	 */
 	memset(bufs->coded_hdr[idx].cpu, 0, bufs->coded_hdr[idx].size);
 
+	/* docs/95 §2.5: the final pass decides every frame type itself */
+	if (bufs->mp_pass == 2) {
+		f.frame_type = AVE_FRAME_TYPE_AUTO;
+		f.mp_stats_in_addr = ave_mp_fill_input(bufs, idx, n);
+		if (!f.mp_stats_in_addr)
+			return -EINVAL;
+	}
+
 	f.recon_luma_addr = ry;
 	f.recon_chroma_addr = ruv;
 	f.recon_luma_lsb_addr = ry_lsb;
@@ -3918,6 +4204,8 @@ static int ave_session_process_result(struct ave_device *ave,
 			ret);
 		return ret;
 	}
+	if (bufs->mp_rec)
+		ave_mp_keep_record(abi, bufs, idx, n);
 	sess_info(bufs, ave->dev,
 		 "session: frame %u: %u bytes in %u slice(s) (written %u - trimmed %u), FrameTypeReturned %u, frame_num %u (sent %u), SPS+PPS %u bits, cabac_zero_words %u\n",
 		 n, info->bytes, info->slices, info->span, info->bytes_removed,
@@ -3992,6 +4280,17 @@ static int ave_session_process_result(struct ave_device *ave,
 			"session: frame %u: the firmware DROPPED this frame (FrameTypeReturned 4)\n",
 			n);
 		return -ENODATA;
+	}
+	/*
+	 * Type 5 (the final pass of docs/95, docs/85 mq4): the firmware chose
+	 * the type, so what it returns decides the parameter sets and the
+	 * key-frame flag.
+	 */
+	if (frame_type == AVE_FRAME_TYPE_AUTO && !hevc &&
+	    info->frame_type >= 1 && info->frame_type <= AVE_FRAME_TYPE_IDR) {
+		frame_type = info->frame_type;
+		if (frame_type == AVE_FRAME_TYPE_IDR)
+			bufs->last_idr = n;
 	}
 	if (info->frame_num != n)
 		dev_warn(ave->dev,
@@ -5361,7 +5660,7 @@ int ave_enc_encode(struct ave_device *ave, u32 n, bool idr,
 	memcpy(out, bufs->stream, bufs->stream_len);
 	*out_len = bufs->stream_len;
 	/* HEVC with no reference slot turns every P into an IDR. */
-	*keyframe = !n || idr ||
+	*keyframe = !n || idr || bufs->coded_type == AVE_FRAME_TYPE_IDR ||
 		    (bufs->codec == AVE_SESS_CODEC_HEVC && bufs->last_idr == n);
 	bufs->t_total += ktime_get_ns() - t_start;
 	bufs->t_frames++;

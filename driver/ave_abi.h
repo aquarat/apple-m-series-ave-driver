@@ -605,6 +605,19 @@ static inline u32 ave_coded_data_size_max(u32 w, u32 h, bool hevc)
  */
 #define AVE_CODED_HEADER_SIZE	0xc000		/* 49152 */
 
+/*
+ * Multi-pass (docs/95, 13.5): the first pass's per-frame record in the coded
+ * header, and the final pass's per-frame input buffer: a 0x108-byte
+ * sequence header, then records; frame 0 carries frames 0..10,
+ * later frames one record each, for the frame AVE_MP_WINDOW ahead.
+ */
+#define AVE_MP_REC_OFF		0x22638
+#define AVE_MP_REC_SIZE		0x626
+#define AVE_MP_HDR_SIZE		0x108
+#define AVE_MP_WINDOW		10
+#define AVE_MP_IN_FIRST		0x44aa	/* 0x108 + 11 * 0x626 */
+#define AVE_MP_IN_NEXT		0x72e	/* 0x108 + 0x626 */
+
 /* 26.6.2 ONLY: buffer count is clamped to at most 30. 13.5: 20. */
 #define AVE_CODED_MAX_BUFS	30
 
@@ -1206,6 +1219,14 @@ struct ave_start_avc_layout {
 	 */
 	u32	src_go_bit3;		/* u8; AVE_OFF_NONE = not located */
 	u32	multi_me;		/* u16 iMultiMECnt (docs/94); AVE_OFF_NONE = not located */
+	/*
+	 * Multi-pass (docs/95 §2.1-2.2): bEnableMultipass (u8), the pass
+	 * (u32: 1 first, 2 final; the firmware turns 1 into 9 with
+	 * ConstantQP and QPModLevel >= 0), ConstantQP, QPModLevel,
+	 * MaxQPModLevel, Options (s32, -1 = the firmware's default).
+	 * AVE_OFF_NONE = not located.
+	 */
+	u32	mp_enable, mp_pass, mp_const_qp, mp_qpmod, mp_max_qpmod, mp_options;
 	u32	src_go_bits;		/* u8; AVE_OFF_NONE = not located */
 	/*
 	 * The controller's debug-verbosity bitfield (docs/70). It reaches
@@ -1441,6 +1462,8 @@ struct ave_process_avc_layout {
 	u32	in_chroma_size;
 	u32	in_chroma_stride;
 	u32	in_dims;		/* 2 x u32; AVE_OFF_NONE = not sent (docs/90) */
+	/* sInput.MultiPassStatsInBuffer, u64, final pass only (docs/95 §2.5) */
+	u32	mp_stats_in;
 	u32	out_mode;		/* u8 */
 	u32	out_index;		/* u32 */
 	u32	out_coded;		/* u64 */
@@ -2128,6 +2151,13 @@ const struct ave_cmd_abi ave_cmd_abi_13_5 = {
 		 * (ldrh 0x4e930) gates every ME1-bank (DPE+0xF0000) write on it.
 		 */
 		.multi_me	= 0xfcea,
+		/* docs/95 §2.1: VP+0xFE9C..0xFEB0, fw 0x4e6a0-0x4e73c */
+		.mp_enable	= 0xfefc,
+		.mp_pass	= 0xff00,
+		.mp_const_qp	= 0xff04,
+		.mp_qpmod	= 0xff08,
+		.mp_max_qpmod	= 0xff0c,
+		.mp_options	= 0xff10,
 		.src_go_bits	= 0xfecc,	/* fw 0x5cfe4 -> SRCDMAGO bits 4+, docs/69 */
 		.dbg_bits	= 0xfcd8,	/* fw 0x5cedc -> ctrl+0xA7C, docs/70 */
 		.ipcm_islice	= 0xfce4,	/* fw 0x5cf58 -> ctrl+0x23FDE, docs/73 */
@@ -2224,6 +2254,8 @@ const struct ave_cmd_abi ave_cmd_abi_13_5 = {
 		 * input, H14G (t8112) for linear input too (docs/90).
 		 */
 		.in_dims	= 0x964,
+		/* docs/95 §2.5: kext 0xfffffe0008e92fe0; fw 0x45d40 asserts on 0 */
+		.mp_stats_in	= 0x900,
 		.out_mode	= 0xc00,	/* kext strb wzr,[x3,#3072] 0xfffffe0008eb051c */
 		.out_index	= 0xc04,	/* kext str w26,[x3,#3076] 0xfffffe0008eb0520 */
 		.out_coded	= 0xc08,	/* kext 0xfffffe0008eb0548; fw 0x58384 */
@@ -2663,6 +2695,12 @@ const struct ave_cmd_abi ave_cmd_abi_26_6 = {
 		.src_cfg_byte	= AVE_OFF_NONE,
 		.src_go_bit3	= AVE_OFF_NONE,
 		.multi_me	= AVE_OFF_NONE,
+		.mp_enable	= AVE_OFF_NONE,
+		.mp_pass	= AVE_OFF_NONE,
+		.mp_const_qp	= AVE_OFF_NONE,
+		.mp_qpmod	= AVE_OFF_NONE,
+		.mp_max_qpmod	= AVE_OFF_NONE,
+		.mp_options	= AVE_OFF_NONE,
 		.src_go_bits	= AVE_OFF_NONE,
 		.dbg_bits	= AVE_OFF_NONE,
 		.ipcm_islice	= AVE_OFF_NONE,
@@ -2743,6 +2781,7 @@ const struct ave_cmd_abi ave_cmd_abi_26_6 = {
 		.in_chroma_size	= AVE_PIC_IN_CHROMA_SIZE,
 		.in_chroma_stride = AVE_PIC_IN_CHROMA_STRIDE,
 		.in_dims	= AVE_OFF_NONE,
+		.mp_stats_in	= AVE_OFF_NONE,
 		.out_mode	= AVE_PIC_OUT_MODE,
 		.out_index	= AVE_PIC_OUT_INDEX,
 		.out_coded	= AVE_PIC_OUT_CODED,

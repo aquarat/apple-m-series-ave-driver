@@ -47,7 +47,16 @@ QUALITY_LADDER = {"ave-cqp": [22, 26, 30, 34, 38],
                   "ave-cqp-p010": [34, 38, 42, 46, 50],
                   "x265-medium-crf-10bit": [18, 22, 26, 30, 34],
                   "x265-medium-crf": [18, 22, 26, 30, 34],
-                  "x265-slow-crf": [18, 22, 26, 30, 34]}
+                  "x265-slow-crf": [18, 22, 26, 30, 34],
+                  "ave264-cqp": [22, 26, 30, 34, 38]}
+
+# H.264 on AVE (docs/97): fixed QP, 1-pass VBR, and 2-pass VBR (docs/95). The
+# 2-pass runs pass 1, reads its records from debugfs, builds the final pass's
+# table with MP_BUILD (RECS TABLE), writes it back and runs pass 2. Needs root.
+MP_BUILD = E("MP_BUILD", f"python3 {os.path.join(HERE, '..', '..', 'tools', 'ave2pass', 'ave2pass.py')} build")
+MP_PARAM = "/sys/module/apple_ave/parameters/session_mp_pass"
+MP_REC = "/sys/kernel/debug/apple_ave_mp_rec"
+MP_TAB = "/sys/kernel/debug/apple_ave_mp_table"
 
 
 def base_enc(enc):
@@ -99,8 +108,50 @@ def p010_padded(clip):
     return dst
 
 
+def ave264_cmd(enc, clip, kbps, out):
+    base, w, h, fps, n, _ = CLIPS[clip]
+    h16 = (h + 15) // 16 * 16
+    rc = (f"h264_i_frame_qp_value={kbps},frame_level_rate_control_enable=0" if enc == "ave264-cqp" else
+          f"video_bitrate_mode=0,video_bitrate={kbps * 1000},frame_level_rate_control_enable=1")
+    return ["v4l2-ctl", "-d", ave_dev(),
+            f"--set-fmt-video-out=width={w},height={h16},pixelformat=NV12",
+            "--set-fmt-video=pixelformat=H264",
+            f"--set-selection-output=target=crop,width={w},height={h}",
+            f"--set-ctrl=video_gop_size={KEYINT},h264_profile=4,h264_entropy_mode=1,{rc}",
+            "--stream-mmap", "--stream-out-mmap", f"--stream-from={SRC}/{base}.nv12",
+            f"--stream-to={out}", f"--stream-count={n}"]
+
+
+def mp_pass(p):
+    with open(MP_PARAM, "w") as f:
+        f.write(str(p))
+
+
+def encode_2pass(enc, clip, kbps, out):
+    """docs/95: pass 1, records -> table (MP_BUILD), pass 2."""
+    c0, t0 = child_cpu(), time.monotonic()
+    rec, tab = out + ".rec", out + ".tab"
+    try:
+        mp_pass(1)
+        subprocess.run(ave264_cmd(enc, clip, kbps, out + ".p1"), check=True,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        with open(MP_REC, "rb") as f, open(rec, "wb") as g:
+            g.write(f.read())
+        subprocess.run(MP_BUILD.split() + [rec, tab], check=True, stdout=subprocess.DEVNULL)
+        with open(tab, "rb") as f, open(MP_TAB, "wb") as g:
+            g.write(f.read())
+        mp_pass(2)
+        subprocess.run(ave264_cmd(enc, clip, kbps, out), check=True,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    finally:
+        mp_pass(0)
+    return time.monotonic() - t0, child_cpu() - c0
+
+
 def encode(enc, clip, kbps, out):
     base, w, h, fps, n, _ = CLIPS[clip]
+    if enc == "ave264-2pass":
+        return encode_2pass(enc, clip, kbps, out)
     if enc == "ave" and h % 16:
         # ffmpeg's V4L2 m2m wrapper segfaults when the driver rounds the height
         # up (1080 -> 1088). Feed it a 16-aligned frame whose extra lines
@@ -127,6 +178,8 @@ def encode(enc, clip, kbps, out):
                "--stream-mmap", "--stream-out-mmap",
                f"--stream-from={p010_padded(clip) if p010 else SRC + '/' + base + '.nv12'}",
                f"--stream-to={out}", f"--stream-count={n}"]
+    elif enc.startswith("ave264-"):
+        cmd = ave264_cmd(enc, clip, kbps, out)
     elif base_enc(enc) == "ave-cqp":
         # v4l2-ctl, rate control off (the driver's default): fixed QP. A
         # 16-unaligned height goes through the OUTPUT crop, which v4l2-ctl
@@ -157,7 +210,7 @@ def encode(enc, clip, kbps, out):
             cmd += ["--bframes", "0"]
     c0, t0 = child_cpu(), time.monotonic()
     subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL,
-                   stderr=subprocess.DEVNULL if enc.startswith("ave-cqp") else None)
+                   stderr=subprocess.DEVNULL if enc.startswith(("ave-cqp", "ave264-")) else None)
     return time.monotonic() - t0, child_cpu() - c0
 
 
@@ -199,7 +252,7 @@ def run(clips, encoders):
             base, w, h, fps, n, ladder = CLIPS[clip]
             for enc in encoders:
                 for kbps in QUALITY_LADDER.get(base_enc(enc), ladder):
-                    out = f"{OUT}/{clip}.{enc}.{kbps}.hevc"
+                    out = f"{OUT}/{clip}.{enc}.{kbps}.{'h264' if enc.startswith('ave264-') else 'hevc'}"
                     wall, cpu = encode(enc, clip, kbps, out)
                     rate = os.path.getsize(out) * 8 * fps / n / 1000
                     q = measure(clip, out)

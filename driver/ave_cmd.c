@@ -387,6 +387,7 @@ static int ave_vp_check(const struct ave_start_avc_layout *l,
 	    (s->src_cfg_byte && l->src_cfg_byte == AVE_OFF_NONE) ||
 	    (s->src_go_bit3 && l->src_go_bit3 == AVE_OFF_NONE) ||
 	    (s->multi_me && l->multi_me == AVE_OFF_NONE) ||
+	    (s->mp_pass && (l->mp_enable == AVE_OFF_NONE || s->mp_pass > 2)) ||
 	    (s->src_go_bits && l->src_go_bits == AVE_OFF_NONE) ||
 	    (s->dbg_bits && l->dbg_bits == AVE_OFF_NONE) ||
 	    (s->ipcm_islice && l->ipcm_islice == AVE_OFF_NONE) ||
@@ -549,6 +550,14 @@ static void ave_vp_fill(struct ave_wr *w, const struct ave_start_avc_layout *l,
 		wr8(w, l->src_go_bit3, s->src_go_bit3);
 	if (s->multi_me)
 		wr16(w, l->multi_me, s->multi_me);
+	if (s->mp_pass) {
+		wr8(w, l->mp_enable, 1);
+		wr32(w, l->mp_pass, s->mp_pass);
+		wr32(w, l->mp_const_qp, (u32)s->mp_const_qp);
+		wr32(w, l->mp_qpmod, (u32)s->mp_qpmod);
+		wr32(w, l->mp_max_qpmod, (u32)s->mp_max_qpmod);
+		wr32(w, l->mp_options, (u32)s->mp_options);
+	}
 	if (s->src_go_bits)
 		wr8(w, l->src_go_bits, s->src_go_bits);
 	if (s->dbg_bits)
@@ -1250,6 +1259,8 @@ static int ave_pic_check(const struct ave_cmd_abi *abi,
 	if (l->in_luma_size != AVE_OFF_NONE &&
 	    (!f->in_luma_size || !f->in_chroma_size))
 		return -EINVAL;
+	if (f->mp_stats_in_addr && l->mp_stats_in == AVE_OFF_NONE)
+		return -EINVAL;
 	if (f->coded_index >= abi->start_avc.coded_max || !f->coded_addr ||
 	    !f->coded_hdr_addr || !f->coded_size)
 		return -EINVAL;
@@ -1345,6 +1356,8 @@ static int ave_pic_fill(struct ave_wr *w, const struct ave_process_avc_layout *l
 		wr32(w, base + l->in_dims, f->in_dims[0]);
 		wr32(w, base + l->in_dims + 4, f->in_dims[1]);
 	}
+	if (l->mp_stats_in != AVE_OFF_NONE && f->mp_stats_in_addr)
+		wr64(w, base + l->mp_stats_in, f->mp_stats_in_addr);
 
 	wr8(w, base + l->out_mode, 0);		/* Coded == CodedData[index] arm */
 	wr32(w, base + l->out_index, f->coded_index);
