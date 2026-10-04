@@ -25,10 +25,12 @@ touched.*
 | Firmware lookahead | No multi-frame lookahead in single pass. The M2's **LRME-RC** (H14G only) is a per-frame low-resolution pre-analysis (RC and weighted prediction). It is turned on by VP+0xFE6D `lrme_rc_pass_num` and **requires wire 0xFCE9 = 1** (async LRME pipe). docs/93 found that this flag hangs the M2 today | C / I |
 | Benefit | Against AVE's 1-pass bitrate mode: most of the gap to fixed QP (docs/88: +31 % vs +21 % BD-rate against x265 `medium`), so roughly **5-10 %** in bitrate mode, with accurate size targeting. Against fixed QP: **0-3 %**, from scene-cut IDRs and complexity-based frame QPs. The larger lever, B-frames (~9 %, docs/92), stays blocked | I |
 
-What the host has to compute between passes is the expensive part. The
-user-space code that does it is located below (§2.4): scene detection,
-scene accumulation, bit corrections, and the sequence header. It is
-floating-point work, so it belongs in user space, not in the kernel driver.
+What the host has to compute between passes is the expensive part: scene
+detection, scene accumulation, bit corrections, and the sequence header.
+§2.4 describes macOS's code for it, and `tools/ave2pass/` reproduces it
+byte for byte (Apple's functions under emulation, plus a pure-Python
+port). It is floating-point work, so it belongs in user space, not in the
+kernel driver.
 
 ---
 
@@ -190,19 +192,247 @@ bits 3, 9 and 11 select constants (fw 0x2c9c0-0x2ca34); their meaning is [U].
 
 ### 2.4 Between passes: what the host computes
 
-The user-space "MP" code (log prefix `MP:`) runs on every pass-1 record,
-then once at the end. Locations [C]; algorithms [U] until ported:
+*Filled in from the user-space code (UA 0xb8270-0xbbc00, about 3 700
+instructions) and by running it: `tools/ave2pass/` runs Apple's functions
+under Unicorn (`mpemu.py`) and has a pure-Python port (`mpport.py`) that
+matches the emulation byte for byte on every record set tried (§2.4.8).*
 
-| function (UA) | what it does (from its code and log strings) |
+The user-space "MP" code (log prefix `MP:`) runs on every pass-1 record as
+it completes, then once at the end of the pass. It is pure computation:
+apart from memcpy/memmove, `operator new`/`delete` and logging, the only
+imports it calls are `CFDataCreateMutable`/`CFDataAppendBytes`/`CFRelease`
+and `VTMultiPassStorageSetDataAtTimeStamp`. There is no libm call: the
+log10 complexity values arrive from the firmware already computed. [C]
+
+| function (UA) | summary |
 |---|---|
-| `enqueue_first_pass` 0xb9a08 | reorders records from coding to display order (a heap keyed on rec+0x2C), with a small "fixup FIFO" |
-| bits correction 0xb97b4 | adds the following record's rec+0x48 to rec+0x40 (`frame_bits`) and scales rec+0x44 (`hdr_bits`); updates the u64 sums at rec+0x4CC.. by class (rec+0x34) |
-| `scene_change_pipeline` 0xb9130 (`histogram_diff` 0xb8270, `scene_change_detect` 0xb8398) | scene-cut detection from the LRME histograms; writes **rec+0x4B0** (scene-start flag) and rec+0x4B8/0x4BC (metrics, floats) |
-| `accumulate_scene_info` 0xb84e8 | folds every non-start record into its scene's first record: rec+0x4C4 (frame count) and the u64 sums. Accumulates sequence totals: bits by class (rec+0x624: NORMAL/MIN/MAX/BLANK), complexity rec+0x614/0x618, and a 16-bin log10-complexity histogram (rec+0x574.., +0x5B4..) |
-| `FinalizeSeqRcInfo` 0xb9ff4 | quantises the 16-bin histogram to 4 values and counts and closes the **sequence RC info**. Its 0x108 bytes at MP-object+0x63A0 are the pass-2 header (copier UA 0x899d4; fields printed by UA 0xb88c0: total_scenes, cnt/bits All/NORMAL/MIN/MAX/BLANK, avg_qscale, current_complexity, totalcplxsum) |
+| `enqueue_first_pass` 0xb9a08 | 2-deep "fixup FIFO" for the bits correction, then a min-heap that releases records in display order (§2.4.3) |
+| bits correction 0xb97b4 | adds rec+0x48 of the record that arrived **two** records later to rec+0x40, scales rec+0x44 to match (§2.4.3) |
+| `scene_change_pipeline` 0xb9130 (`histogram_diff` 0xb8270, `scene_change_detect` 0xb8398) | earth mover's distance between consecutive LRME histograms, a 4-record window, a fixed decision tree; writes rec+0x4B0/0x4B8/0x4BC; holds each scene's first record back until the scene is complete (§2.4.4) |
+| `accumulate_scene_info` 0xb84e8 | sequence totals into the header; folds each non-start record into its scene's first record (§2.4.5) |
+| `FinalizeSeqRcInfo` 0xb9ff4 | reduces the 16-bin log10-complexity histogram to 4 counts and 4 values (§2.4.6) |
 
-The firmware has its own `InitCplxHistQuant`/`QuantizeCplxHist`, so part of
-this may be reproducible from the firmware's version too. [I]
+#### 2.4.1 Where it runs
+
+| step | code | label |
+|---|---|---|
+| object | the frame receiver (0x45040 bytes, `operator new` at UA 0x9bd60, not zeroed) holds the MP object at **+8** (UA 0x87ef4); constructor UA 0x9c140, reset UA 0x9c1c8, which zeroes the header (UA 0x9c200) | C |
+| per frame, pass 1 | `SendFrame` writes the frame's PTS over rec+0x04..0x1B, then calls UA 0x94f6c: take a free record from the pool (UA 0x94fcc), memcpy the firmware's 0x626 bytes into it, `enqueue_first_pass(MP, rec, flush = 0)`. That returns the record leaving the pipeline, or NULL. SendFrame copies it to FrameInfo+0x63A6 (UA 0x970e8) and stores it with `VTMultiPassStorageSetDataAtTimeStamp`, keyed by **the emitted record's own PTS** (the key is FrameInfo+0x63AA = record+0x04, UA 0x983c0-0x98408). Only when FrameInfo+0x0C == 0 (UA 0x970bc, 0x97e70) | C |
+| end of pass | `DataType_RESETMULTIPASS` (UA 0x8b1d8) calls `FlushStats(MP, storage)` (UA 0xba86c). It feeds padding records with display order −1 until one of them comes out, storing every real record that comes out; then it resets the pool and queues (UA 0x9c220) and runs `FinalizeSeqRcInfo` | C |
+| pass 2 | the header is MP+0x6398 (= FrameReceiver+0x63A0, copier UA 0x899d4), 0x108 bytes, copied in front of the records (UA 0xa6178-0xa61a8, 0xa6ae8-0xa6b08) | C |
+
+All 13.5 callers pass flush = 0 (UA 0x94fa8, 0x95164, 0xba968); the flush = 1
+arm of `enqueue_first_pass` is dead code here. [C] The debug dump
+`DBUG_DumpMultiPassStats` (UA 0x950e0) writes each emitted record at file
+offset 0x108 + display_order × 0x626 (UA 0x95174-0x9519c): the same
+`header + rec[n]` layout as the table of §6.3. [C]
+
+#### 2.4.2 The MP object (offsets from MP = FrameReceiver+8)
+
+| MP+ | what | label |
+|---|---|---|
+| 0x0002 | 16 record slots, 0x626 apart | C (UA 0x9c27c-0x9c2b0) |
+| 0x6268 / 0x62E8 | free pool: 16 pointers used as a stack (LIFO), and its count (16 after reset) | C |
+| 0x62F0 / 0x6300 / 0x6304 | the 2-entry fixup FIFO, its length, the index of its older entry | C |
+| 0x6308 | `std::vector<stats*>`: binary min-heap on display order, compared **unsigned** (UA 0xbb428, 0xbb48c) | C |
+| 0x6328 | `std::deque<stats*>` D1: the scene-detection window | C |
+| 0x6358 | `std::deque<stats*>` D2: scene starts held back | C |
+| 0x6388 | u32: the next display order the heap may release | C |
+| 0x6390 | the open scene's first record | C |
+| 0x6398 | **the 0x108-byte sequence header** (§2.4.6), up to MP+0x64A0 | C |
+| 0x64A0 | double: running sum of rec+0x614 (for avg_qscale) | C |
+| 0x64A8 | u32 written in pass 2 (UA 0x899ec), unused here | C / U |
+
+#### 2.4.3 `enqueue_first_pass` and the bits correction
+
+```
+FIFO len 0: fifo[idx] = rec; len = 1;   return NULL
+FIFO len 1: fifo[!idx] = rec; len = 2;  return NULL
+FIFO len 2: bits_correction(fifo[idx], rec.correction@0x48)
+            heap.push(fifo[idx]); fifo[idx] = rec; idx = !idx
+then        top = heap.top()
+            if top.display_order != -1 and != next_display_order: return NULL
+            next_display_order++; heap.pop()
+            out = scene_change_pipeline(top)
+            if out: back into the free pool (the caller copies it at once)
+            return out
+```
+
+So rec+0x48 corrects the record that arrived **two** records earlier, not
+the previous one. [C] The heap restores display order; in IPPP it never
+holds more than one record.
+
+`bits_correction(r, c)` (UA 0xb97b4), integer only [C]:
+
+```
+if c == 0 or (s32)(r.bits@0x40 + c) < 1: return
+hc = (s64)((u64)r.hdr_bits@0x44 * (s64)c) / (s64)(s32)r.bits     (sdiv; 0 if bits == 0)
+r+0x4CC (u64) += c                 r+0x4DC (u64) += (s32)hc
+r+0x40 = bits + c                  r+0x44 = hdr_bits + (s32)hc    (u32)
+class@0x34 == 0: r+0x4EC += hc     class == 2: r+0x4E4 += hc
+r+0x524, 0x52C, 0x534, 0x53C (u64): += c, each only if non-zero
+```
+
+#### 2.4.4 `scene_change_pipeline` (UA 0xb9130)
+
+D1 holds the last four records, in display order. For each record `rec`:
+
+1. If no scene is open (the very first record): rec+0x4B0 = 1; it opens the
+   scene and goes onto D2.
+2. Push rec onto D1. If D1 has one entry: rec+0x4B8 = rec+0x4BC = 0,
+   return NULL.
+3. **Distance to the previous record** `prev` (UA 0xb9280-0xb92b4), float32:
+   `hdiff = max(histogram_diff(rec, prev) / (max(rec+0x4C0 + prev+0x4C0, 1) / 512), 0.01)`.
+   `histogram_diff` (UA 0xb8270) is the earth mover's distance between
+   the 256-bin LRME histograms at rec+0xB0, in double:
+   Σ_i |Σ_{j≤i} (a_j − b_j)| / Σ_j a_j, in bins, returned as float. A
+   padding record takes prev+0x4B8 instead.
+   rec+0x4B8 = hdiff; rec+0x4BC = max(hdiff, prev+0x4B8).
+4. With two entries the first record gets the second's 0x4B8/0x4BC and is
+   accumulated (§2.4.5). With three: return NULL.
+5. With four, the **candidate** is D1[1] (two records before rec):
+   `m0` = D1[0]+0x4BC, `m1` = cand+0x4B8, `m2` = rec+0x4BC,
+   `ratio_p = m1/m0`, `ratio_n = m2/m1`, `m0m2 = ratio_n/ratio_p` (float32).
+   If rec is padding, or the candidate's display order is below 3
+   (unsigned): cand+0x4B0 = rec+0x50 bit 0 (logged as `forceKeyFrame`),
+   and 1 for a padding candidate. Otherwise cand+0x4B0 =
+   `scene_change_detect()` or forceKeyFrame. The candidate is then
+   accumulated (§2.4.5); if it starts a scene it goes onto D2 and becomes
+   the open scene.
+6. Pop D1's front. If it does not start a scene, return it. If it does,
+   return D2's front instead, unless that is the open scene (then NULL).
+   So **a scene's first record leaves only after the next scene has
+   started**, carrying the sums of the whole scene.
+
+`scene_change_detect` (UA 0xb8398), compares in double against the
+constants at UA 0x119f30-0x119f68 [C]:
+
+```
+if m0m2 > 0.00272072:
+    if m1 > 71.58768845: cut = ratio_p > 4.51769352  and m0m2 <= 0.03005953
+    else:                cut = ratio_p > 23.24848175 and m1 > 26.7539587
+else:                    cut = ratio_n <= 0.96605313 and ratio_p > 1.34009841
+```
+
+A hard cut is a single spike in the distance at the candidate: ratio_p is
+large, ratio_n small, and the third arm fires. Consequences: frame 0
+always opens a scene; cuts at display order 1 and 2 are never detected
+(only forced); cuts in the last two frames are never detected, since the
+record after them is padding; a cut one or two frames after another one is
+not detected, since m0 still holds the first spike (emulated for one frame:
+cuts at 500 and 501 give one scene start, at 500). [C, emulated]
+
+#### 2.4.5 `accumulate_scene_info` (UA 0xb84e8)
+
+Once per real record (padding returns at once); H = the header:
+
+```
+H.cnt_All++; if rec+0x4B0: H.total_scenes++
+H.bits_All += rec.bits@0x40
+if rec.class@0x34 == 2: H+0x10++, H+0x14 += bits, H+0x50 += (double)rec+0x614
+MP+0x64A0 += (double)rec+0x614;  H.avg_qscale = (float)(MP+0x64A0 / cnt_All)
+H+0x58 += (double)rec+0x618;  H+0x60 += (double)rec+0x61C
+H+0x68[i] += rec+0x574[i] (u32);  H+0xA8[i] += rec+0x5B4[i] (float),  i < 16
+switch (u16)rec+0x624: 0 NORMAL H+0x1C/0x20, 1 MIN H+0x28/0x2C,
+                       2 MAX H+0x34/0x38, 3 BLANK H+0x40/0x44   (count++, bits +=)
+```
+
+If rec+0x4B0 == 0, rec is also folded into the open scene's first record
+S: u32 += at 0x4C4 (frames) and 0x4C8; u64 += at 0x4CC, 0x4D4, 0x4DC,
+0x4E4, 0x4EC, 0x50C, 0x524, 0x52C, 0x534, 0x53C; double += at 0x4F4, 0x4FC,
+0x544, 0x54C, 0x554, 0x55C; S+0x564/0x56C += (double)rec+0x618/0x61C (the
+per-frame floats, not rec+0x564); u32[4] += at 0x514; S+0x504 = min,
+S+0x508 = max; u32[16] at 0x574 and float[16] at 0x5B4 +=; and
+`S+0x4C0 = fma(S+0x4C0, old_count, rec+0x4C0 × rec_count) / new_count`,
+a frame-weighted mean with one fused multiply-add. [C]
+
+The pass-2 debug print (UA 0xa6b0c-0xa6c30) names part of that block:
+"cnt" 0x4C4, "bits" 0x4CC, 0x4DC, 0x4E4, 0x4EC, "QScale" 0x4F4, 0x4FC
+(double), 0x504, 0x508 (float). With §2.4.3 (0x4DC follows hdr_bits;
+0x4E4/0x4EC follow it for class 2/0) these read as: total bits, header
+bits, class-2 and class-0 header bits; qscale sum, a second qscale sum
+(squares?), min, max. [C] for the names, [I] for the reading.
+
+#### 2.4.6 `FinalizeSeqRcInfo` (UA 0xb9ff4) and the header
+
+The 16-bin histogram (H+0x68 counts, H+0xA8 sums) covers log10 complexity
+in bins of 0.1875: bin *j* = [0.1875 *j*, 0.1875 (*j*+1)), the binning the
+firmware uses too (fw 0x2de9c-0x2deb4). Finalize reduces it to four values:
+
+1. One entry {count, mean = sum/count, lo, hi} per non-empty bin; if there
+   is none, {1, 1.5, 0, 3}.
+2. While there are fewer than 4 entries: sort by count, descending (libc++
+   `std::sort`, UA 0xbb550), and split the first entry at its mean into
+   {c − c/2, (mean+hi)/2, mean, hi} and {c/2, (lo+mean)/2, lo, mean}.
+3. Sort by mean (UA 0xbc194). Place four centroids evenly over
+   [first.lo, last.hi], each {0, centre, lo, hi}.
+4. Three rounds of `QuantizeData` (UA 0xba6a0): every centroid takes from
+   every bin the overlapping part of its count (count × overlap / bin
+   width) at the overlap's midpoint; count = (u32)(carry + Σw + 0.5),
+   mean = Σ(w × mid) / Σw, carry = Σw − count. Then each boundary moves to
+   the midpoint between neighbouring means.
+5. H+0xE8 = the four counts, H+0xF8 = the four means (logged as "log10_cplx
+   quantized histogram : values … counts …").
+
+The **header** (MP+0x6398, 0x108 bytes). Names are from the print at UA
+0xb88c0 where it prints them [C]; every field is packed, no gaps:
+
+| H+ | type | field | label |
+|---|---|---|---|
+| 0x00 | u32 | total_scenes | C |
+| 0x04 | u32 | cnt_All | C |
+| 0x08 | u64 | bits_All (Σ rec+0x40 after the correction) | C |
+| 0x10 | u32 | frames with rec+0x34 == 2 (not printed; intra frames [I]) | C / I |
+| 0x14 | u64 | their bits | C |
+| 0x1C / 0x20 | u32 / u64 | cnt_NORMAL / bits_NORMAL (rec+0x624 == 0) | C |
+| 0x28 / 0x2C | u32 / u64 | cnt_MIN / bits_MIN (== 1) | C |
+| 0x34 / 0x38 | u32 / u64 | cnt_MAX / bits_MAX (== 2) | C |
+| 0x40 / 0x44 | u32 / u64 | cnt_BLANK / bits_BLANK (== 3) | C |
+| 0x4C | f32 | avg_qscale = Σ rec+0x614 / cnt_All | C |
+| 0x50 | f64 | Σ rec+0x614 over the rec+0x34 == 2 frames (not printed) | C |
+| 0x58 | f64 | current_complexity = Σ rec+0x618 | C |
+| 0x60 | f64 | totalcplxsum = Σ rec+0x61C | C |
+| 0x68 | u32[16] | log10-complexity histogram counts (Σ rec+0x574) | C |
+| 0xA8 | f32[16] | histogram sums (Σ rec+0x5B4) | C |
+| 0xE8 | u32[4] | quantised counts | C |
+| 0xF8 | f32[4] | quantised values | C |
+
+What the final pass does with each field is [U]; the firmware copies the
+header to `CMultiPassControl`+0x39C on frame 0 (§2.5) and has its own
+`InitCplxHistQuant`/`QuantizeCplxHist`.
+
+#### 2.4.7 Quirks a faithful tool keeps
+
+- **Stale padding records.** FlushStats takes a slot from the pool and sets
+  only display order = −1. That slot is the one last returned, so it still
+  holds an earlier record, and its rec+0x48 corrects the last two real
+  frames. With fewer than 7 frames the padding comes from never-used slots,
+  whose contents depend on whether `operator new` returned zeroed memory;
+  the port and the emulation assume zeros. [C; U for N < 7]
+- A missing or repeated display order stalls the heap for good, and
+  FlushStats would then loop until the pool is empty. `ave2pass.py`
+  refuses such input.
+- Arithmetic: float32 where the code uses s registers, float64 where it
+  uses d registers, one fused multiply-add, the AArch64 NaN rules
+  (FPCR.DN = 0 assumed for macOS [I]). The port implements them explicitly,
+  so its output does not depend on the host CPU.
+
+#### 2.4.8 Verification
+
+`tools/ave2pass/selftest.py`: 50 invariant checks (a 40-frame clip with a
+hard cut at 12 gives rec+0x4B0 = 1 at 0 and 12 only, rec+0x4C4 = 12 and 28,
+total_scenes 2; forced key frames; no detected cut below display order 3;
+pass-2 buffers for 1..40 frames), then the port against the emulation on
+synthetic clips of 1-300 frames (cuts, varied frame bits, IDR periods) and
+on random records with NaNs, infinities and subnormals in every float field
+the code reads: 0 differences in 600+ record sets. A 3000-frame clip
+builds in about 0.6 s with either backend. [C, emulated]
+
+Still [U]: how the firmware fills the fields this code reads (rec+0x4C0,
+the class values at rec+0x34 and rec+0x624, rec+0x50, rec+0x4C8 and the
+other scene-block seeds), and whether any of the stale-slot effects matter
+to the final pass. The T1 records (§7) answer the first; `ave2pass.py dump`
+prints them.
 
 ### 2.5 Pass 2: the per-frame input buffer
 
@@ -245,13 +475,29 @@ So the host-side buffer, per in-flight frame, is:
 
 | frame (display index) | bytes | content |
 |---|---|---|
-| 0 | 0x44AA = 0x108 + 11×0x626 + 0x20 | header; records 0..10 (if the clip is shorter, macOS repeats the last record, UA 0x39fb0) |
+| 0 | 0x44AA = 0x108 + 11×0x626 | header; records 0..10 (if the clip is shorter, macOS repeats the last record, UA 0x39fb0) |
 | N ≥ 1 | 0x72E = 0x108 + 0x626 | header (re-sent; read only on frame 0); record N+10 (macOS repeats the last one at the end) |
 
-Why N+10: after frame 0 the user-space cursor stands at frame 10, and each
-later frame advances it once (UA 0x39ad8-0x3a0d8). The firmware queue pops
-one record and pushes one, keeping 11. [C] for both halves; [I] that they
-pair as stated.
+There is **no padding**: 11 × 0x626 = 0x43A2, and the IOSurface is
+0x43A2 or 0x626 bytes plus the header (UA 0xa5ff4-0xa601c: `frame == 0 ?
+0x43A2 : 0x626`), filled by `memcpy(surface, header, 0x108)` and
+`memcpy(surface + 0x108, records, size)` (UA 0xa618c-0xa61a8, 0xa6aec-0xa6b08).
+(An earlier version of this table read 0x44AA as 0x108 + 11×0x626 + 0x20.) [C]
+
+Why N+10: `AVE_H264MultipassDataFetch` (UA 0x39a98) on frame 0 copies the
+record at the frame's own PTS, checks its display order against the frame
+number (UA 0x39ee4-0x39ef0, "bytePtr->pic_info.display_order ==
+encoderPrivateStorage->frameNumber"), then steps
+`kVTMultiPassStorageStep_GetNextTimeStamp` ten times, copying each record;
+when the next time stamp is not valid (flags & 0x1D != 1) it copies the
+previous slot again (UA 0x39fb0). So the cursor stands at frame 10. Each
+later frame steps once more and copies that record; at the end
+(GetNextTimeStamp not valid) it steps `GetPreviousTimeStamp` from there
+(UA 0x39d08-0x39d2c, 0x3a14c-0x3a184), which with VideoToolbox's ordering of
+an invalid time after every valid one gives the last record again [I]. The
+firmware queue pops one record and pushes one, keeping 11. [C] for both
+halves; [I] that they pair as stated. `tools/ave2pass/ave2pass.py frames`
+builds these buffers.
 
 **Second-pass entry.** `AVE_CHM_MakeFwCmd_Reset` (kext 0xfffffe0008e8fd14) [C]:
 - id **3** (0x8e8fef8); +0x20 = 200 (0x8e8fed8); +0x28..0x37 = timeout
@@ -282,18 +528,21 @@ A new session started with pass = 2 goes through the same
 | 0x24 | frame rate, float (30.0 if unset) | fw 0x2d6e4-0x2d72c | C |
 | 0x2C | display frame number; the host checks it against its count | fw 0x2d790; UA 0x39ee4 | C |
 | 0x30 | slice type | fw 0x2d82c | C |
-| 0x34 | frame class (host buckets it; `FrameType` counts it, 0x389fc) | | C read, meaning I |
-| 0x40 / 0x44 / 0x48 | frame bits / header bits / correction for the previous frame | UA 0xb97b4 | I |
+| 0x34 | frame class: the host counts class 2 separately (header +0x10/0x14/0x50) and the bits correction books class 0 and 2 header bits apart; matches the H.264 slice-type numbering (0 P, 2 I) [I] | UA 0xb85d8, 0xb9980; `FrameType` counts it, 0x389fc | C read, meaning I |
+| 0x40 / 0x44 / 0x48 | frame bits / header bits (u32) / signed correction, added to the record that arrived **two** records earlier | UA 0xb97b4, 0xb9b7c (§2.4.3) | C |
+| 0x50 | bit 0: forced key frame, as the host logs it; forces a scene start | UA 0xb94a4, 0xb952c | C |
 | 0x54.. | MCPU statistics | fw 0x2d4a0 | C |
-| 0xA0, 0xB0-0x4AF | LRME data, 256 × u32 histogram | fw 0x2cf30 | C |
-| 0x4B0 | scene start (host) | UA 0xb94ac; fw 0x38418 | C |
-| 0x4B4 | scene's first frame [I] | fw 0x45de4 compares it with the current frame | I |
-| 0x4B8 / 0x4BC | scene-change metrics, floats (host) | UA 0xb93a8 | C |
+| 0xA0, 0xB0-0x4AF | LRME data, 256 × u32 histogram (the scene detector's input) | fw 0x2cf30; UA 0xb8270 | C |
+| 0x4B0 | scene start (host writes it for every record) | UA 0xb921c, 0xb94ac-0xb94ec; fw 0x38418 | C |
+| 0x4B4 | scene's first frame [I]; the host never touches it | fw 0x45de4 compares it with the current frame | I |
+| 0x4B8 / 0x4BC | histogram distance to the previous frame / max of it and the previous frame's (host, float) | UA 0xb93a8-0xb93ac (§2.4.4) | C |
+| 0x4C0 | float that scales the distance (÷ (Σ of two frames)/512); a scene's first record ends up with the frame-weighted mean | UA 0xb9280, 0xb87bc-0xb87d0 | C use, meaning U |
 | 0x4C4 | frames in the scene (host accumulates). `UpdateNextScene` sets next scene = current + this | UA 0xb8630-0xb8774; fw 0x38434 | C |
-| 0x4CC-0x5FF | scene sums (u64 bits by class, 16-bin log10-complexity counts at 0x574 and sums at 0x5B4) | UA 0xb8664-0xb8698 | C |
+| 0x4C8-0x5F3 | scene block, summed over the scene into its first record (§2.4.5): bits 0x4CC, header bits 0x4DC, class-2/0 header bits 0x4E4/0x4EC, qscale sums 0x4F4/0x4FC, min/max 0x504/0x508, complexity 0x564/0x56C, 16-bin log10-complexity counts 0x574 and sums 0x5B4 | UA 0xb8744-0xb8884, 0xa6b58 | C (names I) |
 | 0x600-0x613 | firmware per-frame values | fw 0x2df70.. | C |
-| 0x614 / 0x618 | complexity floats | UA 0xb85fc, 0xb8650 | C |
-| 0x624 | u16 class 0..3 (NORMAL/MIN/MAX/BLANK) | UA 0xb869c | I |
+| 0x614 | qscale (float; avg_qscale is its mean) | UA 0xb85fc, 0xb8628 | C |
+| 0x618 / 0x61C | complexity floats (header current_complexity / totalcplxsum) | UA 0xb8650 | C |
+| 0x624 | u16 class 0..3 (NORMAL/MIN/MAX/BLANK); other values are not counted | UA 0xb869c | C |
 
 ---
 
@@ -410,7 +659,7 @@ u32 pic_mp_in;        /* AVC 0x12C8, HEVC 0x5EB0, u64 IOVA */
 #define AVE_MP_REC_SIZE  0x626
 #define AVE_MP_HDR_SIZE  0x108
 #define AVE_MP_WINDOW    10       /* records after the current one */
-#define AVE_MP_IN_FIRST  0x44AA   /* 0x108 + 11*0x626 + 0x20 */
+#define AVE_MP_IN_FIRST  0x44AA   /* 0x108 + 11*0x626, no padding */
 #define AVE_MP_IN_NEXT   0x72E
 /* RESET: id 3, AVC 0x48 + 0x10DB0, HEVC 0x48 + 0x32D68; reply 0xE03 */
 ```
@@ -438,8 +687,8 @@ u32 pic_mp_in;        /* AVC 0x12C8, HEVC 0x5EB0, u64 IOVA */
 ### 6.3 User interface
 
 There is no float math in the kernel. The kernel moves blobs; user space
-(a small `tools/ave-2pass` helper, or the application) ports the five
-UA functions of §2.4.
+computes the table: `tools/ave2pass/ave2pass.py build` (§2.4), or the
+application with the same code.
 - **Lab path (first):** module/debugfs. `session_mp_pass=1|2`; debugfs
   `apple_ave_mp` returns the pass-1 records (frame-indexed) and accepts the
   pass-2 table (header + records) for the probe-time self-test.
@@ -464,7 +713,7 @@ and the probe-time self-test at 1280×720. Repeat each one before believing it.
 | T1 | wire 0xFEFC = 1, 0xFF00 = 1 (0xFF04..0xFF10 = −1) | all 30 frames complete; rec+0x2C = frame index, rec+0x1C/0x20 = 1280/720, rec+0x24 = the frame rate as a float, rec+0x40 ≈ 8 × coded bytes; optionally read back MCPU word 0x267408000 = bit 24 set (a register the firmware wrote, so safe, docs/93 §4) | hang or assert (watch `sSVEMap`), or rec+0x2C still zero → the gate is not what §2.3 says |
 | T2 | T1 + 0xFF04 = 30, 0xFF08 = 0 (pass 9) | records as in T1; slice QP ≈ 30 in every frame (`h264_parse.py`) | QPs still move under RC → pass 9 not taken |
 | T3 | second session: 0xFF00 = 2, every frame type 5, BFrames 0, PICMGMT+0x900 → buffer built from T1's records and a **zero** header | 30 frames complete, IDR then P (FrameTypeReturned 3, 1, …), no assert | assert/hang (0x900 not seen, or the header zero is fatal); QP pinned at min/max → the header is needed (go to T4) |
-| T4 | T3 with the header and scene fields from the user-space port (§2.4) | file size within a few % of target; QPs vary with content | size miss ≫ 1-pass RC |
+| T4 | T3 with the header and records from `tools/ave2pass/ave2pass.py build` on T1's records (§2.4), buffers from `ave2pass.py frames` | file size within a few % of target; QPs vary with content | size miss ≫ 1-pass RC |
 | T5 | T4 on a clip with one hard cut, the cut marked | IDR exactly at the cut | no IDR → rec+0x4B0/0x4C4 semantics wrong |
 | T6 | T4 via `CAVE_CMD_RESET` instead of a new session | RESET_DONE 0xE03, then identical output to T4 | |
 | T7 | BD-rate bench (docs/88): 2-pass at pass-1-size vs 1-pass bitrate mode vs fixed QP | §8 | |
@@ -491,11 +740,15 @@ Do not set wire 0xFCE9 or `lrme_rc_pass_num` in any of these runs (§4).
 
 ## 9. Open questions
 
-- Exact header layout and scene-detection thresholds: port UA
-  0xb8270-0xba5d0 (about 10 KB of code). [U]
+- ~~Exact header layout and scene-detection thresholds~~: done, §2.4
+  (`tools/ave2pass/`). What the final pass does with each header field,
+  and the firmware-side meaning of rec+0x4C0, rec+0x34 and rec+0x624. [U]
 - Whether a zero or approximate header is safe (T3 answers it), and the
   meaning of Options bits and QPModLevel outside pass 9. [U]
-- Writer of rec+0x4B4. Whether the firmware uses the PTS at rec+0x04. [U]
+- Writer of rec+0x4B4 (not the host code). Whether the firmware uses the
+  PTS at rec+0x04 (the host code does not read it). [U]
+- Whether macOS's frame receiver memory is zero when a clip shorter than 7
+  frames uses never-touched pool slots for padding (§2.4.7). [U]
 - Whether the RESET header byte cmd+0x40 is "clean reset" = 1 for macOS
   (it comes from a client byte, kext 0x8e8fee8). [I]
 
@@ -511,4 +764,9 @@ S=tools/fwemu/mp
 PATCH="0xffffffff8080426c:01000000;0xffffffff80827724:01;0xffffffff80827728:01000000" \
   .venv/bin/python $S/emu_mp.py <snap>/S3 __ZN14CAVCController16ProcessPipeStartEPv \
   0xffffffff80803760 0x1a2b00 > rc1.txt     # then tools/fwemu/diff.py rc0.txt rc1.txt
+A=tools/ave2pass/ave2pass.py                # §2.4: pass-1 records -> pass-2 table and buffers
+.venv/bin/python $A synth 40 -o recs.bin --cuts 12
+.venv/bin/python $A build recs.bin 40 -o table.bin --backend both   # port == Apple's code under Unicorn
+.venv/bin/python $A dump table.bin; .venv/bin/python $A frames table.bin out/
+.venv/bin/python tools/ave2pass/selftest.py
 ```
