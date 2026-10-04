@@ -32,12 +32,14 @@ that matches only `"apple,ave"` is refused at probe with a pointer here.
 |---|---|---|---|
 | `name` | `"t6001"` | | logs |
 | `fw_name` | `apple/ave_h13c.bin` | IPSW `AppleAVE2FW_*.im4p`, unwrapped (`tools/fetch_firmware.py`) | §3 step 2 |
-| `fw_pristine_name` | `apple/ave-13.5-data-pristine.bin` | `tools/make_ave_data_blob.py` | only for `fw_restore_data` |
+| `fw_pristine_name` | `apple/ave-13.5-data-pristine.bin` | `tools/make_ave_data_blob.py` (a cold dump), or `tools/data_blob_from_image.py build` (the image plus iBoot's fills, docs/89 §6.2) | a reload's DATA restore, and owned DATA |
 | `dev[13.5]` | 14 / 11 / 8 | kext table `0xfffffe0007bc2a38` (docs/09) | **t6001's own row is 15/12/9**; the driver has always sent t6000's and it works. **t8103: 13/10/7** [C, docs/09] |
 | `dev[26.6]` | 11 / 9 / 6 | docs/45 row 3 | 26.6.2 ABI is not the operating one |
 | `cpudart_phys`, `dart1_phys`, `smmu_phys`, `dapf_phys` | `0x40d040000`, `…30000`, `…20000`, `…44000` | ADT `dart-ave0` reg[0..3] + `/arm-io` ranges (`tools/check_addrs.py`) | DAPF = CPUDART + 0x4000 is checked |
 | `dapf_window`, `dapf_mmio_own`, `dapf_mmio_adt` | docs/44 addendum | ADT `dart-ave*` `filter-data-instance-*`, masked | only the driver-side DAPF experiments use these; m1n1 programs the real DAPF |
 | `iboot.*` | TEXT `0x10000b28000`/`0xec000`, DATA `0x10001a90000`/`0x134000` | the live RVBAR and docs/43-44 | **per machine and boot chain**, not just per SoC; the driver checks the live RVBAR against `text_phys` first |
+| `iboot.data_owned` | 0 (`AVE_DATA_IBOOT`) | where the live DATA is: outside RAM, iBoot's copy in place; `AVE_DATA_OWNED` = always the driver's copy (t6001 ave1, docs/82); `AVE_DATA_OWNED_IF_RAM` = the driver's copy when iBoot's DATA lies in System RAM, decided at probe (t8103 on a stock-m1n1 Mac mini, docs/89 §6) | owned DATA needs `tag_cpad`/`tag_wrad`/`tag_ioba` (checked against the ASC and fabric banks) and a blob |
+| `iboot.tag_soc`, `iboot.blob_by_image` | 0, false | the SoC id iBoot writes (`SOC_`); whether a blob that verifies against `fw_name`'s `__DATA` is accepted besides the pinned one | owned DATA only; the in-place restore keeps the pinned sha256 (docs/89 §6.4) |
 | `iboot.translated` | false | the live RVBAR: a DART address (`dart-ave` `vm-base`) instead of TEXT's physical one | t8112: the core fetches TEXT/DATA through the CPUDART; `text_dva`/`data_dva` are then full DVAs and the RVBAR is checked against `text_dva` (docs/90 §3) |
 | `dart_t8110` | false | ADT `dart-ave` `compatible`: `dart,t8020`/`t6000` vs `dart,t8110` | the register layout every TCR/TTBR/ERROR access uses, the DAPF entry's `r20`, and the reload's stream-enable + TLB flush (docs/90 §4) |
 | `src_dims` | false | the firmware: does `CDMAController::ConfigPipeRdDMA` read PICMGMT `+0x964` on the linear-input arm? | true on t8112 (H14G); without it the source reader reads a 0x0 picture and the encoder codes black, with no fault (docs/90 §5) |

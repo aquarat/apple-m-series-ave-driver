@@ -264,6 +264,17 @@ const struct ave_soc ave_soc_t8103 = {
 	 *   TEXT phys 0x8009f4000 iova 0       remap 0x8009f4000 size 0xcc000
 	 *   DATA phys 0x8019b0000 iova 0xcc000 remap 0xf000cc000 size 0x128000
 	 * The DATA literal sits at TEXT+0x423c as in H13C (same RTKit start).
+	 *
+	 * docs/89 §6: a Mac mini (j274) on stock m1n1 reads the same RVBAR
+	 * and literal, but there iBoot's DATA lies inside Linux's System RAM
+	 * (0x801224000-0x802c27fff on that boot) and is overwritten in use.
+	 * Then the driver builds DATA itself, as for t6001's ave1: the
+	 * pristine blob in its own pages, mapped at the same DVA 0xcc000 the
+	 * literal 0xf000cc000 reaches through the DAPF window. TEXT stays
+	 * iBoot's (outside RAM, fetched physically). Where DATA is outside
+	 * RAM (the j313 with the fork's m1n1) nothing changes. The blob may be
+	 * the pinned j313 dump or any blob that verifies against ave_h13g.bin
+	 * with these tags (tools/data_blob_from_image.py build --soc t8103).
 	 */
 	.iboot = {
 		.text_phys	= 0x8009f4000ULL,
@@ -273,6 +284,12 @@ const struct ave_soc ave_soc_t8103 = {
 		.data_size	= 0x128000ULL,
 		.data_dva	= 0xcc000ULL,
 		.data_literal	= 0xf000cc000ULL,
+		.data_owned	= AVE_DATA_OWNED_IF_RAM,
+		.tag_cpad	= 0x267800000ULL,	/* the ASC bank */
+		.tag_wrad	= 0x267c00000ULL,
+		.tag_ioba	= 0,			/* iBoot leaves IOBA 0 on t8103 */
+		.tag_soc	= 0x8103,
+		.blob_by_image	= true,
 	},
 
 	/*

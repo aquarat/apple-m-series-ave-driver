@@ -436,3 +436,10 @@ registers, or the `0x1f0` window mapping) — record it in
   faulting in a way consistent with a stack-guard mismatch, the cheap test is to
   preserve the live 8 bytes at DATA+`0x3a38` across the restore instead of
   overwriting them.
+- **2026-10-04, the blob without a dump** (docs/89 §6.2). The 147 bytes are
+  exactly iBoot's fill set, read from the image's own tag list: the payloads of
+  `STKG`, `SOC_`, `SOCR`, `CpAd`, `WrAd`, `IOBA` and the ASC tunables table at
+  `TUNS`/`TUNZ`. `tools/data_blob_from_image.py` rebuilds the H13S and H14G
+  blobs byte for byte from their images plus those values (`validate`), so a
+  dump is needed only for values the tool does not hold: H13C's tunables (in
+  the t6001 dump, not transcribed) and H13G's (unknown, docs/89 §6.3).

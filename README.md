@@ -27,7 +27,7 @@ the **M2** (`t8112`, Mac mini `j473`) as the first outside the M1 family
 |---|---|---|---|---|---|
 | `t6001` M1 Max | MacBookPro18,4/18,2 (`j314c`/`j316c`) | 2 (`apple-ave-enc`, `apple-ave1-enc`) | `AppleAVE2FW_H13C` → `apple/ave_h13c.bin` | `VARIANT=7` (both) or `4` (ave0) | bring-up machine; ave0's DAPF via the patched m1n1 (docs/50) |
 | `t6000` M1 Pro | MacBookPro18,3 (`j314s`); 18,1 (`j316s`) untested | 1 (`apple-ave-enc`) | `AppleAVE2FW_H13S` → `apple/ave_h13s.bin` | `VARIANT=8` | works with stock m1n1 (the driver programs the DAPF), docs/87 |
-| `t8103` M1 | MacBook Air M1 (`j313`); other M1 machines: placement per machine (docs/89) | 1 (`apple-ave-enc`) | `AppleAVE2FW_H13G` → `apple/ave_h13g.bin` | `VARIANT=9` | H.264 tested by the fork author (docs/89); merged with driver-side DAPF, untested on stock m1n1 |
+| `t8103` M1 | MacBook Air M1 (`j313`); Mac mini M1 (`j274`) being brought up; other M1 machines: placement per machine (docs/89) | 1 (`apple-ave-enc`) | `AppleAVE2FW_H13G` → `apple/ave_h13g.bin` | `VARIANT=9` | H.264 tested by the fork author (docs/89); on a stock-m1n1 Mac mini the driver-side DAPF works (stage 8) and the driver builds DATA itself (docs/89 §6), core start not yet run |
 | `t8112` M2 | Mac mini M2 (`j473`); other M2 machines: placement per machine (docs/90) | 1 (`apple-ave-enc`) | `AppleAVE2FW_H14G` → `apple/ave_h14g.bin` | `VARIANT=10` | H.264 and HEVC (Main, Main10) tested on a j473 with stock m1n1, clean boot and reload; full speed without the PMP, which only slows it here (docs/90 §9) |
 | `t6002` M1 Ultra | Mac Studio (`j375d`) | 4: two per die (`apple-ave-enc`, `apple-ave1-enc`, `apple-ave2-enc`, `apple-ave3-enc`) | `AppleAVE2FW_H13D` → `apple/ave_h13d.bin` | `VARIANT=11` (ave0), `12` (die 0), `13` (ave0 + ave2), `14` (all four) | **ported, untested on hardware** (docs/98): stock m1n1 and DTB; the iBoot placement is read from the live ADT first (docs/98 U0); no PMP vote (the stock DT has the PMP off) |
 | others (M2 Pro/Max, M3…) | | | | | not ported: docs/79 is the checklist |
@@ -41,8 +41,12 @@ Each SoC needs its firmware variant's Mach-O and its **pristine DATA blob**
 `tools/t6002_placement.py`) in `/lib/firmware`. The
 blob is iBoot's DATA segment as left before the encoder's first start,
 taken from a cold boot with the read-only `test/physdump.ko` (docs/51,
-docs/87 §3). The driver checks its sha256 and only needs it to reload in
-the same boot. Only macOS 13.5 stub firmware (`asahi,os-fw-version`) has
+docs/87 §3), or built from the image plus the bytes iBoot fills in with
+`tools/data_blob_from_image.py` (byte-identical to the dumps for H13S and
+H14G; for H13G the tunables need a dump or a choice, docs/89 §6). The driver
+checks its sha256 and only needs it to reload in the same boot, or, where
+iBoot's DATA lies in Linux's RAM (an M1 Mac mini on stock m1n1), to build the
+core's DATA itself. Only macOS 13.5 stub firmware (`asahi,os-fw-version`) has
 been mapped.
 
 ## Benchmarks (2026-10-03, B frames 2026-10-04)

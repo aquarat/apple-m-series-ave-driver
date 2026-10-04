@@ -671,50 +671,155 @@ static void ave_fw_unmap_iboot(struct ave_device *ave)
 }
 
 static int ave_fw_load_pristine(struct ave_device *ave);
+static int ave_fw_check_text_identity(struct ave_device *ave);
 
 /*
- * docs/82 ave1: this instance's DATA, built here: the pristine blob with the
- * three instance tags (CpAd, WrAd, IOBA - {tag, len 8, value} records at
- * DATA+0x3bb3..) set from the table, in pages we own, mapped at data_dva.
- * A fresh copy every probe, so a reload needs no restore.
+ * Whose DATA does this core run on (soc->iboot.data_owned)? Decided once per
+ * probe, before anything uses it, and logged. AVE_DATA_OWNED_IF_RAM: a
+ * stock-m1n1 boot of a Mac mini (j274) leaves iBoot's DATA inside Linux's
+ * System RAM, where the in-place path refuses to map or write it (docs/89
+ * §6); the MacBook Air (j313) with its patched m1n1 keeps it outside, and
+ * stays on the in-place path exactly as before.
  */
-#define AVE_DATA_TAG_CPAD	0x3bbb
-#define AVE_DATA_TAG_WRAD	0x3bcb
-#define AVE_DATA_TAG_IOBA	0x3be4
+static bool ave_fw_data_owned(struct ave_device *ave)
+{
+	const typeof(ave->soc->iboot) *ib = &ave->soc->iboot;
+	int r;
 
+	if (ave->data_mode_set)
+		return ave->data_owned;
+	ave->data_mode_set = true;
+	ave->data_owned = ib->data_owned == AVE_DATA_OWNED;
+	if (ib->data_owned != AVE_DATA_OWNED_IF_RAM)
+		return ave->data_owned;
+
+	r = ib->data_phys ? region_intersects(ib->data_phys, ib->data_size,
+					      IORESOURCE_SYSTEM_RAM,
+					      IORES_DESC_NONE)
+			  : REGION_INTERSECTS;
+	ave->data_owned = r != REGION_DISJOINT;
+	dev_info(ave->dev, "iboot: DATA %#llx+%#llx is %s System RAM: %s\n",
+		 (u64)ib->data_phys, ib->data_size,
+		 r == REGION_DISJOINT ? "outside" :
+		 r == REGION_MIXED ? "partly inside" : "inside",
+		 ave->data_owned ?
+			"owned DATA - built from the pristine blob in pages the driver owns" :
+			"iBoot's DATA, mapped in place");
+	return ave->data_owned;
+}
+
+/*
+ * The RTKit tag list in DATA (_rtk_patchbay, docs/43 §3.4): packed
+ * {4-char code stored byte-reversed, u32 len, payload} records, no
+ * alignment, starting with STKG at data_stkg_off - 8 and ending with IOSZ.
+ * Returns the payload offset of @name in DATA, or a negative errno.
+ * Finding the records by name, not by a fixed offset, is what lets one code
+ * path serve every image (H13C's CpAd payload is at DATA+0x3bbb, H13G's at
+ * 0x3503).
+ */
+static int ave_fw_find_tag(const struct ave_soc *soc, const u8 *data,
+			   size_t size, const char *name, u32 want_len)
+{
+	size_t i;
+	unsigned int n;
+
+	if (soc->data_stkg_off < 8)
+		return -EINVAL;
+	i = soc->data_stkg_off - 8;
+	for (n = 0; n < 64 && i + 8 <= size; n++) {
+		const u8 *p = data + i;
+		u32 len = get_unaligned_le32(p + 4);
+		unsigned int k;
+
+		for (k = 0; k < 4; k++)
+			if (p[k] < 0x20 || p[k] > 0x7e)
+				return -EINVAL;
+		if (len > 0x100 || i + 8 + len > size)
+			return -EINVAL;
+		if (n == 0 && memcmp(p, "GKTS", 4))	/* STKG first */
+			return -EINVAL;
+		if (p[0] == name[3] && p[1] == name[2] &&
+		    p[2] == name[1] && p[3] == name[0])
+			return len == want_len ? (int)(i + 8) : -EINVAL;
+		if (!memcmp(p, "ZSOI", 4))		/* IOSZ ends the list */
+			break;
+		i += 8 + len;
+	}
+	return -ENOENT;
+}
+
+/*
+ * docs/82 ave1, docs/89 §6: this instance's DATA, built here: the pristine
+ * blob with the instance tags (CpAd, WrAd, IOBA) set from the table, in
+ * pages we own, mapped at data_dva. A fresh copy every probe, so a reload
+ * needs no restore. The tag values are checked against this instance's own
+ * banks first, so a row cannot point a core at another block's hardware.
+ */
 static int ave_fw_map_owned_data(struct ave_device *ave,
 				 struct iommu_domain *domain)
 {
 	const typeof(ave->soc->iboot) *ib = &ave->soc->iboot;
+	static const char *const names[3] = { "CpAd", "WrAd", "IOBA" };
+	const u64 want[3] = { ib->tag_cpad, ib->tag_wrad, ib->tag_ioba };
 	unsigned int order = get_order(ib->data_size);
+	phys_addr_t asc = ave->bank[AVE_BANK_ASC].phys;
+	phys_addr_t fabric = ave->bank[AVE_BANK_FABRIC].phys;
+	int off[3];
 	struct page *pg;
+	unsigned int i;
 	u8 *p;
 	int ret;
 
-	/* a row without this encoder's own tags would hand the core IOBA 0 */
-	if (!ib->tag_cpad || !ib->tag_wrad || !ib->tag_ioba) {
-		dev_err(ave->dev, "owned DATA: REFUSING - %s has no CpAd/WrAd/IOBA tags for its own DATA (ave_soc.c)\n",
-			ave->soc->name);
+	if (!ib->tag_cpad || ib->tag_cpad != asc ||
+	    ib->tag_wrad != ib->tag_cpad + 0x400000 ||
+	    (ib->tag_ioba && ib->tag_ioba != fabric)) {
+		dev_err(ave->dev,
+			"owned DATA: REFUSING - %s's tags CpAd %#llx WrAd %#llx IOBA %#llx do not match this instance (ASC %pa, fabric %pa)\n",
+			ave->soc->name, ib->tag_cpad, ib->tag_wrad, ib->tag_ioba,
+			&asc, &fabric);
 		return -EINVAL;
 	}
+
 	ret = ave_fw_load_pristine(ave);
 	if (ret)
 		return ret;
-	/* the tags must be where ave0's are, with ave0's values: same image */
-	if (get_unaligned_le64(ave->iboot_data_pristine + AVE_DATA_TAG_CPAD) != 0x40d800000ULL ||
-	    get_unaligned_le64(ave->iboot_data_pristine + AVE_DATA_TAG_WRAD) != 0x40dc00000ULL ||
-	    get_unaligned_le64(ave->iboot_data_pristine + AVE_DATA_TAG_IOBA) != 0x40c000000ULL) {
-		dev_err(ave->dev, "owned DATA: REFUSING - the blob's CpAd/WrAd/IOBA are not where docs/82 found them\n");
+	/* the blob is this image's DATA only if the image in DRAM is this one */
+	ret = ave_fw_check_text_identity(ave);
+	if (ret)
+		return ret;
+
+	for (i = 0; i < 3; i++) {
+		off[i] = ave_fw_find_tag(ave->soc, ave->iboot_data_pristine,
+					 ib->data_size, names[i], 8);
+		if (off[i] < 0) {
+			dev_err(ave->dev,
+				"owned DATA: REFUSING - no %s record (len 8) in the blob's tag list at DATA+%#x (%d)\n",
+				names[i], ave->soc->data_stkg_off - 8, off[i]);
+			return -EINVAL;
+		}
+	}
+	/* the blob's own pair must be a pair: one ASC's CpAd and WrAd */
+	if (get_unaligned_le64(ave->iboot_data_pristine + off[1]) !=
+	    get_unaligned_le64(ave->iboot_data_pristine + off[0]) + 0x400000) {
+		dev_err(ave->dev, "owned DATA: REFUSING - the blob's CpAd/WrAd are not one ASC's\n");
 		return -EINVAL;
 	}
+
 	pg = alloc_pages(GFP_KERNEL | __GFP_ZERO, order);
 	if (!pg)
 		return -ENOMEM;
 	p = page_address(pg);
 	memcpy(p, ave->iboot_data_pristine, ib->data_size);
-	put_unaligned_le64(ib->tag_cpad, p + AVE_DATA_TAG_CPAD);
-	put_unaligned_le64(ib->tag_wrad, p + AVE_DATA_TAG_WRAD);
-	put_unaligned_le64(ib->tag_ioba, p + AVE_DATA_TAG_IOBA);
+	for (i = 0; i < 3; i++) {
+		u64 was = get_unaligned_le64(p + off[i]);
+
+		put_unaligned_le64(want[i], p + off[i]);
+		dev_info(ave->dev, "  owned DATA: %s at DATA+%#x %#llx -> %#llx%s\n",
+			 names[i], off[i], was, want[i],
+			 was == want[i] ? " (the blob's own)" : "");
+	}
+	/* in DRAM before the core fetches it, as the in-place restore does */
+	arch_wb_cache_pmem(p, ib->data_size);
 	ret = iommu_map(domain, ib->data_dva, page_to_phys(pg), ib->data_size,
 			IOMMU_READ | IOMMU_WRITE, GFP_KERNEL);
 	if (ret) {
@@ -723,9 +828,9 @@ static int ave_fw_map_owned_data(struct ave_device *ave,
 		return ret;
 	}
 	ave->owned_data = pg;
-	dev_info(ave->dev, "  owned DATA: %#llx bytes at phys %pa -> DVA %#llx; CpAd %#llx WrAd %#llx IOBA %#llx\n",
+	dev_info(ave->dev, "  owned DATA: %#llx bytes at phys %pa -> DVA %#llx (the core reads it at %#llx); CpAd %#llx WrAd %#llx IOBA %#llx\n",
 		 ib->data_size, &(phys_addr_t){ page_to_phys(pg) }, ib->data_dva,
-		 ib->tag_cpad, ib->tag_wrad, ib->tag_ioba);
+		 ib->data_literal, ib->tag_cpad, ib->tag_wrad, ib->tag_ioba);
 	return 0;
 }
 
@@ -761,7 +866,7 @@ static int ave_fw_map_iboot(struct ave_device *ave, struct iommu_domain *domain,
 
 	ave->iboot_domain = domain;
 
-	if (fw_map_data && ave->soc->iboot.data_owned) {
+	if (fw_map_data && ave_fw_data_owned(ave)) {
 		ret = ave_fw_map_owned_data(ave, domain);
 		if (ret)
 			goto fail;
@@ -792,6 +897,175 @@ static int ave_fw_map_iboot(struct ave_device *ave, struct iommu_domain *domain,
 fail:
 	ave_fw_unmap_iboot(ave);
 	ave->iboot_domain = NULL;
+	return ret;
+}
+
+/* @name's LC_SEGMENT_64 in a Mach-O firmware file, bounds-checked; NULL if absent */
+static const struct macho_seg *ave_fw_find_seg(const struct firmware *fw,
+					       const char *name)
+{
+	const struct macho_hdr *h = (const void *)fw->data;
+	size_t off = sizeof(*h);
+	unsigned int i;
+
+	if (fw->size < sizeof(*h) || le32_to_cpu(h->magic) != MH_MAGIC_64)
+		return NULL;
+	for (i = 0; i < le32_to_cpu(h->ncmds); i++) {
+		const struct macho_seg *s = (const void *)(fw->data + off);
+		u32 cmd, cmdsize;
+
+		if (off + 8 > fw->size)
+			return NULL;
+		cmd = le32_to_cpup((__le32 *)(fw->data + off));
+		cmdsize = le32_to_cpup((__le32 *)(fw->data + off + 4));
+		if (!cmdsize || off + cmdsize > fw->size)
+			return NULL;
+		if (cmd == LC_SEGMENT_64 && cmdsize >= sizeof(*s) &&
+		    !strncmp(s->segname, name, sizeof(s->segname))) {
+			if (le64_to_cpu(s->fileoff) + le64_to_cpu(s->filesize) > fw->size ||
+			    le64_to_cpu(s->filesize) > le64_to_cpu(s->vmsize))
+				return NULL;
+			return s;
+		}
+		off += cmdsize;
+	}
+	return NULL;
+}
+
+/*
+ * docs/89 §6: a pristine blob that is not the pinned one, accepted for owned
+ * DATA only (soc->iboot.blob_by_image), and only if it is provably this
+ * image's DATA plus iBoot's fills:
+ *   - the firmware file (soc->fw_name) is the image the row identifies:
+ *     its TEXT windows hash to soc->text_win, as TEXT in DRAM must too
+ *     (ave_fw_check_text_identity, before the blob is used);
+ *   - every byte of the blob equals the file's __DATA (zero past filesize),
+ *     except iBoot's fill set, read from the file's own tag list: the
+ *     payloads of STKG, SOC_, SOCR, CpAd, WrAd and IOBA, and the
+ *     _rtk_tunables region TUNS/TUNZ point at;
+ *   - the tunables region starts with the file's table header (version,
+ *     kind, capacity) and a count no larger than the capacity;
+ *   - CpAd/WrAd/IOBA hold this row's tags and SOC_ its SoC id.
+ * What it cannot prove is that iBoot's tunable VALUES are right; the tool
+ * that builds the blob states where they came from
+ * (tools/data_blob_from_image.py).
+ * The in-place path never takes such a blob: there the blob is compared with
+ * and written over iBoot's live DATA, and only the pinned dump is trusted.
+ */
+static int ave_fw_blob_by_image(struct ave_device *ave, const u8 *blob)
+{
+	static const char *const fill[] = { "STKG", "SOC_", "SOCR", "CpAd", "WrAd", "IOBA" };
+	static const u32 fill_len[] = { 8, 4, 4, 8, 8, 8 };
+	const struct ave_soc *soc = ave->soc;
+	const typeof(soc->iboot) *ib = &soc->iboot;
+	const struct macho_seg *ts, *ds;
+	const struct firmware *fw;
+	u64 dvm, dfo, dfs, tfo, tfs, tuns, tunz, tun_off;
+	int foff[ARRAY_SIZE(fill)];
+	u8 dig[SHA256_DIGEST_SIZE];
+	u64 differ = 0, first = 0;
+	unsigned int i;
+	size_t k;
+	int ret, t, z;
+
+	ret = request_firmware(&fw, soc->fw_name, ave->dev);
+	if (ret) {
+		dev_err(ave->dev, "pristine by image: cannot load %s (%d)\n",
+			soc->fw_name, ret);
+		return ret;
+	}
+	ret = -EINVAL;
+	ts = ave_fw_find_seg(fw, "__TEXT");
+	ds = ave_fw_find_seg(fw, "__DATA");
+	if (!ts || !ds || le64_to_cpu(ds->vmsize) != ib->data_size) {
+		dev_err(ave->dev, "pristine by image: %s has no __TEXT/__DATA of DATA's size %#llx\n",
+			soc->fw_name, ib->data_size);
+		goto out;
+	}
+	tfo = le64_to_cpu(ts->fileoff);
+	tfs = le64_to_cpu(ts->filesize);
+	dvm = le64_to_cpu(ds->vmaddr);
+	dfo = le64_to_cpu(ds->fileoff);
+	dfs = le64_to_cpu(ds->filesize);
+
+	for (i = 0; i < ARRAY_SIZE(soc->text_win); i++) {
+		const typeof(soc->text_win[0]) *w = &soc->text_win[i];
+
+		if (w->off + AVE_TEXT_WINDOW_SIZE > tfs)
+			goto out;
+		sha256(fw->data + tfo + w->off, AVE_TEXT_WINDOW_SIZE, dig);
+		if (memcmp(dig, w->sha, sizeof(dig))) {
+			dev_err(ave->dev, "pristine by image: %s TEXT+%#x is not the image this row identifies\n",
+				soc->fw_name, w->off);
+			goto out;
+		}
+	}
+
+	/* the fill set, from the file's own tag list */
+	for (i = 0; i < ARRAY_SIZE(fill); i++) {
+		foff[i] = ave_fw_find_tag(soc, fw->data + dfo, dfs, fill[i], fill_len[i]);
+		if (foff[i] < 0) {
+			dev_err(ave->dev, "pristine by image: no %s record in %s's tag list (%d)\n",
+				fill[i], soc->fw_name, foff[i]);
+			goto out;
+		}
+	}
+	t = ave_fw_find_tag(soc, fw->data + dfo, dfs, "TUNS", 8);
+	z = ave_fw_find_tag(soc, fw->data + dfo, dfs, "TUNZ", 4);
+	if (t < 0 || z < 0)
+		goto out;
+	tuns = get_unaligned_le64(fw->data + dfo + t);
+	tunz = get_unaligned_le32(fw->data + dfo + z);
+	tun_off = tuns - dvm;
+	if (tuns < dvm || tunz < 8 || tun_off + tunz > dfs) {
+		dev_err(ave->dev, "pristine by image: TUNS %#llx/TUNZ %#llx outside __DATA\n",
+			tuns, tunz);
+		goto out;
+	}
+
+	for (k = 0; k < ib->data_size; k++) {
+		u8 img = k < dfs ? fw->data[dfo + k] : 0;
+		bool in_fill = k >= tun_off && k < tun_off + tunz;
+
+		for (i = 0; !in_fill && i < ARRAY_SIZE(fill); i++)
+			in_fill = k >= foff[i] && k < foff[i] + fill_len[i];
+		if (blob[k] != img && !in_fill) {
+			if (!differ)
+				first = k;
+			differ++;
+		}
+	}
+	if (differ) {
+		dev_err(ave->dev,
+			"pristine by image: REFUSING - %llu byte(s) outside iBoot's fill set differ from %s's __DATA, first at DATA+%#llx\n",
+			differ, soc->fw_name, first);
+		goto out;
+	}
+	if (memcmp(blob + tun_off, fw->data + dfo + tun_off, 3) ||
+	    blob[tun_off + 3] > blob[tun_off + 2] ||
+	    8 + 20 * (u64)blob[tun_off + 2] > tunz) {
+		dev_err(ave->dev, "pristine by image: REFUSING - the tunables table header %*phN is not the image's shape\n",
+			8, blob + tun_off);
+		goto out;
+	}
+	if (get_unaligned_le64(blob + foff[3]) != ib->tag_cpad ||
+	    get_unaligned_le64(blob + foff[4]) != ib->tag_wrad ||
+	    get_unaligned_le64(blob + foff[5]) != ib->tag_ioba ||
+	    (ib->tag_soc && get_unaligned_le32(blob + foff[1]) != ib->tag_soc)) {
+		dev_err(ave->dev, "pristine by image: REFUSING - the blob's SOC_ %#x CpAd %#llx WrAd %#llx IOBA %#llx are not %s's\n",
+			get_unaligned_le32(blob + foff[1]),
+			get_unaligned_le64(blob + foff[3]),
+			get_unaligned_le64(blob + foff[4]),
+			get_unaligned_le64(blob + foff[5]), soc->name);
+		goto out;
+	}
+	dev_info(ave->dev,
+		 "pristine by image: %s __DATA matches outside iBoot's fills; SOC_ %#x SOCR %#x, %u tunable(s) at DATA+%#llx\n",
+		 soc->fw_name, get_unaligned_le32(blob + foff[1]),
+		 get_unaligned_le32(blob + foff[2]), blob[tun_off + 3], tun_off);
+	ret = 0;
+out:
+	release_firmware(fw);
 	return ret;
 }
 
@@ -838,7 +1112,15 @@ static int ave_fw_load_pristine(struct ave_device *ave)
 	}
 
 	sha256(fw->data, fw->size, dig);
-	if (memcmp(dig, ave->soc->fw_pristine_sha256, sizeof(dig))) {
+	if (memcmp(dig, ave->soc->fw_pristine_sha256, sizeof(dig)) &&
+	    ave->soc->iboot.blob_by_image && ave_fw_data_owned(ave)) {
+		dev_info(ave->dev,
+			 "fw_restore_data: %s sha256 %*phN is not the pinned blob; verifying it against the image (owned DATA)\n",
+			 path, (int)sizeof(dig), dig);
+		ret = ave_fw_blob_by_image(ave, fw->data);
+		if (ret)
+			goto out;
+	} else if (memcmp(dig, ave->soc->fw_pristine_sha256, sizeof(dig))) {
 		dev_err(ave->dev,
 			"fw_restore_data: REFUSING - %s sha256 %*phN, expected %*phN\n",
 			path, (int)sizeof(dig), dig,
@@ -981,7 +1263,7 @@ int ave_fw_data_ran(struct ave_device *ave)
 	 * has never run reads exactly 0x2a (ave0 and ave1 both, A1b); a halted
 	 * one 0x2e. The exact value, not the STOPPED bit (s2-9).
 	 */
-	if (ave->soc->iboot.data_owned) {
+	if (ave_fw_data_owned(ave)) {
 		u32 st = ave_read(ave, AVE_BANK_ASC, AVE_ASC_CPU_STATUS);
 
 		dev_info(ave->dev, "reload: CPU_STATUS %#x: %s\n", st,
@@ -1025,7 +1307,7 @@ int ave_fw_restore_data(struct ave_device *ave)
 	int mode = fw_restore_data;
 
 	/* Owned DATA is rebuilt from the blob every probe (docs/82) */
-	if (ave->soc->iboot.data_owned)
+	if (ave_fw_data_owned(ave))
 		return 0;
 	if (!mode && ave->recover_halted) {
 		dev_info(ave->dev,
