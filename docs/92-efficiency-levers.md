@@ -10,8 +10,8 @@ for fewer bits at the same quality? The options, cheapest first.*
 | A speed/quality preset | **does not exist**: the motion search is fixed-function and already at its widest window (±192x96, wire 0xFCE0 = 0) | — |
 | Separate P-frame QP | **done** (V4L2 `*_P_FRAME_QP`, `*_B_FRAME_QP`) | −1.5 to −2 % bitrate at +2/+3 (§1) |
 | HEVC in-loop/prediction tools | already at macOS's settings (SAO, TMVP, WPP on) | — |
-| Two or more references | **works since docs/94** (both ME units); was blocked: any frame with two active references stalls the pipe after two macroblocks, on the M2 as on the M1 Max (§2) | not measured separately |
-| B-frames | **works since docs/94** in the self-test; V4L2 support in progress (docs/81) | worth ~9 %: x265 `medium` without B frames needs 9.3 % more bitrate (VMAF, these clips) |
+| Two references | **works since docs/94** (both ME units; was: any frame with two active references stalls the pipe after two macroblocks, §2); V4L2 `reference_frames_for_a_p_frame=2` | −0.1 % VMAF / −0.6 % PSNR-Y, at 2.2x the M1 Pro's time per frame (docs/94, docs/96) |
+| B-frames | **works** (docs/94, V4L2 docs/81 §8) | **−7.6 % VMAF / −9.7 % PSNR-Y** with one B frame per P at B QP +3: the gap to x265 `medium` drops from 20 % to 11 % (docs/96) |
 | Multi-pass / lookahead | firmware code present (CMultiPassControl, H14G's LRME-RC); host interface not mapped | mainly a rate-control (bitrate-mode) improvement; fixed QP is already AVE's better mode |
 
 ## 1. P-frame QP offset
@@ -88,6 +88,6 @@ DCP and AVD drivers were brought up. It needs:
 docs/93 then ran the firmware's per-frame code under emulation from live
 snapshots: it programs the second reference completely and the hardware
 accepts every write, so the trace should look outside the per-frame
-registers. Until then, B-frames and multiple references stay parked; the driver's
-experiment switches (`session_bframes`, `session_ref_spacing_p`,
-`session_hevc_refs`) remain for the trace's follow-up.
+registers. **Not needed after all:** the missing state was the second
+motion-estimation unit, found statically and by emulation (docs/94); B
+frames and two references work (docs/96).

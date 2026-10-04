@@ -568,15 +568,16 @@ AVE_HEVC_Update_POClsb_SliceType (0x211b4), called at 0x6ae3c:
 ## 8. V4L2 implementation (2026-10-04)
 
 After docs/94 (both ME units, Start wire 0xFCEA) made two-reference frames
-work, the V4L2 node gets B frames and two-reference P frames. **Built and
-checked offline only; nothing below has run on hardware yet.** The test
-list is §8.6.
+work, the V4L2 node gets B frames and two-reference P frames. **Tested on
+hardware on the M1 Pro and the M2 on 2026-10-04: every run of §8.6 passes;
+results, benchmark and defaults in docs/96.**
 
 ### 8.1 Controls
 
 | control (v4l2-ctl name) | range | default | latched |
 |---|---|---|---|
 | `V4L2_CID_MPEG_VIDEO_B_FRAMES` (`video_b_frames`) | 0..2 | **0** | at STREAMON |
+| `*_B_FRAME_QP` (`h264_b_frame_qp_value`, `hevc_b_frame_qp_value`) | 0..51 | 0: with B frames on, the I QP + 3 (docs/96) | at STREAMON |
 | `V4L2_CID_MPEG_VIDEO_REF_NUMBER_FOR_PFRAMES` (`reference_frames_for_a_p_frame`) | 1..2 | **1** | at STREAMON |
 | `V4L2_CID_MIN_BUFFERS_FOR_OUTPUT` (read-only) | 1..4 | 1 | follows B_FRAMES: B + 2 |
 
@@ -680,15 +681,16 @@ probe-time self-test now runs **hb1**: `session_bframes=1` with
 
 ### 8.5 Not done, or uncertain
 
-- **Nothing has run on hardware.** HEVC B has never run at all (hb1 was
-  never reached); the S1 offsets and the trimmed sets are its risk (R3, R4).
+- ~~Nothing has run on hardware~~: all of §8.6 passes on both SoCs,
+  HEVC B included (docs/96 §1).
 - H.264 B together with RefSpacingP 2 is allowed but untested; H.264 B
   under rate control writes 0x78 (b8, b10).
 - No H.264 VUI (bitstream_restriction, max_num_reorder_frames 1): decoders
   then assume the level's DPB for reordering, which is correct with more
   output delay. b4 decoded without it. R13 makes it a step of its own.
 - `tools/h264_parse.py` still misparses B slices (§2): grade with
-  ffprobe/ffmpeg. GStreamer with B is untried.
+  ffprobe/ffmpeg. GStreamer 1.28 with B: a correct stream, but DTS > PTS on
+  every B frame, so `mp4mux` breaks (docs/96 §4).
 - CAPTURE through DMABUF needs a kernel mapping, as the one-frame path
   already does.
 

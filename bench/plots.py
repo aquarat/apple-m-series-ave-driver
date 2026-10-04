@@ -7,6 +7,8 @@ Inputs (all in git):
   bench/speed/results.csv              per-frame encode time, by machine/codec/size
   bench/hevc-efficiency/results.csv    M1 Pro: AVE and x265 (docs/88)
   bench/hevc-efficiency/results-m2.csv M2: AVE (docs/91)
+  bench/hevc-efficiency/results-m2-{poff,2ref,bframes,bframes2}.csv
+                                       M2: P/B QP offsets, two references, B frames (docs/92, 94, 96)
   bench/hevc-efficiency/power.log      M1 Pro energy per frame (docs/88)
   bench/hevc-efficiency/power-m2.log   M2 energy per frame (docs/91)
 BD-rates use bench.py's PCHIP implementation, the one docs/88's tables use.
@@ -27,7 +29,15 @@ import bench  # noqa: E402
 XIPH = ["crowd_run", "park_joy", "ducks_take_off", "in_to_tree", "old_town_cross"]
 C = {"M1 Pro": "#1f77b4", "M1 Pro + PMP vote": "#0b3d91", "M2": "#d62728",
      "x265 medium": "#7f7f7f", "x265 slow": "#2ca02c", "x265 ultrafast": "#bcbd22",
-     "x265 fast": "#9467bd"}
+     "x265 fast": "#9467bd", "B frames": "#ff7f0e"}
+# AVE's best measured setting: one B frame per P, B QP = I QP + 3 (docs/96)
+BEST_B = "ave-cqp-x-b1-boff3"
+
+
+def m2_all():
+    return [r for f in ("results-m2.csv", "results-m2-poff.csv", "results-m2-2ref.csv",
+                        "results-m2-bframes.csv", "results-m2-bframes2.csv")
+            for r in rows(os.path.join(HERE, "hevc-efficiency", f))]
 plt.rcParams.update({"font.size": 10, "axes.grid": True, "grid.alpha": 0.3,
                      "svg.fonttype": "none", "figure.dpi": 100})
 
@@ -78,15 +88,16 @@ def pts(rs, clip, enc, metric):
 
 def rd():
     m1 = rows(bench.RESULTS)
-    m2 = rows(os.path.join(HERE, "hevc-efficiency", "results-m2.csv"))
+    m2 = m2_all()
     fig, axs = plt.subplots(1, len(XIPH), figsize=(16, 3.6), sharey=True)
     for ax, clip in zip(axs, XIPH):
         for rs, enc, lab in ((m1, "x265-medium-crf", "x265 medium"), (m1, "x265-slow-crf", "x265 slow"),
-                             (m1, "ave-cqp", "M1 Pro"), (m2, "ave-cqp", "M2")):
+                             (m1, "ave-cqp", "M1 Pro"), (m2, "ave-cqp", "M2"), (m2, BEST_B, "B frames")):
             x, y = pts(rs, clip, enc, "vmaf")
             if x:
                 ax.plot(x, y, marker="o", ms=3.5, lw=1.4, color=C[lab],
-                        label=f"AVE {lab}" if lab.startswith("M") else lab,
+                        label=f"AVE {lab}" if lab.startswith("M") else
+                        "AVE + B frames (B QP +3)" if lab == "B frames" else lab,
                         ls="--" if lab == "M2" else "-")
         ax.set_xscale("log")
         ax.xaxis.set_minor_formatter(NullFormatter())
@@ -100,12 +111,14 @@ def rd():
 
 def bdrate():
     m1 = rows(bench.RESULTS)
-    m2 = rows(os.path.join(HERE, "hevc-efficiency", "results-m2.csv"))
-    combos = [("M1 Pro", m1, "ave-cqp"), ("M2", m2, "ave-cqp")]
+    m2 = m2_all()
+    # the M1 Pro and the M2 are identical (docs/91 §2): one bar for both
+    combos = [("M1 Pro", m1, "ave-cqp", "AVE, P frames only (M1 Pro = M2)"),
+              ("B frames", m2, BEST_B, "AVE + B frames, B QP +3 (docs/96)")]
     fig, axs = plt.subplots(1, 2, figsize=(11, 3.8), sharey=True)
     for ax, (metric, qmax, mname) in zip(axs, (("vmaf", 99.0, "VMAF"), ("psnr_y", None, "PSNR-Y"))):
         w = 0.38
-        for i, (lab, rs, enc) in enumerate(combos):
+        for i, (lab, rs, enc, name) in enumerate(combos):
             vals = []
             for clip in XIPH:
                 r1, q1 = pts(m1, clip, "x265-medium-crf", metric)
@@ -113,7 +126,7 @@ def bdrate():
                 v, ov = bench.bd_rate_pchip(r1, q1, r2, q2, qmax=qmax) if r2 else (float("nan"), 0)
                 vals.append(v if ov >= 0.3 else float("nan"))
             xs = [k + (i - 0.5) * w for k in range(len(XIPH))]
-            b = ax.bar(xs, [0 if v != v else v for v in vals], w, color=C[lab], label=f"AVE {lab}")
+            b = ax.bar(xs, [0 if v != v else v for v in vals], w, color=C[lab], label=name)
             ax.bar_label(b, labels=["n/a" if v != v else f"{v:+.0f}%" for v in vals], fontsize=8, padding=2)
         ax.axhline(0, color="k", lw=0.8)
         ax.set_xticks(range(len(XIPH)), [c.replace("_", "\n") for c in XIPH], fontsize=8)
@@ -122,6 +135,34 @@ def bdrate():
     axs[0].legend(fontsize=8)
     fig.suptitle("How much more bitrate AVE HEVC needs than x265 --preset medium", y=1.02)
     save(fig, "bdrate.svg")
+
+
+def levers():
+    """BD-rate of each M2 setting against AVE's plain fixed QP, mean of the 5 clips."""
+    m2 = m2_all()
+    sets = [("P QP +3", "ave-cqp-poff3"), ("2 refs", "ave-cqp-x-2ref"),
+            ("B=1", "ave-cqp-x-b1"), ("B=2", "ave-cqp-x-b2"),
+            ("B=1, B QP +1", "ave-cqp-x-b1-boff1"), ("B=1, B QP +2", "ave-cqp-x-b1-boff2"),
+            ("B=1, B QP +3\n(default)", BEST_B), ("B=1, B QP +4", "ave-cqp-x-b1-boff4"),
+            ("B=2, B QP +4", "ave-cqp-x-b2-boff4")]
+    sets = [(l, e) for l, e in sets if any(r["encoder"] == e for r in m2)]
+    fig, ax = plt.subplots(figsize=(11, 3.8))
+    w = 0.38
+    for i, (metric, qmax, mname, col) in enumerate((("vmaf", 99.0, "VMAF", "#ff7f0e"),
+                                                    ("psnr_y", None, "PSNR-Y", "#8c564b"))):
+        vals = []
+        for _, enc in sets:
+            v = [bench.bd_rate_pchip(*pts(m2, c, "ave-cqp", metric), *pts(m2, c, enc, metric), qmax=qmax)[0]
+                 for c in XIPH]
+            vals.append(sum(v) / len(v))
+        b = ax.bar([k + (i - 0.5) * w for k in range(len(sets))], vals, w, color=col, label=f"by {mname}")
+        ax.bar_label(b, labels=[f"{v:+.1f}%" for v in vals], fontsize=7, padding=2)
+    ax.axhline(0, color="k", lw=0.8)
+    ax.set_xticks(range(len(sets)), [l for l, _ in sets], fontsize=8)
+    ax.set_ylabel("bitrate vs AVE P frames only\nfor the same quality (BD-rate)")
+    ax.legend(fontsize=8)
+    ax.set_title("AVE HEVC compression settings on the M2, mean of five Xiph clips (negative = fewer bits)")
+    save(fig, "levers.svg")
 
 
 def energy():
@@ -189,4 +230,5 @@ if __name__ == "__main__":
     rd()
     device()
     bdrate()
+    levers()
     energy()

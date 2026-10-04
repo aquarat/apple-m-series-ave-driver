@@ -51,8 +51,9 @@ QUALITY_LADDER = {"ave-cqp": [22, 26, 30, 34, 38],
 
 
 def base_enc(enc):
-    """ave-cqp-poff<N>[-<tag>]: ave-cqp with P QP = QP + N (docs/92); -<tag> names an
-    AVE_EXTRA_CTRLS experiment. Both use ave-cqp's QP ladder."""
+    """ave-cqp-poff<N>[-<tag>]: ave-cqp with P QP = QP + N (docs/92); ave-cqp-x-<tag>:
+    tags -b<N> (B frames) and -boff<N> (B QP offset, docs/96), or an AVE_EXTRA_CTRLS
+    experiment. All use ave-cqp's QP ladder."""
     return "ave-cqp" if enc.startswith("ave-cqp-poff") or enc.startswith("ave-cqp-x-") else enc
 
 
@@ -138,6 +139,10 @@ def encode(enc, clip, kbps, out):
                f"--set-ctrl=video_gop_size={KEYINT},hevc_i_frame_qp_value={kbps},frame_level_rate_control_enable=0"
                + (f",hevc_p_frame_qp_value={min(51, kbps + int(re.match(r'ave-cqp-poff(\d+)', enc)[1]))}"
                   if enc.startswith("ave-cqp-poff") else "")
+               # -bN: N B frames per mini-GOP; -boffN: B QP = QP + N (docs/96)
+               + (f",video_b_frames={re.search(r'-b(\d)(?!\w)', enc)[1]}" if re.search(r'-b(\d)(?!\w)', enc) else "")
+               + (f",hevc_b_frame_qp_value={min(51, kbps + int(re.search(r'-boff(\d+)', enc)[1]))}"
+                  if re.search(r'-boff(\d+)', enc) else "")
                + (("," + os.environ["AVE_EXTRA_CTRLS"]) if os.environ.get("AVE_EXTRA_CTRLS") else ""),
                "--stream-mmap", "--stream-out-mmap", f"--stream-from={SRC}/{base}.nv12",
                f"--stream-to={out}", f"--stream-count={n}"]

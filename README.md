@@ -42,7 +42,7 @@ docs/87 §3). The driver checks its sha256 and only needs it to reload in
 the same boot. Only macOS 13.5 stub firmware (`asahi,os-fw-version`) has
 been mapped.
 
-## Benchmarks (2026-10-03)
+## Benchmarks (2026-10-03, B frames 2026-10-04)
 
 Measured on an M1 Pro and an M2 Mac mini; method, tables and reruns in
 [docs/91](docs/91-benchmarks.md).
@@ -52,12 +52,19 @@ the PMP performance vote (docs/87); the M2 is at full speed without it.
 
 ![AVE encode speed](docs/img/speed.svg)
 
-**Compression**: AVE HEVC against x265 on five Xiph 1080p50 clips. AVE needs
-~20 % more bitrate than x265 `--preset medium` for the same VMAF (docs/88).
+**Compression**: AVE HEVC against x265 on five Xiph 1080p50 clips. With P
+frames only, AVE needs ~20 % more bitrate than x265 `--preset medium` for
+the same VMAF (docs/88); with one B frame per P (`video_b_frames=1`),
+~11 % (docs/96).
 
 ![rate-distortion](docs/img/rd-vmaf.svg)
 
 ![BD-rate vs x265 medium](docs/img/bdrate.svg)
+
+The compression settings against AVE's P-only stream (docs/92, docs/94,
+docs/96):
+
+![compression settings](docs/img/levers.svg)
 
 **Per device**: the M1 Pro and the M2 produce identical output. All 50
 points (5 clips, 8-bit and Main 10, 5 QPs) match in bitrate and every
@@ -130,12 +137,14 @@ It is a stateful mem2mem encoder, NV12 in:
   and 4K 55.5 → **18.2 ms (~55 fps)** with the vote, PSNR unchanged. The PMP
   runs only with a DTB that has the `pmp` alias (Fedora's are built without
   `APPLE_USE_PMP`; docs/78, docs/87 §6-7).
+- **B frames and two references** (docs/81 §8, docs/94, docs/96): the
+  V4L2 controls `video_b_frames` (0..2) and `reference_frames_for_a_p_frame`
+  (1..2), H.264 and HEVC, tested on the M1 Pro and the M2 (byte-identical
+  streams). `video_b_frames=1` saves 7.6 % (VMAF) / 9.7 % (PSNR-Y) bitrate;
+  B frames get the I QP + 3 unless a B QP is set. Both controls default to
+  the one-reference IPPP stream; ffmpeg's V4L2 wrapper always asks for 0 B
+  frames.
 - **Not yet:**
-  - **B frames**, and more than one reference per frame, through V4L2.
-    Two references need both motion-estimation units (docs/94); the
-    `video_b_frames` (0..2) and `reference_frames_for_a_p_frame` (1..2)
-    controls are implemented (docs/81 §8) but not yet run on hardware.
-    Both default to the one-reference IPPP stream.
   - System suspend/resume (untested; suspend is masked on the lab machine).
 - **Known issues:** ffmpeg's V4L2 m2m wrapper segfaults on a 1080-line
   input: the driver rounds the OUTPUT height up to 1088 and the wrapper

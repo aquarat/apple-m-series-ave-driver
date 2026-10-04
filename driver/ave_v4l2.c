@@ -637,7 +637,7 @@ static int ave_init_ctrls(struct ave_ctx *ctx)
 	v4l2_ctrl_new_std(h, o, V4L2_CID_MPEG_VIDEO_FORCE_KEY_FRAME, 0, 0, 0, 0);
 	v4l2_ctrl_new_std(h, o, V4L2_CID_MPEG_VIDEO_H264_I_FRAME_QP, 0, 51, 1,
 			  AVE_DEF_QP);
-	/* 0 = the I-frame QP (docs/92) */
+	/* 0 = the I-frame QP (docs/92); a B QP of 0 with B frames on: + 3 (docs/96) */
 	v4l2_ctrl_new_std(h, o, V4L2_CID_MPEG_VIDEO_H264_P_FRAME_QP, 0, 51, 1, 0);
 	v4l2_ctrl_new_std(h, o, V4L2_CID_MPEG_VIDEO_H264_B_FRAME_QP, 0, 51, 1, 0);
 	v4l2_ctrl_new_std(h, o, V4L2_CID_MPEG_VIDEO_H264_MIN_QP, 0, 51, 1, 10);
@@ -818,6 +818,9 @@ static void ave_return_bufs(struct ave_ctx *ctx, struct vb2_queue *q,
  * clamped where it cannot work (docs/81 §3.3 #1): Baseline/CBP has no B
  * slices; a GOP needs room for a mini-GOP and the anchor before its IDR.
  */
+/* B QP over the I QP when B frames are on and no B QP is set (docs/96) */
+#define AVE_B_QP_OFFSET	3
+
 static u32 ave_latch_bframes(struct ave_ctx *ctx)
 {
 	struct device *dev = ctx->av->ave->dev;
@@ -903,6 +906,15 @@ static int ave_start_streaming(struct vb2_queue *q, unsigned int count)
 			.bframes = nb,
 			.p_refs = ctx->p_refs,
 		};
+
+		/*
+		 * B frames without a B QP: the I QP + AVE_B_QP_OFFSET, the
+		 * best of the measured offsets (docs/96: B=1 at +3 is -7.6 %
+		 * VMAF / -9.7 % PSNR-Y BD-rate against P-only, on every clip;
+		 * at +0 it is -0.5 % / -4.2 %).
+		 */
+		if (nb && !cfg.qp_b)
+			cfg.qp_b = min_t(u32, cfg.qp + AVE_B_QP_OFFSET, 51);
 
 		ret = ave_enc_start(av->ave, &cfg);
 		if (!ret) {

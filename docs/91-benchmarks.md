@@ -86,6 +86,10 @@ POWER_TESTS=crowd_run:8000 POWER_ENCS=ave python3 power.py | tee power-m2.log
 
 ## 5. Can it compress better?
 
-docs/92: a separate P-frame QP (now a V4L2 control) buys 1.5-2 %; more
-references and B-frames, worth roughly half of the gap to x265 `medium`,
-stall the pipe on both SoCs and need a trace of macOS to unblock.
+Yes, with B frames: one B frame per P at B QP +3 needs 7.6 % (VMAF) /
+9.7 % (PSNR-Y) less bitrate than P frames only, at the same hardware time
+per frame; the gap to x265 `medium` drops from 20 % to 11 % (docs/96). A
+separate P-frame QP buys 1.5-2 % (docs/92), a second reference 0.1-0.6 %
+(docs/94).
+
+![compression settings](img/levers.svg)
