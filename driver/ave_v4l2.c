@@ -158,9 +158,14 @@ static inline struct ave_ctx *fh_to_ctx(struct file *file)
 /* Formats                                                                */
 /* ---------------------------------------------------------------------- */
 
+/*
+ * Whole macroblocks; the line stride (bytesperline) is 64-byte aligned on
+ * its own. Width used to be rounded to 64 as well, which left no crop for a
+ * 720-wide picture (768 - 14 = 754 at most): SD sources came out wrong.
+ */
 static void ave_clamp_size(u32 *w, u32 *h)
 {
-	*w = clamp_t(u32, ALIGN(*w, 64), AVE_MIN_W, AVE_MAX_W);
+	*w = clamp_t(u32, ALIGN(*w, 16), AVE_MIN_W, AVE_MAX_W);
 	*h = clamp_t(u32, ALIGN(*h, 16), AVE_MIN_H, AVE_MAX_H);
 }
 
