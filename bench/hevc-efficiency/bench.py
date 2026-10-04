@@ -139,7 +139,7 @@ def encode_2pass(enc, clip, kbps, out):
     """docs/95: pass 1, records -> table (MP_BUILD), pass 2."""
     c0, t0 = child_cpu(), time.monotonic()
     rec, tab = out + ".rec", out + ".tab"
-    cq = re.search(r"-cq(\d+)$", enc)
+    cq = re.search(r"-cq(\d+)", enc)
     try:
         if cq:
             mp_const_qp(int(cq[1]))
@@ -150,7 +150,9 @@ def encode_2pass(enc, clip, kbps, out):
             g.write(f.read())
         if cq:
             mp_const_qp(-1)
-        subprocess.run(MP_BUILD.split() + [rec, str(os.path.getsize(rec) // 0x626), "-o", tab],
+        # -tuned: the host-side fix for the final pass's first-frame QP clamp (docs/95 §12)
+        tune = ["--rc-scene", "1", "--scene-qscale", "bits"] if "-tuned" in enc else []
+        subprocess.run(MP_BUILD.split() + tune + [rec, str(os.path.getsize(rec) // 0x626), "-o", tab],
                        check=True, stdout=subprocess.DEVNULL)
         with open(tab, "rb") as f, open(MP_TAB, "wb") as g:
             g.write(f.read())

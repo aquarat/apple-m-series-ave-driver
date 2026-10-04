@@ -66,10 +66,14 @@ docs/96):
 
 ![compression settings](docs/img/levers.svg)
 
-The firmware's 2-pass mode against its 1-pass VBR (H.264, docs/95 §11):
-it works, but needs more bits, not fewer.
+The firmware's 2-pass mode against its 1-pass VBR (H.264, docs/95 §11-12):
+as macOS drives it, the final pass clamps its first frame to QP 36 and
+front-loads; with the host-side fix it is slightly better than 1-pass and
+lands closer to its target size.
 
 ![2-pass vs 1-pass](docs/img/multipass.svg)
+
+![park_joy frame by frame](docs/img/finalpass.svg)
 
 **Per device**: the M1 Pro and the M2 produce identical output. All 50
 points (5 clips, 8-bit and Main 10, 5 QPs) match in bitrate and every
@@ -152,9 +156,11 @@ It is a stateful mem2mem encoder, NV12 in:
 - **Not yet:**
   - **2-pass** (docs/95): the firmware's multi-pass mode is mapped and runs
     on both SoCs through a lab path (module parameter `session_mp_pass`,
-    debugfs, `tools/ave2pass` for the between-pass step, H.264), but it
-    compresses worse than 1-pass VBR so far (docs/95 §11), so V4L2 does
-    not expose it.
+    debugfs, `tools/ave2pass` for the between-pass step, H.264). Driven as
+    macOS drives it, the final pass front-loads (its first frame is clamped
+    to QP 36, docs/95 §12); with `ave2pass build --rc-scene 1
+    --scene-qscale bits` it beats 1-pass VBR slightly (−0.6 % VMAF,
+    −1.8 % PSNR-Y) and hits its size within 4 % on average. Not in V4L2 yet.
   - System suspend/resume (untested; suspend is masked on the lab machine).
 - **Known issues:** ffmpeg's V4L2 m2m wrapper segfaults on a 1080-line
   input: the driver rounds the OUTPUT height up to 1088 and the wrapper

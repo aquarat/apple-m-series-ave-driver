@@ -37,7 +37,7 @@ touched.*
 | What pass 2 does with the stats | Only with **frame type 5** (firmware decides): it loads the records, runs `CFrameType::FrameType(MPQueue)`, and places IDRs at the scene cuts the host marked. The rate controller allocates bits from first-pass complexity (`MpFinalPassAccumulate`, `finalPassSequenceLevel`, `finalPassSceneLevel`). Multi-pass **forces the bitrate RC arm**: there is no fixed-QP final pass | C |
 | B-frames needed? | **No.** With BFrames (VP+0x18) = 0, the final-pass frame typing produces IDR and P only, scene IDRs included (emulated). Adaptive B placement (`LookAheadBFrames`) needs B-frames, which the two-reference stall blocks (docs/81) | C (emulated) |
 | Firmware lookahead | No multi-frame lookahead in single pass. The M2's **LRME-RC** (H14G only) is a per-frame low-resolution pre-analysis (RC and weighted prediction). It is turned on by VP+0xFE6D `lrme_rc_pass_num` and **requires wire 0xFCE9 = 1** (async LRME pipe). docs/93 found that this flag hangs the M2 today | C / I |
-| Benefit | Expected: 5-10 % over 1-pass bitrate mode, with accurate size targeting [I]. **Measured (§11.4, H.264, M2): +5.2 % VMAF / +11.3 % PSNR-Y BD-rate against 1-pass VBR, i.e. worse, and a 13.5 % mean size miss against 7.3 %.** The final pass front-loads its bits: its first frame is clamped to QP 36 or below (§12) | C (measured) |
+| Benefit | Expected: 5-10 % over 1-pass bitrate mode, with accurate size targeting [I]. **Measured (§11.4, H.264, M2): +5.2 % VMAF / +11.3 % PSNR-Y BD-rate against 1-pass VBR, i.e. worse, and a 13.5 % mean size miss against 7.3 %.** The final pass front-loads its bits: its first frame is clamped to QP 36 or below (§12). **With the host-side fix of §12 (`ave2pass build --rc-scene 1 --scene-qscale bits`): −0.6 % VMAF / −1.8 % PSNR-Y against 1-pass VBR, 4.3 % mean size miss (§12.9)** | C (measured) |
 
 What the host has to compute between passes is the expensive part: scene
 detection, scene accumulation, bit corrections, and the sequence header.
@@ -1296,3 +1296,50 @@ tools/h264_mbqp OUT.h264 > OUT.qp
   firmware, and macOS's table equals ours, so a macOS 2-pass of a short
   single-scene clip should front-load the same way. In content with cuts,
   each later scene restarts unclamped. [I]
+
+### 12.9 Hardware results (2026-10-04, M2)
+
+T8-T12 of §12.7, H.264 at 8 Mbit/s, then the full bench. Every run was
+checked against the emulation: the per-frame QPs of the hardware streams
+(`tools/h264_mbqp.py`, a Python equivalent of `tools/h264_mbqp.c` for an
+FFmpeg that cannot be linked against) equal `fpemu.py`'s replay of the same
+table on **all 1200 frames** of T8 and T9 (and on the 600 frames of the
+original runs), so each table reached the firmware as written.
+
+| run | park_joy | crowd_run | in_to_tree |
+|---|---|---|---|
+| 1-pass VBR | 7905 kbit/s, VMAF 61.23 | 7472, 62.41 | 7322, 89.21 |
+| final pass, macOS-faithful table | 6865 (−14 %), 51.23; MB per 40 frames 1.48 1.16 0.28 0.20 0.32 | 7320, 57.62 | 8164, 89.92 |
+| T8 `--rc-scene 1` | 7589 (−5.1 %), 59.74; 0.56 0.69 0.76 0.88 0.90 | 7041 (−12 %), 61.42 | 7836, 89.39 |
+| **T9 `--rc-scene 1 --scene-qscale bits`** | **8139 (+1.7 %), 62.58; 0.75 0.85 0.91 0.81 0.75** | **7840 (−2.0 %), 64.89** | **8079 (+1.0 %), 89.78** |
+| T12 `--scene-qscale bits` alone | 6987 (−12.7 %), 54.30; 1.44 0.92 0.27 0.33 0.53 | 7245, 58.66 | 8173, 89.90 |
+
+T9's frame 1 is at QP 41 (park_joy) as §12.6 predicted; T12 still
+front-loads, so the clamp, not the qscale sums, is the cause. T10 was not
+needed: `--rc-scene 1` marks the scene without an IDR.
+
+**The bench (T11)**, five clips × 2/4/8/16 Mbit/s (`ave264-2pass-tuned` in
+`bench.py`, `results-m2-2pass-tuned.csv`), PCHIP BD-rate against 1-pass
+VBR, negative = fewer bits:
+
+| | crowd | park | ducks | tree | town | mean |
+|---|---|---|---|---|---|---|
+| macOS-faithful 2-pass, VMAF | +4.2 | +9.2 | −2.3 | +9.0 | +5.9 | +5.2 % |
+| **tuned 2-pass, VMAF** | −3.3 | −2.3 | −1.8 | +3.2 | +1.3 | **−0.6 %** |
+| macOS-faithful 2-pass, PSNR-Y | +6.7 | +28.8 | +10.4 | +4.6 | +6.0 | +11.3 % |
+| **tuned 2-pass, PSNR-Y** | −3.9 | −4.6 | −3.0 | +1.5 | +1.1 | **−1.8 %** |
+
+| mean size miss (max) | 1-pass VBR | macOS-faithful 2-pass | tuned 2-pass |
+|---|---|---|---|
+| all 20 points | 7.3 % (17.8) | 13.5 % (46.2) | **4.3 % (14.9)** |
+
+So the fix turns the final pass from 5-11 % worse than 1-pass VBR into
+slightly better (best on the fast clips, where the clamp did the damage),
+with a closer size match. It is still a bitrate mode: fixed QP with B
+frames (docs/96) stays AVE's most efficient setting, and the 2-pass gain is
+small next to B frames' 8-10 %. The useful property is the size match.
+
+![2-pass vs 1-pass](img/multipass.svg)
+
+![park_joy frame by frame](img/finalpass.svg)
+

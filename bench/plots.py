@@ -171,40 +171,44 @@ def levers():
 
 
 def multipass():
-    """H.264 on the M2: 2-pass against 1-pass VBR, and how close each lands to its target."""
-    rs = [r for f in ("results-m2-h264.csv", "results-m2-h264-vbr.csv", "results-m2-2pass.csv")
+    """H.264 on the M2: 2-pass (as macOS drives it, and with the docs/95 §12 fix) against
+    1-pass VBR, and how close each lands to its target."""
+    rs = [r for f in ("results-m2-h264.csv", "results-m2-h264-vbr.csv", "results-m2-2pass.csv",
+                      "results-m2-2pass-tuned.csv")
           for r in rows(os.path.join(HERE, "hevc-efficiency", f))]
     if not any(r["encoder"] == "ave264-2pass" for r in rs):
         return
-    fig, axs = plt.subplots(1, 2, figsize=(12, 3.8))
-    w = 0.38
-    ax = axs[0]
-    for i, (metric, qmax, mname, col) in enumerate((("vmaf", 99.0, "VMAF", "#ff7f0e"),
-                                                    ("psnr_y", None, "PSNR-Y", "#8c564b"))):
-        vals = [bench.bd_rate_pchip(*pts(rs, c, "ave264-vbr", metric), *pts(rs, c, "ave264-2pass", metric),
-                                    qmax=qmax)[0] for c in XIPH]
-        b = ax.bar([k + (i - 0.5) * w for k in range(len(XIPH))], vals, w, color=col, label=f"by {mname}")
-        ax.bar_label(b, labels=[f"{v:+.0f}%" for v in vals], fontsize=8, padding=2)
-    ax.axhline(0, color="k", lw=0.8)
-    ax.set_xticks(range(len(XIPH)), [c.replace("_", "\n") for c in XIPH], fontsize=8)
-    ax.set_ylabel("2-pass bitrate vs 1-pass VBR\nat equal quality (BD-rate)")
-    ax.set_title("2-pass against 1-pass (positive = 2-pass needs more bits)")
-    ax.legend(fontsize=8)
-    ax = axs[1]
-    for i, (enc, lab, col) in enumerate((("ave264-vbr", "1-pass VBR", "#9467bd"),
-                                         ("ave264-2pass", "2-pass VBR", "#2ca02c"))):
+    twop = [(e, l, c) for e, l, c in (("ave264-2pass", "2-pass as macOS drives it", "#d62728"),
+                                      ("ave264-2pass-tuned", "2-pass, first-frame clamp avoided", "#2ca02c"))
+            if any(r["encoder"] == e for r in rs)]
+    fig, axs = plt.subplots(1, 3, figsize=(17, 3.9))
+    for ax, (metric, qmax, mname) in zip(axs, (("vmaf", 99.0, "VMAF"), ("psnr_y", None, "PSNR-Y"))):
+        w = 0.8 / len(twop)
+        for i, (enc, lab, col) in enumerate(twop):
+            vals = [bench.bd_rate_pchip(*pts(rs, c, "ave264-vbr", metric), *pts(rs, c, enc, metric),
+                                        qmax=qmax)[0] for c in XIPH]
+            b = ax.bar([k + (i - (len(twop) - 1) / 2) * w for k in range(len(XIPH))], vals, w, color=col, label=lab)
+            ax.bar_label(b, labels=[f"{v:+.0f}%" for v in vals], fontsize=8, padding=2)
+        ax.axhline(0, color="k", lw=0.8)
+        ax.set_xticks(range(len(XIPH)), [c.replace("_", "\n") for c in XIPH], fontsize=8)
+        ax.set_title(f"bitrate vs 1-pass VBR at equal {mname}")
+    axs[0].set_ylabel("BD-rate (negative = 2-pass needs fewer bits)")
+    ax = axs[2]
+    modes = [("ave264-vbr", "1-pass VBR", "#9467bd")] + twop
+    w = 0.8 / len(modes)
+    for i, (enc, lab, col) in enumerate(modes):
         errs = []
         for clip in XIPH:
             e = [100 * (float(r["kbps"]) / float(r["target_kbps"]) - 1) for r in rs
                  if r["clip"] == clip and r["encoder"] == enc]
             errs.append(sum(abs(x) for x in e) / len(e) if e else float("nan"))
-        b = ax.bar([k + (i - 0.5) * w for k in range(len(XIPH))], errs, w, color=col, label=lab)
-        ax.bar_label(b, labels=[f"{v:.0f}%" for v in errs], fontsize=8, padding=2)
+        b = ax.bar([k + (i - (len(modes) - 1) / 2) * w for k in range(len(XIPH))], errs, w, color=col, label=lab)
+        ax.bar_label(b, labels=[f"{v:.0f}" for v in errs], fontsize=7, padding=2)
     ax.set_xticks(range(len(XIPH)), [c.replace("_", "\n") for c in XIPH], fontsize=8)
-    ax.set_title("miss of the bitrate target (mean |error|, 2-16 Mbit/s)")
-    ax.set_ylabel("%")
-    ax.legend(fontsize=8)
-    fig.suptitle("AVE H.264 on the M2: the firmware's 2-pass mode against its 1-pass VBR (docs/95 §11)", y=1.02)
+    ax.set_title("miss of the bitrate target, % (mean |error|, 2-16 Mbit/s)")
+    fig.legend(*ax.get_legend_handles_labels(), loc="lower center", ncol=3, fontsize=9,
+               bbox_to_anchor=(0.5, -0.1))
+    fig.suptitle("AVE H.264 on the M2: the firmware's 2-pass mode against its 1-pass VBR (docs/95 §11-12)", y=1.02)
     save(fig, "multipass.svg")
 
 
@@ -216,7 +220,9 @@ def finalpass():
     f = [int(r["frame"]) for r in rs]
     series = (("vbr", "1-pass VBR (hardware)", "#9467bd", "-"),
               ("final", "final pass (hardware; the emulation gives the same QPs)", "#2ca02c", "-"),
-              ("tuned_model", "final pass, --rc-scene 1 --scene-qscale bits (emulation + bits model)", "#ff7f0e", "--"))
+              ("tuned_model", "final pass, --rc-scene 1 --scene-qscale bits: emulation + bits model", "#ff7f0e", "--"),
+              ("tuned_hw", "the same on hardware", "#ff7f0e", "-"))
+    series = tuple(x for x in series if x[0] + "_qp" in rs[0])
     fig, axs = plt.subplots(1, 2, figsize=(12, 3.8))
     for key, lab, col, ls in series:
         axs[0].plot(f, [int(r[key + "_qp"]) for r in rs], color=col, ls=ls, lw=1.6, label=lab)
@@ -229,7 +235,7 @@ def finalpass():
     for ax in axs:
         ax.set_xlabel("frame")
     axs[0].legend(fontsize=8, loc="lower right")
-    fig.suptitle("park_joy 1080p50, H.264 8 Mbit/s on the M2: the final pass starts at QP 36 (docs/95 §12)", y=1.02)
+    fig.suptitle("park_joy 1080p50, H.264 8 Mbit/s on the M2: the final pass starts at QP 36, and the fix (docs/95 §12)", y=1.02)
     save(fig, "finalpass.svg")
 
 
