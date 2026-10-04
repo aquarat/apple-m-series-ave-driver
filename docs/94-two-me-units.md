@@ -44,6 +44,26 @@ V4L2 implementation):
 | `session_multi_me=N` | Start wire 0xFCEA (u16) = N: the firmware programs both ME units |
 | `me1_off=1` | hold venc_me0 but leave venc_me1 off (macOS's default state); on an unclean teardown the ME0 holder is the one abandoned |
 
+**The M1 Pro (t6000, H13S) has the same fix** (2026-10-04, module reloads
+on a machine whose encoder was idle): bs1, hb3 and b4 complete with
+`session_multi_me=1`, with frame sizes byte-identical to the M2's (2580;
+1207/456/494/413; 2232/2158), and the b4 stream is byte-identical to the
+M2's (B frame Y 49.56 dB). The H13S firmware reads the same field
+(InitEncodingParameters `ldrh [x22,#0x52a]`) and has the same 46 writes to
+the ME1 bank as H14G. The control with the current build matches the
+installed one exactly (44.255294 dB).
+
+Speed (V4L2, 720p, fixed QP, 60 frames, per frame):
+
+| | M1 Pro H.264 | M1 Pro HEVC | M2 H.264 | M2 HEVC |
+|---|---|---|---|---|
+| 1 reference | 2.67 ms | 3.54 ms | 3.22 ms | 4.32 ms |
+| 1 reference, `session_multi_me=1` | 2.69 ms | 3.51 ms | | |
+| 2 references, `session_multi_me=1` | **5.91 ms** | **6.66 ms** | 3.22 ms | 4.60 ms |
+
+Both ME units cost nothing by themselves; a second reference costs the M1
+Pro ~2x, the M2 almost nothing.
+
 Compression with two references (bench/hevc-efficiency, M2, five Xiph
 clips, `results-m2-2ref.csv`; PCHIP BD-rate against plain fixed QP on the
 same machine, negative = fewer bits):
