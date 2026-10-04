@@ -17,6 +17,7 @@ sys.path.insert(0, HERE)
 import recfmt  # noqa: E402
 import mpport  # noqa: E402
 import ave2pass  # noqa: E402
+import tune  # noqa: E402
 
 REC, HDR = recfmt.REC, recfmt.HDR
 fails = 0
@@ -111,6 +112,42 @@ def test_numerics():
     check(mpport.fmaxnm32(nan, 0.5) == 0.5 and math.isnan(mpport.fmax32(nan, 0.5)), "fmax/fmaxnm")
 
 
+def test_tune():
+    """docs/95 §12: --key, --rc-scene, --scene-qscale bits."""
+    n = 40
+    recs = recfmt.synth(n, seed=3, bits=lambda k: 20000 + (k * 7919) % 50000)
+    hdr, out = ave2pass.build(recs)
+    # forced key frame: a scene start (and so an IDR in the final pass) at 5
+    _, out_k = ave2pass.build(tune.force_keys(recs, [5]))
+    check(tune.scene_starts(out_k) == [0, 5], "--key 5: scenes start at 0 and 5 (%s)" % tune.scene_starts(out_k))
+    # rate-control scene at 1: frame 1 carries the block a cut at 1 would, frame 0 keeps its 0x4C4
+    h2, out_r, note = tune.rc_scene(recs, 1, ave2pass.build)
+    check(note == "", "--rc-scene 1: no note (%s)" % note)
+    check(h2 == hdr, "--rc-scene: header unchanged")
+    check(tune.scene_starts(out_r) == [0, 1], "--rc-scene 1: scene marks at 0 and 1")
+    check(u32(out_r[0], recfmt.R_SCNT) == n, "--rc-scene: frame 0 still spans the clip (CFrameType's chain)")
+    check(u32(out_r[1], recfmt.R_SCNT) == n - 1, "--rc-scene: frame 1's block has %d frames" % (n - 1))
+    check(struct.unpack_from("<Q", out_r[1], 0x4CC)[0] == sum(u32(r, recfmt.R_BITS) for r in out[1:]),
+          "--rc-scene: frame 1's block sums the bits of frames 1..%d" % (n - 1))
+    check(all(out_r[i] == out[i] for i in range(n) if i != 1), "--rc-scene: every other record unchanged")
+    # bits-weighted qscale sums
+    hb, out_b = tune.bits_weighted_qscale(hdr, out)
+    b = [u32(r, recfmt.R_BITS) for r in out]
+    q = [recfmt.f32(r, recfmt.R_QS) for r in out]
+    want = n * sum(x * y for x, y in zip(b, q)) / sum(b)
+    got = struct.unpack_from("<d", out_b[0], 0x4F4)[0]
+    check(abs(got - want) < 1e-9 * want, "--scene-qscale bits: scene sum %.6g, want %.6g" % (got, want))
+    check(all(out_b[i] == out[i] for i in range(1, n)), "--scene-qscale bits: only scene-start records change")
+    flat = [bytearray(r) for r in recs]
+    for r in flat:
+        struct.pack_into("<f", r, recfmt.R_QS, 7.5)
+        struct.pack_into("<d", r, 0x4F4, 7.5)      # the firmware seeds the scene sum with the frame's qscale
+    h3, out3 = ave2pass.build([bytes(r) for r in flat])
+    _, out3b = tune.bits_weighted_qscale(h3, out3)
+    check(abs(struct.unpack_from("<d", out3b[0], 0x4F4)[0] - struct.unpack_from("<d", out3[0], 0x4F4)[0]) < 1e-6,
+          "--scene-qscale bits: a constant qscale gives the macOS sum")
+
+
 def test_emulation(cases):
     try:
         import mpemu
@@ -147,6 +184,7 @@ def main():
     test_no_cut_and_force()
     test_buffers()
     test_numerics()
+    test_tune()
     test_emulation(a.emu_cases)
     print("%d checks, %d failed" % (checks, fails))
     sys.exit(1 if fails else 0)

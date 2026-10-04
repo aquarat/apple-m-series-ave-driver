@@ -27,3 +27,6 @@ test/*_dtbo.h
 lab.env
 lab.local.md
 .claude/
+
+# docs/95 §12: built from tools/h264_mbqp.c
+tools/h264_mbqp

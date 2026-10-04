@@ -11,6 +11,13 @@ touched.*
 > adaptive B placement is blocked by the two-reference stall, that blocker
 > is gone.
 >
+> **Update (same day): §12.** The final pass front-loads because the
+> firmware clamps its first frame to QP 36 or below and then reaches the
+> right level only through a buffer longer than the bench clips. The
+> emulation reproduces every hardware frame QP. Two host-side table options
+> (`ave2pass build --rc-scene 1 --scene-qscale bits`) flatten it under
+> emulation; the hardware tests are §12.7.
+>
 > **Update (hardware, same day): §11.** The interface works on the M2 and
 > the M1 Pro as mapped here (T1-T5, byte-identical across the two), with
 > two corrections: the LRME collector is not unconditional (§2.3), and the
@@ -30,7 +37,7 @@ touched.*
 | What pass 2 does with the stats | Only with **frame type 5** (firmware decides): it loads the records, runs `CFrameType::FrameType(MPQueue)`, and places IDRs at the scene cuts the host marked. The rate controller allocates bits from first-pass complexity (`MpFinalPassAccumulate`, `finalPassSequenceLevel`, `finalPassSceneLevel`). Multi-pass **forces the bitrate RC arm**: there is no fixed-QP final pass | C |
 | B-frames needed? | **No.** With BFrames (VP+0x18) = 0, the final-pass frame typing produces IDR and P only, scene IDRs included (emulated). Adaptive B placement (`LookAheadBFrames`) needs B-frames, which the two-reference stall blocks (docs/81) | C (emulated) |
 | Firmware lookahead | No multi-frame lookahead in single pass. The M2's **LRME-RC** (H14G only) is a per-frame low-resolution pre-analysis (RC and weighted prediction). It is turned on by VP+0xFE6D `lrme_rc_pass_num` and **requires wire 0xFCE9 = 1** (async LRME pipe). docs/93 found that this flag hangs the M2 today | C / I |
-| Benefit | Expected: 5-10 % over 1-pass bitrate mode, with accurate size targeting [I]. **Measured (§11.4, H.264, M2): +5.2 % VMAF / +11.3 % PSNR-Y BD-rate against 1-pass VBR, i.e. worse, and a 13.5 % mean size miss against 7.3 %.** The final pass front-loads its bits; why is open (§11.5) | C (measured) |
+| Benefit | Expected: 5-10 % over 1-pass bitrate mode, with accurate size targeting [I]. **Measured (§11.4, H.264, M2): +5.2 % VMAF / +11.3 % PSNR-Y BD-rate against 1-pass VBR, i.e. worse, and a 13.5 % mean size miss against 7.3 %.** The final pass front-loads its bits: its first frame is clamped to QP 36 or below (§12) | C (measured) |
 
 What the host has to compute between passes is the expensive part: scene
 detection, scene accumulation, bit corrections, and the sequence header.
@@ -825,12 +832,17 @@ Do not set wire 0xFCE9 or `lrme_rc_pass_num` in any of these runs (§4).
 ## 9. Open questions
 
 - ~~Exact header layout and scene-detection thresholds~~: done, §2.4
-  (`tools/ave2pass/`). What the final pass does with each header field,
-  and the firmware-side meaning of rec+0x4C0, rec+0x34 and rec+0x624. [U]
+  (`tools/ave2pass/`). ~~What the final pass does with each header
+  field~~: mostly done, §12.3 (cnt_All sets the sequence budget and
+  window; the scene blocks set the start estimate; the quantised
+  complexity feeds class rates whose meaning is open). The firmware-side
+  meaning of rec+0x4C0, rec+0x34 and rec+0x624. [U]
 - Whether a zero or approximate header is safe (T3 answers it), and the
   meaning of Options bits and QPModLevel outside pass 9. [U]
-- Writer of rec+0x4B4 (not the host code). Whether the firmware uses the
-  PTS at rec+0x04 (the host code does not read it). [U]
+- ~~Writer of rec+0x4B4~~: the firmware, with the frame's display
+  number; ProcessPipeStart compares it to the frame (§12.6). The PTS at
+  rec+0x04 and the frame rate at rec+0x24 do not change the final pass
+  (§11.5, §12.1). [C, emulated]
 - Whether macOS's frame receiver memory is zero when a clip shorter than 7
   frames uses never-touched pool slots for padding (§2.4.7). [U]
 - Whether the RESET header byte cmd+0x40 is "clean reset" = 1 for macOS
@@ -860,6 +872,11 @@ A=tools/ave2pass/ave2pass.py                # §2.4: pass-1 records -> pass-2 ta
 .venv/bin/python $A build recs.bin 40 -o table.bin --backend both   # port == Apple's code under Unicorn
 .venv/bin/python $A dump table.bin; .venv/bin/python $A frames table.bin out/
 .venv/bin/python tools/ave2pass/selftest.py
+# §12: the final pass's rate control under emulation (snapshot S3 of docs/93)
+.venv/bin/python $A build recs.bin 200 -o tuned.tab --rc-scene 1 --scene-qscale bits
+.venv/bin/python $S/fpemu.py <snap>/S3 table.bin --sizes final.sizes --hwqp final.qp      # replay
+.venv/bin/python $S/fpemu.py <snap>/S3 tuned.tab --model p1.qp:p1.sizes final.qp:final.sizes vbr.qp:vbr.sizes
+tools/h264_mbqp final.h264 > final.qp       # per-frame macroblock QPs of a stream
 ```
 
 ## 11. Hardware results (2026-10-04)
@@ -933,9 +950,349 @@ Per 40 frames of `park_joy` at 8 Mbit/s: 1-pass VBR spends 0.96, 0.65,
 - **The tool.** `ave2pass` matches Apple's own host code under emulation
   (§2.4.8); a hand-made single-scene table behaves the same.
 
-Left: how the firmware's final-pass controller (`MpFinalPassAccumulate`,
-`finalPassSequenceLevel`, `finalPassSceneLevel`, §2.2) spends the
-header's totals over the clip; the RESET path macOS uses instead of a new
-session (T6); and the header fields whose meaning is still [U] (§2.4.6).
-Until then the lab path stays a lab path: nothing in the V4L2 interface
-exposes it, and AVE's best mode remains fixed QP with B frames (docs/96).
+Left at the time: how the firmware's final-pass controller
+(`MpFinalPassAccumulate`, `finalPassSequenceLevel`, `finalPassSceneLevel`,
+§2.2) spends the header's totals over the clip. §12 answers it: a clamp on
+the first frame's QP and a slow buffer, not the header, the PTS or the
+RESET path. Until §12.7's tests pass, the lab path stays a lab path:
+nothing in the V4L2 interface exposes it, and AVE's best mode remains
+fixed QP with B frames (docs/96).
+
+## 12. Why the final pass front-loads
+
+*2026-10-04, static analysis of H14G and H13S plus Unicorn emulation from
+snapshot S3, fed with the hardware evidence of §11.4 (park_joy, crowd_run
+and in_to_tree at 8 Mbit/s: the pass-1 records, the tables, the three
+streams and their per-frame sizes). No hardware was touched.*
+
+### 12.1 Result
+
+| question | answer | label |
+|---|---|---|
+| What sets the final pass's QP? | One QP per frame, from one number: the controller's qscale (CMultiPassControl+0xC). It is looked up in a 99-entry {QP, mod level, qscale} table, and ProcessRateControl returns the result unchanged. Every macroblock of a frame has that QP. The slice header keeps 26 and the first macroblock's mb_qp_delta carries the rest. No stream shows per-MB modulation: not the final pass, not pass 1, not 1-pass VBR (§12.2). §11.5's "acts per macroblock" came from the slice header's 26 | C (code; every MB of 1800 hardware frames decoded) |
+| Can the emulation be trusted? | **Yes.** Fed the hardware's per-frame sizes, the firmware's own code under emulation gives the hardware's frame QP on **all 600 frames** of the three clips (0 differences). With a per-frame bits model instead (closed loop), it reproduces the hardware's per-40-frame sizes within a few %. Independently, it also reproduces the pass-9 run of §11.5 (§12.5) | C (emulated) |
+| Root cause | **The first frame's qscale is clamped to QP 36 or below** (`MpFinalPassSceneBitrates`, fw 0x307c4-0x308fc). The clamp applies only on the sequence-level call at frame 0. The firmware's own estimate for park_joy is QP 45-46 (qscale 47.9), the content needs about QP 42 at 8 Mbit/s (1-pass VBR settles there), and the clamp starts it at 36. After that, q moves only through a virtual buffer of 1.65 × the scene's duration (6.6 s and 52.8 Mbit for a 4-s clip). The buffer starts at the bottom of its q range, and going from QP 36 to 42 means absorbing about 31 Mbit, the whole clip's budget. What finally moves q is the sequence buffer's correction (2-s window, amplified up to 7× when over budget). It overshoots to QP 51 and pays back for the rest of the clip | C (code), emulated |
+| Why in_to_tree differs | Its estimate (qscale 8.5, QP 33) lies between QP 30 and 36, and the clamp sets such a start to exactly QP 30 (5.80). That happens to be the level in_to_tree needs at 8 Mbit/s (its pass 1 settles at QP 30), so nothing has to be paid back | C (emulated) |
+| Other suspects | None of these is involved. rec+0x24: the records say 30.0 fps, and a replay with 50.0 is identical. Wire 0xFF48 (1 or 50), the QP floor (10 or 0) and the PTS: identical. The header's cnt is 200, the number of frames coded. The budgets use the session's 50 fps. The RESET path re-runs the same `InitEncodingParameters` → `ProcessInit` → `Initialize` (§2.5), so it starts the controller in the same state [I]. A constant-QP first pass does not help, because the clamp sets the start, not the estimate (§12.5) | C (emulated) / I |
+| H13S | The same code. `finalPassSequenceLevel`, `finalPassSceneLevel` and `MpFinalPassSceneBitrates` have identical instruction multisets once registers are renamed. `MpFinalPassAccumulate`, `Initialize`, `ProcessRateControl` and `ProcessAccumulate` differ only in instruction scheduling and store pairing. The qscale tables and constants are byte-identical (h13s 0xb1fd4 = h14g 0xb7314) | C |
+| Host-side fix | Two table options, both host-side. `ave2pass build --rc-scene 1` adds a rate-control scene start at frame 1 with no IDR, so the start comes from the scene-level path, which has no clamp. `--scene-qscale bits` makes the scene qscale sums bits-weighted, so that path's estimate is right after a VBR first pass. Closed loop: park_joy 0.67 0.89 0.86 0.90 0.81 MB per 40 frames, +3 % size, QP 40-42 after frame 0; crowd_run −2 %, in_to_tree −0.3 % (§12.6). Hardware tests: §12.7 | C (emulated), I (bits model) |
+
+![final pass, park_joy](img/finalpass.svg)
+
+### 12.2 How the QP reaches the frame
+
+`CRateControl::ProcessRateControl` (fw 0x3acbc) takes a multipass path
+when RC+0x2979 (sCRCInitParams+177, the enable) is set and the pass is
+non-zero (fw 0x3ad3c-0x3adc8). On the first frame it calls
+`finalPassSequenceLevel` (fw 0x3b128). On later frames it calls
+`finalPassSceneLevel` when the current scene's start
+(CMultiPassControl+0x250) is at or before the frame (fw 0x3ae88-0x3ae9c).
+Then it returns RC+0x394 as the frame's QP (fw 0x3b12c-0x3b2cc; RC+0x794
+is 0 from ProcessInit). Nothing else adjusts the QP on this path. [C]
+
+RC+0x394 is written only through `CRateControl::QpUpdateByMultipass`
+(fw 0x3d888), which sets:
+
+- RC+0x394 = the table entry's QP (+ RC+0x31C, which is 0 for AVC);
+- RC+0x1164 = the entry's mod level;
+- RC+0x3B4 = the qscale.
+
+The entry is the first whose qscale is ≥ q, a lower bound (e.g. fw
+0x2f1b4-0x2f568). The AVC table (codec ≠ 1) is at fw 0xb7314: 99 entries
+{s16 QP, u16 mod, f32 qscale}, with QP 0-51, mod 4-7 and qscale 0.213-255.
+Some entries: QP 36/6 = 12.91, 30/6 = 5.80, 42/6 = 30.82, 51/7 = 255. [C]
+
+The mod level would feed QP modulation, which is off (wire 0xFF70 = 0).
+On the hardware, every macroblock of every frame has the same QP
+(`tools/h264_mbqp.c`, libavcodec's per-MB QP export, 9 streams × 200
+frames). [C]
+
+The controller updates q after each frame (`MpFinalPassAccumulate`,
+called from `ProcessAccumulate` at fw 0x3d078). So frame n's QP comes from
+frames < n, and on a scene-start frame from the scene-level call that
+runs first. [C]
+
+### 12.3 The controller
+
+Notation:
+
+- R = the session bitrate (RC+0x2B8); f = the frame rate (RC+0x538,
+  float).
+- M = the CMultiPassControl object (ctrl+0x418); H = the header (M+0x39C).
+- The current scene block (rec+0x4B0..0x5FF of the scene's first record)
+  sits at M+0x24C, so M+x there is rec+(x+0x264).
+- N_s = rec+0x4C4 (frames in the scene), B_s = Σ bits (rec+0x4CC),
+  Q_s = Σ qscale (rec+0x4F4).
+
+**Four virtual buffers.** `Initialize` (fw 0x2c8f4) sets them up through
+a helper (fw 0x2ccf8, "init(rate, f, window, q_lo, q_hi)") [C]:
+
+- M+0x10, the *sequence* buffer;
+- M+0x98, the *scene* buffer;
+- M+0x120 and M+0x1A8, in macroblock units, not on the default path.
+
+Each buffer has a size S = window × rate, a fullness F (16.16 bits)
+started at S/2, a drain of rate/f per frame, and a q range [q_lo, q_hi].
+q follows F as:
+
+```
+q(F) = q_lo·K / (K − F'),   K = q_hi·S / (q_hi − q_lo),   F' = clamp(F, 0, S)       fw 0x2f264-0x2f2c4, 0x313ac
+       clamped to [0.2395, 255], then to the table's [0.213, 255]                   fw 0x2f2c8-0x2f2e0
+```
+
+So q runs from q_lo at an empty buffer to q_hi at a full one, along a
+hyperbola that is flat near q_lo. Adding a frame (fw 0x2ecc8) books its
+bits at once, or, in "list mode" (+0x48 = 1), spreads them: an I frame
+over round(f) frames, a P frame over 4. [C]
+
+`Initialize` also sets M+0xC = 1.889. That is the qscale of QP 21: the
+first pass's start, the 21 of §11.5's pass-1 streams. From Options (wire
+0xFF10, default 0x1305) it sets [C]:
+
+- bit 3 → M+0x4F4/0x4F8 = {0.5, 2.0} or {0.9, 1.1};
+- bits 9 and 11 → M+0x500 = 2, 4 or 5.
+
+**Frame 0: `finalPassSequenceLevel`** (fw 0x2faac):
+
+```
+T = cnt_All·R/f,  D = cnt_All/f                                          fw 0x2fb9c-0x2fbc0
+window0 = Options bit 12 ? min(D/2, 300) : 300                           fw 0x2fbc4-0x2fbec
+R0 = Options bit 0 ? max(31/32·T, T − window0·R/2) / D : R               fw 0x2fbf8-0x2fcb8
+sequence buffer: rate R0, size window0·R0, F0 = S/2, list mode, no clamps  fw 0x2fcbc-0x2fde0
+divisor = (u32)(f·window0/2) + 1                                         fw 0x2fd40-0x2fd78
+```
+
+For the bench clips (200 frames at 50 fps) this gives D = 4 s,
+window0 = 2 s, R0 = 7.75 Mbit/s (31/32 of the target), S = 15.5 Mbit and
+divisor 51 (emulated). [C] It then calls
+`MpFinalPassSceneBitrates(f, first = 1)`.
+
+**Scene level: `MpFinalPassSceneBitrates`** (fw 0x3007c) runs at frame 0
+and at every later scene start. At a later start, `finalPassSceneLevel`
+(fw 0x2fee0) first subtracts the new scene's block from H
+(`MpFinalPassUpdateSeqRcInfo`, fw 0x30a78), and skips the rest if no
+frames remain.
+
+```
+class rates from H's quantised complexity counts (first call only)       fw 0x300b8-0x302ac   [C], meaning [U]
+R_s = the scene's rate: class rates weighted by the scene's classes      fw 0x302b0-0x30460   [C]
+T_s = R_s·N_s/f;   Hd = header-bit estimate from rec+0x4DC/0x4E4/0x4EC   fw 0x30464-0x304e8   [C], terms [I]
+q_raw = (Q_s/N_s) · (B_s − Hd) / (T_s − Hd)                              fw 0x304f4-0x305c4   [C]
+        for a scene that starts on an I frame (rec+0x5F4 = 2); otherwise B_s also gets
+        the expected extra cost of the IDR the final pass will put there (fw 0x30508)
+        clamped to the table's range, >= 0.2521
+scene buffer (Options bit 8): rate R_s, window clamp(1.65·N_s/f, 0.5, 30) s,
+        q range [q_raw/3.75, 4·q_raw]                                    fw 0x306f8-0x307bc   [C, emulated]
+first call only:                                                         fw 0x307c4-0x308fc   [C, emulated]
+        qA = qscale(first entry with QP·10+mod >= 300) = 5.80 (QP 30)
+        qB = qscale(first entry with QP·10+mod >= 366) = 12.91 (QP 36)
+        q0 = q_raw > qB ? qB : q_raw > qA ? qA : q_raw     (a q_raw > 4·qA branch is dead for AVC)
+later calls: q0 = q_raw
+M+0xC = q0;  scene F = K − q_lo·K/q0  (so that q(F) = q0)                fw 0x30900-0x3091c   [C]
+```
+
+This is a 2-pass estimator in the usual form, with bits ∝ 1/qscale: the
+pass-1 mean qscale, scaled by pass-1 bits over target bits. Its weak spot
+is the plain mean of qscale. After a first pass whose qscale moved a lot,
+Σq/N × ΣB is not ΣqB, and the VBR first pass ramps from qscale 1.9 to 30
+while spending most of its bits early. [I]
+
+**Every frame: `MpFinalPassAccumulate`** (fw 0x2ef08). `ProcessAccumulate`
+(fw 0x3d078) passes it the frame index, the display index, the class (0 P,
+2 I), the frame's bits, and the CABAC-minus-estimate correction of two
+frames back.
+
+```
+if display order == 0: finalPassSequenceLevel()                           fw 0x2f068, 0x2f304
+if M+0x250 <= display order: finalPassSceneLevel()                        fw 0x2f06c-0x2f07c
+sequence: add(bits); F0 += corr − R0/f                                     fw 0x2f080-0x2f0f0
+c = ((F0 >> 16) − F0_start) / divisor                                     fw 0x2f0f4-0x2f108
+Options bit 2: r = min(3·(F0 − F0_start)/S0, 2);  c ×= ((r+3)² + 3) / ((r−3)² + 3)   fw 0x2f10c-0x2f154
+        (×1 at r = 0, ×7 at r = 2, ×0.37 at r = −1: overspending is corrected hard,
+         underspending gently)
+Options bit 8: scene: add(bits); F += corr − R_s/f; F += c               fw 0x2f1fc-0x2f27c
+q = q(F) (scene buffer), clamped; M+0xC = q; QpUpdateByMultipass          fw 0x2f280-0x2f568
+```
+
+So the frame QP follows the scene buffer. The sequence buffer acts on it
+only through c, an integral term with a 2-s horizon. [C]
+
+### 12.4 park_joy, frame by frame
+
+A replay feeds the hardware's per-frame sizes in and reads the QPs out;
+they equal the hardware's:
+
+| frame | QP | q | sequence F / S (Mbit) | scene F / S (Mbit) |
+|---|---|---|---|---|
+| 0 | 36 | 12.91 | 7.6 / 15.5 | 0.5 / 52.8 |
+| 20 | 36 | 13.34 | 9.5 / 15.5 | 2.6 / 52.8 |
+| 40 | 37 | 15.06 | 13.0 / 15.5 | 9.1 / 52.8 |
+| 60 | 39 | 20.03 | 15.5 / 15.5 | 21.3 / 52.8 |
+| 80 | 43 | 37.82 | 16.3 / 15.5 | 38.3 / 52.8 |
+| 100 | 49 | 115.4 | 14.7 / 15.5 | 50.7 / 52.8 |
+| 120 | 51 | 191.5 | 12.3 / 15.5 | 52.9 / 52.8 |
+| 160 | 49 | 122.6 | 7.7 / 15.5 | 50.6 / 52.8 |
+
+How the clip goes [C, emulated]:
+
+1. The scene buffer's range is [12.76, 191.5] (q_raw = 47.9). q0 = 12.91
+   sits at its floor, so the buffer starts nearly empty.
+2. At 8 Mbit/s the content needs q ≈ 31 (QP 42). This hyperbola reaches
+   31 only at F ≈ 0.59·S = 31 Mbit, the clip's whole budget.
+3. Frames at QP 36 cost about 30 kB against a 20 kB budget, so the
+   sequence buffer fills.
+4. From frame ~40 its amplified correction drives the scene buffer up. q
+   passes 31 near frame 75, but the sequence buffer is already over its
+   size, and the correction keeps pushing.
+5. The scene buffer fills (QP 51, 4 kB frames at 100-135) and then drains
+   slowly. The clip ends 12.7 % under target.
+
+crowd_run goes the same way with q_raw = 41.4.
+
+### 12.5 Emulation (`tools/fwemu/mp/fpemu.py`)
+
+The run starts from snapshot S3. `CRateControl::Init` gets the snapshot's
+own sCRCInitParams copy (RC+0x1C0), patched to the bench session:
+
+- 1920×1088, 8 Mbit/s, 50 fps, wire 0xFF48 = 1;
+- IdrPeriod 400, MaxKeyFrameIntervalDuration 2^20 s, QP 10-51;
+- multipass 1/2/−1/−1/6/0x1305.
+
+Then, per frame:
+
+1. `GetFrameType`, with type 5 and the real multipass buffers.
+2. The two copies of `ProcessPipeStart`, done in Python: the header on
+   frame 0, and one scene block per frame (fw 0x45d44-0x45e40).
+3. `CRateControl::RateControl`.
+4. `UpdateBits` for both engines, with the frame's bits.
+5. `CRateControl::Accumulate`.
+
+`_RTK_lock_lock`/`unlock` are stubbed, because their LSE `cas` faults in
+Unicorn.
+
+- **Replay**, with the hardware's sizes as bits: the frame QPs equal the
+  hardware's on 200/200 frames of each clip. [C, emulated]
+- **Closed loop**, with bits from a per-frame model
+  log2(bits_f) = a_f − QP/k. The model is fitted on the three hardware
+  streams of each clip (pass 1, final pass, 1-pass VBR). k = 4.3 for
+  park_joy and 5.0 for crowd_run; in_to_tree's is fixed at 5, because its
+  streams span only QP 29-33. The mean |QP error| is 0.1-0.3. The default
+  table gives these MB per 40 frames:
+
+  | clip | closed loop | hardware |
+  |---|---|---|
+  | park_joy | 1.41 1.24 0.34 0.20 0.31 | 1.48 1.16 0.28 0.20 0.32 |
+  | crowd_run | 1.42 0.99 0.51 0.35 0.39 | 1.45 0.95 0.50 0.35 0.41 |
+  | in_to_tree | 0.78 0.81 0.79 0.81 0.92 | 0.77 0.81 0.80 0.81 0.90 |
+
+  A constant-QP first pass at 36, synthesised from the model, gives
+  park_joy 1.38 1.07 0.31 0.28 0.46. §11.5's hardware pass-9 run was
+  1.46 0.99 0.27 0.27 0.45. [C, emulated; the model is I]
+
+### 12.6 Host-side changes, closed loop
+
+The tables were built with `tools/ave2pass` and run through the
+emulation with the bits model. All three options are off by default, and
+none of them is what macOS does. Each cell gives MB per 40 frames, the
+size against the 4 MB target, and the QP range after frame 0. There is
+one IDR, at frame 0, unless noted.
+
+| table | park_joy | crowd_run | in_to_tree |
+|---|---|---|---|
+| macOS (default) | 1.41 1.24 0.34 0.20 0.31, −12.7 %, 36-51 | 1.42 0.99 0.51 0.35 0.39, −8.5 %, 36-46 | 0.87 0.70 0.73 0.82 0.88, 0.0 %, 29-30 |
+| `--scene-qscale bits` | 1.37 1.03 0.30 0.31 0.50, −12.1 % | 1.37 0.83 0.44 0.42 0.55, −9.6 % | unchanged |
+| `--key 2` (IDR at 0 and 2) | 0.52 0.70 0.76 0.90 0.94, −4.3 %, 35-44 | 0.71 0.64 0.69 0.75 0.80, −10.4 % | 0.74 0.62 0.73 0.87 0.90, −3.3 % |
+| `--key 2 --scene-qscale bits` | 0.71 0.84 0.86 0.90 0.81, +3.0 %, 35-42 | 0.93 0.71 0.72 0.78 0.77, −2.1 % | 0.83 0.68 0.73 0.85 0.88, −0.8 % |
+| `--rc-scene 1` | 0.48 0.70 0.75 0.90 0.94, −5.6 %, 42-44 | 0.64 0.63 0.69 0.75 0.80, −12.2 % | 0.69 0.62 0.73 0.88 0.93, −3.6 % |
+| **`--rc-scene 1 --scene-qscale bits`** | **0.67 0.89 0.86 0.90 0.81, +3.1 %, 40-42** | **0.88 0.75 0.75 0.76 0.77, −2.1 %, 40-41** | **0.77 0.70 0.78 0.86 0.88, −0.3 %, 29-31** |
+| Options 0x1205 (bit 8 off) | 0.78 0.99 1.01 0.93 0.79, +12.4 %, 40-43 | 0.99 0.93 0.91 0.84 0.80, +11.9 % | 0.66 0.65 0.71 0.81 0.92, −6.2 % |
+
+Longer clips were made from the 200 frames played forwards and
+backwards, 1000 frames in one scene. The host detects a cut at each turn,
+so there are IDRs at 398 and 796. Per 200 frames:
+
+| clip | default | both options |
+|---|---|---|
+| park_joy | 7.36 2.48 2.43 2.68 3.64 MB (−7 %) | 4.25 3.57 4.15 3.58 4.16 (−1.5 %) |
+| crowd_run | 6.12 3.66 2.32 2.84 3.39 | 4.15 3.83 3.84 3.88 3.90 |
+
+The start transient is a fixed ~100 frames: long clips dilute it but do
+not remove it. [C, emulated; I]
+
+- **`--key N`** sets rec+0x50 bit 0 (forceKeyFrame) on the pass-1 record
+  of frame N, so the host pipeline starts a scene there (§2.4.4). The
+  scene-level call at N has no clamp, and it starts the scene buffer at
+  q_raw with its range centred on it. Cost: a second IDR.
+  [C, emulated]
+- **`--rc-scene P`** gives record P the scene block that a cut at P would
+  give it, and leaves the enclosing scene's rec+0x4C4 alone. P then gets
+  a scene-level call but no IDR [C, emulated]:
+  - CFrameType puts IDRs only where its scene chain lands: next scene =
+    current + rec+0x4C4 (`UpdateNextScene`, fw 0x383c4-0x38450; the IDR
+    at fw 0x38ba0). The chain does not land on P.
+  - The firmware's scene ring takes every record with rec+0x4B0 ≠ 0
+    (fw 0x1e5d8-0x1e648).
+  - ProcessPipeStart copies P's block in on frame P (fw 0x45d94-0x45e40;
+    rec+0x4B4 = P is the firmware's own frame number).
+
+  The header is unchanged.
+- **`--scene-qscale bits`** rewrites each scene's Q_s as N_s·Σ(b·q)/Σb,
+  and H+0x4C the same way. The firmware reads Q_s for q_raw (M+0x290,
+  fw 0x30464); otherwise Q_s and H+0x4C only feed
+  `MpFinalPassUpdateSeqRcInfo`'s avg_qscale upkeep. With a constant-QP
+  first pass the option changes nothing. After the VBR first pass it
+  brings park_joy's q_raw from 47.9 to 29.3 (the bits-weighted mean is
+  0.61 of the plain one; crowd_run 0.60, in_to_tree 0.82). Alone it does
+  little, because the clamp, not q_raw, sets the start. [C, emulated]
+- **Options bit 8 off** starts the scene buffer at max(clamp, q_raw/2),
+  with a 30-s window and no sequence correction. The QP is flat, but the
+  size follows q_raw's error (+12 %). It is not a fix. [C, emulated]
+
+A constant-QP first pass with `--rc-scene 1` does as well as the VBR
+first pass with both options (park_joy 0.65 0.84 0.86 0.90 0.83,
++2.3 %), so the first pass can stay as it is. [emulated, I]
+
+### 12.7 Hardware tests (lead only; one variable per run, in this order)
+
+Each test is the §11.3 bench setup with the table built differently. Only
+`MP_BUILD` changes; the driver does not. Two checks go with every run:
+
+- Afterwards, check with `tools/h264_mbqp` that the final pass's frame
+  QPs are the ones §12.6 predicts.
+- Run the replay (`fpemu.py SNAP TABLE --sizes S --hwqp Q`). It must
+  report 0 differing frames. That shows the edited table reached the
+  firmware as intended.
+
+| # | change | expect (park_joy 8 Mbit/s) | a "no" looks like |
+|---|---|---|---|
+| T8 | `--rc-scene 1` | IDR at 0 only. Frame 0 at QP 36, frames 1-17 at 44, then 43 and 42; 0.48 0.70 0.75 0.90 0.94 MB per 40 frames, −5.6 %. crowd_run: QP 43 from frame 1 | QP 36 held for ~35 frames as before: the ring copy or the scene-level call did not happen at frame 1. An IDR at 1: CFrameType chains on rec+0x4B0 after all (then run T10) |
+| T9 | `--rc-scene 1 --scene-qscale bits` | Frame 1 at QP 41, then 40-42; 0.67 0.89 0.86 0.90 0.81 MB, +3 %. crowd_run QP 40-41, −2 %; in_to_tree −0.3 % | as T8, with QP 44 at frame 1: Q_s did not reach the firmware |
+| T10 | `--key 2 --scene-qscale bits` (only if T8 fails) | IDRs at 0 and 2; frame 1 at QP 35, then 41; 0.71 0.84 0.86 0.90 0.81 MB, +3 % | |
+| T11 | the bench, five clips, four rates, with T9's table | BD-rate against 1-pass VBR near or below 0, instead of +5 % VMAF / +11 % PSNR-Y; a size miss near 3 % | still positive: then quality, not allocation, separates the passes |
+| T12 | `--scene-qscale bits` alone (optional) | park_joy 1.37 1.03 0.30 0.31 0.50, little change: the clamp is the cause | |
+
+Commands (T9 shown):
+
+```sh
+# on the target, root, the driver loaded with V4L2:
+RESULTS=bench/hevc-efficiency/results-m2-2pass-t9.csv \
+MP_BUILD="python3 tools/ave2pass/ave2pass.py build --rc-scene 1 --scene-qscale bits" \
+ENCODERS=ave264-2pass python3 bench/hevc-efficiency/bench.py run park_joy crowd_run in_to_tree
+# on the host: the frame QPs of one output (build h264_mbqp as its header says),
+# then the replay, which must report "0 of 200 frame QPs differ"
+tools/h264_mbqp OUT.h264 > OUT.qp
+.venv/bin/python tools/fwemu/mp/fpemu.py <snap>/S3 OUT.h264.tab --sizes OUT.sizes --hwqp OUT.qp
+```
+
+### 12.8 What is still open
+
+- The class rates (M+0x514..0x51C), and what rec+0x624's
+  NORMAL/MIN/MAX classes mean. The header's quantised complexity feeds
+  only the class rates. [U]
+- The two macroblock-unit buffers (M+0x120, M+0x1A8), and the mode switch
+  on M+0x230 that the Options bit-8-off path uses (fw 0x2f31c-0x2f474).
+  [U]
+- Whether macOS clients see the same start. The clamp is in the
+  firmware, and macOS's table equals ours, so a macOS 2-pass of a short
+  single-scene clip should front-load the same way. In content with cuts,
+  each later scene restarts unclamped. [I]

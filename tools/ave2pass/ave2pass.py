@@ -2,6 +2,7 @@
 """ave2pass: pass-1 records -> pass-2 table and buffers, as macOS 13.5 does it (docs/95 §2.4).
 
   ave2pass.py build RECS.bin [N] -o TABLE.bin [--fps F] [--keep-pts] [--backend port|emu|both]
+                    [--key N,..] [--rc-scene P] [--scene-qscale sum|bits]
   ave2pass.py frames TABLE.bin OUTDIR
   ave2pass.py dump RECS.bin|TABLE.bin [--all]
   ave2pass.py synth N -o RECS.bin [--cuts 12,30] [--seed S] [--fps F]
@@ -13,6 +14,10 @@ RECS.bin   pass-1 records, 0x626 bytes each, in arrival (coding) order; for an
            CodedHeader dumps: --stride 0x22C60 --offset 0x22638).
 TABLE.bin  header[0x108] + rec[N][0x626], records in display order (the
            layout of macOS's own debug dump, DBUG_DumpMultiPassStats UA 0x950e0).
+
+The default build is what macOS computes. --key, --rc-scene and
+--scene-qscale bits are departures from it for the final pass's rate
+controller (docs/95 §12, tune.py).
 """
 import argparse
 import os
@@ -22,6 +27,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import recfmt  # noqa: E402
 import mpport  # noqa: E402
+import tune  # noqa: E402
 
 REC, HDR = recfmt.REC, recfmt.HDR
 
@@ -100,7 +106,16 @@ def cmd_build(a):
     if not a.keep_pts:
         recs = [recfmt.set_pts(r, i, a.fps) for i, r in enumerate(recs)]
     log = (lambda s: print(s, file=sys.stderr)) if a.trace else None
-    hdr, out = build(recs, a.backend, log)
+    if a.key:
+        recs = tune.force_keys(recs, [int(x, 0) for x in a.key.split(",")])
+    if a.rc_scene is not None:
+        hdr, out, note = tune.rc_scene(recs, a.rc_scene, lambda rr: build(rr, a.backend, log))
+        if note:
+            print("--rc-scene: " + note, file=sys.stderr)
+    else:
+        hdr, out = build(recs, a.backend, log)
+    if a.scene_qscale == "bits":
+        hdr, out = tune.bits_weighted_qscale(hdr, out)
     with open(a.o, "wb") as f:
         f.write(hdr)
         for r in out:
@@ -186,6 +201,12 @@ def main():
     b.add_argument("--backend", choices=("port", "emu", "both"), default="port",
                    help="port: pure Python (default); emu: Apple's code under Unicorn; both: run both and compare")
     b.add_argument("--trace", action="store_true", help="print the MP: log lines (emu) to stderr")
+    b.add_argument("--key", metavar="N[,N..]", help="not macOS: force a key frame (scene start, IDR) at "
+                   "these display frames (docs/95 §12.6)")
+    b.add_argument("--rc-scene", type=_int, metavar="P", help="not macOS: a rate-control scene start at "
+                   "display frame P with no IDR (docs/95 §12.6)")
+    b.add_argument("--scene-qscale", choices=("sum", "bits"), default="sum",
+                   help="scene qscale sums: sum = macOS (default); bits = bits-weighted (docs/95 §12.3)")
     f = sp.add_parser("frames", help="table -> per-frame pass-2 input buffers")
     f.add_argument("table")
     f.add_argument("outdir")

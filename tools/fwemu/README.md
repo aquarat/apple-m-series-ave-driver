@@ -13,4 +13,10 @@ memory, and log every register it programs (docs/93).
 | `diff.py` | host | compare two emulations' final register values |
 | `fwsyms.py` | host | function symbols and sizes from the firmware Mach-O |
 
+`mp/` holds the multipass tools of docs/95: `fd.py` (firmware disassembly by
+symbol), `ua.py`/`kd.py` (user space, kext), `ftemu.py`, `gftemu.py` and
+`emu_mp.py` (§3), and `fpemu.py`, the final pass's rate control frame by frame
+(§12.5): replay of a hardware run's per-frame sizes, which must give its
+frame QPs, or a closed loop with a per-frame bits model.
+
 Snapshots contain Apple's firmware: keep them out of git (as `data/blobs/`).

@@ -9,6 +9,7 @@ the way macOS 13.5's user space does it (docs/95 §2.4, §2.5).
 | `mpport.py` | pure-Python port of the user-space MP code (no dependencies) |
 | `mpemu.py` | the same code run from Apple's binary under Unicorn (needs `unicorn` and the binary) |
 | `recfmt.py` | record and header layout, decoder, pass-2 buffers, synthetic records |
+| `tune.py` | not macOS: the table options of docs/95 §12 (`--key`, `--rc-scene`, `--scene-qscale bits`) |
 | `selftest.py` | invariants on synthetic clips; port against emulation when the binary is there |
 
 The port is the default backend. It matches the emulation byte for byte on
@@ -57,6 +58,22 @@ $P tools/ave2pass/selftest.py                         # 50 checks + emulation cr
 The emulation needs `data/blobs/macos-13.5-userspace/.../AppleVideoEncoder`
 (SHA-256 `b1f8fd38…834da803`, fetched by `tools/fetch_userspace.py`) or
 `AVE_USERSPACE_BIN=path`. Everything else runs on a plain `python3`.
+
+## Departures from macOS (docs/95 §12)
+
+The default build is macOS's. Three `build` options change the table for
+the final pass's rate controller, which otherwise starts every clip at QP
+36 or below and front-loads (docs/95 §12.1):
+
+| option | what it does |
+|---|---|
+| `--rc-scene P` | a rate-control scene start at display frame P with no IDR: record P gets the scene block a cut at P would give it, the enclosing scene keeps its length. The firmware runs its scene-level rate control at P, which has no start clamp |
+| `--scene-qscale bits` | each scene's qscale sum (rec+0x4F4 of its first record) becomes frames × Σ(bits·qscale)/Σbits, the header's avg_qscale the same; the start estimate is then right after a VBR first pass |
+| `--key N[,N..]` | forced key frames (rec+0x50 bit 0) at these frames: real scene starts, with an IDR |
+
+`--rc-scene 1 --scene-qscale bits` is the combination docs/95 §12.6
+measured under emulation; on hardware it is still a proposal (§12.7).
+`selftest.py` checks all three.
 
 ## What `dump` prints
 

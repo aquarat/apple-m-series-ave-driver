@@ -11,6 +11,9 @@ Inputs (all in git):
                                        M2: P/B QP offsets, two references, B frames (docs/92, 94, 96)
   bench/hevc-efficiency/results-m2-h264{,-vbr}.csv, results-m2-2pass.csv
                                        M2: H.264 fixed QP, 1-pass VBR, 2-pass VBR (docs/95 §11)
+  bench/hevc-efficiency/finalpass-park_joy.csv
+                                       M2: per-frame QP and size of park_joy at 8 Mbit/s, 1-pass VBR,
+                                       the final pass, its emulation, and the tuned table (docs/95 §12)
   bench/hevc-efficiency/power.log      M1 Pro energy per frame (docs/88)
   bench/hevc-efficiency/power-m2.log   M2 energy per frame (docs/91)
 BD-rates use bench.py's PCHIP implementation, the one docs/88's tables use.
@@ -205,6 +208,31 @@ def multipass():
     save(fig, "multipass.svg")
 
 
+def finalpass():
+    """park_joy, H.264 8 Mbit/s: per-frame QP and size of the final pass against 1-pass VBR."""
+    rs = rows(os.path.join(HERE, "hevc-efficiency", "finalpass-park_joy.csv"))
+    if not rs:
+        return
+    f = [int(r["frame"]) for r in rs]
+    series = (("vbr", "1-pass VBR (hardware)", "#9467bd", "-"),
+              ("final", "final pass (hardware; the emulation gives the same QPs)", "#2ca02c", "-"),
+              ("tuned_model", "final pass, --rc-scene 1 --scene-qscale bits (emulation + bits model)", "#ff7f0e", "--"))
+    fig, axs = plt.subplots(1, 2, figsize=(12, 3.8))
+    for key, lab, col, ls in series:
+        axs[0].plot(f, [int(r[key + "_qp"]) for r in rs], color=col, ls=ls, lw=1.6, label=lab)
+        axs[1].plot(f, [int(r[key + "_bytes"]) / 1e3 for r in rs], color=col, ls=ls, lw=1.2, label=lab)
+    axs[0].set_ylabel("frame QP (every macroblock)")
+    axs[1].set_ylabel("coded kB per frame")
+    axs[1].set_yscale("log")
+    axs[1].axhline(8e6 / 50 / 8 / 1e3, color="k", lw=0.8, ls=":")
+    axs[1].annotate("target 20 kB/frame", (105, 26), fontsize=8)
+    for ax in axs:
+        ax.set_xlabel("frame")
+    axs[0].legend(fontsize=8, loc="lower right")
+    fig.suptitle("park_joy 1080p50, H.264 8 Mbit/s on the M2: the final pass starts at QP 36 (docs/95 §12)", y=1.02)
+    save(fig, "finalpass.svg")
+
+
 def energy():
     def parse(path):
         out = {}
@@ -272,4 +300,5 @@ if __name__ == "__main__":
     bdrate()
     levers()
     multipass()
+    finalpass()
     energy()
