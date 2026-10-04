@@ -544,6 +544,80 @@ A new session started with pass = 2 goes through the same
 | 0x618 / 0x61C | complexity floats (header current_complexity / totalcplxsum) | UA 0xb8650 | C |
 | 0x624 | u16 class 0..3 (NORMAL/MIN/MAX/BLANK); other values are not counted | UA 0xb869c | C |
 
+### 2.7 IDR period in the final pass
+
+*Hardware (M2, M1 Pro): a final pass of a 90-frame 30 fps single-scene
+clip, sent with ui32IdrPeriod (wire 0xFF34) = 180, put IDRs at 0, 30, 60.*
+
+The final pass's longest IDR interval is **not** ui32IdrPeriod alone:
+
+```
+max_interval = min(IdrPeriod,                                   wire 0xFF34 (RC+0x04)
+                   Duration != 0 ? (u32)(Duration * FrameRate)  wire 0xFF38 (RC+0x08, double, seconds)
+                                 : FrameRate)                   wire 0xFF4C (RC+0x1C, u32 Hz)
+```
+
+With wire 0xFF38 = 0, as the driver sends it, the final pass puts an IDR at
+least every *FrameRate* frames: one per second. [C, emulated]
+
+Evidence (H14G; H13S is the same code at the addresses in brackets):
+
+- `CAVCController::InitEncodingParameters` builds `sCFrameTypeInitParams`
+  from x23 = VP+0xFED0 (the RC block, wire 0xFF30; fw 0x4e70c-0x4e710
+  [h13s 0x4cd0c-0x4cd20]) and calls `CFrameType::init` (fw 0x4f43c-0x4f498
+  [0x4da18-0x4da74]); init copies the 0x38 bytes to ft+0x78 (fw 0x36f10).
+  So ft+0x78 (double) = RC+0x08, ft+0x80 = ft+0x84 = RC+0x04 (IdrPeriod),
+  ft+0x98 = RC+0x1C (frame rate; the pair RC+0x18/0x1C is swapped by
+  `rev64`). [C]
+- `CFrameType::FrameType(…MPQueue…)` sets ft+1 = (ft+0x78 != 0.0)
+  (fw 0x3883c-0x3885c). [C]
+- `CFrameType::UpdateNextScene` (fw 0x383c4 [h13s 0x37008]):
+  `w8 = ft+0x98; if ft+1: w8 = fcvtzu(ft+0x78 × ucvtf(w8)); w8 = min(ft+0x80, w8)`
+  (fw 0x383c8-0x383ec). The next IDR is then min(next scene start,
+  current + w8) (fw 0x38448-0x38460). If the next scene starts less than 10
+  frames beyond that limit and the limit is at least 11, the IDR goes to
+  current + ((distance / 2) & ~3) + 1 instead, splitting the scene
+  (fw 0x38464-0x384a4; that is the IDR at 29 in §3.1). [C]
+- Emulation (`ftemu.py <snap>/S3 200 bframes=0 idr=… dur=… fps=…`, snapshot
+  frame rate 30) [C, emulated]:
+
+  | IdrPeriod | wire 0xFF38 | wire 0xFF4C | scene marks | IDRs (200 frames) |
+  |---|---|---|---|---|
+  | 180 | 0 | 30 | none | 0 30 60 90 120 150 180 (the hardware result) |
+  | 180 | 0 | 60 | none | 0 60 120 180 |
+  | 180 | 1.5 | 30 | none | 0 45 90 135 180 |
+  | 180 | 2.0 | 30 | none | 0 60 120 180 |
+  | 180 | 1000.0 | 30 | none | 0 180 |
+  | 1000 | 1000.0 | 30 | none | 0 |
+  | 1000 | 1000.0 | 30 | cut at 120 | 0 120 |
+
+**macOS user space.** The RC block is S+0xB0 (docs/72 §1.3).
+`AVE_SetEncoderDefault` writes RC+0x04 = 30 (UA 0x29b5c-0x29b60) and leaves
+RC+0x08 = 0 (bzero at creation). `kVTCompressionPropertyKey_MaxKeyFrameInterval`
+writes RC+0x04 = value, 0 meaning 30 (UA 0x10e44-0x10e54);
+`kVTCompressionPropertyKey_MaxKeyFrameIntervalDuration` writes the double
+to RC+0x08 and to the driver block DRV+0x00 (UA 0x12978-0x12980). So a macOS
+2-pass encode with default properties also gets an IDR at least every
+min(30, frame rate) frames; a client that wants long GOPs sets both keys,
+and the final pass uses min(MaxKeyFrameInterval, Duration × ExpectedFrameRate,
+truncated). [C]
+
+**Driver.** To get IDRs only at frame 0 and at marked scene cuts, send
+IdrPeriod ≥ the clip length and wire 0xFF38 ≥ IdrPeriod / FrameRate seconds.
+A constant does it, in the multi-pass block of the Start builder:
+
+```c
+wr64(w, 0xff38, 0x4130000000000000ULL); /* RC+0x08 MaxKeyFrameIntervalDuration = 2^20 s (double): final-pass key interval = IdrPeriod (docs/95 §2.7) */
+```
+
+(2^20 × frame rate saturates at 0xFFFFFFFF in `fcvtzu`, so it never limits.)
+Send it in pass 2 only: the single-pass `FrameType(…AdaptiveB…)` also reads
+ft+0x78 (fw 0x37118-0x37228, a time-stamp based key interval), which
+explicit frame types bypass but type-5 single-pass sessions would not. [I]
+The HEVC path builds the same init block (`CHEVCController::InitEncodingParameters`
+calls `CFrameType::init` at fw 0x6dfb0); its source offsets were not
+checked. [U]
+
 ---
 
 ## 3. Emulation (tools/fwemu style, M2 snapshot S3)
@@ -555,7 +629,8 @@ fixed QP), with patches applied in Unicorn memory only.
 
 I put synthetic records in `ctrl`'s MPQueue (frames N..N+10) and called the
 function once per display frame, with the session's own CFrameType object
-(ctrl+0x1B0; IdrPeriod patched to 30):
+(ctrl+0x1B0; IdrPeriod patched to 30; the snapshot's frame rate 30 and
+duration 0 cap the interval at 30 anyway, §2.7):
 
 | BFrames (VP+0x18 → ft+0x88) | host scene marks | types chosen |
 |---|---|---|

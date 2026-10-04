@@ -39,6 +39,11 @@ def main():
     # session knobs in the CFrameType object (init params copied to ft+0x78, CFrameType::init 0x36ee8)
     if 'bframes' in opts: w32(FT + 0x88, int(opts['bframes'])); uc.mem_write(FT + 2, bytes([int(opts['bframes']) != 0]))
     if 'idr' in opts: w32(FT + 0x80, int(opts['idr'])); w32(FT + 0x84, int(opts['idr']))
+    # ft+0x78 double = RC+0x08 (wire 0xFF38, MaxKeyFrameIntervalDuration, s); ft+0x98 = RC+0x1C (wire 0xFF4C, fps)
+    if 'dur' in opts: uc.mem_write(FT + 0x78, struct.pack('<d', float(opts['dur'])))
+    if 'fps' in opts: w32(FT + 0x98, int(opts['fps']))
+    print('ft: dur(+0x78) %r idr(+0x80/0x84) %d/%d bframes(+0x88) %d fps(+0x98) %d' % (
+        struct.unpack('<d', uc.mem_read(FT + 0x78, 8))[0], r32(FT + 0x80), r32(FT + 0x84), r32(FT + 0x88), r32(FT + 0x98)))
     stubs = {a for nme, a in addr.items() if nme.startswith(("__ZNK14CAVEFilterBase5Print", "__ZN7CLogger", "__Z17AVE_History_Print", "_printf", "__ZN9CTaskPool16GetCurrentTaskID"))}
     stop = addr['_bsp_assert_fail']
     calls = []
