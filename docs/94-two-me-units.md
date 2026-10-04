@@ -44,6 +44,20 @@ V4L2 implementation):
 | `session_multi_me=N` | Start wire 0xFCEA (u16) = N: the firmware programs both ME units |
 | `me1_off=1` | hold venc_me0 but leave venc_me1 off (macOS's default state); on an unclean teardown the ME0 holder is the one abandoned |
 
+Compression with two references (bench/hevc-efficiency, M2, five Xiph
+clips, `results-m2-2ref.csv`; PCHIP BD-rate against plain fixed QP on the
+same machine, negative = fewer bits):
+
+| variant | VMAF | PSNR-Y |
+|---|---|---|
+| P-frame QP +3 (docs/92) | -1.6 % | -2.1 % |
+| two references, `ave-cqp-x-2ref` | **-0.1 %** | **-0.6 %** |
+| two references + P QP +3 | -1.6 % | -2.7 % |
+
+A second P reference buys almost nothing on these clips; its value is that
+it makes B-frames possible (worth ~9 % to x265 `medium`, docs/92). Against
+x265 `medium` the gap stays ~20 %.
+
 What macOS does differently is that it powers ME1 only while such a session
 runs; the driver keeps ME1 on whenever it is loaded, which is harmless (T1/T2).
 Not yet measured: the power cost of ME1 while idle.
