@@ -1,0 +1,55 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/*
+ * t6002 (M1 Ultra) ave2: die 1's first encoder, inside the
+ * /soc@2200000000 fragment. That bus's ranges map child 0x2_0000_0000 to
+ * CPU 0x22_0000_0000, so every address here is die 0's number and lands
+ * at die 0's + 0x20_0000_0000: the encoder at 0x240d100000, the PMGR PS
+ * bank at 0x228e588000. That is the j375d ADT's ave2 (bus 0x220d100000..,
+ * /arm-io ranges bus 0x2000000000 -> 0x2200000000).
+ *
+ * AIC: the ADT's 5127 (encoder) and 5124 (DARTs, SMMU) are die 1's 1031
+ * and 1028; Asahi's AIC2 takes the die in the second cell, as die 1's
+ * avd@286000000 does (<0 1 0x3f3 4>).
+ *
+ * Sentinels: 0x13 AIC, 0xf1 venc_sys_die1, 0xf2 venc_pipe5_die1,
+ * 0xf4 venc_me0_die1, 0xf3 venc_pipe4_die1. venc_me1_die1 is the
+ * driver's holder (ave_soc_t6002_ave2.me1_node).
+ */
+dart_ave2_0: iommu@40d040000 {
+	compatible = "apple,t6000-dart";
+	reg = <0x4 0x0d040000 0x0 0x4000>;
+	interrupt-parent = <0xa7e00013>;
+	interrupts = <0 1 1028 4>;
+	#iommu-cells = <1>;
+	power-domains = <0xa7e000f1>;
+};
+
+dart_ave2_1: iommu@40d030000 {
+	compatible = "apple,t6000-dart";
+	reg = <0x4 0x0d030000 0x0 0x4000>;
+	interrupt-parent = <0xa7e00013>;
+	interrupts = <0 1 1028 4>;
+	#iommu-cells = <1>;
+	power-domains = <0xa7e000f1>;
+};
+
+ave2: video-encoder@40d100000 {
+	compatible = "apple,t6002-ave", "apple,ave";
+	reg = <0x4 0x0d100000 0x0 0x45c000>,
+	      <0x4 0x0d800000 0x0 0x800000>,
+	      <0x4 0x0d050000 0x0 0x008000>,
+	      <0x2 0x8e588000 0x0 0x000024>,
+	      <0x4 0x0c000000 0x0 0x1000000>,
+	      <0x4 0x0d040000 0x0 0x4000>,
+	      <0x4 0x0d044000 0x0 0x4000>,
+	      <0x4 0x0d020000 0x0 0x4000>;
+	reg-names = "dpe", "asc", "sve", "unk3", "axi2af",
+		    "cpudart", "dapf", "smmu";
+	interrupt-parent = <0xa7e00013>;
+	interrupts = <0 1 1031 4>, <0 1 1028 4>;
+	power-domains = <0xa7e000f1>, <0xa7e000f2>, <0xa7e000f4>,
+			<0xa7e000f3>;
+	resets = <0xa7e000f1>;
+	iommus = <&dart_ave2_0 0>, <&dart_ave2_0 1>,
+		 <&dart_ave2_1 0>, <&dart_ave2_1 1>;
+};

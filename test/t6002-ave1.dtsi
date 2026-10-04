@@ -1,0 +1,49 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/*
+ * t6002 (M1 Ultra) ave1: die 0's second encoder, inside the /soc@200000000
+ * fragment. t6001's ave1 (ave-overlay-e6.dts has the reasoning): the j375d
+ * ADT's /arm-io/ave1 and dart-ave1 are j314c's byte for byte. Bank 3 is
+ * ps-regs[17], 0x28e688000 +0x24 (VENC1_DMA..VENC1_ME1), not the ADT's
+ * reg[3] (docs/82 §0.6). AIC die 0: 1041 (encoder), 1038 (DARTs).
+ *
+ * Sentinels: 0x13 AIC, 0xe1 venc1_sys, 0xe2 venc1_pipe5, 0xe4 venc1_me0,
+ * 0xe3 venc1_pipe4.
+ */
+dart_ave1_0: iommu@507040000 {
+	compatible = "apple,t6000-dart";
+	reg = <0x5 0x07040000 0x0 0x4000>;
+	interrupt-parent = <0xa7e00013>;
+	interrupts = <0 0 1038 4>;
+	#iommu-cells = <1>;
+	power-domains = <0xa7e000e1>;
+};
+
+dart_ave1_1: iommu@507030000 {
+	compatible = "apple,t6000-dart";
+	reg = <0x5 0x07030000 0x0 0x4000>;
+	interrupt-parent = <0xa7e00013>;
+	interrupts = <0 0 1038 4>;
+	#iommu-cells = <1>;
+	power-domains = <0xa7e000e1>;
+};
+
+ave1: video-encoder@507100000 {
+	compatible = "apple,t6002-ave", "apple,ave";
+	reg = <0x5 0x07100000 0x0 0x45c000>,
+	      <0x5 0x07800000 0x0 0x800000>,
+	      <0x5 0x07050000 0x0 0x008000>,
+	      <0x2 0x8e688000 0x0 0x000024>,
+	      <0x5 0x06000000 0x0 0x1000000>,
+	      <0x5 0x07040000 0x0 0x4000>,
+	      <0x5 0x07044000 0x0 0x4000>,
+	      <0x5 0x07020000 0x0 0x4000>;
+	reg-names = "dpe", "asc", "sve", "unk3", "axi2af",
+		    "cpudart", "dapf", "smmu";
+	interrupt-parent = <0xa7e00013>;
+	interrupts = <0 0 1041 4>, <0 0 1038 4>;
+	power-domains = <0xa7e000e1>, <0xa7e000e2>, <0xa7e000e4>,
+			<0xa7e000e3>;
+	resets = <0xa7e000e1>;
+	iommus = <&dart_ave1_0 0>, <&dart_ave1_0 1>,
+		 <&dart_ave1_1 0>, <&dart_ave1_1 1>;
+};

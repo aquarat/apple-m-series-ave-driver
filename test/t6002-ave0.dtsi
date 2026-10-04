@@ -1,0 +1,54 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/*
+ * t6002 (M1 Ultra) ave0: die 0's first encoder, included by the
+ * ave-overlay-t6002*.dts variants inside the /soc@200000000 fragment.
+ *
+ * The j375d ADT's /arm-io/ave0 and dart-ave0 are t6001's (and t6000's)
+ * byte for byte, so this is variant=8's node (ave-overlay-t6000.dts, see
+ * ave-overlay-e4.dts for why each entry is there) with the t6002
+ * compatible: CPU physical = ADT bus + 0x2_00000000, AIC die 0 IRQs 1031
+ * (encoder) and 1028 (both DART instances and the SMMU), streams 0 and 1 on
+ * both DARTs. No afnc4_ioa: it is not one of the ADT ave0's power-gates
+ * (docs/87 §4), and t6000 runs without it.
+ *
+ * Sentinels (ave_overlay_mod.c): 0x13 AIC, 0x1d venc_sys, 0xc2 venc_pipe5,
+ * 0xc4 venc_me0, 0xc3 venc_pipe4. venc_me1 is the driver's holder.
+ */
+dart_ave0_0: iommu@40d040000 {
+	compatible = "apple,t6000-dart";
+	reg = <0x4 0x0d040000 0x0 0x4000>;
+	interrupt-parent = <0xa7e00013>;
+	interrupts = <0 0 1028 4>;
+	#iommu-cells = <1>;
+	power-domains = <0xa7e0001d>;
+};
+
+dart_ave0_1: iommu@40d030000 {
+	compatible = "apple,t6000-dart";
+	reg = <0x4 0x0d030000 0x0 0x4000>;
+	interrupt-parent = <0xa7e00013>;
+	interrupts = <0 0 1028 4>;
+	#iommu-cells = <1>;
+	power-domains = <0xa7e0001d>;
+};
+
+ave0: video-encoder@40d100000 {
+	compatible = "apple,t6002-ave", "apple,ave";
+	reg = <0x4 0x0d100000 0x0 0x45c000>,
+	      <0x4 0x0d800000 0x0 0x800000>,
+	      <0x4 0x0d050000 0x0 0x008000>,
+	      <0x2 0x8e588000 0x0 0x000024>,
+	      <0x4 0x0c000000 0x0 0x1000000>,
+	      <0x4 0x0d040000 0x0 0x4000>,
+	      <0x4 0x0d044000 0x0 0x4000>,
+	      <0x4 0x0d020000 0x0 0x4000>;
+	reg-names = "dpe", "asc", "sve", "unk3", "axi2af",
+		    "cpudart", "dapf", "smmu";
+	interrupt-parent = <0xa7e00013>;
+	interrupts = <0 0 1031 4>, <0 0 1028 4>;
+	power-domains = <0xa7e0001d>, <0xa7e000c2>, <0xa7e000c4>,
+			<0xa7e000c3>;
+	resets = <0xa7e0001d>;
+	iommus = <&dart_ave0_0 0>, <&dart_ave0_0 1>,
+		 <&dart_ave0_1 0>, <&dart_ave0_1 1>;
+};

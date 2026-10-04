@@ -244,8 +244,12 @@ static int ave_querycap(struct file *file, void *priv,
 	strscpy(cap->card, av->hevc ? "Apple AVE H.264/HEVC encoder" :
 				      "Apple AVE H.264 encoder",
 		sizeof(cap->card));
-	snprintf(cap->bus_info, sizeof(cap->bus_info), "platform:%s%s",
-		 AVE_V4L2_NAME, av->ave->soc->inst ? "1" : "");
+	if (av->ave->soc->inst)
+		snprintf(cap->bus_info, sizeof(cap->bus_info), "platform:%s%u",
+			 AVE_V4L2_NAME, av->ave->soc->inst);
+	else
+		snprintf(cap->bus_info, sizeof(cap->bus_info), "platform:%s",
+			 AVE_V4L2_NAME);
 	return 0;
 }
 
@@ -1429,9 +1433,15 @@ int ave_v4l2_register(struct ave_device *ave)
 		.vfl_dir	= VFL_DIR_M2M,
 		.device_caps	= V4L2_CAP_VIDEO_M2M | V4L2_CAP_STREAMING,
 	};
-	/* encoder 0 keeps the name tools/ave-load.sh and v4l2-test.sh grep for */
-	strscpy(av->vfd.name, ave->soc->inst ? "apple-ave1-enc" : "apple-ave-enc",
-		sizeof(av->vfd.name));
+	/*
+	 * encoder 0 keeps the name tools/ave-load.sh and v4l2-test.sh grep for;
+	 * the others are apple-ave1-enc .. apple-ave3-enc (t6002, docs/98)
+	 */
+	if (ave->soc->inst)
+		snprintf(av->vfd.name, sizeof(av->vfd.name), "apple-ave%u-enc",
+			 ave->soc->inst);
+	else
+		strscpy(av->vfd.name, "apple-ave-enc", sizeof(av->vfd.name));
 	video_set_drvdata(&av->vfd, av);
 	ret = video_register_device(&av->vfd, VFL_TYPE_VIDEO, -1);
 	if (ret)

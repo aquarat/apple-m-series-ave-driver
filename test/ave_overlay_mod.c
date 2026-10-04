@@ -35,6 +35,10 @@
 #include "ave_overlay_t6000_dtbo.h"
 #include "ave_overlay_t8103_dtbo.h"
 #include "ave_overlay_t8112_dtbo.h"
+#include "ave_overlay_t6002_dtbo.h"
+#include "ave_overlay_t6002_die0_dtbo.h"
+#include "ave_overlay_t6002_ave2_dtbo.h"
+#include "ave_overlay_t6002_all_dtbo.h"
 
 static int ovcs_id, pmp_ovcs_id;
 
@@ -87,6 +91,15 @@ static const struct {
 	{ AVE_OV_SENTINEL(0xe2), "venc1_pipe5" },
 	{ AVE_OV_SENTINEL(0xe4), "venc1_me0" },
 	{ AVE_OV_SENTINEL(0xe3), "venc1_pipe4" },
+	/* t6002 die 1 (variants 13/14, docs/98): Asahi's *_die1 labels */
+	{ AVE_OV_SENTINEL(0xf1), "venc_sys_die1" },
+	{ AVE_OV_SENTINEL(0xf2), "venc_pipe5_die1" },
+	{ AVE_OV_SENTINEL(0xf3), "venc_pipe4_die1" },
+	{ AVE_OV_SENTINEL(0xf4), "venc_me0_die1" },
+	{ AVE_OV_SENTINEL(0xf5), "venc1_sys_die1" },
+	{ AVE_OV_SENTINEL(0xf6), "venc1_pipe5_die1" },
+	{ AVE_OV_SENTINEL(0xf7), "venc1_pipe4_die1" },
+	{ AVE_OV_SENTINEL(0xf8), "venc1_me0_die1" },
 };
 
 static int ave_ov_find_pd(const char *label, u32 *phandle)
@@ -253,6 +266,11 @@ fail:
  * variant=8 (docs/87): variant=4 for t6000 (M1 Pro): compatible
  *                      "apple,t6000-ave" and no afnc4_ioa, which t6000 lacks.
  *
+ * variant=11..14 (docs/98): t6002 (M1 Ultra), "apple,t6002-ave", nodes on
+ *                      /soc@200000000 (die 0) and /soc@2200000000 (die 1):
+ *                      11 ave0, 12 ave0+ave1 (die 0), 13 ave0+ave2 (the
+ *                      first die-1 encoder), 14 all four.
+ *
  * Selected here rather than at build time so the risk is chosen when the
  * module is loaded, with the consequence in front of whoever types it.
  * Any other value is refused; before variants 2 and 3 existed every non-zero
@@ -261,7 +279,7 @@ fail:
 static int variant;
 module_param(variant, int, 0444);
 MODULE_PARM_DESC(variant,
-		 "0 = with DART (default), 1 = no IOMMU: preserves iBoot's DART config, NO backstop, 2 = 1 + cpudart/dapf regs (E2), 3 = 0 + cpudart/dapf regs (E3), 4 = 3 with both DARTs in iommus (docs/56), 5 = 4 + stream 15 (docs/69), 6 = ave1 alone, 7 = both encoders (docs/82), 8 = t6000 (M1 Pro) ave0 (docs/87), 9 = t8103 (M1), 10 = t8112 (M2)");
+		 "0 = with DART (default), 1 = no IOMMU: preserves iBoot's DART config, NO backstop, 2 = 1 + cpudart/dapf regs (E2), 3 = 0 + cpudart/dapf regs (E3), 4 = 3 with both DARTs in iommus (docs/56), 5 = 4 + stream 15 (docs/69), 6 = ave1 alone, 7 = both encoders (docs/82), 8 = t6000 (M1 Pro) ave0 (docs/87), 9 = t8103 (M1), 10 = t8112 (M2), 11-14 = t6002 (M1 Ultra): 11 ave0, 12 die 0 (ave0+ave1), 13 ave0+ave2, 14 all four (docs/98)");
 
 static int __init ave_ov_init(void)
 {
@@ -325,9 +343,45 @@ static int __init ave_ov_init(void)
 		len = ave_overlay_t6000_dtbo_len;
 		pr_warn("ave-overlay: variant=8 - t6000 (M1 Pro) ave0, variant=4's shape (docs/87)\n");
 		break;
+	case 11:
+		fdt = ave_overlay_t6002_dtbo;
+		len = ave_overlay_t6002_dtbo_len;
+		pr_warn("ave-overlay: variant=11 - t6002 (M1 Ultra) ave0 (docs/98)\n");
+		break;
+	case 12:
+		fdt = ave_overlay_t6002_die0_dtbo;
+		len = ave_overlay_t6002_die0_dtbo_len;
+		pr_warn("ave-overlay: variant=12 - t6002 die 0, ave0 + ave1 (docs/98)\n");
+		break;
+	case 13:
+		fdt = ave_overlay_t6002_ave2_dtbo;
+		len = ave_overlay_t6002_ave2_dtbo_len;
+		pr_warn("ave-overlay: variant=13 - t6002 ave0 + ave2, die 1's first encoder (docs/98)\n");
+		break;
+	case 14:
+		fdt = ave_overlay_t6002_all_dtbo;
+		len = ave_overlay_t6002_all_dtbo_len;
+		pr_warn("ave-overlay: variant=14 - t6002, all four encoders (docs/98)\n");
+		break;
 	default:
-		pr_err("ave-overlay: variant=%d is not 0-10; refusing\n", variant);
+		pr_err("ave-overlay: variant=%d is not 0-14; refusing\n", variant);
 		return -EINVAL;
+	}
+
+	/*
+	 * The t6002 dtbos target /soc@200000000 and /soc@2200000000, the
+	 * other SoCs' /soc: refuse the wrong family before applying, rather
+	 * than let of_overlay_fdt_apply() fail on a missing target halfway.
+	 */
+	{
+		bool t6002 = variant >= 11 && variant <= 14;
+		bool is_t6002 = of_machine_is_compatible("apple,t6002");
+
+		if (t6002 != is_t6002) {
+			pr_err("ave-overlay: variant=%d is %sa t6002 overlay, and this machine is %st6002; refusing\n",
+			       variant, t6002 ? "" : "not ", is_t6002 ? "" : "not ");
+			return -EINVAL;
+		}
 	}
 
 	if (pmp_venc) {

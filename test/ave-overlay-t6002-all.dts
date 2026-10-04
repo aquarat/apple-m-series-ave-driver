@@ -1,0 +1,34 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/*
+ * variant=14 (docs/98): all four t6002 encoders - ave0 and ave1 on die 0,
+ * ave2 and ave3 on die 1. V4L2 nodes apple-ave-enc, apple-ave1-enc,
+ * apple-ave2-enc, apple-ave3-enc. Compile WITHOUT -@.
+ */
+/dts-v1/;
+/plugin/;
+
+/ {
+	fragment@0 {
+		target-path = "/soc@200000000";
+
+		__overlay__ {
+			#address-cells = <2>;
+			#size-cells = <2>;
+
+			/include/ "t6002-ave0.dtsi"
+			/include/ "t6002-ave1.dtsi"
+		};
+	};
+
+	fragment@1 {
+		target-path = "/soc@2200000000";
+
+		__overlay__ {
+			#address-cells = <2>;
+			#size-cells = <2>;
+
+			/include/ "t6002-ave2.dtsi"
+			/include/ "t6002-ave3.dtsi"
+		};
+	};
+};

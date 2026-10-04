@@ -177,6 +177,7 @@ extern const struct ave_soc ave_soc_t8103;
 extern const struct ave_soc_set ave_soc_set_t8103;
 extern const struct ave_soc ave_soc_t8112;
 extern const struct ave_soc_set ave_soc_set_t8112;
+extern const struct ave_soc_set ave_soc_set_t6002;
 
 const struct ave_soc *ave_soc_pick(const struct ave_soc_set *set,
 				   phys_addr_t dpe_phys);

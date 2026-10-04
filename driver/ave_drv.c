@@ -1586,6 +1586,17 @@ static int ave_probe_stages(struct platform_device *pdev)
 					     dev->of_node, r ? &r->start : NULL);
 		dev_info(dev, "probe: SoC row %s (encoder %u)\n",
 			 ave->soc->name, ave->soc->inst);
+		/*
+		 * A row whose iBoot placement is not known yet (t6002 before
+		 * docs/98 U0) would only be refused at stage 10, after power,
+		 * MMIO and IPC allocation - an unclean teardown that costs a
+		 * reboot. Refuse here instead, before anything is touched;
+		 * a power-only probe (stop_after below fw-load) may still run.
+		 */
+		if (!ave->soc->iboot.text_phys && stop_after >= AVE_STAGE_FW_LOAD)
+			return dev_err_probe(dev, -ENODEV,
+					     "%s: iBoot placement unknown (ave_soc.c, run docs/98 U0 and tools/t6002_placement.py); refusing before any register access\n",
+					     ave->soc->name);
 	}
 	platform_set_drvdata(pdev, ave);
 	dev_info(dev, "probe: staged bring-up, stop_after=%d (max %d)\n",
@@ -2712,6 +2723,7 @@ static const struct of_device_id ave_of_match[] = {
 	{ .compatible = "apple,t6000-ave", .data = &ave_soc_set_t6000 },
 	{ .compatible = "apple,t8103-ave", .data = &ave_soc_set_t8103 },
 	{ .compatible = "apple,t8112-ave", .data = &ave_soc_set_t8112 },
+	{ .compatible = "apple,t6002-ave", .data = &ave_soc_set_t6002 },
 	{ .compatible = "apple,ave" },
 	{}
 };
