@@ -36,7 +36,8 @@ hevc) PIX=HEVC; FFENC=hevc_v4l2m2m; GSTENC=v4l2h265enc; GSTPARSE=h265parse
       GSTCAPS=video/x-h265; RAW=out.h265; RAWFMT=hevc ;;
 *) echo "CODEC must be h264 or hevc"; exit 1 ;;
 esac
-D=$HOME/ave-test; mkdir -p "$D"; cd "$D"
+# AVE_TEST_DIR: a separate work directory per concurrent run (docs/98 U6)
+D=${AVE_TEST_DIR:-$HOME/ave-test}; mkdir -p "$D"; cd "$D"
 # v4l2-ctl reads frames of the crop size when an OUTPUT crop is set and
 # pads them into the buffer (f71/f72 fed it 1088-line frames and graded the
 # resulting misalignment as a broken encode), so the file is W x CROP_H.
@@ -65,7 +66,7 @@ with open(src, 'rb') as f, open(dst, 'wb') as o:
 PY
     IN=$PAD
 fi
-# NODE=apple-ave1-enc for the second encoder (docs/82)
+# NODE=apple-ave1-enc for the second encoder (docs/82); apple-ave2/3-enc on t6002 (docs/98)
 NODE=${NODE:-apple-ave-enc}
 DEV=
 for n in /sys/class/video4linux/video*/name; do

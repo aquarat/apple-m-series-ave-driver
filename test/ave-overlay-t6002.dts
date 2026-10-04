@@ -1,0 +1,25 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/*
+ * variant=11 (docs/98): t6002 (M1 Ultra, Mac Studio j375d), ave0 only -
+ * die 0's first encoder, the one iBoot is known to preload on every
+ * t600x. The first step of the Ultra bring-up; variant=12 adds die 0's
+ * ave1, variant=13 adds die 1's ave2, variant=14 is all four.
+ *
+ * The t6002 DT has two SoC buses, /soc@200000000 (die 0) and
+ * /soc@2200000000 (die 1); there is no /soc. Compile WITHOUT -@.
+ */
+/dts-v1/;
+/plugin/;
+
+/ {
+	fragment@0 {
+		target-path = "/soc@200000000";
+
+		__overlay__ {
+			#address-cells = <2>;
+			#size-cells = <2>;
+
+			/include/ "t6002-ave0.dtsi"
+		};
+	};
+};

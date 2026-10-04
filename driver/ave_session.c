@@ -3143,6 +3143,17 @@ static int ave_session_nal_type(const u8 *buf, size_t len)
 	return buf[4] & 0x1f;
 }
 
+/* /sys/kernel/debug/apple_ave for encoder 0, apple_ave1..3 for the others */
+static struct dentry *ave_session_dbg_dir(struct ave_device *ave)
+{
+	char name[16];
+
+	if (!ave->soc->inst)
+		return debugfs_create_dir("apple_ave", NULL);
+	snprintf(name, sizeof(name), "apple_ave%u", ave->soc->inst);
+	return debugfs_create_dir(name, NULL);
+}
+
 /*
  * docs/77 §8.2 H1 encodes no frame, and ave_session_publish() only runs
  * after one: publish the parameter-sets buffer alone (back-scan length), so
@@ -3153,7 +3164,7 @@ static void ave_session_publish_psets(struct ave_device *ave,
 {
 	if (!bufs->psets_cpu || bufs->dbg_dir)
 		return;
-	bufs->dbg_dir = debugfs_create_dir(ave->soc->inst ? "apple_ave1" : "apple_ave", NULL);
+	bufs->dbg_dir = ave_session_dbg_dir(ave);
 	if (IS_ERR(bufs->dbg_dir)) {
 		dev_warn(ave->dev, "session: debugfs dir failed: %pe\n",
 			 bufs->dbg_dir);
@@ -3183,7 +3194,7 @@ static void ave_session_publish(struct ave_device *ave,
 
 	(void)psets_len;
 
-	bufs->dbg_dir = debugfs_create_dir(ave->soc->inst ? "apple_ave1" : "apple_ave", NULL);
+	bufs->dbg_dir = ave_session_dbg_dir(ave);
 	if (IS_ERR(bufs->dbg_dir)) {
 		dev_warn(ave->dev, "session: debugfs dir failed: %pe\n",
 			 bufs->dbg_dir);

@@ -1,0 +1,22 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/*
+ * variant=12 (docs/98): t6002 die 0's two encoders, ave0 and ave1 - the
+ * t6001 pair (variant=7's shape) with the t6002 compatible. Compile
+ * WITHOUT -@.
+ */
+/dts-v1/;
+/plugin/;
+
+/ {
+	fragment@0 {
+		target-path = "/soc@200000000";
+
+		__overlay__ {
+			#address-cells = <2>;
+			#size-cells = <2>;
+
+			/include/ "t6002-ave0.dtsi"
+			/include/ "t6002-ave1.dtsi"
+		};
+	};
+};

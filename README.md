@@ -21,7 +21,7 @@ which exposes two independent encoder instances (`ave0`, `ave1`). The **M1 Pro**
 the **M2** (`t8112`, Mac mini `j473`) as the first outside the M1 family
 (docs/90). The approach should generalise across the M1 family and forward.
 
-## Supported machines (2026-10-03)
+## Supported machines (2026-10-04)
 
 | SoC | machines | encoders | firmware (macOS 13.5 stub) | overlay | status |
 |---|---|---|---|---|---|
@@ -29,13 +29,16 @@ the **M2** (`t8112`, Mac mini `j473`) as the first outside the M1 family
 | `t6000` M1 Pro | MacBookPro18,3 (`j314s`); 18,1 (`j316s`) untested | 1 (`apple-ave-enc`) | `AppleAVE2FW_H13S` → `apple/ave_h13s.bin` | `VARIANT=8` | works with stock m1n1 (the driver programs the DAPF), docs/87 |
 | `t8103` M1 | MacBook Air M1 (`j313`); other M1 machines: placement per machine (docs/89) | 1 (`apple-ave-enc`) | `AppleAVE2FW_H13G` → `apple/ave_h13g.bin` | `VARIANT=9` | H.264 tested by the fork author (docs/89); merged with driver-side DAPF, untested on stock m1n1 |
 | `t8112` M2 | Mac mini M2 (`j473`); other M2 machines: placement per machine (docs/90) | 1 (`apple-ave-enc`) | `AppleAVE2FW_H14G` → `apple/ave_h14g.bin` | `VARIANT=10` | H.264 and HEVC (Main, Main10) tested on a j473 with stock m1n1, clean boot and reload; full speed without the PMP, which only slows it here (docs/90 §9) |
+| `t6002` M1 Ultra | Mac Studio (`j375d`) | 4: two per die (`apple-ave-enc`, `apple-ave1-enc`, `apple-ave2-enc`, `apple-ave3-enc`) | `AppleAVE2FW_H13D` → `apple/ave_h13d.bin` | `VARIANT=11` (ave0), `12` (die 0), `13` (ave0 + ave2), `14` (all four) | **ported, untested on hardware** (docs/98): stock m1n1 and DTB; the iBoot placement is read from the live ADT first (docs/98 U0); no PMP vote (the stock DT has the PMP off) |
 | others (M2 Pro/Max, M3…) | | | | | not ported: docs/79 is the checklist |
 
 Each SoC needs its firmware variant's Mach-O and its **pristine DATA blob**
 (`apple/ave-13.5-data-pristine.bin` for H13C,
 `apple/ave-13.5-h13s-data-pristine.bin` for H13S,
 `apple/ave-13.5-h13g-data-pristine.bin` for H13G,
-`apple/ave-13.5-h14g-data-pristine.bin` for H14G) in `/lib/firmware`. The
+`apple/ave-13.5-h14g-data-pristine.bin` for H14G,
+`apple/ave-13.5-h13d-data-pristine.bin` for H13D, made by
+`tools/t6002_placement.py`) in `/lib/firmware`. The
 blob is iBoot's DATA segment as left before the encoder's first start,
 taken from a cold boot with the read-only `test/physdump.ko` (docs/51,
 docs/87 §3). The driver checks its sha256 and only needs it to reload in
@@ -101,6 +104,7 @@ sudo tools/ave-load.sh                  # M1 Max: both encoders; prints /dev/vid
 sudo VARIANT=8 tools/ave-load.sh        # M1 Pro
 sudo VARIANT=9 tools/ave-load.sh        # M1 (docs/89)
 sudo VARIANT=10 tools/ave-load.sh       # M2 (docs/90)
+sudo VARIANT=11 tools/ave-load.sh       # M1 Ultra ave0; untested, docs/98 U0 first
 ffmpeg -i input.mp4 -pix_fmt nv12 -c:v h264_v4l2m2m -b:v 4M out.mp4
 ffmpeg -i input.mp4 -pix_fmt nv12 -c:v hevc_v4l2m2m -b:v 4M out.mp4
 ```

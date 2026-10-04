@@ -12,7 +12,9 @@ PWD  := $(shell pwd)
 all: ave_overlay_dtbo.h ave_overlay_noiommu_dtbo.h ave_overlay_e2_dtbo.h \
      ave_overlay_e3_dtbo.h ave_overlay_e4_dtbo.h \
      ave_overlay_e5_dtbo.h ave_overlay_e6_dtbo.h ave_overlay_e7_dtbo.h ave_overlay_pmp_venc_dtbo.h ave_overlay_pmp_venc_t8112_dtbo.h \
-     ave_overlay_t6000_dtbo.h ave_overlay_t8103_dtbo.h ave_overlay_t8112_dtbo.h
+     ave_overlay_t6000_dtbo.h ave_overlay_t8103_dtbo.h ave_overlay_t8112_dtbo.h \
+     ave_overlay_t6002_dtbo.h ave_overlay_t6002_die0_dtbo.h ave_overlay_t6002_ave2_dtbo.h \
+     ave_overlay_t6002_all_dtbo.h
 	$(MAKE) -C $(KDIR) M=$(PWD) modules
 
 # Build from the no-DART overlay. Building from ave-overlay.dts silently
@@ -114,4 +116,32 @@ ave_overlay_pmp_venc_t8112_dtbo.h: ave-overlay-pmp-venc-t8112.dtbo
 	python3 mkhdr.py $< ave_overlay_pmp_venc_t8112_dtbo $@
 
 ave-overlay-pmp-venc-t8112.dtbo: ave-overlay-pmp-venc-t8112.dts
+	dtc -I dts -O dtb -o $@ $< 2>/dev/null
+
+# variants 11-14 (docs/98): t6002 (M1 Ultra). The per-encoder nodes are in
+# t6002-ave{0,1,2,3}.dtsi, pulled in with dtc's own /include/.
+T6002_DTSI := t6002-ave0.dtsi t6002-ave1.dtsi t6002-ave2.dtsi t6002-ave3.dtsi
+
+ave_overlay_t6002_dtbo.h: ave-overlay-t6002.dtbo
+	python3 mkhdr.py $< ave_overlay_t6002_dtbo $@
+
+ave-overlay-t6002.dtbo: ave-overlay-t6002.dts $(T6002_DTSI)
+	dtc -I dts -O dtb -o $@ $< 2>/dev/null
+
+ave_overlay_t6002_die0_dtbo.h: ave-overlay-t6002-die0.dtbo
+	python3 mkhdr.py $< ave_overlay_t6002_die0_dtbo $@
+
+ave-overlay-t6002-die0.dtbo: ave-overlay-t6002-die0.dts $(T6002_DTSI)
+	dtc -I dts -O dtb -o $@ $< 2>/dev/null
+
+ave_overlay_t6002_ave2_dtbo.h: ave-overlay-t6002-ave2.dtbo
+	python3 mkhdr.py $< ave_overlay_t6002_ave2_dtbo $@
+
+ave-overlay-t6002-ave2.dtbo: ave-overlay-t6002-ave2.dts $(T6002_DTSI)
+	dtc -I dts -O dtb -o $@ $< 2>/dev/null
+
+ave_overlay_t6002_all_dtbo.h: ave-overlay-t6002-all.dtbo
+	python3 mkhdr.py $< ave_overlay_t6002_all_dtbo $@
+
+ave-overlay-t6002-all.dtbo: ave-overlay-t6002-all.dts $(T6002_DTSI)
 	dtc -I dts -O dtb -o $@ $< 2>/dev/null

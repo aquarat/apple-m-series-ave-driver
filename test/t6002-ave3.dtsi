@@ -1,0 +1,48 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/*
+ * t6002 (M1 Ultra) ave3: die 1's second encoder, inside the
+ * /soc@2200000000 fragment: t6002-ave1.dtsi's numbers on die 1 (CPU
+ * physical + 0x20_0000_0000, AIC die 1: the ADT's 5137 and 5134 are 1041
+ * and 1038). Bank 3 is die 1's ps-regs[17] (0x228e688000 +0x24).
+ *
+ * Sentinels: 0x13 AIC, 0xf5 venc1_sys_die1, 0xf6 venc1_pipe5_die1,
+ * 0xf8 venc1_me0_die1, 0xf7 venc1_pipe4_die1.
+ */
+dart_ave3_0: iommu@507040000 {
+	compatible = "apple,t6000-dart";
+	reg = <0x5 0x07040000 0x0 0x4000>;
+	interrupt-parent = <0xa7e00013>;
+	interrupts = <0 1 1038 4>;
+	#iommu-cells = <1>;
+	power-domains = <0xa7e000f5>;
+};
+
+dart_ave3_1: iommu@507030000 {
+	compatible = "apple,t6000-dart";
+	reg = <0x5 0x07030000 0x0 0x4000>;
+	interrupt-parent = <0xa7e00013>;
+	interrupts = <0 1 1038 4>;
+	#iommu-cells = <1>;
+	power-domains = <0xa7e000f5>;
+};
+
+ave3: video-encoder@507100000 {
+	compatible = "apple,t6002-ave", "apple,ave";
+	reg = <0x5 0x07100000 0x0 0x45c000>,
+	      <0x5 0x07800000 0x0 0x800000>,
+	      <0x5 0x07050000 0x0 0x008000>,
+	      <0x2 0x8e688000 0x0 0x000024>,
+	      <0x5 0x06000000 0x0 0x1000000>,
+	      <0x5 0x07040000 0x0 0x4000>,
+	      <0x5 0x07044000 0x0 0x4000>,
+	      <0x5 0x07020000 0x0 0x4000>;
+	reg-names = "dpe", "asc", "sve", "unk3", "axi2af",
+		    "cpudart", "dapf", "smmu";
+	interrupt-parent = <0xa7e00013>;
+	interrupts = <0 1 1041 4>, <0 1 1038 4>;
+	power-domains = <0xa7e000f5>, <0xa7e000f6>, <0xa7e000f8>,
+			<0xa7e000f7>;
+	resets = <0xa7e000f5>;
+	iommus = <&dart_ave3_0 0>, <&dart_ave3_0 1>,
+		 <&dart_ave3_1 0>, <&dart_ave3_1 1>;
+};

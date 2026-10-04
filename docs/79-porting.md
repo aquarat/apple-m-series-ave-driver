@@ -51,7 +51,11 @@ Worked ports since: **t6000** M1 Pro (docs/87: firmware found from the IPSW and 
 cold RAM dump, driver-side DAPF), **t8103** M1 MacBook Air (docs/89: placement
 from the live ADT, per-SoC DPE tunables, a second ME power holder, `pipe_diag`)
 and **t8112** M2 Mac mini (docs/90: `t8110` DART, firmware fetched through the
-CPUDART, the source size in PICMGMT `+0x964`).
+CPUDART, the source size in PICMGMT `+0x964`). **t6002** M1 Ultra (docs/98,
+untested on hardware): four encoders on two dies, and the iBoot placement read
+from the live ADT, which m1n1 publishes as a `phram` reserved-memory node
+(`test/physdump.ko adt=1 seg=N`, `tools/t6002_placement.py`). That is the
+cheapest way to find the placement on any new m1n1-booted machine.
 
 Three checks the M2 added, cheap to do first on any new SoC:
 - the `dart-ave` compatible (`dart,t8110` needs `dart_t8110`);

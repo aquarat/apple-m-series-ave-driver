@@ -502,6 +502,248 @@ const struct ave_soc_set ave_soc_set_t8112 = {
 	.n	= ARRAY_SIZE(ave_soc_t8112_rows),
 };
 
+/*
+ * t6002, M1 Ultra (Mac Studio j375d), macOS 13.5 firmware (docs/98).
+ *
+ * Two t6001 dies. The j375d restore ADT has four encoders: ave0/ave1 are
+ * t6001's ave0/ave1 byte for byte (reg, interrupts, power-gates, dart-ave*
+ * reg, sids, filter-data-instance-0), and ave2/ave3 are die 1's copies:
+ * every bus address + 0x2000000000, AIC + 4096 (die 1), PMGR ids with the
+ * die bit. CPU physical = ADT bus + 0x200000000 on both dies (/arm-io
+ * ranges), so die 1's encoders are at 0x240d100000 and 0x2507100000.
+ *
+ * Firmware: the BuildManifest gives j375dap AppleAVE2FW_H13D (docs/43
+ * §1.2). H13D is H13C rebuilt: the same segment layout (TEXT 0xec000, DATA
+ * vm 0xec000 +0x134000, file 0xf0000 +0x64000), the same patchbay and
+ * tunables offsets (STKG DATA+0x3a38, CpAd/WrAd/IOBA at the docs/82
+ * offsets), and the same 1390 symbols; the only function that changed size
+ * is CAVECommonController::SetTunable (672 -> 588 bytes), whose table gains
+ * three AVE_DPE pipe tunables (+0x30740/44/48). Everything after it moves
+ * by -0x54, so the TEXT identity windows below are H13D's own.
+ *
+ * What is NOT known until the machine has been read (docs/98 U0): where
+ * iBoot put TEXT and DATA, whether it preloaded ave1-ave3, and the
+ * pristine DATA blob. Those come from the block below, which
+ * tools/t6002_placement.py rewrites from the live ADT and cold dumps. While
+ * a row's TEXT is 0 the driver refuses at probe, before any register access
+ * (ave_drv.c), so an unfilled build is harmless.
+ *
+ * Device row: t6000's 14/11/8 for every instance (perGroup 1, instance 0),
+ * as t6001 sends for both encoders: no firmware-to-firmware routing between
+ * the four (docs/82 §0.2). DAPF: the driver programs it (stock m1n1).
+ * PMP: ave0's addresses are t6001's (tools/pmp_ptd_map.py on the j375d ADT
+ * passes C1-C4 with identical values), but the stock j375d DT has the PMP
+ * disabled; die 1 has no VENC report entries in Asahi's DT at all.
+ *
+ * BEGIN t6002-placement (generated: tools/t6002_placement.py; do not edit by hand)
+ */
+#define T6002_AVE0_TEXT_PHYS		0x10000bfc000ULL
+#define T6002_AVE0_DATA_PHYS		0x10001640000ULL
+#define T6002_AVE0_PRISTINE_NAME	"apple/ave-13.5-h13d-data-pristine.bin"
+#define T6002_AVE0_PRISTINE_SHA256	{ 0x5a, 0x00, 0x28, 0xb7, 0x7d, 0xc4, 0x31, 0xb1, 0xb5, 0x96, 0xe5, 0xe4, 0x98, 0x2a, 0x96, 0xb8, 0x9a, 0x1f, 0xff, 0xa3, 0xe9, 0x71, 0x45, 0xf2, 0xe2, 0xc1, 0x48, 0x47, 0x89, 0x56, 0xab, 0x55 }
+#define T6002_AVE1_TEXT_PHYS		0x10000bfc000ULL
+#define T6002_AVE1_DATA_PHYS		0x10001774000ULL
+#define T6002_AVE1_PRISTINE_NAME	"apple/ave-13.5-h13d-ave1-data-pristine.bin"
+#define T6002_AVE1_PRISTINE_SHA256	{ 0x64, 0x83, 0x32, 0xa9, 0xa2, 0x14, 0xea, 0x23, 0xd7, 0x7c, 0xd9, 0x0a, 0xca, 0xc5, 0xd0, 0xa5, 0xf2, 0x03, 0x5d, 0x95, 0x90, 0x2d, 0xa6, 0xdd, 0xe9, 0x7f, 0x70, 0x89, 0x66, 0x45, 0x0f, 0x73 }
+#define T6002_AVE2_TEXT_PHYS		0x10000bfc000ULL
+#define T6002_AVE2_DATA_PHYS		0x100018a8000ULL
+#define T6002_AVE2_PRISTINE_NAME	"apple/ave-13.5-h13d-ave2-data-pristine.bin"
+#define T6002_AVE2_PRISTINE_SHA256	{ 0xf0, 0xdd, 0xcd, 0xd9, 0x4d, 0xa6, 0x8b, 0xef, 0xfb, 0x67, 0x14, 0xff, 0x95, 0xc6, 0x4b, 0x58, 0x6e, 0x96, 0x70, 0x7b, 0xa3, 0x70, 0x27, 0x9e, 0xc2, 0x41, 0x92, 0xf7, 0x1d, 0xf6, 0x33, 0xd0 }
+#define T6002_AVE3_TEXT_PHYS		0x10000bfc000ULL
+#define T6002_AVE3_DATA_PHYS		0x100019dc000ULL
+#define T6002_AVE3_PRISTINE_NAME	"apple/ave-13.5-h13d-ave3-data-pristine.bin"
+#define T6002_AVE3_PRISTINE_SHA256	{ 0x3f, 0x93, 0x8f, 0xb9, 0x56, 0x03, 0x62, 0xbb, 0xf6, 0x50, 0xdf, 0x9b, 0xca, 0xec, 0xa0, 0xcb, 0x2a, 0xa1, 0x0a, 0xc4, 0xf9, 0x58, 0x30, 0x42, 0x23, 0xc7, 0x8c, 0x93, 0x97, 0x9d, 0xd5, 0x16 }
+/* END t6002-placement */
+
+/* H13D's TEXT, as the image has it (tools/t6002_placement.py checks DRAM) */
+#define T6002_TEXT_WIN { \
+	{ 0x0, { \
+		0x99, 0xae, 0x83, 0x15, 0xc6, 0x0d, 0xf9, 0x35, \
+		0x94, 0xcd, 0xd0, 0x0c, 0xdf, 0x7b, 0x72, 0x92, \
+		0x89, 0xce, 0xeb, 0xca, 0x54, 0xd3, 0xe2, 0x0c, \
+		0xd9, 0x57, 0x2d, 0xcd, 0xa7, 0xfd, 0x5c, 0x49, } }, \
+	{ 0x80000, { \
+		0xfe, 0xb9, 0xd4, 0x3d, 0x9b, 0x85, 0xa3, 0x08, \
+		0xad, 0xdc, 0x09, 0xbd, 0xb4, 0x3a, 0xe5, 0xe3, \
+		0xa6, 0x8d, 0xdd, 0x2f, 0x58, 0xc6, 0xf5, 0xe4, \
+		0xce, 0xc2, 0xfe, 0x70, 0x20, 0x53, 0x3c, 0xc2, } }, \
+	{ 0xe8000, { \
+		0x34, 0x4a, 0x25, 0x19, 0x17, 0x06, 0xf2, 0x22, \
+		0x8d, 0x53, 0x71, 0x1e, 0xee, 0xe2, 0xf7, 0xec, \
+		0x82, 0xea, 0xde, 0x47, 0x35, 0x7b, 0x9f, 0xfd, \
+		0x52, 0x4e, 0xcc, 0xfa, 0x3f, 0x4a, 0x4b, 0x38, } }, \
+}
+
+/*
+ * One encoder's iBoot block. RVBAR's low 32 bits are TEXT's DVA (t6001:
+ * 0x10000b28000 -> 0xb28000). DATA 0 = iBoot did not load one for this
+ * encoder: the driver builds it from ave0's pristine blob with this
+ * encoder's three tags (docs/82, as t6001's ave1).
+ */
+#define T6002_IBOOT(text, data, cpad, wrad, ioba) {			\
+	.text_phys	= (text),					\
+	.text_size	= 0xec000ULL,					\
+	.text_dva	= (text) & 0xffffffffULL,			\
+	.data_phys	= (data),					\
+	.data_size	= 0x134000ULL,					\
+	.data_dva	= 0xec000ULL,					\
+	.data_literal	= 0x1f0000ec000ULL,				\
+	.data_owned	= !(data),					\
+	.tag_cpad	= (cpad),					\
+	.tag_wrad	= (wrad),					\
+	.tag_ioba	= (ioba),					\
+}
+
+#define T6002_DEV_ROWS {						\
+	[AVE_ABI_MACOS_13_5] = { .dev_id = 14, .dev_type = 11, .chip_type = 8 }, \
+	[AVE_ABI_MACOS_26_6] = { .dev_id = 11, .dev_type = 9, .chip_type = 6 }, \
+}
+
+static const struct ave_soc ave_soc_t6002_ave0 = {
+	.name			= "t6002",
+	.pipe_diag		= true,		/* t6001's ave0 hardware */
+	.dpe			= &ave_dpe_set_castor_6000,	/* DevID 14-16 share it */
+	.dpe_phys		= 0x40d100000ULL,
+	.inst			= 0,
+	.fw_name		= "apple/ave_h13d.bin",
+	.fw_pristine_name	= T6002_AVE0_PRISTINE_NAME,
+	.fw_pristine_sha256	= T6002_AVE0_PRISTINE_SHA256,
+	.data_stkg_off		= 0x3a38,
+	.text_win		= T6002_TEXT_WIN,
+	.dev			= T6002_DEV_ROWS,
+
+	/* ADT dart-ave0, as t6001 */
+	.cpudart_phys		= 0x40d040000ULL,
+	.dapf_phys		= 0x40d044000ULL,
+	.dart1_phys		= 0x40d030000ULL,
+	.smmu_phys		= 0x40d020000ULL,
+	.dapf_window		= { 0x1f000000000ULL, 0x1f0fffffffcULL },
+	.dapf_mmio_own		= { 0x40d050000ULL, 0x40dc69000ULL },
+	.dapf_mmio_adt		= { 0x506000000ULL, 0x507c6c000ULL },	/* ave1's span */
+	.dapf_by_driver		= true,
+
+	/* iBoot's own DATA; the tags are only used for owned DATA */
+	.iboot = T6002_IBOOT(T6002_AVE0_TEXT_PHYS, T6002_AVE0_DATA_PHYS, 0, 0, 0),
+
+	.me1_node		= "/soc@200000000/power-management@28e580000/power-controller@8020",
+	.me1_label		= "venc_me1",
+	.pmp_report_node	= "/soc@200000000/pmp_report@28e3c0000/report@10",
+
+	/* tools/pmp_ptd_map.py on the j375d ADT: t6001's values, C1-C4 ok */
+	.pmp_ps_reg		= 0x28e0802d8ULL,
+	.pmp_report_base	= 0x28e3c0000ULL,
+	.pmp_dvfs_wr		= 0x28e3d0888ULL,
+	.pmp_dvfs_rd		= 0x28e3c1110ULL,
+	.pmgr_perf_blk		= 0x28e580000ULL + 0x58000,
+};
+
+/* Die 0's second encoder: t6001's ave1 */
+static const struct ave_soc ave_soc_t6002_ave1 = {
+	.name			= "t6002-ave1",
+	.pipe_diag		= true,
+	.dpe			= &ave_dpe_set_castor_6000,
+	.dpe_phys		= 0x507100000ULL,
+	.inst			= 1,
+	.fw_name		= "apple/ave_h13d.bin",
+	.fw_pristine_name	= T6002_AVE1_PRISTINE_NAME,
+	.fw_pristine_sha256	= T6002_AVE1_PRISTINE_SHA256,
+	.data_stkg_off		= 0x3a38,
+	.text_win		= T6002_TEXT_WIN,
+	.dev			= T6002_DEV_ROWS,
+
+	.cpudart_phys		= 0x507040000ULL,
+	.dapf_phys		= 0x507044000ULL,
+	.dart1_phys		= 0x507030000ULL,
+	.smmu_phys		= 0x507020000ULL,
+	.dapf_window		= { 0x1f000000000ULL, 0x1f0fffffffcULL },
+	.dapf_mmio_own		= { 0x507050000ULL, 0x507c69000ULL },
+	.dapf_mmio_adt		= { 0x40d050000ULL, 0x40dc69000ULL },	/* ave0's span */
+	.dapf_by_driver		= true,
+
+	.iboot = T6002_IBOOT(T6002_AVE1_TEXT_PHYS, T6002_AVE1_DATA_PHYS,
+			     0x507800000ULL, 0x507c00000ULL, 0x506000000ULL),
+
+	.me1_node		= "/soc@200000000/power-management@28e680000/power-controller@8020",
+	.me1_label		= "venc1_me1",
+};
+
+/*
+ * Die 1. CPU physical = die 0's + 0x2000000000 for the encoder and its
+ * DARTs; its PMGR is die 1's (soc@2200000000, power-management@28e580000 =
+ * 0x228e580000). The owned-DATA tags assume the firmware addresses its
+ * own block by these global addresses, as ave0/ave1 do; docs/98 U0 checks
+ * that against iBoot's own tags where iBoot loaded a die-1 DATA.
+ */
+static const struct ave_soc ave_soc_t6002_ave2 = {
+	.name			= "t6002-ave2",
+	.pipe_diag		= true,
+	.dpe			= &ave_dpe_set_castor_6000,
+	.dpe_phys		= 0x240d100000ULL,
+	.inst			= 2,
+	.fw_name		= "apple/ave_h13d.bin",
+	.fw_pristine_name	= T6002_AVE2_PRISTINE_NAME,
+	.fw_pristine_sha256	= T6002_AVE2_PRISTINE_SHA256,
+	.data_stkg_off		= 0x3a38,
+	.text_win		= T6002_TEXT_WIN,
+	.dev			= T6002_DEV_ROWS,
+
+	/* ADT dart-ave2 reg[0..3], bus 0x220d040000.. + 0x200000000 */
+	.cpudart_phys		= 0x240d040000ULL,
+	.dapf_phys		= 0x240d044000ULL,
+	.dart1_phys		= 0x240d030000ULL,
+	.smmu_phys		= 0x240d020000ULL,
+	.dapf_window		= { 0x1f000000000ULL, 0x1f0fffffffcULL },
+	.dapf_mmio_own		= { 0x240d050000ULL, 0x240dc69000ULL },
+	/* dart-ave2 filter entry 1: ave3's SVE..ASC (not its axi2af, unlike ave0's) */
+	.dapf_mmio_adt		= { 0x2507050000ULL, 0x2507c6c000ULL },
+	.dapf_by_driver		= true,
+
+	.iboot = T6002_IBOOT(T6002_AVE2_TEXT_PHYS, T6002_AVE2_DATA_PHYS,
+			     0x240d800000ULL, 0x240dc00000ULL, 0x240c000000ULL),
+
+	.me1_node		= "/soc@2200000000/power-management@28e580000/power-controller@8020",
+	.me1_label		= "venc_me1_die1",
+};
+
+static const struct ave_soc ave_soc_t6002_ave3 = {
+	.name			= "t6002-ave3",
+	.pipe_diag		= true,
+	.dpe			= &ave_dpe_set_castor_6000,
+	.dpe_phys		= 0x2507100000ULL,
+	.inst			= 3,
+	.fw_name		= "apple/ave_h13d.bin",
+	.fw_pristine_name	= T6002_AVE3_PRISTINE_NAME,
+	.fw_pristine_sha256	= T6002_AVE3_PRISTINE_SHA256,
+	.data_stkg_off		= 0x3a38,
+	.text_win		= T6002_TEXT_WIN,
+	.dev			= T6002_DEV_ROWS,
+
+	.cpudart_phys		= 0x2507040000ULL,
+	.dapf_phys		= 0x2507044000ULL,
+	.dart1_phys		= 0x2507030000ULL,
+	.smmu_phys		= 0x2507020000ULL,
+	.dapf_window		= { 0x1f000000000ULL, 0x1f0fffffffcULL },
+	.dapf_mmio_own		= { 0x2507050000ULL, 0x2507c69000ULL },
+	.dapf_mmio_adt		= { 0x240d050000ULL, 0x240dc69000ULL },	/* ave2's span */
+	.dapf_by_driver		= true,
+
+	.iboot = T6002_IBOOT(T6002_AVE3_TEXT_PHYS, T6002_AVE3_DATA_PHYS,
+			     0x2507800000ULL, 0x2507c00000ULL, 0x2506000000ULL),
+
+	.me1_node		= "/soc@2200000000/power-management@28e680000/power-controller@8020",
+	.me1_label		= "venc1_me1_die1",
+};
+
+static const struct ave_soc *const ave_soc_t6002_rows[] = {
+	&ave_soc_t6002_ave0, &ave_soc_t6002_ave1,
+	&ave_soc_t6002_ave2, &ave_soc_t6002_ave3,
+};
+
+const struct ave_soc_set ave_soc_set_t6002 = {
+	.rows	= ave_soc_t6002_rows,
+	.n	= ARRAY_SIZE(ave_soc_t6002_rows),
+};
+
 const struct ave_soc *ave_soc_pick(const struct ave_soc_set *set,
 				   phys_addr_t dpe_phys)
 {

@@ -691,6 +691,12 @@ static int ave_fw_map_owned_data(struct ave_device *ave,
 	u8 *p;
 	int ret;
 
+	/* a row without this encoder's own tags would hand the core IOBA 0 */
+	if (!ib->tag_cpad || !ib->tag_wrad || !ib->tag_ioba) {
+		dev_err(ave->dev, "owned DATA: REFUSING - %s has no CpAd/WrAd/IOBA tags for its own DATA (ave_soc.c)\n",
+			ave->soc->name);
+		return -EINVAL;
+	}
 	ret = ave_fw_load_pristine(ave);
 	if (ret)
 		return ret;

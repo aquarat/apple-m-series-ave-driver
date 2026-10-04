@@ -1,0 +1,32 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/*
+ * variant=13 (docs/98): t6002 ave0 (die 0, the known-good control) and
+ * ave2, die 1's first encoder: the first die-1 step adds exactly one new
+ * encoder. Compile WITHOUT -@.
+ */
+/dts-v1/;
+/plugin/;
+
+/ {
+	fragment@0 {
+		target-path = "/soc@200000000";
+
+		__overlay__ {
+			#address-cells = <2>;
+			#size-cells = <2>;
+
+			/include/ "t6002-ave0.dtsi"
+		};
+	};
+
+	fragment@1 {
+		target-path = "/soc@2200000000";
+
+		__overlay__ {
+			#address-cells = <2>;
+			#size-cells = <2>;
+
+			/include/ "t6002-ave2.dtsi"
+		};
+	};
+};
