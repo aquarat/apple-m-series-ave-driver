@@ -36,6 +36,10 @@
 #include <linux/iommu.h>
 #include <linux/io.h>
 #include <linux/iopoll.h>
+#include <linux/vmalloc.h>
+#include <linux/delay.h>
+#include <linux/uaccess.h>
+#include <linux/debugfs.h>
 #include <linux/of.h>
 #include <linux/of_address.h>
 #include <linux/platform_device.h>
@@ -884,6 +888,144 @@ void ave_regdump(struct ave_device *ave, const char *tag)
 	ave_regdump_block(ave, "SMMU", ave->soc->smmu_phys, tag);
 	ave_regdump_block(ave, "DART1", ave->soc->dart1_phys, tag);
 	ave_regdump_block(ave, "CPUDART", ave->soc->cpudart_phys, tag);
+}
+
+/*
+ * docs/93: firmware memory snapshots for emulation. snap_hold_frame=N
+ * snap_hold_s=S holds the probe-time self-test for S seconds after frame N's
+ * result (or timeout), before anything is torn down, so the firmware's
+ * memory can be read through /sys/kernel/debug/apple_ave_dva in a known
+ * state. Reading that file at offset X returns what the encoder sees at
+ * device address X (read-only; unmapped pages read as zeros).
+ */
+static int snap_hold_frame = -1;
+module_param(snap_hold_frame, int, 0644);
+MODULE_PARM_DESC(snap_hold_frame, "probe-time self-test: hold after this frame's result (docs/93); -1 = off");
+static unsigned int snap_hold_s = 60;
+module_param(snap_hold_s, uint, 0644);
+MODULE_PARM_DESC(snap_hold_s, "seconds to hold for snap_hold_frame (docs/93)");
+static bool dva_debugfs;
+module_param(dva_debugfs, bool, 0444);
+MODULE_PARM_DESC(dva_debugfs, "create /sys/kernel/debug/apple_ave_dva: read the encoder's device address space (read-only, docs/93)");
+
+void ave_snap_hold(struct ave_device *ave, unsigned int frame)
+{
+	if (snap_hold_frame < 0 || frame != (unsigned int)snap_hold_frame)
+		return;
+	dev_info(ave->dev, "snap: holding %u s after frame %u (docs/93)\n", snap_hold_s, frame);
+	msleep(snap_hold_s * 1000);
+	dev_info(ave->dev, "snap: hold over\n");
+}
+
+static ssize_t ave_dva_read(struct file *f, char __user *ubuf, size_t len, loff_t *ppos)
+{
+	struct ave_device *ave = f->private_data;
+	struct iommu_domain *dom = iommu_get_domain_for_dev(ave->dev);
+	size_t done = 0;
+
+	if (!dom)
+		return -ENODEV;
+	while (done < len) {
+		u64 dva = *ppos;
+		size_t off = dva & (PAGE_SIZE - 1);
+		size_t n = min_t(size_t, len - done, PAGE_SIZE - off);
+		phys_addr_t pa = iommu_iova_to_phys(dom, dva);
+		void *src = NULL, *map = NULL, *vm = NULL;
+		int left;
+
+		/*
+		 * Read through an uncached mapping. The driver writes its DMA
+		 * buffers through uncached aliases and the coprocessor writes
+		 * DRAM behind the CPU caches, so the cacheable linear map can
+		 * return stale lines. RAM: a non-cacheable vmap of the page.
+		 * The firmware carve-outs are no-map memory (pfn_valid, but not
+		 * in the linear map: page_address() faults there): memremap WC.
+		 */
+		if (pa && region_intersects(pa & PAGE_MASK, PAGE_SIZE, IORESOURCE_SYSTEM_RAM,
+					    IORES_DESC_NONE) == REGION_INTERSECTS) {
+			struct page *pg = pfn_to_page(PHYS_PFN(pa));
+
+			vm = vmap(&pg, 1, VM_MAP, pgprot_writecombine(PAGE_KERNEL));
+			if (vm)
+				src = vm + offset_in_page(pa);
+		} else if (pa) {
+			map = memremap(pa & PAGE_MASK, PAGE_SIZE, MEMREMAP_WC);
+			if (map)
+				src = map + offset_in_page(pa);
+		}
+		if (src)
+			left = copy_to_user(ubuf + done, src, n);
+		else
+			left = clear_user(ubuf + done, n);
+		if (map)
+			memunmap(map);
+		if (vm)
+			vunmap(vm);
+		if (left)
+			return done ? done : -EFAULT;
+		done += n;
+		*ppos += n;
+	}
+	return done;
+}
+
+static const struct file_operations ave_dva_fops = {
+	.owner	= THIS_MODULE,
+	.open	= simple_open,
+	.read	= ave_dva_read,
+	.llseek	= default_llseek,
+};
+
+/*
+ * apple_ave_mmio: read at offset X = readl() of AP-physical address X, only
+ * inside the encoder's own register banks and 4-byte aligned. For reading
+ * back registers the firmware is known to have written (docs/93): an
+ * arbitrary read elsewhere in a bank can be an SError (docs/53 f38), so the
+ * caller chooses the addresses, not this file.
+ */
+static ssize_t ave_mmio_read(struct file *f, char __user *ubuf, size_t len, loff_t *ppos)
+{
+	struct ave_device *ave = f->private_data;
+	u64 pa = *ppos;
+	unsigned int i;
+	u32 v;
+
+	if (len < 4 || (pa & 3))
+		return -EINVAL;
+	for (i = 0; i < AVE_NUM_BANKS; i++) {
+		const struct ave_bank *b = &ave->bank[i];
+
+		if (b->base && pa >= b->phys && pa + 4 <= b->phys + b->size) {
+			v = readl(b->base + (pa - b->phys));
+			if (copy_to_user(ubuf, &v, 4))
+				return -EFAULT;
+			*ppos += 4;
+			return 4;
+		}
+	}
+	return -ERANGE;
+}
+
+static const struct file_operations ave_mmio_fops = {
+	.owner	= THIS_MODULE,
+	.open	= simple_open,
+	.read	= ave_mmio_read,
+	.llseek	= default_llseek,
+};
+
+void ave_dva_debugfs_init(struct ave_device *ave)
+{
+	if (dva_debugfs && !ave->soc->inst) {
+		ave->dva_dentry = debugfs_create_file("apple_ave_dva", 0400, NULL, ave, &ave_dva_fops);
+		ave->mmio_dentry = debugfs_create_file("apple_ave_mmio", 0400, NULL, ave, &ave_mmio_fops);
+	}
+}
+
+void ave_dva_debugfs_exit(struct ave_device *ave)
+{
+	debugfs_remove(ave->dva_dentry);
+	debugfs_remove(ave->mmio_dentry);
+	ave->dva_dentry = ave->mmio_dentry = NULL;
 }
 
 void ave_dapf_dump_on_close(struct ave_device *ave)

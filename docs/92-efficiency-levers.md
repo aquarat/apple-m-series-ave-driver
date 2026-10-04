@@ -85,6 +85,9 @@ DCP and AVD drivers were brought up. It needs:
 - booting that macOS through m1n1 in hypervisor mode for the session (a
   one-off boot; the normal boot chain is not changed).
 
-Until then, B-frames and multiple references stay parked; the driver's
+docs/93 then ran the firmware's per-frame code under emulation from live
+snapshots: it programs the second reference completely and the hardware
+accepts every write, so the trace should look outside the per-frame
+registers. Until then, B-frames and multiple references stay parked; the driver's
 experiment switches (`session_bframes`, `session_ref_spacing_p`,
 `session_hevc_refs`) remain for the trace's follow-up.

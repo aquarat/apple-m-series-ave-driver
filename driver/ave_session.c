@@ -4244,6 +4244,7 @@ static int ave_session_process(struct ave_device *ave,
 	if (!bufs->quiet)
 		ave_step(ave, "frame result logged; next: post-frame diagnostics");
 	ave_regdump(ave, "frame");
+	ave_snap_hold(ave, n);
 
 	/*
 	 * docs/57 #3 and #4, read-only, at the moment Process gave up:

@@ -52,6 +52,9 @@ struct ave_dapf_entry {
 int ave_dapf_dump(struct ave_device *ave);
 void ave_dapf_dump_on_close(struct ave_device *ave);
 void ave_regdump(struct ave_device *ave, const char *tag);
+void ave_snap_hold(struct ave_device *ave, unsigned int frame);
+void ave_dva_debugfs_init(struct ave_device *ave);
+void ave_dva_debugfs_exit(struct ave_device *ave);
 void ave_regdump_iova(struct ave_device *ave, const char *what, dma_addr_t iova);
 
 /*

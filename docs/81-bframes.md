@@ -1,6 +1,9 @@
 # 81. B-frames (H.264 first, then HEVC)
 
-**Status (2026-09-27): parked, after docs/85.** The macOS-equivalent
+**Status (2026-10-04): parked; docs/92 (the M2 stalls identically) and docs/93
+(the firmware's per-frame programming, emulated, is complete, and every write
+reaches the hardware) narrow the cause to state outside the per-frame
+registers.** Earlier: parked after docs/85. The macOS-equivalent
 Start image (mq1/mq2) and the firmware's own frame-type path (mq4, type
 5) both still stall on the second reference, so the cause is not in the
 commands (docs/53 mq1-mq4, bs8).

@@ -85,6 +85,8 @@ enum ave_pm_state {
 };
 
 struct ave_device {
+	struct dentry		*dva_dentry;	/* docs/93: apple_ave_dva */
+	struct dentry		*mmio_dentry;	/* docs/93: apple_ave_mmio */
 	struct device		*dev;
 	const struct ave_soc	*soc;		/* from the compatible; ave_soc.c */
 	struct ave_bank		bank[AVE_NUM_BANKS];
