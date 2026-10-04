@@ -307,5 +307,8 @@ Ours: 0, which is what macOS would send when every pipe is already on.
 - Whether the ME hardware decides unit usage from power state **[U]** — that
   is what T1 tests.
 - Whether macOS user space ever sets MultiME (e.g. above some resolution)
-  **[U]**; only the default path (0) is known.
+  **[U]**; only the default path (0) is known. *Later (docs/89 §8.3): no
+  user-space writer sets it at all **[C/I]**, so macOS runs every B frame with
+  MultiME 0 and ME1 off; a B frame in that state has not been run here (T1
+  was a two-reference P frame).*
 - 13.5 H14G consumer of header `+0x24` and of the MCC DSIDs: none found **[I]**.

@@ -163,6 +163,13 @@ struct ave_soc {
 	 * only for compressed input, so it is not sent there.
 	 */
 	bool		src_dims;
+	/*
+	 * docs/89 §8: frames with two references (B frames, two-reference P
+	 * frames) hang the encoder on this SoC as the driver sends them, so
+	 * the stream API refuses them and V4L2 offers B_FRAMES 0 and one
+	 * reference only. enc_two_refs=1 overrides it (lab runs).
+	 */
+	bool		two_refs_hang;
 
 	/* Power domains the DT cannot hand to the node (docs/57 #3, docs/78) */
 	const char	*me1_node;		/* venc_me1 */

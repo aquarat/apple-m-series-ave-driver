@@ -301,6 +301,14 @@ const struct ave_soc ave_soc_t8103 = {
 	.me1_node		= "/soc/power-management@23b700000/power-controller@8020",
 	.me1_label		= "venc_me1",
 
+	/*
+	 * docs/89 §8: an H.264 B frame hangs the encoder here with both ME
+	 * units programmed (wire 0xFCEA = 1), the fix that works on t6000 and
+	 * t8112 (docs/94). Until a configuration is shown to work, streams get
+	 * one reference per frame; enc_two_refs=1 lets the lab try.
+	 */
+	.two_refs_hang		= true,
+
 	/* No PMP report on t8103 in Asahi: leave the pmp_* fields 0 (docs/79 §4) */
 };
 

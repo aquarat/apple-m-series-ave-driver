@@ -67,6 +67,8 @@ int ave_enc_init(struct ave_device *ave);
 #define AVE_ENC_CODEC_HEVC	1
 /* True when this firmware ABI (and the module's settings) can run HEVC. */
 bool ave_enc_hevc_supported(struct ave_device *ave);
+/* B frames and two-reference P frames: off where they hang (docs/89 §8) */
+bool ave_enc_two_refs_supported(struct ave_device *ave);
 /* One stream's parameters (docs/68 step 4). Zero means "the default". */
 struct ave_enc_cfg {
 	u32	codec;			/* AVE_ENC_CODEC_*; 0 = H.264 */

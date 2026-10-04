@@ -86,6 +86,7 @@ struct ave_v4l2 {
 	struct ave_ctx		*owner;		/* the context holding a session */
 	atomic_t		users;		/* open file handles (docs/84 §5) */
 	bool			hevc;		/* HEVC offered (ave_enc_hevc_supported) */
+	bool			two_refs;	/* B frames, 2 refs (ave_enc_two_refs_supported) */
 };
 
 struct ave_ctx {
@@ -626,17 +627,19 @@ static int ave_init_ctrls(struct ave_ctx *ctx)
 {
 	struct v4l2_ctrl_handler *h = &ctx->hdl;
 	const struct v4l2_ctrl_ops *o = &ave_ctrl_ops;
+	/* docs/89 §8: where two references hang, the ranges stop at 0 and 1 */
+	const bool two = ctx->av->two_refs;
 
 	v4l2_ctrl_handler_init(h, 22);
 	/*
 	 * ffmpeg sets 0 and reads it back; non-zero fails its open (docs/81
 	 * §3.2), so 0 stays the default. 1..2 (docs/81 "V4L2 implementation").
 	 */
-	v4l2_ctrl_new_std(h, o, V4L2_CID_MPEG_VIDEO_B_FRAMES, 0, AVE_GOP_B_MAX,
-			  1, 0);
+	v4l2_ctrl_new_std(h, o, V4L2_CID_MPEG_VIDEO_B_FRAMES, 0,
+			  two ? AVE_GOP_B_MAX : 0, 1, 0);
 	/* 2: two L0 references per P frame (docs/94) */
 	v4l2_ctrl_new_std(h, o, V4L2_CID_MPEG_VIDEO_REF_NUMBER_FOR_PFRAMES,
-			  1, 2, 1, 1);
+			  1, two ? 2 : 1, 1, 1);
 	v4l2_ctrl_new_std(h, o, V4L2_CID_MPEG_VIDEO_GOP_SIZE, 0, 65535, 1, 0);
 	v4l2_ctrl_new_std(h, o, V4L2_CID_MPEG_VIDEO_FORCE_KEY_FRAME, 0, 0, 0, 0);
 	v4l2_ctrl_new_std(h, o, V4L2_CID_MPEG_VIDEO_H264_I_FRAME_QP, 0, 51, 1,
@@ -1407,6 +1410,10 @@ int ave_v4l2_register(struct ave_device *ave)
 		return -ENOMEM;
 	av->ave = ave;
 	av->hevc = ave_enc_hevc_supported(ave);
+	av->two_refs = ave_enc_two_refs_supported(ave);
+	if (!av->two_refs)
+		dev_info(ave->dev, "v4l2: B frames and two-reference P frames off on %s (docs/89 §8): VIDEO_B_FRAMES 0, REF_NUMBER_FOR_PFRAMES 1\n",
+			 ave->soc->name);
 	mutex_init(&av->dev_mutex);
 	mutex_init(&av->hw_mutex);
 	av->wq = alloc_ordered_workqueue("apple-ave", 0);

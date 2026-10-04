@@ -406,6 +406,27 @@ MODULE_PARM_DESC(session_multi_me,
 	"H.264 Start wire 0xFCEA (u16, the kext's iMultiMECnt): the firmware also programs the second ME unit (DPE+0xF0000); docs/94. 0 = as macOS's default");
 
 /*
+ * docs/89 §8. The stream API (V4L2) sets wire 0xFCEA to 1 by itself for B
+ * frames and two-reference P frames (docs/94, docs/96). 0 here leaves it 0,
+ * which is what macOS's user space sends for every session; a non-zero
+ * session_multi_me still wins. For the M1 tests: B frames with one ME unit.
+ */
+static bool session_multi_me_auto = true;
+module_param(session_multi_me_auto, bool, 0644);
+MODULE_PARM_DESC(session_multi_me_auto,
+	"stream API: set wire 0xFCEA for B frames / two references (default 1, docs/94); 0 = leave it 0 as macOS does (docs/89 §8)");
+
+/*
+ * docs/89 §8: frames with two references, per SoC row (two_refs_hang).
+ * -1 = the row decides (default), 0 = refuse them everywhere, 1 = allow them
+ * everywhere (lab runs on a SoC where they hang).
+ */
+static int enc_two_refs = -1;
+module_param(enc_two_refs, int, 0444);
+MODULE_PARM_DESC(enc_two_refs,
+	"stream API: B frames and two-reference P frames; -1 = per SoC (off on t8103, docs/89 §8), 0 = off, 1 = on");
+
+/*
  * Multi-pass (docs/95), the lab path: for the self-test and for V4L2
  * streams alike. session_mp_pass 1 = first pass (each frame's record goes
  * to apple_ave_mp_rec), 2 = final pass (each frame gets its input buffer
@@ -5527,6 +5548,13 @@ bool ave_enc_hevc_supported(struct ave_device *ave)
 	return ave_sess_hevc_ok(ave_cmd_abi_get(ave->fw_abi));
 }
 
+bool ave_enc_two_refs_supported(struct ave_device *ave)
+{
+	if (enc_two_refs >= 0)
+		return enc_two_refs > 0;
+	return !ave->soc->two_refs_hang;
+}
+
 /*
  * Open + Start_AVC or HEVC_INIT for one stream; one at a time (the caller
  * serialises). HEVC gets what the self-test proved in h3h (docs/77 §15-§18):
@@ -5568,6 +5596,12 @@ int ave_enc_start(struct ave_device *ave, const struct ave_enc_cfg *cfg)
 	if (cfg->bframes > AVE_GOP_B_MAX || cfg->p_refs > 2 ||
 	    (cfg->bframes && !hevc && cfg->profile_idc < 77))
 		return -EINVAL;
+	/* docs/89 §8: refused where they hang (the V4L2 controls stop at 0/1) */
+	if ((cfg->bframes || cfg->p_refs >= 2) && !ave_enc_two_refs_supported(ave)) {
+		dev_err(ave->dev, "enc: %u B frame(s), %u reference(s) per P: two-reference frames are off on %s (docs/89 §8; enc_two_refs=1 to try)\n",
+			cfg->bframes, cfg->p_refs, ave->soc->name);
+		return -EOPNOTSUPP;
+	}
 
 	bufs->codec = cfg->codec;
 	/* docs/83: Main 10 by profile; P010 input by format (m1-m3b) */
@@ -5599,7 +5633,8 @@ int ave_enc_start(struct ave_device *ave, const struct ave_enc_cfg *cfg)
 	bufs->p_refs = cfg->p_refs;
 	bufs->req_dpb = cfg->bframes || cfg->p_refs >= 2 ?
 			max_t(u32, session_dpb, 3) : 0;
-	bufs->multi_me = cfg->bframes || cfg->p_refs >= 2 ? 1 : 0;
+	bufs->multi_me = session_multi_me_auto &&
+			 (cfg->bframes || cfg->p_refs >= 2) ? 1 : 0;
 	bufs->hevc_bframes = 0;
 	bufs->quiet = true;
 	bufs->open_ended = true;
