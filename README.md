@@ -138,6 +138,10 @@ It is a stateful mem2mem encoder, NV12 in:
   buffer with a crop).
 - **Both encoders:** the M1 Max's second encoder (ave1) is a second node,
   `apple-ave1-enc`; two streams run at once, each at full speed (docs/82).
+  Opening a node whose encoder is taken binds the stream to a free one, so
+  clients that always open the same node (ffmpeg, GStreamer) still get one
+  encoder each (`open_balance`, default on; docs/98 §12, not yet run on
+  hardware).
 - **Checks:** `v4l2-compliance -s` passes 54/54. ffmpeg and GStreamer
   (`v4l2h264enc`/`v4l2h265enc`) work. `testsrc2` comes back at 43-45 dB PSNR
   from 480p to 4K in both codecs.

@@ -8,7 +8,9 @@
  * STREAMON. HEVC is offered only when the firmware ABI has its layouts
  * (13.5). Single-planar, MMAP (and DMABUF, which costs nothing here). One stream
  * owns the hardware at a time: a second context gets -EBUSY from
- * start_streaming, never from open() (docs/68 §7 step 5).
+ * start_streaming, never from open() (docs/68 §7 step 5). On a SoC with
+ * several encoders, open() binds the context to an idle one if the node's
+ * own is taken (open_balance, docs/98 §12).
  *
  * The session layer (ave_session.c, ave_enc_*) does the firmware work and
  * is synchronous - one Process in flight - so device_run() hands the job to
@@ -27,7 +29,9 @@
  * its own linesize and puts chroma at stride * the height we report, so
  * any other size gives a silently wrong picture with ffmpeg.
  */
+#include <linux/list.h>
 #include <linux/module.h>
+#include <linux/mutex.h>
 #include <linux/slab.h>
 #include <linux/workqueue.h>
 #include <media/v4l2-ctrls.h>
@@ -75,23 +79,68 @@ module_param(v4l2_test_key_every, uint, 0644);
 MODULE_PARM_DESC(v4l2_test_key_every,
 		 "test aid, B-frame streams only: act as if FORCE_KEY_FRAME were set for every Nth OUTPUT buffer (0 = off; docs/81)");
 
+/*
+ * docs/98 §12: on a SoC with several encoders (t6001: 2, t6002: 4) each node
+ * drives one encoder, and an encoder runs one stream. ffmpeg and GStreamer
+ * pick the node themselves and all pick the same one, so open() picks the
+ * encoder: the node's own if no context is bound to it, else the idle
+ * compatible encoder with the lowest index, else the node's own as before
+ * (STREAMON then fails with -EBUSY, as without this).
+ */
+static bool open_balance = true;
+module_param(open_balance, bool, 0444);
+MODULE_PARM_DESC(open_balance,
+		 "an open of a node whose encoder is busy uses an idle compatible encoder of the same SoC (docs/98 §12)");
+
+/*
+ * Every registered encoder, and every ave_v4l2's ctxs and users. A leaf
+ * lock: nothing is taken under it but ave_schedule_recover()'s allocation
+ * and work queueing.
+ */
+static DEFINE_MUTEX(ave_v4l2_list_lock);
+static LIST_HEAD(ave_v4l2_list);
+
+/*
+ * One encoder and its node. Since docs/98 §12 a file opened on this node may
+ * be bound to another encoder: the node half (vfd, dev_mutex) serves the
+ * files opened here, the encoder half (m2m_dev, hw_mutex, wq, owner, the
+ * DMA device) the contexts bound here, wherever they were opened.
+ */
 struct ave_v4l2 {
 	struct ave_device	*ave;
 	struct v4l2_device	v4l2_dev;
 	struct video_device	vfd;
 	struct v4l2_m2m_dev	*m2m_dev;
-	struct mutex		dev_mutex;	/* vfd and queue lock */
+	/* vfd lock, and the queue lock of every file opened on this node */
+	struct mutex		dev_mutex;
 	struct mutex		hw_mutex;	/* ave_enc_* calls */
 	struct workqueue_struct	*wq;
 	struct ave_ctx		*owner;		/* the context holding a session */
-	atomic_t		users;		/* open file handles (docs/84 §5) */
+	struct list_head	list;		/* on ave_v4l2_list while registered */
+	/*
+	 * Under ave_v4l2_list_lock. ctxs: contexts bound to this encoder (what
+	 * open_balance looks at). users: those plus the files open on this
+	 * node, wherever they are bound (docs/84 §5): the re-probe after a
+	 * hang, which frees this structure, waits for it to reach 0.
+	 */
+	unsigned int		ctxs;
+	unsigned int		users;
 	bool			hevc;		/* HEVC offered (ave_enc_hevc_supported) */
 	bool			two_refs;	/* B frames, 2 refs (ave_enc_two_refs_supported) */
+	bool			h264_two_refs;	/* the same for H.264 (docs/89 §9) */
 };
 
 struct ave_ctx {
 	struct v4l2_fh		fh;
+	/*
+	 * av: the encoder this context is bound to - everything that reaches
+	 * the hardware, the m2m scheduler, the control ranges, the buffers'
+	 * DMA device. nav: the node it was opened on - the vfd, the lock its
+	 * ioctls and queues run under, QUERYCAP. The same unless open_balance
+	 * moved it (docs/98 §12).
+	 */
 	struct ave_v4l2		*av;
+	struct ave_v4l2		*nav;
 	struct v4l2_ctrl_handler hdl;
 	struct work_struct	run_work;
 	u32			width, height;	/* OUTPUT, as negotiated */
@@ -241,6 +290,11 @@ static void ave_fill_cap_fmt(const struct ave_ctx *ctx,
 	p->xfer_func = ctx->xfer_func;
 }
 
+/*
+ * The node's identity, not the bound encoder's (docs/98 §12): clients match
+ * bus_info to the device they opened, and the encoders open_balance chooses
+ * between are alike in everything else QUERYCAP says.
+ */
 static int ave_querycap(struct file *file, void *priv,
 			struct v4l2_capability *cap)
 {
@@ -261,7 +315,7 @@ static int ave_querycap(struct file *file, void *priv,
 
 static int ave_enum_fmt(struct file *file, void *priv, struct v4l2_fmtdesc *f)
 {
-	struct ave_v4l2 *av = video_drvdata(file);
+	struct ave_v4l2 *av = fh_to_ctx(file)->av;
 
 	if (V4L2_TYPE_IS_OUTPUT(f->type)) {
 		/* P010 whenever HEVC exists (see ave_fill_out_fmt) */
@@ -282,7 +336,7 @@ static int ave_enum_fmt(struct file *file, void *priv, struct v4l2_fmtdesc *f)
 static int ave_enum_framesizes(struct file *file, void *priv,
 			       struct v4l2_frmsizeenum *fs)
 {
-	struct ave_v4l2 *av = video_drvdata(file);
+	struct ave_v4l2 *av = fh_to_ctx(file)->av;
 
 	if (fs->index || (fs->pixel_format != V4L2_PIX_FMT_NV12 &&
 			  !(fs->pixel_format == V4L2_PIX_FMT_P010 && av->hevc) &&
@@ -1019,8 +1073,18 @@ static int ave_queue_init(void *priv, struct vb2_queue *src,
 		q[i]->ops = &ave_qops;
 		q[i]->mem_ops = &vb2_dma_contig_memops;
 		q[i]->timestamp_flags = V4L2_BUF_FLAG_TIMESTAMP_COPY;
-		q[i]->lock = &ctx->av->dev_mutex;
-		/* Allocated through AVE's own DMA ops: the IOVA is a DART one. */
+		/*
+		 * The node's mutex, which is also the vfd lock the other
+		 * ioctls (S_FMT, ENCODER_CMD, ...) run under: one lock for all
+		 * of a file's ioctls, as before docs/98 §12, whichever encoder
+		 * the file is bound to. Contexts are serialised against each
+		 * other by hw_mutex and owner, never by this.
+		 */
+		q[i]->lock = &ctx->nav->dev_mutex;
+		/*
+		 * Allocated through the bound encoder's own DMA ops: the IOVA
+		 * is a DART one, on that encoder's DART.
+		 */
 		q[i]->dev = ctx->av->ave->dev;
 		ret = vb2_queue_init(q[i]);
 		if (ret)
@@ -1330,16 +1394,99 @@ static const struct v4l2_m2m_ops ave_m2m_ops = {
 /* File operations                                                        */
 /* ---------------------------------------------------------------------- */
 
+/*
+ * docs/98 §12. Encoders open_balance may move a context between: the same
+ * firmware and ABI, so the same formats, sizes, controls and ranges.
+ */
+static bool ave_v4l2_compatible(const struct ave_v4l2 *a,
+				const struct ave_v4l2 *b)
+{
+	const char *fa = a->ave->soc->fw_name, *fb = b->ave->soc->fw_name;
+
+	return a->ave->fw_abi == b->ave->fw_abi &&
+	       fa && fb && !strcmp(fa, fb) &&
+	       a->hevc == b->hevc && a->two_refs == b->two_refs &&
+	       a->h264_two_refs == b->h264_two_refs;
+}
+
+/*
+ * No context bound, and not hung or being re-probed (a re-probe frees the
+ * ave_v4l2; ave_schedule_recover() sets recover_scheduled under the list
+ * lock from ave_v4l2_unbind(), and the PM paths set fw_hung before they
+ * look at ave_v4l2_idle(), which takes it). List lock held.
+ */
+static bool ave_v4l2_free(const struct ave_v4l2 *av)
+{
+	return !av->ctxs && !READ_ONCE(av->ave->fw_hung) &&
+	       !READ_ONCE(av->ave->recover_scheduled);
+}
+
+/*
+ * The encoder an open of @nav's node is bound to: its own while free, else
+ * the free compatible encoder with the lowest index, else its own (today's
+ * behaviour: STREAMON gets -EBUSY while another stream runs there). Counts
+ * the context and the file. Sets *why for the log when it moves.
+ */
+static struct ave_v4l2 *ave_v4l2_bind(struct ave_v4l2 *nav, const char **why)
+{
+	struct ave_v4l2 *av = nav, *it;
+
+	*why = NULL;
+	mutex_lock(&ave_v4l2_list_lock);
+	if (open_balance && !ave_v4l2_free(nav)) {
+		list_for_each_entry(it, &ave_v4l2_list, list) {
+			if (it == nav || !ave_v4l2_free(it) ||
+			    !ave_v4l2_compatible(nav, it))
+				continue;
+			if (av == nav || it->ave->soc->inst < av->ave->soc->inst)
+				av = it;
+		}
+		if (av != nav)
+			*why = nav->ctxs ? "busy" : "hung";
+	}
+	av->ctxs++;
+	av->users++;
+	nav->users++;
+	mutex_unlock(&ave_v4l2_list_lock);
+	return av;
+}
+
+/*
+ * Undoes ave_v4l2_bind(). The last user of a hung encoder - a context bound
+ * to it, or a file on its node - starts its re-probe (docs/84 §5), under the
+ * list lock so that no open binds to it in between.
+ */
+static void ave_v4l2_unbind(struct ave_v4l2 *nav, struct ave_v4l2 *av)
+{
+	mutex_lock(&ave_v4l2_list_lock);
+	av->ctxs--;
+	av->users--;
+	nav->users--;
+	if (!av->users && READ_ONCE(av->ave->fw_hung))
+		ave_schedule_recover(av->ave);
+	if (nav != av && !nav->users && READ_ONCE(nav->ave->fw_hung))
+		ave_schedule_recover(nav->ave);
+	mutex_unlock(&ave_v4l2_list_lock);
+}
+
 static int ave_open(struct file *file)
 {
-	struct ave_v4l2 *av = video_drvdata(file);
+	struct ave_v4l2 *nav = video_drvdata(file), *av;
 	struct ave_ctx *ctx;
+	const char *why;
 	int ret;
 
 	ctx = kzalloc(sizeof(*ctx), GFP_KERNEL);
 	if (!ctx)
 		return -ENOMEM;
+	/* Before the controls and the m2m context: both depend on it. */
+	av = ave_v4l2_bind(nav, &why);
+	if (why)
+		dev_info_ratelimited(nav->ave->dev,
+				     "v4l2: %s %s; this open uses %s\n",
+				     nav->vfd.name, why, av->vfd.name);
 	ctx->av = av;
+	ctx->nav = nav;
 	INIT_WORK(&ctx->run_work, ave_run_work);
 	ctx->width = AVE_DEF_W;
 	ctx->height = AVE_DEF_H;
@@ -1368,7 +1515,6 @@ static int ave_open(struct file *file)
 		goto err_ctrl;
 	}
 	v4l2_fh_add(&ctx->fh, file);
-	atomic_inc(&av->users);
 	return 0;
 
 err_ctrl:
@@ -1376,17 +1522,18 @@ err_ctrl:
 err_fh:
 	v4l2_fh_exit(&ctx->fh);
 	kfree(ctx);
+	ave_v4l2_unbind(nav, av);
 	return ret;
 }
 
 static int ave_release(struct file *file)
 {
 	struct ave_ctx *ctx = fh_to_ctx(file);
-	struct ave_v4l2 *av = ctx->av;
+	struct ave_v4l2 *av = ctx->av, *nav = ctx->nav;
 
-	mutex_lock(&av->dev_mutex);
+	mutex_lock(&nav->dev_mutex);		/* the queues' lock */
 	v4l2_m2m_ctx_release(ctx->fh.m2m_ctx);	/* stops both queues */
-	mutex_unlock(&av->dev_mutex);
+	mutex_unlock(&nav->dev_mutex);
 	ave_end_session(ctx);
 	v4l2_ctrl_handler_free(&ctx->hdl);
 	v4l2_fh_del(&ctx->fh, file);
@@ -1396,8 +1543,7 @@ static int ave_release(struct file *file)
 	 * A hung firmware is reset by re-probing the device, which tears down
 	 * this V4L2 device: only once nobody holds it open (docs/84 §5).
 	 */
-	if (atomic_dec_and_test(&av->users) && av->ave->fw_hung)
-		ave_schedule_recover(av->ave);
+	ave_v4l2_unbind(nav, av);
 	return 0;
 }
 
@@ -1427,7 +1573,9 @@ int ave_v4l2_register(struct ave_device *ave)
 	/* the controls' ranges: what either codec can do; H.264 is clamped at STREAMON */
 	av->two_refs = ave_enc_two_refs_supported(ave, av->hevc ? AVE_ENC_CODEC_HEVC :
 						  AVE_ENC_CODEC_H264);
-	if (!ave_enc_two_refs_supported(ave, AVE_ENC_CODEC_H264))
+	av->h264_two_refs = ave_enc_two_refs_supported(ave, AVE_ENC_CODEC_H264);
+	INIT_LIST_HEAD(&av->list);
+	if (!av->h264_two_refs)
 		dev_info(ave->dev, "v4l2: H.264 B frames and two-reference P frames off on %s (docs/89 §9): an H.264 stream is clamped to IPPP; HEVC has them\n",
 			 ave->soc->name);
 	mutex_init(&av->dev_mutex);
@@ -1471,6 +1619,10 @@ int ave_v4l2_register(struct ave_device *ave)
 		goto err_m2m;
 
 	ave->v4l2 = av;
+	/* Last: from here an open of another encoder's node may bind here. */
+	mutex_lock(&ave_v4l2_list_lock);
+	list_add_tail(&av->list, &ave_v4l2_list);
+	mutex_unlock(&ave_v4l2_list_lock);
 	dev_info(ave->dev, "v4l2: %s encoder at /dev/video%d\n",
 		 av->hevc ? "H.264/HEVC" : "H.264", av->vfd.num);
 	return 0;
@@ -1551,10 +1703,18 @@ void ave_v4l2_pm_resume(struct ave_device *ave)
 		v4l2_m2m_resume(ave->v4l2->m2m_dev);
 }
 
-/* No open file handle: a re-probe cannot pull the device from under one. */
+/*
+ * No open file handle on this node and no context bound to this encoder
+ * (docs/98 §12): a re-probe cannot pull the device from under one.
+ */
 bool ave_v4l2_idle(struct ave_device *ave)
 {
-	return !ave->v4l2 || !atomic_read(&ave->v4l2->users);
+	bool idle;
+
+	mutex_lock(&ave_v4l2_list_lock);
+	idle = !ave->v4l2 || !ave->v4l2->users;
+	mutex_unlock(&ave_v4l2_list_lock);
+	return idle;
 }
 
 void ave_v4l2_unregister(struct ave_device *ave)
@@ -1563,6 +1723,14 @@ void ave_v4l2_unregister(struct ave_device *ave)
 
 	if (!av)
 		return;
+	/* First: no open of another node binds here any more. */
+	mutex_lock(&ave_v4l2_list_lock);
+	list_del_init(&av->list);
+	if (av->users)
+		dev_warn(ave->dev,
+			 "v4l2: unregistering with %u user(s) (open files on this node, contexts bound to this encoder)\n",
+			 av->users);
+	mutex_unlock(&ave_v4l2_list_lock);
 	video_unregister_device(&av->vfd);
 	v4l2_m2m_release(av->m2m_dev);
 	v4l2_device_unregister(&av->v4l2_dev);
