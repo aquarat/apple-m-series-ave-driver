@@ -1,0 +1,95 @@
+From c0447e0659f08a7e7f8feb1e0fa1a1103fc8d37a Mon Sep 17 00:00:00 2001
+From: Aaron Scheiner <blue@aquarat.co.uk>
+Date: Sun, 4 Oct 2026 18:32:42 +0100
+Subject: [PATCH 2/7] avcodec/v4l2_m2m_enc: crop the OUTPUT to the picture size
+
+Encoders code whole macroblocks, so drivers round the OUTPUT format up
+(1920x1080 becomes 1920x1088). Without a crop the stream says 1088 lines
+and the last eight are the padding. Set the OUTPUT crop selection to the
+picture's size whenever the format differs from it, which stateful
+encoders turn into the SPS's frame cropping; warn when the driver
+cannot, and refuse to start when the format is smaller than the picture.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01AGB1JqfDntxCaB5cKZV4vM
+---
+ libavcodec/v4l2_m2m_enc.c | 56 +++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 56 insertions(+)
+
+diff --git a/libavcodec/v4l2_m2m_enc.c b/libavcodec/v4l2_m2m_enc.c
+index 93703cc..325fe5a 100644
+--- a/libavcodec/v4l2_m2m_enc.c
++++ b/libavcodec/v4l2_m2m_enc.c
+@@ -171,6 +171,58 @@ static inline void v4l2_subscribe_eos_event(V4L2m2mContext *s)
+                "the v4l2 driver does not support end of stream VIDIOC_SUBSCRIBE_EVENT\n");
+ }
+ 
++/*
++ * Drivers round the OUTPUT format up to what the hardware codes (whole
++ * macroblocks: 1080 lines become 1088). Ask for the picture's own size as
++ * the OUTPUT crop, so that the stream carries it (SPS frame cropping)
++ * instead of the padded size.
++ */
++static int v4l2_set_output_crop(V4L2m2mContext *s)
++{
++    AVCodecContext *avctx = s->avctx;
++    const struct v4l2_format *fmt = &s->output.format;
++    const int mplane = V4L2_TYPE_IS_MULTIPLANAR(fmt->type);
++    const unsigned width  = mplane ? fmt->fmt.pix_mp.width  : fmt->fmt.pix.width;
++    const unsigned height = mplane ? fmt->fmt.pix_mp.height : fmt->fmt.pix.height;
++    struct v4l2_selection sel = {
++        .type   = s->output.type,
++        .target = V4L2_SEL_TGT_CROP,
++        .r      = { 0, 0, avctx->width, avctx->height },
++    };
++    int ret;
++
++    if (width < avctx->width || height < avctx->height) {
++        av_log(avctx, AV_LOG_ERROR, "The device cannot take %dx%d frames (it offers %ux%u)\n",
++               avctx->width, avctx->height, width, height);
++        return AVERROR(EINVAL);
++    }
++    if (width == avctx->width && height == avctx->height)
++        return 0;
++
++    ret = ioctl(s->fd, VIDIOC_S_SELECTION, &sel);
++    /* before Linux 4.13 some drivers took only the non-_MPLANE type */
++    if (ret < 0 && errno == EINVAL && mplane) {
++        sel.type = V4L2_BUF_TYPE_VIDEO_OUTPUT;
++        sel.r = (struct v4l2_rect){ 0, 0, avctx->width, avctx->height };
++        ret = ioctl(s->fd, VIDIOC_S_SELECTION, &sel);
++    }
++    if (ret < 0) {
++        av_log(avctx, AV_LOG_WARNING, "The device codes %ux%u and cannot crop it to "
++               "%dx%d (%s): the stream will have the padded size\n",
++               width, height, avctx->width, avctx->height, av_err2str(AVERROR(errno)));
++        return 0;
++    }
++    if (sel.r.left || sel.r.top || sel.r.width != avctx->width || sel.r.height != avctx->height)
++        av_log(avctx, AV_LOG_WARNING, "Asked for a %dx%d crop of %ux%u, got %ux%u at %d,%d\n",
++               avctx->width, avctx->height, width, height,
++               sel.r.width, sel.r.height, sel.r.left, sel.r.top);
++    else
++        av_log(avctx, AV_LOG_VERBOSE, "Coding %ux%u, cropped to %dx%d\n",
++               width, height, avctx->width, avctx->height);
++
++    return 0;
++}
++
+ static int v4l2_prepare_encoder(V4L2m2mContext *s)
+ {
+     AVCodecContext *avctx = s->avctx;
+@@ -378,6 +430,10 @@ static av_cold int v4l2_encode_init(AVCodecContext *avctx)
+         return AVERROR(EINVAL);
+     }
+ 
++    ret = v4l2_set_output_crop(s);
++    if (ret < 0)
++        return ret;
++
+     return v4l2_prepare_encoder(s);
+ }
+ 
+-- 
+2.55.0
+

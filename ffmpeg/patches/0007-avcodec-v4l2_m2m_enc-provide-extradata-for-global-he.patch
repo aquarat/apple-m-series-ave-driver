@@ -1,0 +1,356 @@
+From a9ffd2a75f6ba8f0475974ea697d5d18ecef5082 Mon Sep 17 00:00:00 2001
+From: Aaron Scheiner <blue@aquarat.co.uk>
+Date: Sun, 4 Oct 2026 19:00:58 +0100
+Subject: [PATCH 7/7] avcodec/v4l2_m2m_enc: provide extradata for global-header
+ muxers
+
+A stateful encoder emits its parameter sets in the stream, with the first
+frame and every IDR, and the wrapper set no extradata, so Matroska and
+MP4 output failed ("Could not write header (incorrect codec
+parameters?)"): both need the parameter sets before the first packet,
+and the Matroska muxer ignores AV_PKT_DATA_NEW_EXTRADATA for H.264 and
+HEVC.
+
+When AV_CODEC_FLAG_GLOBAL_HEADER is set, code one black frame at init,
+take the SPS/PPS (H.264) or VPS/SPS/PPS (HEVC) in front of its picture
+as Annex B extradata, and stop and restart both queues, so that the real
+stream starts afresh (a stateful encoder starts a new sequence, IDR
+first, at STREAMON) with the same controls and therefore the same
+parameter sets. The muxers turn Annex B extradata into avcC/hvcC.
+Other codecs keep their headers in the stream, as before.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01AGB1JqfDntxCaB5cKZV4vM
+---
+ libavcodec/tests/v4l2_enc_utils.c |  45 ++++++++++
+ libavcodec/v4l2_enc_utils.c       |  65 ++++++++++++++
+ libavcodec/v4l2_enc_utils.h       |  12 +++
+ libavcodec/v4l2_m2m_enc.c         | 137 ++++++++++++++++++++++++++++++
+ 4 files changed, 259 insertions(+)
+
+diff --git a/libavcodec/tests/v4l2_enc_utils.c b/libavcodec/tests/v4l2_enc_utils.c
+index 01df154..77b0375 100644
+--- a/libavcodec/tests/v4l2_enc_utils.c
++++ b/libavcodec/tests/v4l2_enc_utils.c
+@@ -540,8 +540,53 @@ static void test_has_picture(void)
+     CHECK(ff_v4l2_enc_has_picture(AV_CODEC_ID_VP8, h264_hdr, sizeof(h264_hdr)), "vp8");
+ }
+ 
++static void test_paramsets(void)
++{
++    /* AUD, SPS, PPS, SEI, IDR slice; 3- and 4-byte start codes, trailing zeros */
++    static const uint8_t h264[] = { 0, 0, 0, 1, 0x09, 0x10,
++                                    0, 0, 0, 1, 0x67, 0x64, 0x00, 0x28, 0xac, 0x00,
++                                    0, 0, 1, 0x68, 0xee, 0x3c, 0x80,
++                                    0, 0, 1, 0x06, 0x05, 0x01, 0x80,
++                                    0, 0, 1, 0x65, 0x88, 0x84, 0x00, 0x21 };
++    static const uint8_t h264_want[] = { 0, 0, 0, 1, 0x67, 0x64, 0x00, 0x28, 0xac,
++                                         0, 0, 0, 1, 0x68, 0xee, 0x3c, 0x80 };
++    /* VPS, SPS, PPS, prefix SEI, IDR_W_RADL; an SPS-like byte pattern in the slice */
++    static const uint8_t hevc[] = { 0, 0, 0, 1, 0x40, 0x01, 0x0c, 0x01,
++                                    0, 0, 0, 1, 0x42, 0x01, 0x01, 0x01,
++                                    0, 0, 0, 1, 0x44, 0x01, 0xc1, 0x72,
++                                    0, 0, 0, 1, 0x4e, 0x01, 0x05, 0xff,
++                                    0, 0, 0, 1, 0x26, 0x01, 0xaf, 0x00, 0x00, 0x03, 0x42 };
++    static const uint8_t hevc_want[] = { 0, 0, 0, 1, 0x40, 0x01, 0x0c, 0x01,
++                                         0, 0, 0, 1, 0x42, 0x01, 0x01, 0x01,
++                                         0, 0, 0, 1, 0x44, 0x01, 0xc1, 0x72 };
++    static const uint8_t no_pps[] = { 0, 0, 0, 1, 0x67, 0x64, 0, 0, 1, 0x65, 0x88 };
++    uint8_t *out = NULL;
++    int size = 0, ret, i, pad = 1;
++
++    ret = ff_v4l2_enc_extract_paramsets(AV_CODEC_ID_H264, h264, sizeof(h264), &out, &size);
++    CHECK(ret == 0 && size == sizeof(h264_want) && !memcmp(out, h264_want, size),
++          "h264 parameter sets: ret %d size %d", ret, size);
++    for (i = 0; ret == 0 && i < AV_INPUT_BUFFER_PADDING_SIZE; i++)
++        pad &= !out[size + i];
++    CHECK(pad, "h264 extradata padding");
++    av_freep(&out);
++
++    ret = ff_v4l2_enc_extract_paramsets(AV_CODEC_ID_HEVC, hevc, sizeof(hevc), &out, &size);
++    CHECK(ret == 0 && size == sizeof(hevc_want) && !memcmp(out, hevc_want, size),
++          "hevc parameter sets: ret %d size %d", ret, size);
++    av_freep(&out);
++
++    ret = ff_v4l2_enc_extract_paramsets(AV_CODEC_ID_H264, no_pps, sizeof(no_pps), &out, &size);
++    CHECK(ret == AVERROR_INVALIDDATA && !out, "h264 without a PPS: ret %d", ret);
++    /* the HEVC stream has no H.264 SPS/PPS: control */
++    ret = ff_v4l2_enc_extract_paramsets(AV_CODEC_ID_H264, hevc, sizeof(hevc), &out, &size);
++    CHECK(ret == AVERROR_INVALIDDATA, "hevc data as h264: ret %d", ret);
++    av_freep(&out);
++}
++
+ int main(void)
+ {
++    test_paramsets();
+     test_copy();
+     test_convert();
+     test_dts();
+diff --git a/libavcodec/v4l2_enc_utils.c b/libavcodec/v4l2_enc_utils.c
+index 98bddfc..60b6528 100644
+--- a/libavcodec/v4l2_enc_utils.c
++++ b/libavcodec/v4l2_enc_utils.c
+@@ -25,8 +25,10 @@
+ #include "libavutil/fifo.h"
+ #include "libavutil/imgutils.h"
+ #include "libavutil/intreadwrite.h"
++#include "libavutil/mem.h"
+ #include "libavutil/pixdesc.h"
+ 
++#include "defs.h"
+ #include "v4l2_enc_utils.h"
+ 
+ #define V4L2_ENC_MAX_PLANES 4
+@@ -377,3 +379,66 @@ int ff_v4l2_enc_has_picture(enum AVCodecID codec_id, const uint8_t *data, int si
+         return 1;
+     return v4l2_enc_for_each_nal(data, size, v4l2_enc_vcl_cb, &scan);
+ }
++
++typedef struct V4L2EncParamSets {
++    enum AVCodecID codec_id;
++    uint8_t *buf;
++    int size;
++    unsigned seen;      /* bit per NAL unit type found */
++    int err;
++} V4L2EncParamSets;
++
++static int v4l2_enc_paramset_cb(void *opaque, const uint8_t *nal, int size)
++{
++    static const uint8_t startcode[4] = { 0, 0, 0, 1 };
++    V4L2EncParamSets *ps = opaque;
++    const int type = v4l2_enc_nal_type(ps->codec_id, nal);
++    const int keep = ps->codec_id == AV_CODEC_ID_HEVC ?
++                     type >= 32 && type <= 34 :             /* VPS, SPS, PPS */
++                     type == 7 || type == 8 || type == 13;  /* SPS, PPS, SPS extension */
++    uint8_t *buf;
++
++    if (v4l2_enc_is_vcl(ps->codec_id, type))
++        return 1;       /* the parameter sets come before the picture */
++    if (!keep)
++        return 0;
++    if (size > INT_MAX - AV_INPUT_BUFFER_PADDING_SIZE - 4 - ps->size) {
++        ps->err = AVERROR(ERANGE);
++        return 1;
++    }
++    buf = av_realloc(ps->buf, ps->size + 4 + size + AV_INPUT_BUFFER_PADDING_SIZE);
++    if (!buf) {
++        ps->err = AVERROR(ENOMEM);
++        return 1;
++    }
++    memcpy(buf + ps->size, startcode, 4);
++    memcpy(buf + ps->size + 4, nal, size);
++    ps->buf   = buf;
++    ps->size += 4 + size;
++    memset(ps->buf + ps->size, 0, AV_INPUT_BUFFER_PADDING_SIZE);
++    ps->seen |= 1u << (type & 31);
++    return 0;
++}
++
++int ff_v4l2_enc_extract_paramsets(enum AVCodecID codec_id, const uint8_t *data, int size,
++                                  uint8_t **out, int *out_size)
++{
++    V4L2EncParamSets ps = { codec_id };
++    unsigned need;
++
++    if (codec_id == AV_CODEC_ID_HEVC)
++        need = 1u << (32 & 31) | 1u << (33 & 31) | 1u << (34 & 31);
++    else if (codec_id == AV_CODEC_ID_H264)
++        need = 1u << 7 | 1u << 8;
++    else
++        return AVERROR(ENOSYS);
++
++    v4l2_enc_for_each_nal(data, size, v4l2_enc_paramset_cb, &ps);
++    if (ps.err < 0 || (ps.seen & need) != need) {
++        av_free(ps.buf);
++        return ps.err < 0 ? ps.err : AVERROR_INVALIDDATA;
++    }
++    *out      = ps.buf;
++    *out_size = ps.size;
++    return 0;
++}
+diff --git a/libavcodec/v4l2_enc_utils.h b/libavcodec/v4l2_enc_utils.h
+index f6c6c28..2a2129d 100644
+--- a/libavcodec/v4l2_enc_utils.h
++++ b/libavcodec/v4l2_enc_utils.h
+@@ -117,4 +117,16 @@ static inline int64_t ff_v4l2_enc_ts_in_flight(const V4L2EncTimestamps *ts)
+  */
+ int ff_v4l2_enc_has_picture(enum AVCodecID codec_id, const uint8_t *data, int size);
+ 
++/**
++ * Collect the parameter sets (H.264: SPS, PPS; HEVC: VPS, SPS, PPS) that
++ * precede the first picture of an Annex B packet, as Annex B extradata.
++ *
++ * @param out      out: the parameter sets, padded with
++ *                 AV_INPUT_BUFFER_PADDING_SIZE zero bytes; av_free() it
++ * @param out_size out: their size
++ * @return 0 on success, AVERROR_INVALIDDATA if a required one is missing
++ */
++int ff_v4l2_enc_extract_paramsets(enum AVCodecID codec_id, const uint8_t *data, int size,
++                                  uint8_t **out, int *out_size);
++
+ #endif /* AVCODEC_V4L2_ENC_UTILS_H */
+diff --git a/libavcodec/v4l2_m2m_enc.c b/libavcodec/v4l2_m2m_enc.c
+index 84667cc..ff37e77 100644
+--- a/libavcodec/v4l2_m2m_enc.c
++++ b/libavcodec/v4l2_m2m_enc.c
+@@ -29,6 +29,8 @@
+ #include "libavcodec/avcodec.h"
+ #include "libavcodec/codec_desc.h"
+ #include "libavutil/mem.h"
++#include "libavutil/imgutils.h"
++#include "libavutil/time.h"
+ #include "libavutil/pixdesc.h"
+ #include "libavutil/pixfmt.h"
+ #include "libavutil/opt.h"
+@@ -627,6 +629,135 @@ static int v4l2_receive_packet(AVCodecContext *avctx, AVPacket *avpkt)
+     }
+ }
+ 
++/*
++ * Back to the state after init: both queues off, every OUTPUT buffer free,
++ * every CAPTURE buffer queued. STREAMOFF hands all buffers back.
++ */
++static int v4l2_restart_streams(AVCodecContext *avctx, V4L2m2mContext *s)
++{
++    int i, ret, err = 0;
++
++    ret = ff_v4l2_context_set_status(&s->output, VIDIOC_STREAMOFF);
++    if (ret < 0)
++        err = ret;
++    ret = ff_v4l2_context_set_status(&s->capture, VIDIOC_STREAMOFF);
++    if (ret < 0)
++        err = ret;
++    if (err < 0) {
++        av_log(avctx, AV_LOG_ERROR, "VIDIOC_STREAMOFF failed: %s\n", av_err2str(err));
++        return err;
++    }
++
++    for (i = 0; i < s->output.num_buffers; i++)
++        s->output.buffers[i].status = V4L2BUF_AVAILABLE;
++    for (i = 0; i < s->capture.num_buffers; i++) {
++        ret = ff_v4l2_buffer_enqueue(&s->capture.buffers[i]);
++        if (ret < 0) {
++            av_log(avctx, AV_LOG_ERROR, "Cannot requeue capture buffer %d: %s\n",
++                   i, av_err2str(ret));
++            return ret;
++        }
++    }
++
++    s->output.done = s->capture.done = 0;
++    s->draining  = 0;
++    s->eos_event = 0;
++    av_freep(&s->enc_hdr);
++    s->enc_hdr_size = 0;
++
++    return 0;
++}
++
++/* How long the device may take to return the first packet. */
++#define V4L2_ENC_HEADER_WAIT_MS 5000
++
++/*
++ * Matroska and MP4 (AV_CODEC_FLAG_GLOBAL_HEADER) need the parameter sets
++ * before the first packet, but a stateful encoder emits them only in its
++ * stream. Code one black frame, take them from its packet, and restart the
++ * streams: the driver starts the real stream afresh at the next STREAMON,
++ * with the same controls, so the stream's own parameter sets match.
++ */
++static int v4l2_generate_extradata(AVCodecContext *avctx, V4L2m2mContext *s)
++{
++    AVFrame *frame = NULL;
++    AVPacket *pkt = NULL;
++    ptrdiff_t linesize[4];
++    int64_t deadline;
++    int i, ret, err;
++
++    if (avctx->codec_id != AV_CODEC_ID_H264 && avctx->codec_id != AV_CODEC_ID_HEVC) {
++        av_log(avctx, AV_LOG_WARNING, "No global header for %s: it stays in the stream\n",
++               avcodec_get_name(avctx->codec_id));
++        return 0;
++    }
++
++    frame = av_frame_alloc();
++    pkt   = av_packet_alloc();
++    if (!frame || !pkt) {
++        ret = AVERROR(ENOMEM);
++        goto end;
++    }
++    frame->format = avctx->pix_fmt;
++    frame->width  = avctx->width;
++    frame->height = avctx->height;
++    frame->pts    = 0;
++    ret = av_frame_get_buffer(frame, 0);
++    if (ret < 0)
++        goto end;
++    for (i = 0; i < 4; i++)
++        linesize[i] = frame->linesize[i];
++    ret = av_image_fill_black(frame->data, linesize, frame->format,
++                              AVCOL_RANGE_MPEG, frame->width, frame->height);
++    if (ret < 0)
++        goto end;
++
++    ret = ff_v4l2_context_enqueue_frame(&s->output, frame);
++    if (ret < 0)
++        goto end;
++    ret = v4l2_start_streaming(avctx, s);
++    if (ret < 0)
++        goto end;
++
++    deadline = av_gettime_relative() + V4L2_ENC_HEADER_WAIT_MS * 1000LL;
++    for (;;) {
++        int64_t left = deadline - av_gettime_relative();
++
++        if (left <= 0) {
++            av_log(avctx, AV_LOG_ERROR, "No packet from the device within %d ms\n",
++                   V4L2_ENC_HEADER_WAIT_MS);
++            ret = AVERROR(ETIMEDOUT);
++            break;
++        }
++        ret = ff_v4l2_context_dequeue_packet(&s->capture, pkt, (int)((left + 999) / 1000), 0);
++        if (ret == AVERROR(EAGAIN))
++            continue;
++        if (ret < 0)
++            break;
++
++        av_freep(&avctx->extradata);
++        avctx->extradata_size = 0;
++        ret = ff_v4l2_enc_extract_paramsets(avctx->codec_id, pkt->data, pkt->size,
++                                            &avctx->extradata, &avctx->extradata_size);
++        av_packet_unref(pkt);
++        if (ret != AVERROR_INVALIDDATA)
++            break;
++        /* a packet without them (cannot happen with an IDR first): try the next */
++    }
++    if (ret < 0)
++        av_log(avctx, AV_LOG_ERROR, "Could not get the parameter sets for the global header: %s\n",
++               av_err2str(ret));
++    else
++        av_log(avctx, AV_LOG_VERBOSE, "Global header: %d bytes of parameter sets\n",
++               avctx->extradata_size);
++
++end:
++    err = v4l2_restart_streams(avctx, s);
++    av_frame_free(&frame);
++    av_packet_free(&pkt);
++    return ret < 0 ? ret : err;
++}
++
+ static av_cold int v4l2_encode_init(AVCodecContext *avctx)
+ {
+     V4L2Context *capture, *output;
+@@ -701,6 +832,12 @@ static av_cold int v4l2_encode_init(AVCodecContext *avctx)
+     /* the B frames it holds back, and one being coded while we copy the next */
+     s->enc_hold = avctx->max_b_frames + 1;
+ 
++    if (avctx->flags & AV_CODEC_FLAG_GLOBAL_HEADER) {
++        ret = v4l2_generate_extradata(avctx, s);
++        if (ret < 0)
++            return ret;
++    }
++
+     return 0;
+ }
+ 
+-- 
+2.55.0
+

@@ -1,0 +1,173 @@
+From 07f32a9354f4be3f73bd7b31455e9ac3829493b0 Mon Sep 17 00:00:00 2001
+From: Aaron Scheiner <blue@aquarat.co.uk>
+Date: Sun, 4 Oct 2026 18:38:10 +0100
+Subject: [PATCH 5/7] avcodec/v4l2_m2m_enc: add constant-QP coding (-qp,
+ -qp_p_offset, -qp_b_offset)
+
+The wrapper always turned frame-level rate control on at -b:v, so a
+fixed quality, which is what archival transcoding wants, was out of
+reach.
+
+With -qp N (or -q:v N, which sets global_quality) rate control is turned
+off, the bitrate mode is set to CQ for drivers that look at that, and
+the codec's I/P/B frame QP controls get N, N + qp_p_offset (default 0)
+and N + qp_b_offset (default 3), clipped to the codec's range. H.264,
+HEVC, MPEG-4, H.263 and VP8 (I/P only) are covered. Without a QP the
+behaviour is unchanged: rate control at -b:v.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01AGB1JqfDntxCaB5cKZV4vM
+---
+ libavcodec/v4l2_m2m.h     |  5 +++
+ libavcodec/v4l2_m2m_enc.c | 94 +++++++++++++++++++++++++++++++++++++--
+ 2 files changed, 95 insertions(+), 4 deletions(-)
+
+diff --git a/libavcodec/v4l2_m2m.h b/libavcodec/v4l2_m2m.h
+index 14c8653..7e33952 100644
+--- a/libavcodec/v4l2_m2m.h
++++ b/libavcodec/v4l2_m2m.h
+@@ -80,6 +80,11 @@ typedef struct V4L2m2mPriv {
+     int num_capture_buffers;
+ 
+     char *device;              ///< "device" option: path or name to match
++
++    /* encoders: constant QP (qp < 0: rate control) */
++    int qp;
++    int qp_p_offset;
++    int qp_b_offset;
+ } V4L2m2mPriv;
+ 
+ /**
+diff --git a/libavcodec/v4l2_m2m_enc.c b/libavcodec/v4l2_m2m_enc.c
+index 6a13247..45ff0b7 100644
+--- a/libavcodec/v4l2_m2m_enc.c
++++ b/libavcodec/v4l2_m2m_enc.c
+@@ -23,6 +23,7 @@
+ 
+ #include <linux/videodev2.h>
+ #include <sys/ioctl.h>
++#include <math.h>
+ #include <search.h>
+ #include "encode.h"
+ #include "libavcodec/avcodec.h"
+@@ -224,11 +225,83 @@ static int v4l2_set_output_crop(V4L2m2mContext *s)
+     return 0;
+ }
+ 
++/* Per-frame-type QP controls for constant-QP coding (rate control off). */
++static const struct v4l2_qp_ctrls {
++    enum AVCodecID codec_id;
++    uint32_t i_cid, p_cid, b_cid;   /* b_cid 0: the codec has no B frames */
++    int min, max;
++} v4l2_qp_ctrls[] = {
++    { AV_CODEC_ID_H264,  MPEG_CID(H264_I_FRAME_QP),  MPEG_CID(H264_P_FRAME_QP),
++                         MPEG_CID(H264_B_FRAME_QP),  0,  51 },
++#ifdef V4L2_CID_MPEG_VIDEO_HEVC_I_FRAME_QP
++    { AV_CODEC_ID_HEVC,  MPEG_CID(HEVC_I_FRAME_QP),  MPEG_CID(HEVC_P_FRAME_QP),
++                         MPEG_CID(HEVC_B_FRAME_QP),  0,  51 },
++#endif
++    { AV_CODEC_ID_MPEG4, MPEG_CID(MPEG4_I_FRAME_QP), MPEG_CID(MPEG4_P_FRAME_QP),
++                         MPEG_CID(MPEG4_B_FRAME_QP), 1,  31 },
++    { AV_CODEC_ID_H263,  MPEG_CID(H263_I_FRAME_QP),  MPEG_CID(H263_P_FRAME_QP),
++                         MPEG_CID(H263_B_FRAME_QP),  1,  31 },
++    { AV_CODEC_ID_VP8,   MPEG_CID(VPX_I_FRAME_QP),   MPEG_CID(VPX_P_FRAME_QP),
++                         0,                          0, 127 },
++};
++
++/* The constant QP asked for (-qp, or -q:v / global_quality), or -1. */
++static int v4l2_requested_qp(V4L2m2mContext *s)
++{
++    AVCodecContext *avctx = s->avctx;
++    V4L2m2mPriv *priv = s->priv;
++
++    if (priv->qp >= 0)
++        return priv->qp;
++    if (avctx->flags & AV_CODEC_FLAG_QSCALE)
++        return FFMAX(lrintf(avctx->global_quality / (float)FF_QP2LAMBDA), 0);
++    return -1;
++}
++
++/*
++ * Constant QP: frame-level rate control off, so that the I/P/B QP controls
++ * apply (and the CQ bitrate mode for drivers that look at that instead).
++ */
++static int v4l2_set_constant_qp(V4L2m2mContext *s, int qp)
++{
++    AVCodecContext *avctx = s->avctx;
++    V4L2m2mPriv *priv = s->priv;
++    const struct v4l2_qp_ctrls *c = NULL;
++    int i, qp_i, qp_p, qp_b;
++
++    for (i = 0; i < FF_ARRAY_ELEMS(v4l2_qp_ctrls); i++)
++        if (v4l2_qp_ctrls[i].codec_id == avctx->codec_id)
++            c = &v4l2_qp_ctrls[i];
++    if (!c) {
++        av_log(avctx, AV_LOG_ERROR, "Constant QP is not supported for %s\n",
++               avcodec_get_name(avctx->codec_id));
++        return AVERROR(ENOSYS);
++    }
++
++    qp_i = av_clip(qp, c->min, c->max);
++    qp_p = av_clip(qp_i + priv->qp_p_offset, c->min, c->max);
++    qp_b = av_clip(qp_i + priv->qp_b_offset, c->min, c->max);
++    if (qp_i != qp)
++        av_log(avctx, AV_LOG_WARNING, "QP %d out of range, using %d\n", qp, qp_i);
++
++    v4l2_set_ext_ctrl(s, MPEG_CID(FRAME_RC_ENABLE), 0, "frame level rate control", 1);
++    v4l2_set_ext_ctrl(s, MPEG_CID(BITRATE_MODE), MPEG_VIDEO(BITRATE_MODE_CQ),
++                      "constant quality bitrate mode", 0);
++    v4l2_set_ext_ctrl(s, c->i_cid, qp_i, "I-frame QP", 1);
++    v4l2_set_ext_ctrl(s, c->p_cid, qp_p, "P-frame QP", 1);
++    if (c->b_cid)
++        v4l2_set_ext_ctrl(s, c->b_cid, qp_b, "B-frame QP", avctx->max_b_frames > 0);
++
++    av_log(avctx, AV_LOG_VERBOSE, "Constant QP: I %d, P %d, B %d\n", qp_i, qp_p, qp_b);
++
++    return 0;
++}
++
+ static int v4l2_prepare_encoder(V4L2m2mContext *s)
+ {
+     AVCodecContext *avctx = s->avctx;
+     int qmin_cid, qmax_cid, qmin, qmax;
+-    int ret, val;
++    int ret, val, qp;
+ 
+     /**
+      * requirements
+@@ -247,8 +320,15 @@ static int v4l2_prepare_encoder(V4L2m2mContext *s)
+ 
+     /* set ext ctrls */
+     v4l2_set_ext_ctrl(s, MPEG_CID(HEADER_MODE), MPEG_VIDEO(HEADER_MODE_SEPARATE), "header mode", 0);
+-    v4l2_set_ext_ctrl(s, MPEG_CID(BITRATE) , avctx->bit_rate, "bit rate", 1);
+-    v4l2_set_ext_ctrl(s, MPEG_CID(FRAME_RC_ENABLE), 1, "frame level rate control", 0);
++    qp = v4l2_requested_qp(s);
++    if (qp >= 0) {
++        ret = v4l2_set_constant_qp(s, qp);
++        if (ret < 0)
++            return ret;
++    } else {
++        v4l2_set_ext_ctrl(s, MPEG_CID(BITRATE) , avctx->bit_rate, "bit rate", 1);
++        v4l2_set_ext_ctrl(s, MPEG_CID(FRAME_RC_ENABLE), 1, "frame level rate control", 0);
++    }
+     v4l2_set_ext_ctrl(s, MPEG_CID(GOP_SIZE), avctx->gop_size,"gop size", 1);
+ 
+     av_log(avctx, AV_LOG_DEBUG,
+@@ -457,7 +537,13 @@ static av_cold int v4l2_encode_close(AVCodecContext *avctx)
+ #define V4L_M2M_CAPTURE_OPTS \
+     V4L_M2M_DEFAULT_OPTS,\
+     { "num_capture_buffers", "Number of buffers in the capture context", \
+-        OFFSET(num_capture_buffers), AV_OPT_TYPE_INT, {.i64 = 4 }, 4, INT_MAX, FLAGS }
++        OFFSET(num_capture_buffers), AV_OPT_TYPE_INT, {.i64 = 4 }, 4, INT_MAX, FLAGS }, \
++    { "qp", "Constant QP for I frames, rate control off (-1: rate control at -b:v)", \
++        OFFSET(qp), AV_OPT_TYPE_INT, {.i64 = -1 }, -1, 255, FLAGS }, \
++    { "qp_p_offset", "With -qp: P-frame QP minus I-frame QP", \
++        OFFSET(qp_p_offset), AV_OPT_TYPE_INT, {.i64 = 0 }, -51, 51, FLAGS }, \
++    { "qp_b_offset", "With -qp: B-frame QP minus I-frame QP", \
++        OFFSET(qp_b_offset), AV_OPT_TYPE_INT, {.i64 = 3 }, -51, 51, FLAGS }
+ 
+ static const AVOption mpeg4_options[] = {
+     V4L_M2M_CAPTURE_OPTS,
+-- 
+2.55.0
+

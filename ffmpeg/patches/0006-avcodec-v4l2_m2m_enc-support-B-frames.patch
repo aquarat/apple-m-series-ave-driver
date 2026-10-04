@@ -1,0 +1,1081 @@
+From ee905e0e86e8137e70ba015308f34d66479b02b3 Mon Sep 17 00:00:00 2001
+From: Aaron Scheiner <blue@aquarat.co.uk>
+Date: Sun, 4 Oct 2026 18:46:38 +0100
+Subject: [PATCH 6/7] avcodec/v4l2_m2m_enc: support B frames
+
+The encoder forced V4L2_CID_MPEG_VIDEO_B_FRAMES to 0 and failed to open
+if the driver kept a non-zero value, for want of DTS.
+
+Ask for -bf B frames and use what the driver reads back. A stateful
+encoder takes frames in presentation order and returns packets in decode
+order, each with its own frame's timestamp, so the PTS are right and the
+DTS have to be made: packet n gets the PTS of frame n - max_b_frames
+(the first max_b_frames packets the first PTS minus whole frame
+durations), which rises with n and never exceeds the packet's PTS for any
+order the device codes a group of frames in. has_b_frames is set to the
+same delay. Packets carry the key flag and, from the PFRAME/BFRAME
+flags, the picture type in their quality stats (with the QP under -qp).
+
+The dequeue logic had to change with it. receive_packet() blocked for a
+packet after every frame, which deadlocks as soon as the device holds a
+B frame until its reference arrives. It now queues the frame it has and
+only waits for a packet when the device has more frames than it may hold
+back (the B frames plus one being coded, which also overlaps the copy of
+the next frame with the coding of the last); otherwise it returns EAGAIN
+to get more input. Packets are copied out and their CAPTURE buffers
+requeued at once, since a reordering device needs several of them per
+group and a muxer may hold packets for a long time. A header-only packet
+(HEADER_MODE_SEPARATE drivers) is put in front of the next one, so that
+packets and frames stay one to one. An empty packet (a frame the device
+failed) is an error. The EOS event no longer ends an encoder's drain
+early: drivers may queue it before the buffer flagged LAST is done, which
+dropped the last packets; the drain ends on that flag, and waits only a
+bounded time once the event is in.
+
+The DTS derivation is tested (fate-v4l2-enc-utils) against an emulation
+of the Apple AVE driver's B-frame planner, for 0-2 B frames, GOP sizes
+0-250, constant and variable frame rates, groups coded in any order and
+drivers that code fewer B frames than they accepted, with a control that
+must fail without the delay.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01AGB1JqfDntxCaB5cKZV4vM
+---
+ libavcodec/tests/v4l2_enc_utils.c | 217 +++++++++++++++++++++++++
+ libavcodec/v4l2_buffers.c         |  70 ++++++--
+ libavcodec/v4l2_context.c         |  35 ++--
+ libavcodec/v4l2_context.h         |   5 +-
+ libavcodec/v4l2_enc_utils.c       | 129 +++++++++++++++
+ libavcodec/v4l2_enc_utils.h       |  44 ++++++
+ libavcodec/v4l2_m2m.c             |   2 +
+ libavcodec/v4l2_m2m.h             |  13 ++
+ libavcodec/v4l2_m2m_enc.c         | 254 +++++++++++++++++++++++++-----
+ 9 files changed, 707 insertions(+), 62 deletions(-)
+
+diff --git a/libavcodec/tests/v4l2_enc_utils.c b/libavcodec/tests/v4l2_enc_utils.c
+index 266d938..01df154 100644
+--- a/libavcodec/tests/v4l2_enc_utils.c
++++ b/libavcodec/tests/v4l2_enc_utils.c
+@@ -18,6 +18,7 @@
+  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
+  */
+ 
++#include <inttypes.h>
+ #include <stdio.h>
+ #include <stdlib.h>
+ #include <string.h>
+@@ -325,10 +326,226 @@ end:
+     }
+ }
+ 
++/*
++ * An emulation of a reordering encoder: the B-frame planner of the Apple AVE
++ * V4L2 driver (ave_gop.h), fed frames in presentation order. It holds up to
++ * nb frames as B frames until their anchor (a P) arrives, then codes the
++ * group anchor first; an IDR (the first frame, every gop frames) first
++ * closes the held frames as Bs + a P. With know_last the driver learns
++ * which frame is the last when it arrives (the last is an anchor);
++ * otherwise the drain closes what it holds. order[] gets each group's
++ * frames in decode order; shuffle permutes every group at random instead,
++ * which the DTS must also survive.
++ */
++typedef struct Emu {
++    int nb, gop, know_last, shuffle;
++    int held[8], n_held, dist, started;
++    int order[4096], n_order;
++    int groups[4096], n_groups;  /* order index where each group ends */
++    unsigned rnd;
++} Emu;
++
++static unsigned emu_rand(Emu *e)
++{
++    e->rnd = e->rnd * 1664525u + 1013904223u;
++    return e->rnd >> 8;
++}
++
++static void emu_group(Emu *e, const int *frames, int n)
++{
++    int i, start = e->n_order;
++
++    for (i = 0; i < n; i++)
++        e->order[e->n_order++] = frames[i];
++    if (e->shuffle) {
++        for (i = n - 1; i > 0; i--) {
++            int j = emu_rand(e) % (i + 1), t = e->order[start + i];
++            e->order[start + i] = e->order[start + j];
++            e->order[start + j] = t;
++        }
++    }
++    e->groups[e->n_groups++] = e->n_order;
++}
++
++/* held Bs and their P: the P (the newest) first, then the Bs */
++static void emu_close(Emu *e, int with_new, int new_frame)
++{
++    int g[8], n = 0, i;
++
++    if (with_new) {
++        g[n++] = new_frame;
++        for (i = 0; i < e->n_held; i++)
++            g[n++] = e->held[i];
++    } else if (e->n_held) {
++        g[n++] = e->held[e->n_held - 1];
++        for (i = 0; i < e->n_held - 1; i++)
++            g[n++] = e->held[i];
++    }
++    if (n)
++        emu_group(e, g, n);
++    e->n_held = 0;
++}
++
++static void emu_frame(Emu *e, int f, int last)
++{
++    if (!e->started || (e->gop && e->dist >= e->gop)) {
++        emu_close(e, 0, 0);
++        emu_group(e, &f, 1);              /* the IDR, alone */
++        e->started = 1;
++        e->dist = 1;
++    } else if ((last && e->know_last) || e->n_held >= e->nb ||
++               (e->gop && e->dist + 1 >= e->gop)) {
++        emu_close(e, 1, f);
++        e->dist++;
++    } else {
++        e->held[e->n_held++] = f;
++        e->dist++;
++    }
++}
++
++/*
++ * Run n frames through the emulation and the DTS derivation; return the
++ * number of packets whose DTS is above their PTS or not above the previous
++ * DTS (reported unless quiet), or -1 on a bookkeeping failure.
++ */
++static int run_dts(int nb, int delay, int gop, int n, int know_last, int shuffle,
++                   int vfr, int64_t start, int quiet)
++{
++    Emu e = { .nb = nb, .gop = gop, .know_last = know_last, .shuffle = shuffle,
++              .rnd = 12345u + n * 7u + gop };
++    V4L2EncTimestamps ts = { 0 };
++    int64_t pts[4096], prev_dts = INT64_MIN;
++    int i, g = 0, out = 0, bad = 0;
++
++    pts[0] = start;
++    for (i = 1; i < n; i++)
++        pts[i] = pts[i - 1] + (vfr ? 1 + emu_rand(&e) % 5 : 3);
++
++    if (ff_v4l2_enc_ts_init(&ts, delay, 3) < 0)
++        return -1;
++    for (i = 0; i < n; i++) {
++        emu_frame(&e, i, i == n - 1);
++        if (i == n - 1)
++            emu_close(&e, 0, 0);          /* the drain */
++        if (ff_v4l2_enc_ts_push(&ts, pts[i]) < 0)
++            goto fail;
++        /* the packets of every group complete so far come back now */
++        for (; g < e.n_groups; g++) {
++            for (; out < e.groups[g]; out++) {
++                int64_t dts, p = pts[e.order[out]];
++
++                if (ff_v4l2_enc_ts_next_dts(&ts, &dts) < 0)
++                    goto fail;
++                if (dts > p || dts <= prev_dts || (!delay && dts != p)) {
++                    if (!quiet && bad < 3)
++                        CHECK(0, "nb %d delay %d gop %d n %d last %d shuffle %d: packet %d "
++                              "(frame %d) PTS %"PRId64" DTS %"PRId64" previous DTS %"PRId64,
++                              nb, delay, gop, n, know_last, shuffle, out, e.order[out],
++                              p, dts, prev_dts);
++                    bad++;
++                }
++                prev_dts = dts;
++            }
++        }
++        /* never more than the held B frames in flight */
++        if (ff_v4l2_enc_ts_in_flight(&ts) > nb)
++            goto fail;
++    }
++    if (out != n || ff_v4l2_enc_ts_in_flight(&ts))
++        goto fail;
++    ff_v4l2_enc_ts_uninit(&ts);
++    return bad;
++fail:
++    ff_v4l2_enc_ts_uninit(&ts);
++    return -1;
++}
++
++static void test_dts(void)
++{
++    static const int gops[]     = { 0, 1, 2, 3, 4, 5, 12, 250 };
++    static const int counts[]   = { 1, 2, 3, 4, 7, 60, 1000 };
++    static const int64_t starts[] = { 0, -7, 90000 };
++    int nb, gi, ci, si, last, shuffle, vfr, ret, control = 0;
++
++    for (nb = 0; nb <= 2; nb++)
++        for (gi = 0; gi < FF_ARRAY_ELEMS(gops); gi++)
++            for (ci = 0; ci < FF_ARRAY_ELEMS(counts); ci++)
++                for (last = 0; last <= 1; last++)
++                    for (shuffle = 0; shuffle <= 1; shuffle++)
++                        for (vfr = 0; vfr <= 1; vfr++) {
++                            for (si = 0; si < FF_ARRAY_ELEMS(starts); si++) {
++                                ret = run_dts(nb, nb, gops[gi], counts[ci], last,
++                                              shuffle, vfr, starts[si], 0);
++                                CHECK(ret == 0, "nb %d gop %d n %d: %d bad DTS",
++                                      nb, gops[gi], counts[ci], ret);
++                            }
++                            /* the driver may code fewer B frames than it accepted */
++                            ret = run_dts(nb, 2, gops[gi], counts[ci], last,
++                                          shuffle, vfr, 0, 0);
++                            CHECK(ret == 0, "nb %d delay 2: %d bad DTS", nb, ret);
++                            /* control: B frames without a reorder delay must fail
++                             * (unshuffled: a shuffle may put a group back in order) */
++                            if (nb && !shuffle && counts[ci] >= 7 && gops[gi] != 1 && gops[gi] != 2) {
++                                ret = run_dts(nb, 0, gops[gi], counts[ci], last,
++                                              shuffle, vfr, 0, 1);
++                                CHECK(ret > 0, "control passed: nb %d delay 0 gop %d n %d",
++                                      nb, gops[gi], counts[ci]);
++                                control++;
++                            }
++                        }
++    CHECK(control > 0, "no control ran");
++
++    /* delay 1 is exact for anchor-first groups (x264's has_b_frames without pyramid) */
++    for (nb = 1; nb <= 2; nb++) {
++        ret = run_dts(nb, 1, 250, 1000, 0, 0, 0, 0, 0);
++        CHECK(ret == 0, "nb %d delay 1, anchor first: %d bad DTS", nb, ret);
++    }
++
++    /* the exact sequence for B=1: I0 P2 B1 P4 B3 ... */
++    {
++        V4L2EncTimestamps ts = { 0 };
++        static const int order[] = { 0, 2, 1, 4, 3, 5 };
++        static const int64_t want[] = { -1, 0, 1, 2, 3, 4 };
++        int64_t dts;
++        int i;
++
++        ff_v4l2_enc_ts_init(&ts, 1, 1);
++        for (i = 0; i < 6; i++)
++            ff_v4l2_enc_ts_push(&ts, i);
++        for (i = 0; i < 6; i++) {
++            ff_v4l2_enc_ts_next_dts(&ts, &dts);
++            CHECK(dts == want[i] && dts <= order[i], "B=1 packet %d: DTS %"PRId64, i, dts);
++        }
++        ff_v4l2_enc_ts_uninit(&ts);
++    }
++}
++
++static void test_has_picture(void)
++{
++    static const uint8_t h264_hdr[] = { 0, 0, 0, 1, 0x67, 0x64, 0x00, 0x28, 0, 0, 1, 0x68, 0xee, 0x3c, 0x80 };
++    static const uint8_t h264_idr[] = { 0, 0, 0, 1, 0x67, 0x64, 0, 0, 0, 1, 0x68, 0xee,
++                                        0, 0, 1, 0x65, 0x88, 0x84, 0x00 };
++    static const uint8_t h264_b[]   = { 0, 0, 0, 1, 0x01, 0x9e, 0x12 };
++    static const uint8_t hevc_hdr[] = { 0, 0, 0, 1, 0x40, 0x01, 0x0c, 0, 0, 0, 1, 0x42, 0x01, 0x01,
++                                        0, 0, 0, 1, 0x44, 0x01, 0xc1, 0, 0, 0, 1, 0x4e, 0x01, 0x05 };
++    static const uint8_t hevc_idr[] = { 0, 0, 0, 1, 0x40, 0x01, 0x0c, 0, 0, 0, 1, 0x26, 0x01, 0xaf };
++    static const uint8_t hevc_trail[] = { 0, 0, 1, 0x02, 0x01, 0xd0, 0x00, 0x00 };
++
++    CHECK(!ff_v4l2_enc_has_picture(AV_CODEC_ID_H264, h264_hdr, sizeof(h264_hdr)), "h264 hdr");
++    CHECK(ff_v4l2_enc_has_picture(AV_CODEC_ID_H264, h264_idr, sizeof(h264_idr)), "h264 idr");
++    CHECK(ff_v4l2_enc_has_picture(AV_CODEC_ID_H264, h264_b, sizeof(h264_b)), "h264 b");
++    CHECK(!ff_v4l2_enc_has_picture(AV_CODEC_ID_HEVC, hevc_hdr, sizeof(hevc_hdr)), "hevc hdr");
++    CHECK(ff_v4l2_enc_has_picture(AV_CODEC_ID_HEVC, hevc_idr, sizeof(hevc_idr)), "hevc idr");
++    CHECK(ff_v4l2_enc_has_picture(AV_CODEC_ID_HEVC, hevc_trail, sizeof(hevc_trail)), "hevc trail");
++    CHECK(ff_v4l2_enc_has_picture(AV_CODEC_ID_VP8, h264_hdr, sizeof(h264_hdr)), "vp8");
++}
++
+ int main(void)
+ {
+     test_copy();
+     test_convert();
++    test_dts();
++    test_has_picture();
+ 
+     if (failures) {
+         fprintf(stderr, "%d failure(s)\n", failures);
+diff --git a/libavcodec/v4l2_buffers.c b/libavcodec/v4l2_buffers.c
+index e30e533..7565333 100644
+--- a/libavcodec/v4l2_buffers.c
++++ b/libavcodec/v4l2_buffers.c
+@@ -30,6 +30,7 @@
+ #include "libavcodec/avcodec.h"
+ #include "libavutil/pixdesc.h"
+ #include "libavutil/refstruct.h"
++#include "encode.h"
+ #include "v4l2_context.h"
+ #include "v4l2_buffers.h"
+ #include "v4l2_enc_utils.h"
+@@ -456,27 +457,70 @@ int ff_v4l2_buffer_buf_to_avframe(AVFrame *frame, V4L2Buffer *avbuf)
+ 
+ int ff_v4l2_buffer_buf_to_avpkt(AVPacket *pkt, V4L2Buffer *avbuf)
+ {
+-    int ret;
++    V4L2m2mContext *s = buf_to_m2mctx(avbuf);
++    const int mplane = V4L2_TYPE_IS_MULTIPLANAR(avbuf->buf.type);
++    const unsigned offset = mplane ? avbuf->buf.m.planes[0].data_offset : 0;
++    const unsigned used = mplane ? avbuf->buf.m.planes[0].bytesused : avbuf->buf.bytesused;
++    enum AVPictureType pict_type = AV_PICTURE_TYPE_NONE;
++    int ret, err;
+ 
+     av_packet_unref(pkt);
+-    ret = v4l2_buf_to_bufref(avbuf, 0, &pkt->buf);
+-    if (ret)
+-        return ret;
+ 
+-    pkt->size = V4L2_TYPE_IS_MULTIPLANAR(avbuf->buf.type) ? avbuf->buf.m.planes[0].bytesused : avbuf->buf.bytesused;
+-    pkt->data = pkt->buf->data;
++    /*
++     * Copy the packet out and give the buffer straight back to the driver:
++     * a packet can stay with the caller (a muxer's interleaving queue) for a
++     * long time, and an encoder that reorders needs several CAPTURE buffers
++     * at once to code a group of frames.
++     */
++    if (used < offset || used - offset > avbuf->plane_info[0].length) {
++        av_log(logger(avbuf), AV_LOG_ERROR, "%s: bad payload %u at %u\n",
++               avbuf->context->name, used, offset);
++        ret = AVERROR(EINVAL);
++    } else {
++        ret = av_new_packet(pkt, used - offset);
++        if (!ret)
++            memcpy(pkt->data, (uint8_t *)avbuf->plane_info[0].mm_addr + offset, used - offset);
++    }
+ 
+-    if (avbuf->buf.flags & V4L2_BUF_FLAG_KEYFRAME)
+-        pkt->flags |= AV_PKT_FLAG_KEY;
++    if (ret >= 0) {
++        if (avbuf->buf.flags & V4L2_BUF_FLAG_KEYFRAME) {
++            pkt->flags |= AV_PKT_FLAG_KEY;
++            pict_type = AV_PICTURE_TYPE_I;
++        } else if (avbuf->buf.flags & V4L2_BUF_FLAG_BFRAME) {
++            pict_type = AV_PICTURE_TYPE_B;
++        } else if (avbuf->buf.flags & V4L2_BUF_FLAG_PFRAME) {
++            pict_type = AV_PICTURE_TYPE_P;
++        }
+ 
+-    if (avbuf->buf.flags & V4L2_BUF_FLAG_ERROR) {
+-        av_log(logger(avbuf), AV_LOG_ERROR, "%s driver encode error\n", avbuf->context->name);
+-        pkt->flags |= AV_PKT_FLAG_CORRUPT;
++        if (avbuf->buf.flags & V4L2_BUF_FLAG_ERROR) {
++            av_log(logger(avbuf), AV_LOG_ERROR, "%s driver encode error\n", avbuf->context->name);
++            pkt->flags |= AV_PKT_FLAG_CORRUPT;
++        }
++
++        pkt->dts = pkt->pts = v4l2_get_pts(avbuf);
++
++        if (pict_type != AV_PICTURE_TYPE_NONE) {
++            int qp = s->enc_qp[pict_type == AV_PICTURE_TYPE_I ? 0 :
++                               pict_type == AV_PICTURE_TYPE_P ? 1 : 2];
++            ff_encode_add_stats_side_data(pkt, qp > 0 ? qp * FF_QP2LAMBDA : 0,
++                                          NULL, 0, pict_type);
++        }
++    }
++
++    if (avbuf->context->streamon) {
++        err = ff_v4l2_buffer_enqueue(avbuf);
++        if (err < 0) {
++            av_log(logger(avbuf), AV_LOG_ERROR, "%s: cannot requeue buffer %d: %s\n",
++                   avbuf->context->name, avbuf->buf.index, av_err2str(err));
++            if (ret >= 0)
++                ret = err;
++        }
+     }
+ 
+-    pkt->dts = pkt->pts = v4l2_get_pts(avbuf);
++    if (ret < 0)
++        av_packet_unref(pkt);
+ 
+-    return 0;
++    return ret;
+ }
+ 
+ int ff_v4l2_buffer_avpkt_to_buf(const AVPacket *pkt, V4L2Buffer *out)
+diff --git a/libavcodec/v4l2_context.c b/libavcodec/v4l2_context.c
+index be1df37..0ce6534 100644
+--- a/libavcodec/v4l2_context.c
++++ b/libavcodec/v4l2_context.c
+@@ -188,7 +188,16 @@ static int v4l2_handle_event(V4L2Context *ctx)
+     }
+ 
+     if (evt.type == V4L2_EVENT_EOS) {
+-        ctx->done = 1;
++        /*
++         * An encoder marks its last packet V4L2_BUF_FLAG_LAST and may queue
++         * this event before that buffer is done: stopping here could drop
++         * the last packets. The encoder ends on the flag (or EPIPE), and
++         * waits for it only a while once it has seen the event.
++         */
++        if (s->avctx && av_codec_is_encoder(s->avctx->codec))
++            s->eos_event = 1;
++        else
++            ctx->done = 1;
+         return 0;
+     }
+ 
+@@ -267,7 +276,12 @@ static int v4l2_stop_encode(V4L2Context *ctx)
+     return 0;
+ }
+ 
+-static V4L2Buffer* v4l2_dequeue_v4l2buf(V4L2Context *ctx, int timeout)
++/*
++ * @param wake_for_input on a capture context, also return (NULL) when the
++ *                       output queue has a buffer to give back, so that the
++ *                       caller can queue more input
++ */
++static V4L2Buffer* v4l2_dequeue_v4l2buf(V4L2Context *ctx, int timeout, int wake_for_input)
+ {
+     struct v4l2_plane planes[VIDEO_MAX_PLANES];
+     struct v4l2_buffer buf = { 0 };
+@@ -311,7 +325,7 @@ start:
+         pfd.events =  POLLOUT | POLLWRNORM;
+     else {
+         /* no need to listen to requests for more input while draining */
+-        if (ctx_to_m2mctx(ctx)->draining)
++        if (ctx_to_m2mctx(ctx)->draining || !wake_for_input)
+             pfd.events =  POLLIN | POLLRDNORM | POLLPRI;
+     }
+ 
+@@ -319,7 +333,7 @@ start:
+         ret = poll(&pfd, 1, timeout);
+         if (ret > 0)
+             break;
+-        if (errno == EINTR)
++        if (ret < 0 && errno == EINTR)
+             continue;
+         return NULL;
+     }
+@@ -430,7 +444,7 @@ static V4L2Buffer* v4l2_getfree_v4l2buf(V4L2Context *ctx)
+     /* get back as many output buffers as possible */
+     if (V4L2_TYPE_IS_OUTPUT(ctx->type)) {
+           do {
+-          } while (v4l2_dequeue_v4l2buf(ctx, timeout));
++          } while (v4l2_dequeue_v4l2buf(ctx, timeout, 1));
+     }
+ 
+     for (i = 0; i < ctx->num_buffers; i++) {
+@@ -633,7 +647,7 @@ int ff_v4l2_context_dequeue_frame(V4L2Context* ctx, AVFrame* frame, int timeout)
+      *  1. decoded frame available
+      *  2. an input buffer is ready to be dequeued
+      */
+-    avbuf = v4l2_dequeue_v4l2buf(ctx, timeout);
++    avbuf = v4l2_dequeue_v4l2buf(ctx, timeout, 1);
+     if (!avbuf) {
+         if (ctx->done)
+             return AVERROR_EOF;
+@@ -644,16 +658,17 @@ int ff_v4l2_context_dequeue_frame(V4L2Context* ctx, AVFrame* frame, int timeout)
+     return ff_v4l2_buffer_buf_to_avframe(frame, avbuf);
+ }
+ 
+-int ff_v4l2_context_dequeue_packet(V4L2Context* ctx, AVPacket* pkt)
++int ff_v4l2_context_dequeue_packet(V4L2Context* ctx, AVPacket* pkt,
++                                   int timeout, int wake_for_input)
+ {
+     V4L2Buffer *avbuf;
+ 
+     /*
+-     * blocks until:
++     * waits (up to timeout ms, -1: no limit) until:
+      *  1. encoded packet available
+-     *  2. an input buffer ready to be dequeued
++     *  2. with wake_for_input: an input buffer ready to be dequeued
+      */
+-    avbuf = v4l2_dequeue_v4l2buf(ctx, -1);
++    avbuf = v4l2_dequeue_v4l2buf(ctx, timeout, wake_for_input);
+     if (!avbuf) {
+         if (ctx->done)
+             return AVERROR_EOF;
+diff --git a/libavcodec/v4l2_context.h b/libavcodec/v4l2_context.h
+index fdd5cf5..ecf8a1d 100644
+--- a/libavcodec/v4l2_context.h
++++ b/libavcodec/v4l2_context.h
+@@ -146,9 +146,12 @@ int ff_v4l2_context_set_status(V4L2Context* ctx, uint32_t cmd);
+  * The pkt must be non NULL.
+  * @param[in] ctx The V4L2Context to dequeue from.
+  * @param[inout] pkt The AVPacket to dequeue to.
++ * @param[in] timeout How long to wait for a packet, in ms (-1: no limit, 0: do not wait).
++ * @param[in] wake_for_input Also stop waiting when the output queue can take more input.
+  * @return 0 in case of success, AVERROR(EAGAIN) if no buffer was ready, another negative error in case of error.
+  */
+-int ff_v4l2_context_dequeue_packet(V4L2Context* ctx, AVPacket* pkt);
++int ff_v4l2_context_dequeue_packet(V4L2Context* ctx, AVPacket* pkt,
++                                   int timeout, int wake_for_input);
+ 
+ /**
+  * Dequeues a buffer from a V4L2Context to an AVFrame.
+diff --git a/libavcodec/v4l2_enc_utils.c b/libavcodec/v4l2_enc_utils.c
+index 81ca078..98bddfc 100644
+--- a/libavcodec/v4l2_enc_utils.c
++++ b/libavcodec/v4l2_enc_utils.c
+@@ -22,6 +22,7 @@
+ 
+ #include "libavutil/common.h"
+ #include "libavutil/error.h"
++#include "libavutil/fifo.h"
+ #include "libavutil/imgutils.h"
+ #include "libavutil/intreadwrite.h"
+ #include "libavutil/pixdesc.h"
+@@ -248,3 +249,131 @@ int ff_v4l2_enc_copy_frame(const AVFrame *src, enum AVPixelFormat dst_fmt,
+ 
+     return 0;
+ }
++
++/*
++ * Timestamps of a device that reorders: frames go in in presentation
++ * order, packets come out in decode order, each with its own frame's PTS.
++ */
++int ff_v4l2_enc_ts_init(V4L2EncTimestamps *ts, int delay, int64_t step)
++{
++    ff_v4l2_enc_ts_uninit(ts);
++    ts->pts = av_fifo_alloc2(16, sizeof(int64_t), AV_FIFO_FLAG_AUTO_GROW);
++    if (!ts->pts)
++        return AVERROR(ENOMEM);
++    ts->delay = FFMAX(delay, 0);
++    ts->step  = FFMAX(step, 1);
++    return 0;
++}
++
++void ff_v4l2_enc_ts_uninit(V4L2EncTimestamps *ts)
++{
++    av_fifo_freep2(&ts->pts);
++    ts->nb_in = ts->nb_out = 0;
++}
++
++int ff_v4l2_enc_ts_push(V4L2EncTimestamps *ts, int64_t pts)
++{
++    int ret = av_fifo_write(ts->pts, &pts, 1);
++
++    if (ret < 0)
++        return ret;
++    ts->nb_in++;
++    return 0;
++}
++
++int ff_v4l2_enc_ts_next_dts(V4L2EncTimestamps *ts, int64_t *dts)
++{
++    int64_t pts;
++    int ret;
++
++    /*
++     * Packet n gets the PTS of frame n - delay. With at most `delay` frames
++     * between a frame's position in presentation order and its position in
++     * decode order, that is never later than the packet's own PTS, and it
++     * rises with n. The first `delay` packets have no such frame: they get
++     * the first PTS minus whole frame durations.
++     */
++    if (ts->nb_out < ts->delay) {
++        ret = av_fifo_peek(ts->pts, &pts, 1, 0);
++        if (ret < 0)
++            return ret;
++        *dts = pts == AV_NOPTS_VALUE ? AV_NOPTS_VALUE :
++               pts - (ts->delay - ts->nb_out) * ts->step;
++    } else {
++        ret = av_fifo_read(ts->pts, &pts, 1);
++        if (ret < 0)
++            return ret;
++        *dts = pts;
++    }
++    ts->nb_out++;
++    return 0;
++}
++
++/* The next Annex B start code (00 00 01) at or after p, or end. */
++static const uint8_t *v4l2_enc_find_startcode(const uint8_t *p, const uint8_t *end)
++{
++    for (; end - p >= 3; p++)
++        if (!p[0] && !p[1] && p[2] == 1)
++            return p;
++    return end;
++}
++
++/*
++ * Call cb for every NAL unit of an Annex B buffer; nal points at the NAL
++ * header, size excludes the start code and any trailing zero bytes. Stops
++ * when cb returns non-zero and returns that value.
++ */
++static int v4l2_enc_for_each_nal(const uint8_t *data, int size,
++                                 int (*cb)(void *opaque, const uint8_t *nal, int size),
++                                 void *opaque)
++{
++    const uint8_t *end = data + size;
++    const uint8_t *sc = v4l2_enc_find_startcode(data, end);
++
++    while (sc < end) {
++        const uint8_t *nal  = sc + 3;
++        const uint8_t *next = v4l2_enc_find_startcode(nal, end);
++        const uint8_t *nend = next;
++        int ret;
++
++        while (nend > nal && !nend[-1])
++            nend--;
++        if (nend > nal) {
++            ret = cb(opaque, nal, nend - nal);
++            if (ret)
++                return ret;
++        }
++        sc = next;
++    }
++    return 0;
++}
++
++static int v4l2_enc_nal_type(enum AVCodecID codec_id, const uint8_t *nal)
++{
++    return codec_id == AV_CODEC_ID_HEVC ? (nal[0] >> 1) & 0x3f : nal[0] & 0x1f;
++}
++
++static int v4l2_enc_is_vcl(enum AVCodecID codec_id, int type)
++{
++    return codec_id == AV_CODEC_ID_HEVC ? type < 32 : type >= 1 && type <= 5;
++}
++
++typedef struct V4L2EncNalScan {
++    enum AVCodecID codec_id;
++} V4L2EncNalScan;
++
++static int v4l2_enc_vcl_cb(void *opaque, const uint8_t *nal, int size)
++{
++    const V4L2EncNalScan *scan = opaque;
++
++    return v4l2_enc_is_vcl(scan->codec_id, v4l2_enc_nal_type(scan->codec_id, nal));
++}
++
++int ff_v4l2_enc_has_picture(enum AVCodecID codec_id, const uint8_t *data, int size)
++{
++    V4L2EncNalScan scan = { codec_id };
++
++    if (codec_id != AV_CODEC_ID_H264 && codec_id != AV_CODEC_ID_HEVC)
++        return 1;
++    return v4l2_enc_for_each_nal(data, size, v4l2_enc_vcl_cb, &scan);
++}
+diff --git a/libavcodec/v4l2_enc_utils.h b/libavcodec/v4l2_enc_utils.h
+index 488ed76..f6c6c28 100644
+--- a/libavcodec/v4l2_enc_utils.h
++++ b/libavcodec/v4l2_enc_utils.h
+@@ -27,6 +27,10 @@
+ #include "libavutil/frame.h"
+ #include "libavutil/pixfmt.h"
+ 
++#include "codec_id.h"
++
++struct AVFifo;
++
+ /**
+  * @return 1 if ff_v4l2_enc_copy_frame() can copy a frame of format src into
+  *         a buffer of format dst (the same format, or planar 4:2:0 into
+@@ -73,4 +77,44 @@ int ff_v4l2_enc_copy_frame(const AVFrame *src, enum AVPixelFormat dst_fmt,
+                            const int bytesperline[], int nb_mem_planes,
+                            int fmt_width, int fmt_height, size_t bytesused[]);
+ 
++/**
++ * Decode timestamps for an encoder that reorders (B frames).
++ *
++ * The device takes frames in presentation order and returns packets in
++ * decode order, each carrying its own frame's PTS. Packet n gets the PTS of
++ * the n - delay'th frame as its DTS, where delay bounds how far a frame
++ * moves forward in decode order (the number of B frames between
++ * references); the first delay packets get the first PTS minus whole frame
++ * durations. The DTS then rise strictly (as the input PTS do) and never
++ * exceed the packet's PTS.
++ */
++typedef struct V4L2EncTimestamps {
++    struct AVFifo *pts;    ///< PTS of the frames not yet used for a DTS
++    int delay;             ///< reorder delay, in frames
++    int64_t step;          ///< one frame duration, for the first delay DTS
++    int64_t nb_in;         ///< frames sent to the device
++    int64_t nb_out;        ///< packets received from it
++} V4L2EncTimestamps;
++
++/** (Re)initialize; ts must be zeroed before the first call. */
++int  ff_v4l2_enc_ts_init(V4L2EncTimestamps *ts, int delay, int64_t step);
++void ff_v4l2_enc_ts_uninit(V4L2EncTimestamps *ts);
++/** A frame with this PTS went to the device. */
++int  ff_v4l2_enc_ts_push(V4L2EncTimestamps *ts, int64_t pts);
++/** A packet came back: its DTS. */
++int  ff_v4l2_enc_ts_next_dts(V4L2EncTimestamps *ts, int64_t *dts);
++
++/** Frames sent to the device whose packets have not come back yet. */
++static inline int64_t ff_v4l2_enc_ts_in_flight(const V4L2EncTimestamps *ts)
++{
++    return ts->nb_in - ts->nb_out;
++}
++
++/**
++ * @return 1 if an H.264/HEVC Annex B buffer holds a coded picture (a VCL NAL
++ *         unit), 0 if it holds only headers (parameter sets, SEI); 1 for
++ *         other codecs
++ */
++int ff_v4l2_enc_has_picture(enum AVCodecID codec_id, const uint8_t *data, int size);
++
+ #endif /* AVCODEC_V4L2_ENC_UTILS_H */
+diff --git a/libavcodec/v4l2_m2m.c b/libavcodec/v4l2_m2m.c
+index 737c5f1..4c87066 100644
+--- a/libavcodec/v4l2_m2m.c
++++ b/libavcodec/v4l2_m2m.c
+@@ -261,6 +261,8 @@ static void v4l2_m2m_destroy_context(AVRefStructOpaque unused, void *context)
+     if (s->fd >= 0)
+         close(s->fd);
+     av_frame_free(&s->frame);
++    ff_v4l2_enc_ts_uninit(&s->ts);
++    av_freep(&s->enc_hdr);
+     av_packet_unref(&s->buf_pkt);
+ }
+ 
+diff --git a/libavcodec/v4l2_m2m.h b/libavcodec/v4l2_m2m.h
+index 7e33952..58d9e6c 100644
+--- a/libavcodec/v4l2_m2m.h
++++ b/libavcodec/v4l2_m2m.h
+@@ -31,6 +31,7 @@
+ 
+ #include "libavcodec/avcodec.h"
+ #include "v4l2_context.h"
++#include "v4l2_enc_utils.h"
+ 
+ #define container_of(ptr, type, member) ({ \
+         const __typeof__(((type *)0)->member ) *__mptr = (ptr); \
+@@ -64,6 +65,18 @@ typedef struct V4L2m2mContext {
+     /* Reference to a frame. Only used during encoding */
+     AVFrame *frame;
+ 
++    /* encoding: the device queued V4L2_EVENT_EOS */
++    int eos_event;
++    /* encoding: decode timestamps and the frames in flight */
++    V4L2EncTimestamps ts;
++    /* encoding: frames the device may keep without returning a packet */
++    int enc_hold;
++    /* encoding: the constant QP of I, P and B frames (-1: rate control) */
++    int enc_qp[3];
++    /* encoding: header-only packet data, put in front of the next packet */
++    uint8_t *enc_hdr;
++    int enc_hdr_size;
++
+     /* Reference to self; only valid while codec is active. */
+     struct V4L2m2mContext *self_ref;
+ 
+diff --git a/libavcodec/v4l2_m2m_enc.c b/libavcodec/v4l2_m2m_enc.c
+index 45ff0b7..84667cc 100644
+--- a/libavcodec/v4l2_m2m_enc.c
++++ b/libavcodec/v4l2_m2m_enc.c
+@@ -27,6 +27,8 @@
+ #include <search.h>
+ #include "encode.h"
+ #include "libavcodec/avcodec.h"
++#include "libavcodec/codec_desc.h"
++#include "libavutil/mem.h"
+ #include "libavutil/pixdesc.h"
+ #include "libavutil/pixfmt.h"
+ #include "libavutil/opt.h"
+@@ -147,19 +149,35 @@ static inline int v4l2_mpeg4_profile_from_ff(int p)
+     return AVERROR(ENOENT);
+ }
+ 
+-static int v4l2_check_b_frame_support(V4L2m2mContext *s)
++/*
++ * Ask for -bf B frames and use what the driver kept (it clamps the control
++ * to what it can do). The device returns packets in decode order, each with
++ * its own frame's timestamp; the reorder delay that the DTS need is at most
++ * the number of B frames between references, whatever order the device
++ * codes a group of frames in (V4L2EncTimestamps).
++ */
++static int v4l2_setup_b_frames(V4L2m2mContext *s)
+ {
+-    if (s->avctx->max_b_frames)
+-        av_log(s->avctx, AV_LOG_WARNING, "Encoder does not support b-frames yet\n");
++    AVCodecContext *avctx = s->avctx;
++    int want = FFMAX(avctx->max_b_frames, 0), got = 0;
+ 
+-    v4l2_set_ext_ctrl(s, MPEG_CID(B_FRAMES), 0, "number of B-frames", 0);
+-    v4l2_get_ext_ctrl(s, MPEG_CID(B_FRAMES), &s->avctx->max_b_frames, "number of B-frames", 0);
+-    if (s->avctx->max_b_frames == 0)
+-        return 0;
++    if (!(avctx->codec_descriptor->props & AV_CODEC_PROP_REORDER))
++        want = 0;
++
++    v4l2_set_ext_ctrl(s, MPEG_CID(B_FRAMES), want, "number of B-frames", want > 0);
++    if (v4l2_get_ext_ctrl(s, MPEG_CID(B_FRAMES), &got, "number of B-frames", want > 0) < 0)
++        got = 0;
++    got = FFMAX(got, 0);
++
++    if (got != want)
++        av_log(avctx, want ? AV_LOG_WARNING : AV_LOG_VERBOSE,
++               "The device codes %d B-frame(s) between references (%d asked for)\n",
++               got, want);
+ 
+-    avpriv_report_missing_feature(s->avctx, "DTS/PTS calculation for V4L2 encoding");
++    avctx->max_b_frames = got;
++    avctx->has_b_frames = got;
+ 
+-    return AVERROR_PATCHWELCOME;
++    return 0;
+ }
+ 
+ static inline void v4l2_subscribe_eos_event(V4L2m2mContext *s)
+@@ -293,6 +311,9 @@ static int v4l2_set_constant_qp(V4L2m2mContext *s, int qp)
+         v4l2_set_ext_ctrl(s, c->b_cid, qp_b, "B-frame QP", avctx->max_b_frames > 0);
+ 
+     av_log(avctx, AV_LOG_VERBOSE, "Constant QP: I %d, P %d, B %d\n", qp_i, qp_p, qp_b);
++    s->enc_qp[0] = qp_i;
++    s->enc_qp[1] = qp_p;
++    s->enc_qp[2] = qp_b;
+ 
+     return 0;
+ }
+@@ -308,7 +329,7 @@ static int v4l2_prepare_encoder(V4L2m2mContext *s)
+      */
+     v4l2_subscribe_eos_event(s);
+ 
+-    ret = v4l2_check_b_frame_support(s);
++    ret = v4l2_setup_b_frames(s);
+     if (ret)
+         return ret;
+ 
+@@ -417,51 +438,193 @@ static int v4l2_send_frame(AVCodecContext *avctx, const AVFrame *frame)
+     return ff_v4l2_context_enqueue_frame(output, frame);
+ }
+ 
+-static int v4l2_receive_packet(AVCodecContext *avctx, AVPacket *avpkt)
++static int v4l2_start_streaming(AVCodecContext *avctx, V4L2m2mContext *s)
+ {
+-    V4L2m2mContext *s = ((V4L2m2mPriv*)avctx->priv_data)->context;
+-    V4L2Context *const capture = &s->capture;
+-    V4L2Context *const output = &s->output;
+-    AVFrame *frame = s->frame;
+     int ret;
+ 
+-    if (s->draining)
+-        goto dequeue;
++    if (!s->output.streamon) {
++        ret = ff_v4l2_context_set_status(&s->output, VIDIOC_STREAMON);
++        if (ret) {
++            av_log(avctx, AV_LOG_ERROR, "VIDIOC_STREAMON failed on output context\n");
++            return ret;
++        }
++    }
++
++    if (!s->capture.streamon) {
++        ret = ff_v4l2_context_set_status(&s->capture, VIDIOC_STREAMON);
++        if (ret) {
++            av_log(avctx, AV_LOG_ERROR, "VIDIOC_STREAMON failed on capture context\n");
++            return ret;
++        }
++    }
++
++    return 0;
++}
++
++/*
++ * Queue the next frame, if there is one and the device has room for it; a
++ * frame it has no room for stays in s->frame. At the end of the input,
++ * start draining.
++ */
++static int v4l2_queue_input(AVCodecContext *avctx, V4L2m2mContext *s)
++{
++    AVFrame *frame = s->frame;
++    int64_t pts;
++    int ret;
+ 
+     if (!frame->buf[0]) {
+         ret = ff_encode_get_frame(avctx, frame);
+-        if (ret < 0 && ret != AVERROR_EOF)
++        if (ret == AVERROR_EOF) {
++            ret = v4l2_send_frame(avctx, NULL);
++            return ret < 0 ? ret : 0;
++        }
++        if (ret == AVERROR(EAGAIN))
++            return 0;
++        if (ret < 0)
+             return ret;
+-
+-        if (ret == AVERROR_EOF)
+-            frame = NULL;
+     }
+ 
++    pts = frame->pts;
+     ret = v4l2_send_frame(avctx, frame);
+-    if (ret != AVERROR(EAGAIN))
+-        av_frame_unref(frame);
++    if (ret == AVERROR(EAGAIN))
++        return 0;
++    av_frame_unref(frame);
++    if (ret < 0)
++        return ret;
+ 
+-    if (ret < 0 && ret != AVERROR(EAGAIN))
++    ret = ff_v4l2_enc_ts_push(&s->ts, pts);
++    if (ret < 0)
+         return ret;
+ 
+-    if (!output->streamon) {
+-        ret = ff_v4l2_context_set_status(output, VIDIOC_STREAMON);
+-        if (ret) {
+-            av_log(avctx, AV_LOG_ERROR, "VIDIOC_STREAMON failed on output context\n");
+-            return ret;
+-        }
++    return v4l2_start_streaming(avctx, s);
++}
++
++/*
++ * A packet from the device: put any header-only packet that came before
++ * it in front of it, and give it its DTS. AVERROR(EAGAIN): it was a
++ * header-only packet (drivers in V4L2_MPEG_VIDEO_HEADER_MODE_SEPARATE),
++ * kept for the next one, which is the frame's.
++ */
++static int v4l2_finish_packet(AVCodecContext *avctx, V4L2m2mContext *s, AVPacket *pkt)
++{
++    int64_t dts;
++    int ret;
++
++    if (!pkt->size) {
++        av_log(avctx, AV_LOG_ERROR, "The device returned an empty packet (a frame it could not code)\n");
++        return AVERROR(EIO);
+     }
+ 
+-    if (!capture->streamon) {
+-        ret = ff_v4l2_context_set_status(capture, VIDIOC_STREAMON);
+-        if (ret) {
+-            av_log(avctx, AV_LOG_ERROR, "VIDIOC_STREAMON failed on capture context\n");
++    if (!ff_v4l2_enc_has_picture(avctx->codec_id, pkt->data, pkt->size)) {
++        uint8_t *hdr;
++
++        if (pkt->size > INT_MAX - AV_INPUT_BUFFER_PADDING_SIZE - s->enc_hdr_size)
++            return AVERROR(ERANGE);
++        hdr = av_realloc(s->enc_hdr, s->enc_hdr_size + pkt->size);
++        if (!hdr)
++            return AVERROR(ENOMEM);
++        memcpy(hdr + s->enc_hdr_size, pkt->data, pkt->size);
++        s->enc_hdr       = hdr;
++        s->enc_hdr_size += pkt->size;
++        av_packet_unref(pkt);
++        return AVERROR(EAGAIN);
++    }
++
++    if (s->enc_hdr_size) {
++        const int size = pkt->size;
++
++        ret = av_grow_packet(pkt, s->enc_hdr_size);
++        if (ret < 0)
+             return ret;
+-        }
++        memmove(pkt->data + s->enc_hdr_size, pkt->data, size);
++        memcpy(pkt->data, s->enc_hdr, s->enc_hdr_size);
++        s->enc_hdr_size = 0;
+     }
+ 
+-dequeue:
+-    return ff_v4l2_context_dequeue_packet(capture, avpkt);
++    ret = ff_v4l2_enc_ts_next_dts(&s->ts, &dts);
++    if (ret < 0) {
++        av_log(avctx, AV_LOG_WARNING, "The device returned more packets than it was given frames\n");
++        dts = pkt->pts;
++    }
++
++    if (avctx->max_b_frames <= 0) {
++        pkt->dts = pkt->pts;
++    } else {
++        pkt->dts = dts;
++        if (pkt->pts != AV_NOPTS_VALUE && dts != AV_NOPTS_VALUE && dts > pkt->pts)
++            av_log(avctx, AV_LOG_WARNING, "DTS %"PRId64" > PTS %"PRId64": the device "
++                   "reorders by more than %d frame(s)\n", dts, pkt->pts, avctx->max_b_frames);
++    }
++
++    return 0;
++}
++
++/* How long to wait for the last packets once the device sent its EOS event. */
++#define V4L2_ENC_EOS_WAIT_MS 2000
++/* Wake-ups without a packet in a row that mean the device has stopped. */
++#define V4L2_ENC_MAX_IDLE    100
++
++static int v4l2_receive_packet(AVCodecContext *avctx, AVPacket *avpkt)
++{
++    V4L2m2mContext *s = ((V4L2m2mPriv*)avctx->priv_data)->context;
++    V4L2Context *const capture = &s->capture;
++    int ret, idle = 0;
++
++    for (;;) {
++        int pending = 0, eos = s->eos_event, timeout;
++
++        if (!s->draining) {
++            ret = v4l2_queue_input(avctx, s);
++            if (ret < 0)
++                return ret;
++            pending = !!s->frame->buf[0];
++        }
++
++        if (s->draining) {
++            if (!capture->streamon)
++                return AVERROR_EOF;
++            /* once the EOS event is in, the last buffer is due at once */
++            timeout = eos ? V4L2_ENC_EOS_WAIT_MS : -1;
++        } else if (pending || ff_v4l2_enc_ts_in_flight(&s->ts) > s->enc_hold) {
++            /*
++             * The device has more frames than it may keep back (the B frames
++             * it holds until their reference arrives, and one being coded):
++             * a packet will come. Or the frame waits for room on the OUTPUT
++             * queue, which a packet or a returned OUTPUT buffer gives.
++             */
++            timeout = -1;
++        } else {
++            /* it may be keeping every frame it has until it gets more */
++            timeout = 0;
++        }
++
++        ret = ff_v4l2_context_dequeue_packet(capture, avpkt, timeout, pending);
++        if (ret == AVERROR(EAGAIN)) {
++            if (!timeout)
++                return AVERROR(EAGAIN);
++            if (pending)
++                continue;
++            if (s->draining && eos) {
++                av_log(avctx, AV_LOG_WARNING, "No last packet from the device after its EOS event\n");
++                capture->done = 1;
++                return AVERROR_EOF;
++            }
++            if (++idle > V4L2_ENC_MAX_IDLE) {
++                av_log(avctx, AV_LOG_ERROR, "The device stopped returning packets\n");
++                return AVERROR(EIO);
++            }
++            continue;
++        }
++        if (ret < 0)
++            return ret;
++
++        ret = v4l2_finish_packet(avctx, s, avpkt);
++        if (ret == AVERROR(EAGAIN))
++            continue;
++        if (ret < 0)
++            av_packet_unref(avpkt);
++        return ret;
++    }
+ }
+ 
+ static av_cold int v4l2_encode_init(AVCodecContext *avctx)
+@@ -471,6 +634,7 @@ static av_cold int v4l2_encode_init(AVCodecContext *avctx)
+     V4L2m2mPriv *priv = avctx->priv_data;
+     enum AVPixelFormat pix_fmt_output;
+     uint32_t v4l2_fmt_output;
++    int64_t step = 1;
+     int ret;
+ 
+     ret = ff_v4l2_m2m_create_context(priv, &s);
+@@ -523,7 +687,21 @@ static av_cold int v4l2_encode_init(AVCodecContext *avctx)
+     if (ret < 0)
+         return ret;
+ 
+-    return v4l2_prepare_encoder(s);
++    s->enc_qp[0] = s->enc_qp[1] = s->enc_qp[2] = -1;
++    ret = v4l2_prepare_encoder(s);
++    if (ret < 0)
++        return ret;
++
++    /* the first max_b_frames DTS step back from the first PTS by this */
++    if (avctx->framerate.num > 0 && avctx->framerate.den > 0)
++        step = av_rescale_q(1, av_inv_q(avctx->framerate), avctx->time_base);
++    ret = ff_v4l2_enc_ts_init(&s->ts, avctx->max_b_frames, FFMAX(step, 1));
++    if (ret < 0)
++        return ret;
++    /* the B frames it holds back, and one being coded while we copy the next */
++    s->enc_hold = avctx->max_b_frames + 1;
++
++    return 0;
+ }
+ 
+ static av_cold int v4l2_encode_close(AVCodecContext *avctx)
+-- 
+2.55.0
+

@@ -1,0 +1,222 @@
+From b47d2808ff83f1984fd77af95ca6728fc296901d Mon Sep 17 00:00:00 2001
+From: Aaron Scheiner <blue@aquarat.co.uk>
+Date: Sun, 4 Oct 2026 18:36:48 +0100
+Subject: [PATCH 4/7] avcodec/v4l2_m2m: add a "device" option to pick the V4L2
+ node
+
+The wrappers took the first /dev/video* node, in readdir() order, that
+could do the job. On a machine with several encoders (or a decoder that
+also claims to encode) there was no way to choose one.
+
+The new "device" option takes either a path, which is used as is, or a
+name: the node's (video3), its V4L2 device name from sysfs, or the
+driver, card or bus_info that VIDIOC_QUERYCAP reports. Without the
+option the nodes are now probed in numeric order (video2 before
+video10), so the choice is at least reproducible.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01AGB1JqfDntxCaB5cKZV4vM
+---
+ libavcodec/v4l2_m2m.c | 135 +++++++++++++++++++++++++++++++++++++-----
+ libavcodec/v4l2_m2m.h |   7 ++-
+ 2 files changed, 127 insertions(+), 15 deletions(-)
+
+diff --git a/libavcodec/v4l2_m2m.c b/libavcodec/v4l2_m2m.c
+index 07c7500..737c5f1 100644
+--- a/libavcodec/v4l2_m2m.c
++++ b/libavcodec/v4l2_m2m.c
+@@ -27,6 +27,9 @@
+ #include <unistd.h>
+ #include <dirent.h>
+ #include <fcntl.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
+ #include "libavcodec/avcodec.h"
+ #include "libavutil/mem.h"
+ #include "libavutil/pixdesc.h"
+@@ -287,38 +290,142 @@ av_cold int ff_v4l2_m2m_codec_end(V4L2m2mPriv *priv)
+     return 0;
+ }
+ 
+-av_cold int ff_v4l2_m2m_codec_init(V4L2m2mPriv *priv)
++typedef struct V4L2VideoNode {
++    char name[256];
++} V4L2VideoNode;
++
++/* video2 before video10: readdir() order is the file system's, not ours */
++static int v4l2_video_node_cmp(const void *a, const void *b)
++{
++    const char *na = ((const V4L2VideoNode *)a)->name;
++    const char *nb = ((const V4L2VideoNode *)b)->name;
++    long ia = strtol(na + 5, NULL, 10), ib = strtol(nb + 5, NULL, 10);
++
++    if (ia != ib)
++        return ia < ib ? -1 : 1;
++    return strcmp(na, nb);
++}
++
++/* The /dev/video* names, sorted; *nodes is av_free()d by the caller. */
++static int v4l2_list_video_nodes(V4L2VideoNode **nodes)
+ {
+-    int ret = AVERROR(EINVAL);
+     struct dirent *entry;
++    int nb = 0, ret = 0;
+     DIR *dirp;
+ 
+-    V4L2m2mContext *s = priv->context;
+-
++    *nodes = NULL;
+     dirp = opendir("/dev");
+     if (!dirp)
+         return AVERROR(errno);
+ 
+     for (entry = readdir(dirp); entry; entry = readdir(dirp)) {
++        V4L2VideoNode *tmp;
+ 
+         if (strncmp(entry->d_name, "video", 5))
+             continue;
+-
+-        snprintf(s->devname, sizeof(s->devname), "/dev/%s", entry->d_name);
+-        av_log(s->avctx, AV_LOG_DEBUG, "probing device %s\n", s->devname);
+-        ret = v4l2_probe_driver(s);
+-        if (!ret)
++        tmp = av_realloc_array(*nodes, nb + 1, sizeof(**nodes));
++        if (!tmp) {
++            ret = AVERROR(ENOMEM);
+             break;
++        }
++        *nodes = tmp;
++        snprintf((*nodes)[nb++].name, sizeof((*nodes)->name), "%s", entry->d_name);
+     }
+-
+     closedir(dirp);
+ 
+-    if (ret) {
+-        av_log(s->avctx, AV_LOG_ERROR, "Could not find a valid device\n");
+-        memset(s->devname, 0, sizeof(s->devname));
+-
++    if (ret < 0) {
++        av_freep(nodes);
+         return ret;
+     }
++    if (nb)
++        qsort(*nodes, nb, sizeof(**nodes), v4l2_video_node_cmp);
++    return nb;
++}
++
++/*
++ * Whether /dev/@node is the one the "device" option names: by its node
++ * name (video3), its V4L2 device name (sysfs .../name, e.g. apple-ave1-enc),
++ * or its driver, card or bus_info as VIDIOC_QUERYCAP reports them.
++ */
++static int v4l2_device_matches(const char *node, const char *want)
++{
++    struct v4l2_capability cap;
++    char path[PATH_MAX], name[64] = "";
++    FILE *f;
++    int fd, ret;
++
++    if (!strcmp(node, want))
++        return 1;
++
++    snprintf(path, sizeof(path), "/sys/class/video4linux/%s/name", node);
++    f = fopen(path, "r");
++    if (f) {
++        if (fgets(name, sizeof(name), f))
++            name[strcspn(name, "\n")] = 0;
++        fclose(f);
++        if (!strcmp(name, want))
++            return 1;
++    }
++
++    snprintf(path, sizeof(path), "/dev/%s", node);
++    fd = open(path, O_RDWR | O_NONBLOCK, 0);
++    if (fd < 0)
++        return 0;
++    memset(&cap, 0, sizeof(cap));
++    ret = ioctl(fd, VIDIOC_QUERYCAP, &cap);
++    close(fd);
++    if (ret < 0)
++        return 0;
++
++    return !strcmp((const char *)cap.driver, want) ||
++           !strcmp((const char *)cap.card, want) ||
++           !strcmp((const char *)cap.bus_info, want);
++}
++
++av_cold int ff_v4l2_m2m_codec_init(V4L2m2mPriv *priv)
++{
++    int ret = AVERROR(EINVAL);
++    V4L2VideoNode *nodes = NULL;
++    int i, nb_nodes;
++
++    V4L2m2mContext *s = priv->context;
++    const char *want = priv->device && *priv->device ? priv->device : NULL;
++
++    if (want && strchr(want, '/')) {
++        /* a path: that device or none */
++        snprintf(s->devname, sizeof(s->devname), "%s", want);
++        av_log(s->avctx, AV_LOG_DEBUG, "probing device %s\n", s->devname);
++        ret = v4l2_probe_driver(s);
++        if (ret) {
++            av_log(s->avctx, AV_LOG_ERROR, "Device %s cannot be used for this (%s)\n",
++                   want, av_err2str(ret));
++            memset(s->devname, 0, sizeof(s->devname));
++            return ret;
++        }
++    } else {
++        nb_nodes = v4l2_list_video_nodes(&nodes);
++        if (nb_nodes < 0)
++            return nb_nodes;
++
++        for (i = 0; i < nb_nodes && ret; i++) {
++            if (want && !v4l2_device_matches(nodes[i].name, want))
++                continue;
++            snprintf(s->devname, sizeof(s->devname), "/dev/%s", nodes[i].name);
++            av_log(s->avctx, AV_LOG_DEBUG, "probing device %s\n", s->devname);
++            ret = v4l2_probe_driver(s);
++        }
++        av_free(nodes);
++
++        if (ret) {
++            if (want)
++                av_log(s->avctx, AV_LOG_ERROR, "No device matching '%s' can be used for this\n", want);
++            else
++                av_log(s->avctx, AV_LOG_ERROR, "Could not find a valid device\n");
++            memset(s->devname, 0, sizeof(s->devname));
++
++            return ret;
++        }
++    }
+ 
+     av_log(s->avctx, AV_LOG_INFO, "Using device %s\n", s->devname);
+ 
+diff --git a/libavcodec/v4l2_m2m.h b/libavcodec/v4l2_m2m.h
+index 4ba33dc..14c8653 100644
+--- a/libavcodec/v4l2_m2m.h
++++ b/libavcodec/v4l2_m2m.h
+@@ -38,7 +38,10 @@
+ 
+ #define V4L_M2M_DEFAULT_OPTS \
+     { "num_output_buffers", "Number of buffers in the output context",\
+-        OFFSET(num_output_buffers), AV_OPT_TYPE_INT, { .i64 = 16 }, 2, INT_MAX, FLAGS }
++        OFFSET(num_output_buffers), AV_OPT_TYPE_INT, { .i64 = 16 }, 2, INT_MAX, FLAGS }, \
++    { "device", "V4L2 device: a path (/dev/video3), or the node name (video3), V4L2 name, "\
++        "driver, card or bus_info of the /dev/video* node to use (default: the first that works)",\
++        OFFSET(device), AV_OPT_TYPE_STRING, { .str = NULL }, 0, 0, FLAGS }
+ 
+ typedef struct V4L2m2mContext {
+     char devname[PATH_MAX];
+@@ -75,6 +78,8 @@ typedef struct V4L2m2mPriv {
+ 
+     int num_output_buffers;
+     int num_capture_buffers;
++
++    char *device;              ///< "device" option: path or name to match
+ } V4L2m2mPriv;
+ 
+ /**
+-- 
+2.55.0
+
