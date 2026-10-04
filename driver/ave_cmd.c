@@ -386,6 +386,7 @@ static int ave_vp_check(const struct ave_start_avc_layout *l,
 	if ((s->src_mode && l->src_mode == AVE_OFF_NONE) ||
 	    (s->src_cfg_byte && l->src_cfg_byte == AVE_OFF_NONE) ||
 	    (s->src_go_bit3 && l->src_go_bit3 == AVE_OFF_NONE) ||
+	    (s->multi_me && l->multi_me == AVE_OFF_NONE) ||
 	    (s->src_go_bits && l->src_go_bits == AVE_OFF_NONE) ||
 	    (s->dbg_bits && l->dbg_bits == AVE_OFF_NONE) ||
 	    (s->ipcm_islice && l->ipcm_islice == AVE_OFF_NONE) ||
@@ -546,6 +547,8 @@ static void ave_vp_fill(struct ave_wr *w, const struct ave_start_avc_layout *l,
 		wr8(w, l->src_cfg_byte, s->src_cfg_byte);
 	if (s->src_go_bit3)
 		wr8(w, l->src_go_bit3, s->src_go_bit3);
+	if (s->multi_me)
+		wr16(w, l->multi_me, s->multi_me);
 	if (s->src_go_bits)
 		wr8(w, l->src_go_bits, s->src_go_bits);
 	if (s->dbg_bits)

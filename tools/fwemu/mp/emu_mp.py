@@ -7,16 +7,18 @@ SNAPDIR holds fw.bin and iova.bin from snap-target.py; AVE_FW names the
 firmware Mach-O (default: the M2's H14G). Output: one line per register
 access, "W|R  physical-address  size  value  pc  function".
 """
+import os as _os
+REPO_ROOT = _os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))))
 import struct, sys, os
 from unicorn import Uc, UC_ARCH_ARM64, UC_MODE_ARM, UC_HOOK_CODE, UC_HOOK_MEM_READ, \
     UC_HOOK_MEM_WRITE, UC_HOOK_MEM_UNMAPPED, UC_PROT_ALL, UcError
 from unicorn.arm64_const import *
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+HERE = REPO_ROOT + "/tools/fwemu"
 sys.path.insert(0, HERE)
 from fwmem import Snap
 from fwsyms import sized
-REPO = os.path.dirname(os.path.dirname(HERE))
+REPO = REPO_ROOT + ""
 
 # the firmware Mach-O the snapshot ran (it carries its symbol table)
 FW = os.environ.get("AVE_FW", os.path.join(REPO, "data/blobs/macos-13.5-j473/ave_h14g.bin"))
@@ -49,10 +51,6 @@ def main():
         lo, hi = page(base), page(base + len(b) + 0xfff)
         uc.mem_map(lo, hi - lo, UC_PROT_ALL)
         uc.mem_write(base, bytes(b))
-    # PATCH="va:byte,va:byte": change bytes of the snapshot before running (what-if)
-    for p in filter(None, os.environ.get("PATCH", "").split(",")):
-        va, v = (int(x, 0) for x in p.split(":"))
-        uc.mem_write(va, bytes([v]))
     for va, n, pa in s.mmio():
         uc.mem_map(va, n, UC_PROT_ALL)
     uc.mem_map(MMIO_DPE, MMIO_LEN, UC_PROT_ALL)
@@ -60,6 +58,13 @@ def main():
     uc.mem_map(TRAP, 0x1000, UC_PROT_ALL)
     uc.mem_write(TRAP, b"\x00\x00\x20\xd4")    # brk #0
 
+    # PATCH="va:hexbytes;..." applied to the emulated memory only (snapshot untouched)
+    for p in filter(None, os.environ.get("PATCH", "").split(";")):
+        va, hx = p.split(":"); uc.mem_write(int(va, 0), bytes.fromhex(hx))
+    MPBUF = 0x40000000
+    uc.mem_map(MPBUF, 0x10000, UC_PROT_ALL)
+    if os.environ.get("MPBUF"):
+        uc.mem_write(MPBUF, open(os.environ["MPBUF"], "rb").read())
     log = []
     mmio_ranges = [(MMIO_DPE, MMIO_LEN, 0x266000000)] + [(va, n, pa) for va, n, pa in s.mmio()]
     def where(a):
@@ -80,7 +85,15 @@ def main():
     stubs = {a: n for n, a in addr.items() if n.startswith(STUB_PREFIX)}
     stops = {addr[n]: n for n in STOP if n in addr}
     calls = []
+    mmc, mmd, mmh = addr["__ZN12MappedMemoryC2Emmb"], addr["__ZN12MappedMemoryD1Ev"], addr["__ZNK12MappedMemory10HwToTargetEm"]
+    mpaddr = int(os.environ.get("MPADDR", "0"), 0)
+    real = {}
     def on_code(uc_, a, size, _):
+        # MappedMemory of the multipass input address -> synthetic buffer; everything else runs for real
+        if a == mmc and mpaddr and uc_.reg_read(UC_ARM64_REG_X1) == mpaddr:
+            calls.append(("MAP-MP", hex(uc_.reg_read(UC_ARM64_REG_X2))))
+        if a == mmh and mpaddr and uc_.reg_read(UC_ARM64_REG_X1) == mpaddr:
+            uc_.reg_write(UC_ARM64_REG_X0, MPBUF); uc_.reg_write(UC_ARM64_REG_PC, uc_.reg_read(UC_ARM64_REG_X30)); return
         if a in stops:
             calls.append(("ASSERT", hex(uc_.reg_read(UC_ARM64_REG_X30))))
             uc_.emu_stop()

@@ -1205,6 +1205,7 @@ struct ave_start_avc_layout {
 	 * writing or validating them.
 	 */
 	u32	src_go_bit3;		/* u8; AVE_OFF_NONE = not located */
+	u32	multi_me;		/* u16 iMultiMECnt (docs/94); AVE_OFF_NONE = not located */
 	u32	src_go_bits;		/* u8; AVE_OFF_NONE = not located */
 	/*
 	 * The controller's debug-verbosity bitfield (docs/70). It reaches
@@ -2113,6 +2114,12 @@ const struct ave_cmd_abi ave_cmd_abi_13_5 = {
 		.src_mode	= 0xfec0,	/* fw 0x5d018 -> [x22,#444], docs/62 §6.2 */
 		.src_cfg_byte	= 0xfce8,	/* fw 0x5d118 -> [x22,#41],  docs/62 §6.2 */
 		.src_go_bit3	= 0xfce9,	/* fw 0x5cfcc -> SRCDMAGO bit 3, docs/69 */
+		/*
+		 * docs/94: VP+0xFC8A, the kext's iMultiMECnt: AVE_DPM_TuneUpPipe
+		 * powers ME1 only when it is set; H14G's InitEncodingParameters
+		 * (ldrh 0x4e930) gates every ME1-bank (DPE+0xF0000) write on it.
+		 */
+		.multi_me	= 0xfcea,
 		.src_go_bits	= 0xfecc,	/* fw 0x5cfe4 -> SRCDMAGO bits 4+, docs/69 */
 		.dbg_bits	= 0xfcd8,	/* fw 0x5cedc -> ctrl+0xA7C, docs/70 */
 		.ipcm_islice	= 0xfce4,	/* fw 0x5cf58 -> ctrl+0x23FDE, docs/73 */
@@ -2645,6 +2652,7 @@ const struct ave_cmd_abi ave_cmd_abi_26_6 = {
 		.src_mode	= AVE_OFF_NONE,
 		.src_cfg_byte	= AVE_OFF_NONE,
 		.src_go_bit3	= AVE_OFF_NONE,
+		.multi_me	= AVE_OFF_NONE,
 		.src_go_bits	= AVE_OFF_NONE,
 		.dbg_bits	= AVE_OFF_NONE,
 		.ipcm_islice	= AVE_OFF_NONE,

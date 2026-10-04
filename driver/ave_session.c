@@ -399,6 +399,11 @@ MODULE_PARM_DESC(session_src_cfg,
  * 0x40D120100 - and the stage that never runs is IntraEst, which needs
  * source pixels of its own (F21, F22).
  */
+static unsigned int session_multi_me;
+module_param(session_multi_me, uint, 0644);
+MODULE_PARM_DESC(session_multi_me,
+	"H.264 Start wire 0xFCEA (u16, the kext's iMultiMECnt): the firmware also programs the second ME unit (DPE+0xF0000); docs/94. 0 = as macOS's default");
+
 static unsigned int session_src_bit3;
 module_param(session_src_bit3, uint, 0444);
 MODULE_PARM_DESC(session_src_bit3,
@@ -1944,6 +1949,7 @@ static int ave_session_start_prep(struct ave_device *ave,
 	if (!session_src_cfg && bufs->src_bitdepth == 10)
 		s->src_cfg_byte = 1;
 	s->src_go_bit3 = (u8)session_src_bit3;
+	s->multi_me = (u16)session_multi_me;
 	s->src_go_bits = (u8)session_src_go;
 	s->dbg_bits = session_dbg;
 	s->ipcm_islice = (u8)session_ipcm;

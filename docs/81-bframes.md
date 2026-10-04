@@ -1,6 +1,9 @@
 # 81. B-frames (H.264 first, then HEVC)
 
-**Status (2026-10-04): parked; docs/92 (the M2 stalls identically) and docs/93
+**Status (2026-10-04, later): UNBLOCKED (docs/94).** A frame with two
+references needs both motion-estimation units, which the firmware programs
+only when Start wire 0xFCEA (`iMultiMECnt`) is set; with it bs1, hb3 and b4
+complete on the M2. Earlier the same day: parked; docs/92 (the M2 stalls identically) and docs/93
 (the firmware's per-frame programming, emulated, is complete, and every write
 reaches the hardware) narrow the cause to state outside the per-frame
 registers.** Earlier: parked after docs/85. The macOS-equivalent

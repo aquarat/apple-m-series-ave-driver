@@ -159,6 +159,7 @@ struct ave_avc_session {
 	u8	src_cfg_byte;
 	/* SRCDMAGO bit 3 and bits 4+ (docs/69); 0 = what every run has sent. */
 	u8	src_go_bit3;
+	u16	multi_me;	/* docs/94 */
 	u8	src_go_bits;
 	/*
 	 * Controller debug verbosity (wire 0xFCD8). Bit 5 is what lets the

@@ -179,6 +179,14 @@ module_param(power_me1, bool, 0444);
 MODULE_PARM_DESC(power_me1,
 		 "also power the venc_me1 domain, which no DT reference reaches (docs/57 #3, F8)");
 /* venc_me1's node path is per SoC: ave->soc->me1_node */
+/*
+ * docs/94: macOS powers ME1 only when a session asks for both ME units
+ * (iMultiMECnt); otherwise the firmware never programs it. me1_off=1 holds
+ * venc_me0 (and through it pipe4/pipe5/dma/sys) but leaves venc_me1 off.
+ */
+static bool me1_off;
+module_param(me1_off, bool, 0444);
+MODULE_PARM_DESC(me1_off, "power venc_me0 but leave venc_me1 off, as macOS does without iMultiMECnt (docs/94)");
 
 /*
  * docs/75 R3, docs/78: hold the PMP's report entry for VENC_SYS, so the PMP
@@ -738,6 +746,13 @@ static int ave_power_me1_on(struct ave_device *ave)
 			 ave->soc->me0_label, ave_read(ave, AVE_BANK_PMGR_PS, 0x18));
 	}
 
+	if (me1_off) {
+		if (!ave->me0_dev)
+			return dev_err_probe(ave->dev, -EINVAL,
+					     "me1_off needs an me0 holder (me0_node) on this SoC\n");
+		dev_info(ave->dev, "me1: left off (me1_off=1, docs/94)\n");
+		return 0;
+	}
 	ret = ave_power_holder_on(ave, ave->soc->me1_node, ave->soc->me1_label,
 				  &ave->me1_dev);
 	if (ret) {
@@ -785,6 +800,14 @@ static void ave_power_me1_abandon(struct ave_device *ave)
 {
 	struct device *vdev = ave->me1_dev;
 
+	/* me1_off: the me0 holder is the one keeping the chain up */
+	if (!vdev && ave->me0_dev) {
+		vdev = ave->me0_dev;
+		ave->me0_dev = NULL;
+		dev_warn(ave->dev, "me0: ABANDONING %s (me1_off), still powered, to hold venc_me0 -> pipe4/5 -> sys up after unload. REBOOT before loading again.\n",
+			 dev_name(vdev));
+		return;
+	}
 	if (!vdev) {
 		dev_warn(ave->dev,
 			 "me1: no holder to abandon (power_me1=0), so NOTHING holds venc_me0/pipe4/pipe5/dma up; devres will gate them when remove() returns\n");
