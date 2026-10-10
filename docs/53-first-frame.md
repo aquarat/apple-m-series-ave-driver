@@ -4363,3 +4363,13 @@ boot, `pm_sleep` default 0) merged; one boot, both encoders:
   "pm: DAPF captured for resume". No sleep was attempted.
 Next is docs/86's a1 (bare `rtcwake -m freeze` with no driver), which
 needs the operator at the machine.
+
+## d1-d5 (planned 2026-10-10, not run): ADT placement, driver-side DAPF on t6001 (docs/99)
+
+Two changes for packaging, compiled (`W=1`, clean) but not loaded yet:
+the firmware placement from the live ADT m1n1 publishes (`iboot_adt`,
+default 1), and `dapf_by_driver` on t6001's ave0, so stock m1n1 suffices.
+Plan and the "no" of each run: docs/99 §5. d1 and d2 are the same run
+(repeat before believing); d3 (`iboot_adt=0`) is the control; d4 (stock
+m1n1) needs the operator's decision to swap m1n1; d5 is the docs/84 soak
+and `v4l2-compliance` on this build.

@@ -45,6 +45,7 @@
 #include <linux/libnvdimm.h>	/* arch_wb_cache_pmem / arch_invalidate_pmem */
 
 #include "ave.h"
+#include "ave_adt.h"
 #include "ave_dapf.h"
 
 /*
@@ -438,6 +439,135 @@ MODULE_PARM_DESC(fw_restore_path,
 static bool ave_ranges_overlap(u64 a, u64 alen, u64 b, u64 blen)
 {
 	return a < b + blen && b < a + alen;
+}
+
+/*
+ * docs/99: where iBoot put this encoder's firmware, read from the live ADT,
+ * as macOS's kext reads it (pre-loaded + segment-ranges, docs/09 §1).
+ * Since v1.6.1 m1n1 publishes the ADT iBoot handed it as a reserved-memory
+ * node (compatible "phram", label "adt", docs/98 §4): plain DRAM, read
+ * here through a cacheable mapping, no register touched.
+ *
+ * The ave_soc.c rows carry the placement of the machine each port was
+ * brought up on. With the ADT, a row's TEXT and in-place DATA addresses
+ * become this machine's own; the image identity checks (RVBAR, the DATA
+ * literal in TEXT, the TEXT windows, DATA outside RAM) run on them as
+ * before. Owned DATA (t6001's ave1) is the driver's, so the ADT's DATA is
+ * not used for it. No ADT, no node, or segments of another size: the
+ * compiled row stands.
+ */
+static int iboot_adt = 1;
+module_param(iboot_adt, int, 0444);
+MODULE_PARM_DESC(iboot_adt,
+		 "firmware placement: 1 = from the live ADT m1n1 publishes where it has this encoder, else ave_soc.c (default) | 2 = read the ADT and compare, use ave_soc.c | 0 = ave_soc.c only");
+
+#define AVE_ADT_MAX_SIZE	SZ_16M
+
+static struct device_node *ave_fw_adt_node(void)
+{
+	struct device_node *rmem, *np;
+	const char *label;
+
+	rmem = of_find_node_by_path("/reserved-memory");
+	if (!rmem)
+		return NULL;
+	for_each_child_of_node(rmem, np) {
+		if (of_device_is_compatible(np, "phram") &&
+		    !of_property_read_string(np, "label", &label) &&
+		    !strcmp(label, "adt")) {
+			of_node_put(rmem);
+			return np;	/* the caller puts it */
+		}
+	}
+	of_node_put(rmem);
+	return NULL;
+}
+
+int ave_fw_placement_from_adt(struct ave_device *ave)
+{
+	const struct ave_soc *row = ave->soc;
+	const struct ave_adt_seg *text = NULL, *data = NULL;
+	u64 new_text, new_data;
+	struct ave_adt_enc enc;
+	struct device_node *np;
+	struct ave_soc *copy;
+	struct resource res;
+	unsigned int i;
+	void *p;
+	int ret;
+
+	if (!iboot_adt)
+		return 0;
+	np = ave_fw_adt_node();
+	if (!np) {
+		dev_info(ave->dev, "adt: no live ADT from m1n1 (reserved-memory \"adt\"); placement from ave_soc.c\n");
+		return 0;
+	}
+	ret = of_address_to_resource(np, 0, &res);
+	of_node_put(np);
+	if (ret || !resource_size(&res) || resource_size(&res) > AVE_ADT_MAX_SIZE) {
+		dev_warn(ave->dev, "adt: unusable reserved-memory \"adt\" node (%d, %pR); placement from ave_soc.c\n",
+			 ret, &res);
+		return 0;
+	}
+	p = memremap(res.start, resource_size(&res), MEMREMAP_WB);
+	if (!p) {
+		dev_warn(ave->dev, "adt: cannot map %pR; placement from ave_soc.c\n", &res);
+		return 0;
+	}
+	ret = ave_adt_find_encoder(p, resource_size(&res), row->dpe_phys, &enc);
+	memunmap(p);
+	if (ret) {
+		dev_info(ave->dev, "adt: no encoder at %#llx in the live ADT (%d); placement from ave_soc.c\n",
+			 (u64)row->dpe_phys, ret);
+		return 0;
+	}
+	for (i = 0; i < enc.nseg; i++) {
+		if (!enc.seg[i].iova && enc.seg[i].size == row->iboot.text_size)
+			text = &enc.seg[i];
+		else if (enc.seg[i].iova && enc.seg[i].size == row->iboot.data_size)
+			data = &enc.seg[i];
+	}
+	dev_info(ave->dev, "adt: /arm-io/%s: pre-loaded %s, %u segment(s); TEXT %#llx, DATA %#llx\n",
+		 enc.name, enc.preloaded ? "yes" : "no", enc.nseg,
+		 text ? text->phys : 0, data ? data->phys : 0);
+	if (!enc.preloaded || !text) {
+		dev_info(ave->dev, "adt: iBoot did not preload %s's TEXT here; placement from ave_soc.c\n",
+			 enc.name);
+		return 0;
+	}
+	new_text = text->phys;
+	if (row->iboot.data_owned == AVE_DATA_OWNED) {
+		new_data = row->iboot.data_phys;	/* the driver's own DATA */
+	} else if (data) {
+		new_data = data->phys;
+	} else {
+		dev_warn(ave->dev, "adt: %s has TEXT but no DATA segment of %#llx bytes; placement from ave_soc.c\n",
+			 enc.name, row->iboot.data_size);
+		return 0;
+	}
+	if (new_text == row->iboot.text_phys && new_data == row->iboot.data_phys) {
+		dev_info(ave->dev, "adt: placement matches ave_soc.c's %s row\n", row->name);
+		return 0;
+	}
+	dev_info(ave->dev, "adt: placement TEXT %#llx DATA %#llx, ave_soc.c's %s row has TEXT %#llx DATA %#llx: %s\n",
+		 new_text, new_data, row->name, (u64)row->iboot.text_phys,
+		 (u64)row->iboot.data_phys,
+		 iboot_adt == 1 ? "using the ADT's" : "not used (iboot_adt=2)");
+	if (iboot_adt != 1)
+		return 0;
+
+	copy = devm_kmemdup(ave->dev, row, sizeof(*row), GFP_KERNEL);
+	if (!copy)
+		return -ENOMEM;
+	/* RVBAR's low 32 bits are TEXT's DVA where TEXT is fetched physically */
+	if (!row->iboot.translated &&
+	    row->iboot.text_dva == (row->iboot.text_phys & 0xffffffffULL))
+		copy->iboot.text_dva = new_text & 0xffffffffULL;
+	copy->iboot.text_phys = new_text;
+	copy->iboot.data_phys = new_data;
+	ave->soc = copy;
+	return 0;
 }
 
 /* 0 if [phys, phys+size) belongs to nothing Linux knows about. */

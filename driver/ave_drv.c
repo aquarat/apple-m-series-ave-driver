@@ -1586,6 +1586,10 @@ static int ave_probe_stages(struct platform_device *pdev)
 					     dev->of_node, r ? &r->start : NULL);
 		dev_info(dev, "probe: SoC row %s (encoder %u)\n",
 			 ave->soc->name, ave->soc->inst);
+		/* docs/99: this machine's placement, from the live ADT */
+		ret = ave_fw_placement_from_adt(ave);
+		if (ret)
+			return dev_err_probe(dev, ret, "ADT placement\n");
 		/*
 		 * A row whose iBoot placement is not known yet (t6002 before
 		 * docs/98 U0) would only be refused at stage 10, after power,
@@ -1595,7 +1599,7 @@ static int ave_probe_stages(struct platform_device *pdev)
 		 */
 		if (!ave->soc->iboot.text_phys && stop_after >= AVE_STAGE_FW_LOAD)
 			return dev_err_probe(dev, -ENODEV,
-					     "%s: iBoot placement unknown (ave_soc.c, run docs/98 U0 and tools/t6002_placement.py); refusing before any register access\n",
+					     "%s: iBoot placement unknown (no pre-loaded TEXT in the live ADT and none in ave_soc.c; docs/99); refusing before any register access\n",
 					     ave->soc->name);
 	}
 	platform_set_drvdata(pdev, ave);
