@@ -1,5 +1,5 @@
 From 2c32f91e0c12633609f07e3136c25a75fb5452e5 Mon Sep 17 00:00:00 2001
-From: Aaron Scheiner <blue@aquarat.co.uk>
+From: aquarat <3090997+aquarat@users.noreply.github.com>
 Date: Sun, 4 Oct 2026 18:31:51 +0100
 Subject: [PATCH 1/7] avcodec/v4l2_buffers: honour the OUTPUT format's
  bytesperline and height

@@ -1,5 +1,5 @@
 From 07f32a9354f4be3f73bd7b31455e9ac3829493b0 Mon Sep 17 00:00:00 2001
-From: Aaron Scheiner <blue@aquarat.co.uk>
+From: aquarat <3090997+aquarat@users.noreply.github.com>
 Date: Sun, 4 Oct 2026 18:38:10 +0100
 Subject: [PATCH 5/7] avcodec/v4l2_m2m_enc: add constant-QP coding (-qp,
  -qp_p_offset, -qp_b_offset)

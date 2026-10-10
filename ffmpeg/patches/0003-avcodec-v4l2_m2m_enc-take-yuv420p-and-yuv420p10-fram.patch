@@ -1,5 +1,5 @@
 From c28c2eebe1dc03ed711da9c8d685d6ac730a6c52 Mon Sep 17 00:00:00 2001
-From: Aaron Scheiner <blue@aquarat.co.uk>
+From: aquarat <3090997+aquarat@users.noreply.github.com>
 Date: Sun, 4 Oct 2026 18:34:29 +0100
 Subject: [PATCH 3/7] avcodec/v4l2_m2m_enc: take yuv420p and yuv420p10 frames
  for NV12/P010 devices

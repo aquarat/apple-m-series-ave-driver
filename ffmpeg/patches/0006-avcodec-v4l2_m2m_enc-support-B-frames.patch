@@ -1,5 +1,5 @@
 From ee905e0e86e8137e70ba015308f34d66479b02b3 Mon Sep 17 00:00:00 2001
-From: Aaron Scheiner <blue@aquarat.co.uk>
+From: aquarat <3090997+aquarat@users.noreply.github.com>
 Date: Sun, 4 Oct 2026 18:46:38 +0100
 Subject: [PATCH 6/7] avcodec/v4l2_m2m_enc: support B frames
 

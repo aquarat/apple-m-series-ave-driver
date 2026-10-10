@@ -1,5 +1,5 @@
 From a9ffd2a75f6ba8f0475974ea697d5d18ecef5082 Mon Sep 17 00:00:00 2001
-From: Aaron Scheiner <blue@aquarat.co.uk>
+From: aquarat <3090997+aquarat@users.noreply.github.com>
 Date: Sun, 4 Oct 2026 19:00:58 +0100
 Subject: [PATCH 7/7] avcodec/v4l2_m2m_enc: provide extradata for global-header
  muxers
