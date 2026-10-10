@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-2.0-only
 """Firmware address space from a snapshot (docs/93): VA -> bytes.
 
 VA 0..0x1f8000 is the image (TEXT, DATA, heap) at DVA 0x800000000 (fw.bin).

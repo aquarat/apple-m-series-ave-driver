@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0-only
 """Run macOS 13.5's own multi-pass statistics code under Unicorn (docs/95 §2.4).
 
 The user-space encoder (AppleVideoEncoder.bundle, arm64e Mach-O) is mapped

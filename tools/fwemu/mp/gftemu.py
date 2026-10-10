@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0-only
 """Emulate CAVECommonController::GetFrameType (H14G) in final-pass mode from a live snapshot:
 multipass enable=1, pass=2, every frame type 5, PICMGMT+0x900 -> a synthetic multipass input
 buffer (0x108-byte header + 11 records for frame 0, then 1 record = frame N+10).

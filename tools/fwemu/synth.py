@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0-only
 """Run a firmware function on SYNTHETIC state (no snapshot) and log its pipe-register writes
 (docs/89 §8.4). For builds we have no snapshot of (H13G, H13S): zeroed controller, a few
 fields set by hand, every other input zero.

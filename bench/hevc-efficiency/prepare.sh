@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: GPL-2.0-only
 # Fetch the public test clips and convert them to what bench.py reads.
 #
 #   BENCH_WORK=/big/disk bench/hevc-efficiency/prepare.sh

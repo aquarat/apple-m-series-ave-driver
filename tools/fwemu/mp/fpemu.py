@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0-only
 """The final pass's rate control under emulation (docs/95 §12), H14G, from a live snapshot
 (docs/93; S3, a one-reference P session, is the one used).
 

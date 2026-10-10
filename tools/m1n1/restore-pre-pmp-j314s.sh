@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: GPL-2.0-only
 # Undo the PMP experiment on the M1 Pro (t6000-j314s, docs/87 §7): put back
 # the stock Fedora stage 2 (m1n1 1.6.1, stock DTBs) that was live
 # before it. This machine never had the DAPF-patched m1n1.

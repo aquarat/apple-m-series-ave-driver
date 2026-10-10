@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0-only
 """HEVC benchmark: Apple AVE (hevc_v4l2m2m) vs x265, rate-distortion + speed.
 
   bench.py run   CLIP [CLIP...]   encode + measure, appends to results.csv

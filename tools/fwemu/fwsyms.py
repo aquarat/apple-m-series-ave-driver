@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-2.0-only
 """Function symbols and sizes from an AVE firmware Mach-O (it keeps its symbol table)."""
 import struct
 def syms(p):

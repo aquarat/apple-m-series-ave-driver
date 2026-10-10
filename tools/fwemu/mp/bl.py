@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-2.0-only
 import os as _os
 REPO_ROOT = _os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))))
 import sys,struct

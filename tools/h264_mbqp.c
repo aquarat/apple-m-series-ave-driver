@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * h264_mbqp: per-frame macroblock QPs of an H.264 stream (docs/95 §12).
  *

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0-only
 """h264_mbqp.py IN.h264 [FFMPEG]: per-frame macroblock QPs, the output of tools/h264_mbqp.c
 (`n type qp mean min max`, qp = the most common MB QP), from `ffmpeg -debug qp`. For an
 FFmpeg whose libraries cannot be linked against; needs FFmpeg's native h264 decoder."""

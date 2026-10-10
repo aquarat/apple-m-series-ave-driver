@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: GPL-2.0-only
 # ave-transcode.sh IN OUT.mkv [QP] [NODE] [B]: HEVC at fixed QP, with B frames, on one AVE
 # encoder; audio and subtitles copied, container metadata (creation_time etc.) copied from IN.
 #

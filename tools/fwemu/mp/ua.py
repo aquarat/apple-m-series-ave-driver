@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0-only
 """ua.py xref SUBSTR | dis VA LEN | func VA   -- macOS 13.5 AppleVideoEncoder (user space), VA == file offset."""
 import os as _os
 REPO_ROOT = _os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))))

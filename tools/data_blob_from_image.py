@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0-only
 """Build a pristine 13.5 AVE DATA blob from the firmware image plus iBoot's fills.
 
 Why

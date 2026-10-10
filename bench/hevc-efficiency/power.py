@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0-only
 """Energy per frame: AVE vs x265 presets, measured at the wall (SMC 'Total System Power').
 
 For each (clip, encoder) the same encode as bench.py is looped for PHASE seconds;

@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: GPL-2.0-only
 # Encoder speed: per-frame hardware time for H.264 and HEVC at 720p, 1080p
 # and 2160p, from the driver's own "enc:" line (Process round trip plus
 # result handling, averaged over the frames of one stream; docs/87 §5).

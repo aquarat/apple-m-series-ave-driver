@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-2.0-only
 """On the target, during a snap_hold: read back registers listed in a file (docs/93).
 
   sudo python3 mmio-target.py REGS.txt OUT.txt   (driver loaded with dva_debugfs=1)

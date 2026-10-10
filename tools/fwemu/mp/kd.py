@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0-only
 """kd.py VA|symbol [len] -- disassemble the M2 13.5 kernelcache (AppleAVE2), with symbol/string annotation."""
 import os as _os
 REPO_ROOT = _os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))))

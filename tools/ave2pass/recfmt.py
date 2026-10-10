@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0-only
 """S_AVE_MultiPassStats (0x626 bytes) and the 0x108-byte sequence header:
 offsets, a decoder for `dump`, the pass-2 input buffers, and synthetic records.
 Offsets and labels follow docs/95 §2.4 and §2.6."""

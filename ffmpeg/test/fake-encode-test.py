@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0-only
 """Run ffmpeg's v4l2m2m encoders against fake-ave-v4l2.so and check the output.
 
 No hardware is touched: the fake device lives at a path that does not exist,

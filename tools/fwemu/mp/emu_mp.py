@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0-only
 """Run a firmware function from a snapshot under Unicorn and log its MMIO (docs/93).
 
   emu.py SNAPDIR FUNC_SYMBOL X0 X1 [X2 ...] > writes.txt

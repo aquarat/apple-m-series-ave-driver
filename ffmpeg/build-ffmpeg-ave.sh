@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: GPL-2.0-only
 # build-ffmpeg-ave.sh [PREFIX]: an ffmpeg for archival transcoding with the AVE
 # encoder (hevc_v4l2m2m / h264_v4l2m2m with B frames, constant QP, Matroska),
 # built natively on Fedora Asahi Remix (aarch64). Default PREFIX: $HOME/ffmpeg-ave.

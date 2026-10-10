@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-2.0-only
 """locate.py SNAP FRAME: the CAVCController instance and the sCmdInformation of FRAME."""
 import struct, sys
 from fwmem import Snap

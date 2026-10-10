@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0-only
 """ave2pass: pass-1 records -> pass-2 table and buffers, as macOS 13.5 does it (docs/95 §2.4).
 
   ave2pass.py build RECS.bin [N] -o TABLE.bin [--fps F] [--keep-pts] [--backend port|emu|both]

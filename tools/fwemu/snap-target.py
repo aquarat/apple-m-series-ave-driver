@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-2.0-only
 """On the target, during a snap_hold: copy the encoder's device address space (docs/93).
 
   sudo python3 snap-target.py OUTDIR      (driver loaded with dva_debugfs=1)

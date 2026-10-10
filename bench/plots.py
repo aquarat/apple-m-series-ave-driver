@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0-only
 """Charts for the README and docs/91 from the benchmark CSVs in bench/.
 
   .venv/bin/python bench/plots.py            # writes docs/img/*.svg

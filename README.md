@@ -316,7 +316,8 @@ documents.
 
 | what | licence |
 |---|---|
-| Code: `driver/`, `test/`, `tools/` | GPL-2.0-only, [LICENSE](LICENSE) |
+| Code: `driver/`, `test/`, `tools/`, `bench/`, and `ffmpeg/`'s build script and tests | GPL-2.0-only, [LICENSE](LICENSE) |
+| `ffmpeg/patches/` | changes to FFmpeg, offered under FFmpeg's licence for the files they touch (`LGPL-2.1-or-later`) |
 | Device tree: `dts/` | as marked in each file (`GPL-2.0-only OR BSD-2-Clause`, `GPL-2.0+ OR MIT`), the usual terms for upstream bindings and device trees |
 | Documentation and run records: `docs/`, `results/`, this README, `AGENTS.md` | CC BY-SA 4.0, [docs/LICENSE](docs/LICENSE) |
 

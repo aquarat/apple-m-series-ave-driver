@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0-only
 """Emulate CFrameType::FrameType(RCFrameInfo*, u32*, MPQueue<16>&, codec) (H14G) from a live
 snapshot, frame after frame, with synthetic first-pass records in the controller's MPQueue.
 Usage: ftemu.py SNAPDIR NFRAMES [bframes=N] [idr=N] [scene=F,F,...] [field=OFF:VAL]

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0-only
 """fd.py FW VA|symbol [len]  -- disassemble AVE firmware word by word with symbol + string annotation.
 FW: h14g | h13s | h13c"""
 import os as _os

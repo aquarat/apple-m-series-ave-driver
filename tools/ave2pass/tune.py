@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0-only
 """Host-side departures from macOS for the final pass (docs/95 §12). None of
 these is what macOS does; `ave2pass.py build` applies them only when asked.
 

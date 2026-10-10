@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0-only
 """Self-test for ave2pass: synthetic records through the port, invariants on
 the table and the pass-2 buffers; and, when the macOS binary is present,
 the port against Apple's own code under Unicorn, byte for byte.

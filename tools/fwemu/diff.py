@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-2.0-only
 import sys, collections
 def load(n):
     last = collections.OrderedDict(); fn = {}
