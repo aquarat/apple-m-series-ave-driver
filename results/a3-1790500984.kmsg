@@ -1,4 +1,4 @@
-=== a3 2026-09-27T10:23:04+01:00 commit de7bb4b: insmod driver/apple-ave.ko stop_after=15 ===
+=== a3 2026-09-27T10:23:04+01:00 commit 1ebeb74: insmod driver/apple-ave.ko stop_after=15 ===
 === applying overlay variant=6  ===
 [   14.535924] === applying overlay variant=6  ===
 [   14.571564] ave_overlay: loading out-of-tree module taints kernel.

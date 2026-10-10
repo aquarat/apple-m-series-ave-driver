@@ -1,4 +1,4 @@
-=== f19b 2026-09-20T07:43:06+01:00 commit 28e6950: insmod driver/apple-ave.ko core_reset=2 fw_restore_data=1 stop_after=16 fw_map_data=1 fw_map_text=2 smmu_watch=1 session_selftest=1 session_frame=1 session_lsb=1 power_me1=1 dpe_tunables=1 session_coloc=1 session_entropy_size=1 session_flat_luma=200 fw_halt=1 ===
+=== f19b 2026-09-20T07:43:06+01:00 commit 3141731: insmod driver/apple-ave.ko core_reset=2 fw_restore_data=1 stop_after=16 fw_map_data=1 fw_map_text=2 smmu_watch=1 session_selftest=1 session_frame=1 session_lsb=1 power_me1=1 dpe_tunables=1 session_coloc=1 session_entropy_size=1 session_flat_luma=200 fw_halt=1 ===
 === overlay already applied this boot; OVERLAY=4 ignored ===
 === insmod driver/apple-ave.ko core_reset=2 fw_restore_data=1 stop_after=16 fw_map_data=1 fw_map_text=2 smmu_watch=1 session_selftest=1 session_frame=1 session_lsb=1 power_me1=1 dpe_tunables=1 session_coloc=1 session_entropy_size=1 session_flat_luma=200 fw_halt=1 ===
 [  445.543723] apple-ave 40d100000.video-encoder: probe: staged bring-up, stop_after=16 (max 16)

@@ -131,7 +131,7 @@ marked **confirmed**, **inferred** or **unknown**. Nothing was run.
 | # | Hypothesis | For | Against | Rank |
 |---|---|---|---|---|
 | H-order | A DAPF may only be (re)programmed while its DART is not in operation — before TCR/`ENABLED_STREAMS` are set — and a write to a live one raises a fatal error | Every known-good DAPF write (m1n1 `kboot_boot`, m1n1 `aop.py`) precedes DART configuration; ours followed apple-dart's reset + `ENABLED_STREAMS = 0xffffffff` + TRANSLATE | No document states it; nothing forbids it either | **best supported** |
-| H-first | The first register written, or the entry state, matters: we wrote `r0 = 0` first into a slot holding garbage `r0 0x200` (bits m1n1 never writes; m1n1 always writes r4 first and r0 last with values ≤ `0xff`) | E2/E3a garbage has high r0 bits in many slots; our order was new (added in 6561e6e) | m1n1 on ISP also meets unprogrammed state after gating, at least on a cold boot | plausible |
+| H-first | The first register written, or the entry state, matters: we wrote `r0 = 0` first into a slot holding garbage `r0 0x200` (bits m1n1 never writes; m1n1 always writes r4 first and r0 last with values ≤ `0xff`) | E2/E3a garbage has high r0 bits in many slots; our order was new (added in 7642096) | m1n1 on ISP also meets unprogrammed state after gating, at least on a cold boot | plausible |
 | H-lock | A write lock outside `DAPF_LOCK`/`CONFIG.LOCK` is set for AVE (e.g. by iBoot, which preloads AVE) | iBoot does prepare AVE (RVBAR locked, DATA literal patched) | The DAPF reads as unprogrammed garbage, not as an iBoot configuration; ISP, equally iBoot-preloaded, is writable by m1n1 | possible |
 | H-priv | EL2 Linux may not write DAPF MMIO at all | macOS writes only from PPL | m1n1 writes DAPFs from EL2; PPL protection is software | unlikely |
 | H-block | Not a DAPF | — | Apple's `pmap-io-ranges` tag, the ADT instance rule, `_apfCaptureRegs` | **refuted** |
@@ -233,7 +233,7 @@ observation. That favours a hardware watchdog/protection mechanism tripped
 by the write over a synchronous abort, and makes the order/state hypotheses
 (H-order, H-first) the ones N1 tests.
 
-## N1 as implemented (commit after e24431c)
+## N1 as implemented (commit after d58a8cb)
 
 New `apple-ave` parameters in `ave_dapf.c`:
 
@@ -243,7 +243,7 @@ New `apple-ave` parameters in `ave_dapf.c`:
 | `dapf_quiesce` | 1 | around the writes: save all 16 TCRs and `ENABLED_STREAMS`, write TCRs 0, `ENABLED_STREAMS` 0, program, then restore both |
 
 How the implementation differs from N1 as first written above (review of
-59bfe35): it runs **after stage 12**, not at stage 8, so apple-dart has
+135933a): it runs **after stage 12**, not at stage 8, so apple-dart has
 already done `ave_fw_load()`'s `iommu_map` (stream commands, TLB
 invalidation) and TTBR[0][0] is VALID during the writes (m1n1's AOP
 experiment had TTBRs invalid). Both parameters default **on**. The quiesce

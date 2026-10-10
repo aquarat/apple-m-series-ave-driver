@@ -1,4 +1,4 @@
-=== f64-v4l2 2026-09-24T14:37:43+01:00 commit 69b96b5: insmod driver/apple-ave.ko stop_after=16 fw_map_data=1 fw_map_text=2 smmu_watch=1 session_lsb=1 power_me1=1 dpe_tunables=1 session_coloc=1 session_entropy_size=1 session_nbr_fill=1 session_coded_kb=2048 v4l2=1 ===
+=== f64-v4l2 2026-09-24T14:37:43+01:00 commit 56ee7ff: insmod driver/apple-ave.ko stop_after=16 fw_map_data=1 fw_map_text=2 smmu_watch=1 session_lsb=1 power_me1=1 dpe_tunables=1 session_coloc=1 session_entropy_size=1 session_nbr_fill=1 session_coded_kb=2048 v4l2=1 ===
 [   16.639984] apple-pmgr-pwrstate 28e080000.power-management:power-controller@270: sync_state() pending due to 287080000.avd
  SUBSYSTEM=platform
  DEVICE=+platform:28e080000.power-management:power-cont

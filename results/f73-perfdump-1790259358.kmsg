@@ -1,4 +1,4 @@
-=== f73-perfdump 2026-09-24T15:15:58+01:00 commit 3078b54: insmod driver/apple-ave.ko perf_dump=1 ===
+=== f73-perfdump 2026-09-24T15:15:58+01:00 commit 4b2076c: insmod driver/apple-ave.ko perf_dump=1 ===
 === applying overlay variant=4 ===
 [   15.967611] === applying overlay variant=4 ===
 [   16.001780] ave_overlay: loading out-of-tree module taints kernel.

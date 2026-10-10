@@ -1,4 +1,4 @@
-=== b4d 2026-09-26T23:32:09+01:00 commit 3f9315c: insmod driver/apple-ave.ko session_selftest=1 session_frame=1 session_frames=3 session_poc0=1 session_dpb=3 session_bframes=1 session_profile=77 ===
+=== b4d 2026-09-26T23:32:09+01:00 commit 035bc79: insmod driver/apple-ave.ko session_selftest=1 session_frame=1 session_frames=3 session_poc0=1 session_dpb=3 session_bframes=1 session_profile=77 ===
 [   17.162300] apple-pmgr-pwrstate 28e080000.power-management:power-controller@270: sync_state() pending due to 287080000.avd
  SUBSYSTEM=platform
  DEVICE=+platform:28e080000.power-management:power-cont

@@ -711,7 +711,7 @@ tools/ipc_selftest    32120 checks, 0 failures
 (Superseded by §11.8: `session_selftest` is 167 checks after the
 `sLowResOutput` work.)
 
-## Review of 19b9d93 (Fable) — changes applied
+## Review of d071815 (Fable) — changes applied
 
 Verdict was **SAFE TO RUN**; no path handed the firmware unowned memory, and
 the retrieval chain (length formula, offset-0 bitstream, Annex B start codes,
@@ -1274,7 +1274,7 @@ AVE_MACOS=13.5 python3 tools/disas.py --kext --addr 0xfffffe0008f3a408 -n 0x94
 
 ## 14. F3 (2026-09-14 12:20): no assert - the hardware runs, and its DMA fails
 
-`results/f3-1789384805.kmsg`, commit `19d669d`, same-boot restart
+`results/f3-1789384805.kmsg`, commit `9be1d6b`, same-boot restart
 (`core_reset=2 fw_restore_data=1 ... fw_halt=1`), `session_frame=1`, with the
 docs/54 entropy table (4 x 960 KiB) and `sSVEMap.iNum = 1`.
 
@@ -1311,7 +1311,7 @@ so the next hardware run needs a reboot regardless.
 
 ## 15. F4 (2026-09-14 13:12): the datapath translates through DART1 - which had no TTBR - and the machine reset after unload
 
-`results/f4-1789387926.kmsg`, commit `0b45961`, fresh boot, overlay
+`results/f4-1789387926.kmsg`, commit `af14c49`, fresh boot, overlay
 `variant=4` (both DARTs, SIDs 0 and 1), `core_reset=2 ... smmu_watch=1
 session_frame=1`.
 
@@ -1360,7 +1360,7 @@ No `core_reset` (a cold core is already STOPPED), so if DART1 matches at
 
 ## 16. F5 (2026-09-14 14:21): datapath mapped, zero faults, LRME finishes, the Pipe hangs
 
-`results/f5-1789392104.kmsg`, commit `74ba0ff`, fresh boot, overlay `variant=4`,
+`results/f5-1789392104.kmsg`, commit `c071f1d`, fresh boot, overlay `variant=4`,
 **no `core_reset`** (cold core), `dapf_dump=1 smmu_watch=1 session_frame=1`,
 held loaded (`e3-run.sh`, no unload).
 
@@ -1417,7 +1417,7 @@ prints whether the recon writer was programmed.
 
 ## 18. F7 (2026-09-15 16:40): NEED_LSB_PLANES programs the recon writer; the Pipe still hangs
 
-`results/f7-1789486815.kmsg`, commit `2886130`. Cold boot, overlay
+`results/f7-1789486815.kmsg`, commit `9dbd78f`. Cold boot, overlay
 `variant=4`, no pulse, no unload, `session_lsb=1`.
 
 - Start_AVC with `NEED_LSB_PLANES=1`, slot 0 LSB `0xfe800000`, MSB `0xfe820000`:
@@ -1441,7 +1441,7 @@ default on, read-only): VENC_DMA/PIPE4/PIPE5/ME0/ME1 power state, `0x40D110140`
 
 ## 19. F8 (2026-09-15 16:44): SVE ungate changes nothing; ME1 is off; the pipe really did not finish
 
-`results/f8-1789487084.kmsg`, commit `d37cbea`, cold boot, overlay
+`results/f8-1789487084.kmsg`, commit `94e938a`, cold boot, overlay
 `variant=4`, no pulse, `session_lsb=1 session_sve_ungate=1`.
 
 - SVE `+0x38 <- 0` before Process (and `<- 1` after): **no change** - same
@@ -1468,7 +1468,7 @@ logs ME1's PS register afterwards.
 
 ## 20. F9 (2026-09-15 16:50): ME1 powered, no change
 
-`results/f9-1789487404.kmsg`, commit `ca2d391`, as F8 minus the SVE ungate,
+`results/f9-1789487404.kmsg`, commit `8b9427f`, as F8 minus the SVE ungate,
 plus `power_me1=1`.
 
 - `me1: venc_me1 powered; PMGR PS ME1 = 0x3ff`; genpd shows the holder
@@ -1489,7 +1489,7 @@ what the MCPUs need (docs/58) runs in parallel.
 
 ## 21. F10 (2026-09-15 17:34): AVE_DPE programmed; the pipe stalls at macroblock row 1
 
-`results/f10-1789490043.kmsg`, commit `2f81a3a`, cold boot, overlay `variant=4`,
+`results/f10-1789490043.kmsg`, commit `0ef449f`, cold boot, overlay `variant=4`,
 no pulse, `session_lsb=1 power_me1=1 dpe_tunables=1`.
 
 - `dpe: [before] DC000 0x100 DC004 0x40 DC400 0x2900 DC4A4 0 DC5B0 0` ->
@@ -1519,7 +1519,7 @@ DevType 17/18, else 1) matter, is docs/59's question.
 
 ## 22. F11 (2026-09-15 18:08): the stall is inside row 0; ModeDecision and ReconLuma are stuck
 
-`results/f11-1789492087.kmsg`, commit `2fb7c67`, as F10 plus `session_nbr_fill=1`.
+`results/f11-1789492087.kmsg`, commit `f1cd5ce`, as F10 plus `session_nbr_fill=1`.
 Hang unchanged; docs/59's reads at the timeout:
 
 - **MbInput produced 48, consumed 34**, lag 15, drain 0; last source event
@@ -1558,7 +1558,7 @@ Next: why ModeDecision and ReconLuma stop servicing their MB interrupt
 
 ## 23. F12 (2026-09-19 18:44): the colocated writer was the row-0 stall - 34 -> 3083 MBs
 
-`results/f12-1789839843.kmsg`, commit `1f2f9e5`, as F11 plus `session_coloc=1`.
+`results/f12-1789839843.kmsg`, commit `af11751`, as F11 plus `session_coloc=1`.
 
 - Start_AVC published 2 colocated slots of `0x71000` bytes (slot 0 `0xfe100000`)
   at wire `0xF6B0`. The pipe's colocated writer came up **enabled**:
@@ -1592,7 +1592,7 @@ has (20 new harness checks).
 
 ## 24. F13 (2026-09-19 18:50): the entropy matrix changes nothing; the stall is deterministic at MB 3083
 
-`results/f13-1789840219.kmsg`, commit `de4a30b`, as F12 with the entropy table
+`results/f13-1789840219.kmsg`, commit `336ae50`, as F12 with the entropy table
 filled as the full 4 x 4 matrix (`session: entropy: 4 x 4 buffers of 960 KiB`).
 
 **Every counter is identical to F12**: MbInput produced 3097 / consumed 3083,
@@ -1684,7 +1684,7 @@ after the address table - **not confirmed, not sent**.
 
 ## 27. F14 (2026-09-19 22:15): the address half lands; the size is still zero
 
-`results/f14-1789852532.kmsg`, commit `2849599`, same flags as F13.
+`results/f14-1789852532.kmsg`, commit `cc9eda1`, same flags as F13.
 
 Two of the three checks from §26 passed:
 
@@ -1715,7 +1715,7 @@ including that `param_sets_addr` is still intact at `0xFB30`.
 ## 28. F16/F17: the pipeline completes - and encodes the wrong picture
 
 `results/f16-1789855975.kmsg` (+ `-load1/`), `results/f17-1789857052.kmsg`
-(+ `-load1/`), commits `8826a1c` / `600e365`.
+(+ `-load1/`), commits `e8315ad` / `2b633c7`.
 
 **What works, end to end.** With the entropy size table at wire `0xFA30`
 enabled the encode completes: **no `Cveseb buffer write full!`**, completion
@@ -2480,7 +2480,7 @@ contradicted it.
 The reset at core start is **pre-existing and intermittent**. The same
 signature - log ends before the `[ours] ... N hit(s)` summary, never reaches
 `stage 13 (asc-start): starting`, no error line - killed s1-5 (commit
-`5f72838`), s2-9 (`5c1edd6`) and s3-5 (`83f9551`), all *before* the commit I
+`8a1d914`), s2-9 (`0000e06`) and s3-5 (`795bb81`), all *before* the commit I
 suspected. Over the session's fresh-boot first loads it is roughly a coin
 flip. Four successes followed by three failures is unremarkable from that,
 and neither run of four nor run of three is "the anomaly".
@@ -2496,7 +2496,7 @@ pacing is identical in good and bad runs, so `[ours] IOSZ tag` really is the
 last thing that completed, and the lines that would follow are pure-RAM
 `dev_info` calls that cannot reset anything. The kill is asynchronous.
 
-`d9c3f6f` is exonerated: `dbg_bits` is written only in
+`7b6c8f7` is exonerated: `dbg_bits` is written only in
 `ave_cmd_build_start_avc`, `session_dbg` is read only at
 `ave_session.c:1361`, the new `ratelimit_state_init` is in the same stage-16
 function, and `ave_session_diag_costs()` has one call site in the diag block.
@@ -2555,7 +2555,7 @@ decision is working normally.
 ## F26/F27 (2026-09-20): it is the binary, and the "same signature" claim was wrong
 
 I accepted a reviewer's conclusion that the stage-13 deaths were an
-intermittent SoC hang at roughly a coin flip, and that `d9c3f6f` was
+intermittent SoC hang at roughly a coin flip, and that `7b6c8f7` was
 "exonerated with certainty". Both halves are wrong, and the table below is
 why. I should have built it before agreeing.
 
@@ -2568,7 +2568,7 @@ step count:
 | f15, f17a, s1-5, s2-9, s3-5 | 0 | 0 | died at insmod, no marker |
 | f19 | 11 | 0 | early probe |
 | s1-9 | 31 | 0 | clean `-ETIMEDOUT`, stage 13, logged an error |
-| **f25, f25b, f25c x2, f26** | **29** | **0** | **all on the `d9c3f6f` build** |
+| **f25, f25b, f25c x2, f26** | **29** | **0** | **all on the `7b6c8f7` build** |
 
 The earlier failures the reviewer grouped with these died at **0** or **11**
 markers - during insmod, before probe got going - and s1-9 failed at 31 with
@@ -2578,14 +2578,14 @@ the real rate of reaching ready is 14 of 18, about 78%, which makes five
 consecutive failures p ~ 0.005 even before the step count is considered.
 
 **F26 exonerates the parameter, F27 convicts the binary.** F26 ran the
-`d9c3f6f` build with `session_dbg` omitted: dead at 29. F27 ran the
+`7b6c8f7` build with `session_dbg` omitted: dead at 29. F27 ran the
 pre-commit build, on the same machine five minutes later, with F24's exact
 parameters: **37 steps, ready, frame encoded**.
 
 | binary | runs | result |
 |---|---|---|
-| pre-`d9c3f6f` | f21-f24, f27 | 5/5 reached ready |
-| `d9c3f6f` | f25, f25b, f25c x2, f26 | 5/5 dead at 29 |
+| pre-`7b6c8f7` | f21-f24, f27 | 5/5 reached ready |
+| `7b6c8f7` | f25, f25b, f25c x2, f26 | 5/5 dead at 29 |
 
 So the cause is in that commit, and `session_dbg` is not it.
 
@@ -2602,7 +2602,7 @@ A correct control-flow argument and a 5/5 A/B cannot both be right about
 this, and the A/B is the harder evidence. Something about that build reaches
 the hardware earlier than the source suggests.
 
-**Next, and it costs no rebuild:** `session_diag=0` on the `d9c3f6f` build.
+**Next, and it costs no rebuild:** `session_diag=0` on the `7b6c8f7` build.
 That parameter gates every diagnostic block, including the new one, so it
 turns off the only new code that touches registers while changing nothing
 else. Survives -> the diag code is implicated despite the timing, and the
@@ -2611,7 +2611,7 @@ suspects are the ABI/builder edits, which would be stranger still.
 
 ## F28: n=1 is not a result
 
-`session_diag=0` on the `d9c3f6f` build reached stage 15 and encoded a
+`session_diag=0` on the `7b6c8f7` build reached stage 15 and encoded a
 frame. That is **not** evidence that the diagnostics cause the stage-13
 death, and I am recording it as a non-result before it becomes one.
 
@@ -2624,7 +2624,7 @@ death, and I am recording it as a non-result before it becomes one.
 - With a base success rate of about 78%, a single success is the *expected*
   outcome no matter what the parameter does. One run distinguishes nothing.
 
-What does still stand is the binary A/B: 5/5 dead on `d9c3f6f` against 5/5
+What does still stand is the binary A/B: 5/5 dead on `7b6c8f7` against 5/5
 alive on the commit before it, which is p ~ 0.005 under that base rate. The
 mechanism remains unexplained, and the honest position is that a correct
 control-flow argument and a strong A/B are in conflict, with neither yet
@@ -2654,10 +2654,10 @@ where the log stops:
 
 | build | `ave_session_diag_costs()` runs? | outcome |
 |---|---|---|
-| pre-`d9c3f6f` (f21-f24, f27) | no | 5/5 alive |
-| pre-`d9c3f6f` + the dump only (f29) | **yes** | **dead** |
-| `d9c3f6f` (f25, f25b, f25c x2, f26) | yes | 5/5 dead |
-| `d9c3f6f` with `session_diag=0` (f28) | no | alive |
+| pre-`7b6c8f7` (f21-f24, f27) | no | 5/5 alive |
+| pre-`7b6c8f7` + the dump only (f29) | **yes** | **dead** |
+| `7b6c8f7` (f25, f25b, f25c x2, f26) | yes | 5/5 dead |
+| `7b6c8f7` with `session_diag=0` (f28) | no | alive |
 
 Six and six, and now with a mechanism that fits: **one of the register reads
 I added hangs the fabric**, which is docs/24's founding hazard - a read in a
@@ -3179,7 +3179,7 @@ IntraEst curMB 0. n=2 on all of it.
 
 **f41** is f40 plus `session_dbg=0x20`: wire `0xFCD8` bit 5, docs/70 §9.2's
 "make the firmware state its own parameters". The parameter was removed in
-`f2b3341` along with the f25-f30 deaths, which the dump caused (above), and
+`b95bc35` along with the f25-f30 deaths, which the dump caused (above), and
 is restored. It had never had a run that survived. This one survived,
 with the same 2709-byte frame.
 
@@ -3706,7 +3706,7 @@ vote).
 
 ## f90 (2026-09-24): f89 again, with the right power domains
 
-Same boot DT and module as f89, overlay module from `1b02c90`: it rewrote
+Same boot DT and module as f89, overlay module from `5c118be`: it rewrote
 power-domains[1..4] to venc_pipe5 `0xc7`, venc_me0 `0xc9`, venc_pipe4 `0xc8`
 and afnc4_ioa `0xca`. genpd confirms venc_sys, pipe5, me0, pipe4, afnc4_ioa
 plus the me1 holder, the stock-era set. `tools/v4l2-test.sh 60 ctl`:
@@ -3722,7 +3722,7 @@ PMP's. R1b as in f89 (PMP-STATUS 1, PS-ACK `0x60003000`, AVE0 DVFS 0).
 
 ## f91 (2026-09-24): AVC regression after the HEVC refactor
 
-Module from `fa6999c` (the HEVC host side, with the AVC builders split into
+Module from `78568df` (the HEVC host side, with the AVC builders split into
 shared helpers), same PMP boot DT and overlay as f90. `v4l2-test.sh 60 ctl`:
 720p 9.07 ms, 1080p 17.14 / 17.39 ms, 4K 63.91 / 63.72 ms. PSNR identical
 to f89/f90 to six decimals (44.255294 / 44.686854 / 44.701624). ffmpeg
@@ -3730,7 +3730,7 @@ to f89/f90 to six decimals (44.255294 / 44.686854 / 44.701624). ffmpeg
 
 ## f92 (2026-09-24): R3, VENC_SYS reported to the PMP
 
-`6ad0862`, PMP boot DT. `OVERLAY_ARGS=pmp_venc=1 tools/ave-load.sh
+`c3c86c2`, PMP boot DT. `OVERLAY_ARGS=pmp_venc=1 tools/ave-load.sh
 pmp_report=1 perf_dump=1`. The overlay enabled `report@10`, the entry
 probed as genpd `pmp-venc-sys` (a subdomain of venc_sys), and the driver's
 holder powered it after venc_me1: **PS-REQ `0x60003000` → `0x60013000` (bit
@@ -3743,7 +3743,7 @@ nothing; the vote (R4) is next.
 
 ## f93 (2026-09-24): R4 VMax + FAB0 vote: hang, then reset
 
-`09e0dcb`, as f92 plus `pmp_vote=0x2000000300000003` (macOS's VMax with
+`cfabfdc`, as f92 plus `pmp_vote=0x2000000300000003` (macOS's VMax with
 FAB0 VMax). The receiver's last line is the R3 dump's PS-ACK read
 (`[18.342583]`, `0x60013000`, as f92). The four dump lines after it,
 printed microseconds later, never arrived, and neither did the vote's
@@ -3761,7 +3761,7 @@ after the read-back, holding 200 ms after each line. Then R4′: VNOM only
 
 ## f94 (2026-09-24): R4′, VNOM only: hang within 200 ms of the write
 
-`f5f7fbf`, as f92 plus `pmp_vote=0x2000000000000001` (SOC VNOM, no FAB0).
+`754c140`, as f92 plus `pmp_vote=0x2000000000000001` (SOC VNOM, no FAB0).
 All R1b dump lines arrived this time (so f93's missing dump lines were
 tail loss, not the reads). Then `pmp: writing AVE0 DVFS vote
 0x2000000000000001` arrived, and **"vote written, alive 200 ms later" never
@@ -3782,7 +3782,7 @@ AVE0 vote that macOS does and Linux does not. Candidates:
 
 ## h1 (2026-09-24): HEVC_INIT refused by our own builder
 
-`67d5b2a`, PMP boot DT (irrelevant here), `session_selftest=1
+`992fa07`, PMP boot DT (irrelevant here), `session_selftest=1
 session_codec=1 session_qp=30 session_dbg=0x20`. Config and Open were
 accepted, then `HEVC_INIT build failed: -22` on the host. Nothing was sent.
 The entropy buffers are allocated only when a frame will be encoded (the
@@ -3814,7 +3814,7 @@ Process timed out after 2000 ms, as the assert predicts.
 
 ## h2b (2026-09-24): past 7605; firmware data abort after the transcoders ran
 
-`9460092` (TranscodedData pair, `session_hevc_xc=2` default), otherwise as
+`ebf8d4c` (TranscodedData pair, `session_hevc_xc=2` default), otherwise as
 h2. TranscodedData 2 x 0xa9000 at `fc400000`/`fc300000`. The firmware logged
 both `tmp_bitstream_addr_dst[0]` and `[1]` as ours, two `SetTranscode`s and
 `XC SourceGo.all 3`. **The 7605 assert is gone.** 6 ms later the firmware
@@ -3851,7 +3851,7 @@ non-posted mappings). Every driver write on `/soc` should be non-posted.
 
 ## h2c (2026-09-24): the first HEVC frame
 
-`809295d` (slice block S+0x54C/0x550 = 0xFFFFFFFF, docs/77 §15), h2's
+`1164049` (slice block S+0x54C/0x550 = 0xFFFFFFFF, docs/77 §15), h2's
 parameters. **RESULT frame 0: 1207 bytes** (coded 1178 + a 29-byte slice
 header from the SliceHeader surface), NAL type 20 (IDR_N_LP), I slice,
 slice QP 30, SAO on, 22 WPP entry points, header ends in byte_alignment().
@@ -3871,7 +3871,7 @@ first P").
 
 ## f95 (2026-09-24): R4-np0, the null vote through a non-posted mapping
 
-Operator-approved. `5d8433c` (vote mapped with `ioremap_np`), PMP boot DT,
+Operator-approved. `1a548a3` (vote mapped with `ioremap_np`), PMP boot DT,
 `OVERLAY_ARGS=pmp_venc=1 ave-load.sh pmp_report=1
 pmp_vote=0x2000000000000000 perf_dump=1`. **No SError.** Read-back
 `0x2000000000000000` equals the value written, and the entry's +8 went from
@@ -3917,7 +3917,7 @@ run yet.
 
 ## h3b (2026-09-24): IdrPeriod 30: the inter setup now happens, and still hangs
 
-`27d485c` (ui32IdrPeriod 30 for P sessions, docs/77 §16), h3's parameters.
+`37d3834` (ui32IdrPeriod 30 for P sessions, docs/77 §16), h3's parameters.
 Frame 0 as h2c. Frame 1 still ends in `PIPE HANG: 2, 2`, same StartCount/Idle.
 But the IdrPeriod change took effect as predicted: **the recon writer now
 targets DPB slot 1** (`+0x24c 0xfcd6d000`; h3 wrote slot 0 again), and **the
@@ -3956,7 +3956,7 @@ depth are not the missing inter input.
 
 ## h3f, h3g (2026-09-24): multi-frame intra works; P never gets reference readers
 
-`d6d0934` (reader dump, docs/77 §17). **h3f** (`session_dpb=1`, so every
+`5fa80dc` (reader dump, docs/77 §17). **h3f** (`session_dpb=1`, so every
 frame is IDR): all four frames encode (1207/1217/1225/1234 bytes, NAL 20)
 and decode at Y 50.96/50.92/50.88/50.91 dB. Slot rotation, the SliceHeader
 surfaces, TranscodedData reuse and the second coded slot all work. The hang
@@ -3973,7 +3973,7 @@ waits at the first CTU.
 
 ## f100 (2026-09-24): PMP options without a PMP report
 
-`6700edd`, PMP boot DT, `ave-load.sh pmp_report=1
+`dc6b858`, PMP boot DT, `ave-load.sh pmp_report=1
 pmp_vote=0x2000000300000003` **without** `OVERLAY_ARGS=pmp_venc=1`, so
 report@10 stays disabled, as on a DT without the PMP. Probe warned
 ("report@10 is disabled … encoding at the boot clock"; "pmp_vote ignored")
@@ -3981,7 +3981,7 @@ and carried on. 1080p encodes at 18.5 ms (unvoted), with the same PSNR.
 
 ## h3h (2026-09-24): HEVC P frames
 
-`a7839d6` (four short-term RPS sets with their derived fields, docs/77
+`7cbaddb` (four short-term RPS sets with their derived fields, docs/77
 §18), h3b's parameters. **All four frames encode:** frame 0 IDR (NAL 20,
 1207 bytes), frames 1-3 **P** (NAL 1, TRAIL_R): 456 / 554 / 471 bytes,
 FrameTypeReturned 1, mostly skip (e.g. frame 1: I 3493, P 97, skip 10590
@@ -3995,7 +3995,7 @@ is next.
 
 ## h4 (2026-09-24): HEVC through V4L2
 
-`1615e57` (CAPTURE format HEVC, HEVC controls, docs/77 §19), plain
+`e21e2f5` (CAPTURE format HEVC, HEVC controls, docs/77 §19), plain
 `ave-load.sh`, PMP boot DT with no vote. The node lists `H264` and `HEVC`.
 Fedora's ffmpeg has no HEVC decoder, so the streams are graded on the host
 (ffmpeg psnr against the same `testsrc2` NV12 source). `v4l2-test.sh ctl`
@@ -4019,7 +4019,7 @@ cu_qp_delta (depth 2) under RC. Being traced.
 
 ## h4b-h4e (2026-09-24): HEVC rate control
 
-`779ae79` (docs/77 §20): the firmware codes `cu_qp_delta` when QP
+`3990aee` (docs/77 §20): the firmware codes `cu_qp_delta` when QP
 modulation (`bEnableQPMod`, wire 0xFF70) is on, and we had sent the PPS
 flag on with modulation off. Now they are paired: off by default,
 `session_hevc_qpmod=1` for both on, as macOS does.
@@ -4042,7 +4042,7 @@ pass.**
 
 ## v1-v9 (2026-09-26): the PMP vote per stream (docs/80)
 
-`624716d` moved `pmp_vote` from probe to `ave_enc_start()`/`ave_enc_stop()`
+`fb1d41f` moved `pmp_vote` from probe to `ave_enc_start()`/`ave_enc_stop()`
 and changed the overlay to sentinel phandles (docs/79 §3). Every run:
 PMP boot, `OVERLAY_ARGS=pmp_venc=1 pmp_report=1
 pmp_vote=0x2000000300000003`, `v4l2-test.sh 60 ctl` at 1080p, 4K, 1080p, 4K

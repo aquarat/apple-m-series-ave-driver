@@ -1,4 +1,4 @@
-=== f19 2026-09-20T07:42:00+01:00 commit 28e6950: unload after the F18 encode ===
+=== f19 2026-09-20T07:42:00+01:00 commit 3141731: unload after the F18 encode ===
 [  379.895962] === rmmod now ===
 [  379.927592] apple-ave 40d100000.video-encoder: session: Stop: sending 64 bytes at IOVA 0x00000000ff83c480 on IO
  SUBSYSTEM=platform

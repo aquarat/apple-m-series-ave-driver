@@ -1,4 +1,4 @@
-=== f74-cabac 2026-09-24T15:17:45+01:00 commit 3078b54: insmod driver/apple-ave.ko session_selftest=1 session_frame=1 session_frames=8 session_diag=0 session_profile=77 session_cabac=1 ===
+=== f74-cabac 2026-09-24T15:17:45+01:00 commit 4b2076c: insmod driver/apple-ave.ko session_selftest=1 session_frame=1 session_frames=8 session_diag=0 session_profile=77 session_cabac=1 ===
 [   14.914331] apple-pmgr-pwrstate 28e080000.power-management:power-controller@270: sync_state() pending due to 287080000.avd
  SUBSYSTEM=platform
  DEVICE=+platform:28e080000.power-management:power-cont

@@ -117,7 +117,7 @@ MODULE_PARM_DESC(session_frame,
  *
  * Note for a failure: the 16 slots are one contiguous mapping, so a slot that
  * is too small overruns into the next slot rather than faulting - the symptom
- * is wrong output, not a DART fault (review of 19b9d93, finding 2).
+ * is wrong output, not a DART fault (review of d071815, finding 2).
  *
  * session_nbr=0 sends the tables zero, which is what the pre-phase-6 self-test
  * did - useful as a bisect: it should then assert
@@ -479,7 +479,7 @@ MODULE_PARM_DESC(session_src_go,
  * hundreds. The log path allocates shared memory and sends synchronously,
  * so wider values slow the frame and can overrun the 512-slot ring.
  *
- * Removed in f2b3341 with the f25-f30 deaths, which were the misaddressed
+ * Removed in b95bc35 with the f25-f30 deaths, which were the misaddressed
  * session_costs group 4 read (docs/53, f38); restored 2026-09-24. It has
  * never had a run that survived.
  */
@@ -869,7 +869,7 @@ struct ave_sess_rx {
 	 * ENCODE_DONE (fw 0x14d38 vs 0x14e70). Completing on whatever lands
 	 * first would report a frame that actually succeeded as -EPROTO, with
 	 * the real completion going to the restored hook. Keep waiting
-	 * instead, and log what was skipped. (Review of 19b9d93, finding 1.)
+	 * instead, and log what was skipped. (Review of d071815, finding 1.)
 	 */
 	u16			want_id;
 	u32			other_id;
@@ -915,7 +915,7 @@ static void ave_session_ipc_rx(struct ave_device *ave, u32 chan_id,
 
 	/*
 	 * Two different messages come back per command, and only one is the
-	 * answer (review of 7998bf1, finding 1):
+	 * answer (review of b3e6844, finding 1):
 	 *
 	 *   IO      - the firmware echoes the command buffer back
 	 *             (CController::CmdProcess, fw 0xa1cf8, on handle [this+120]);
@@ -1226,7 +1226,7 @@ static void *ave_sess_dma_alloc(struct ave_sess_bufs *b, size_t size,
 	 * size (fw str w10 0x592fc / 0x59310). Today the DART aperture is
 	 * 32-bit so every IOVA fits, but nothing enforces that, and a buffer
 	 * above 4 GiB would be silently truncated into someone else's mapping.
-	 * (Review of 19b9d93, finding 5.)
+	 * (Review of d071815, finding 5.)
 	 */
 	if ((u64)*iova + size > SZ_4G) {
 		dev_err(b->ave->dev,

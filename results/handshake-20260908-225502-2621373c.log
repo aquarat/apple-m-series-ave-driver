@@ -3,7 +3,7 @@ date      : 2026-09-08T22:55:02+01:00
 boot_id   : 2621373c
 uptime    : 2103.37s
 kernel    : 7.1.13-401.asahi.vrr2.fc44.aarch64+16k
-commit    : 62c9d87
+commit    : 057ff86
 log       : /home/aquarat/Projects/apple-ave-driver/results/handshake-20260908-225502-2621373c.log
 
 >>> modules match running kernel 7.1.13-401.asahi.vrr2.fc44.aarch64+16k

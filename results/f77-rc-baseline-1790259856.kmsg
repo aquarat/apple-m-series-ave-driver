@@ -1,4 +1,4 @@
-=== f77-rc-baseline 2026-09-24T15:24:16+01:00 commit 88d1980: insmod driver/apple-ave.ko session_selftest=1 session_frame=1 session_frames=30 session_diag=0 session_bitrate=300000 ===
+=== f77-rc-baseline 2026-09-24T15:24:16+01:00 commit fdc9973: insmod driver/apple-ave.ko session_selftest=1 session_frame=1 session_frames=30 session_diag=0 session_bitrate=300000 ===
 [   16.632678] apple-pmgr-pwrstate 28e080000.power-management:power-controller@270: sync_state() pending due to 287080000.avd
  SUBSYSTEM=platform
  DEVICE=+platform:28e080000.power-management:power-cont

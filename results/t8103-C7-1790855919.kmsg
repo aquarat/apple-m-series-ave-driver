@@ -1,4 +1,4 @@
-=== t8103-C7 2026-10-01T13:58:39+02:00 commit 0e37f6f: insmod driver/apple-ave.ko stop_after=16 session_frame=1 step_ms=100 ===
+=== t8103-C7 2026-10-01T13:58:39+02:00 commit 0096aab: insmod driver/apple-ave.ko stop_after=16 session_frame=1 step_ms=100 ===
 === applying overlay variant=8  ===
 [   34.768685] === applying overlay variant=8  ===
 [   34.796903] ave_overlay: loading out-of-tree module taints kernel.

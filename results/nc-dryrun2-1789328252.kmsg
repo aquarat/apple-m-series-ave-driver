@@ -1,4 +1,4 @@
-=== nc-dryrun2 2026-09-13T20:37:32+01:00 commit 9fc3cdb: insmod driver/apple-ave.ko stop_after=13 fw_map_data=1 fw_map_text=2 fw_restore_data=2 ===
+=== nc-dryrun2 2026-09-13T20:37:32+01:00 commit daa8436: insmod driver/apple-ave.ko stop_after=13 fw_map_data=1 fw_map_text=2 fw_restore_data=2 ===
 [  177.132265] apple-ave 40d100000.video-encoder: probe: staged bring-up, stop_after=13 (max 16)
  SUBSYSTEM=platform
  DEVICE=+platform:40d100000.video-encoder

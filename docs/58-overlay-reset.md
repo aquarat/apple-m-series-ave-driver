@@ -2,7 +2,7 @@
 
 Prompted by `results/f6-1789395385.kmsg`, `results/f6b-1789397677.kmsg` and
 `results/f6c-1789483860.kmsg` (f6c run 2026-09-15 15:51, by the operator's
-agent on explicit instruction, faithful replication of f6b at commit `9ab1894`;
+agent on explicit instruction, faithful replication of f6b at commit `e7dc8b4`;
 modules rebuilt for `vrr3`, no source changes).
 
 Evidence labels per [00](00-methodology.md): **[C]** read directly from a log,
@@ -19,7 +19,7 @@ journal or live sysfs, **[I]** inferred (chain stated), **[U]** unknown.
 | Why does the on-disk log end at `t=25s`? | The load-1 marker was written to page cache but never flushed; the marker's `sudo tee` is the dead boot's **last journal record** | C |
 | Is the death tied to a script step or a 30 s timer? | No: F6 died ~10 s after a hand-applied overlay, during runner startup (`sudo dmesg` was the last journal record) | C |
 | Kernel change (vrr1→vrr3)? | Dead: F3, F4, F5, F6, f6b and f6c **all** ran `7.1.13-401.asahi.vrr3` | C |
-| Overlay change? | Dead: `test/` unchanged since `0b45961` (F4's commit) | C |
+| Overlay change? | Dead: `test/` unchanged since `af14c49` (F4's commit) | C |
 | Is overlay-on-a-never-driven-boot deterministically lethal? | No: F4's boot sat **9m24s** in overlay-only state (13:02:46→13:12:10) and survived | C |
 | F4's "reset within ~2 s" | The f4 log is truncated at `unload 1 returned rc=0`; load 2 never ran — death in halt-run's `sleep 2` gap, 0–2 s after `remove()` powered the VENC domains down | C |
 | Do the deaths log anything? | No panic, no SError, no oops, no shutdown records; auditd/journald write normally one second, nothing the next | C |
@@ -100,7 +100,7 @@ overlay's presence. **[I]**.
 
 - **Not the kernel version** — every boot from F3 through f6c ran
   `7.1.13-401.asahi.vrr3`. **[C]** (`journalctl -b -N` "Linux version" per boot).
-- **Not the overlay build** — `test/` last changed in `0b45961`, before F4.
+- **Not the overlay build** — `test/` last changed in `af14c49`, before F4.
   **[C]** (git log).
 - **Not the driver** — it never loaded in three of the four deaths. **[C]**.
 - **Not a fixed timer or a script step** — 10 s (mid-runner-startup, only

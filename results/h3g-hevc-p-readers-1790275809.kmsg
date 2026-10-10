@@ -1,4 +1,4 @@
-=== h3g-hevc-p-readers 2026-09-24T19:50:09+01:00 commit d6d0934: insmod driver/apple-ave.ko session_selftest=1 session_codec=1 session_qp=30 session_dbg=0x20 session_frame=1 session_frames=4 ===
+=== h3g-hevc-p-readers 2026-09-24T19:50:09+01:00 commit 5fa80dc: insmod driver/apple-ave.ko session_selftest=1 session_codec=1 session_qp=30 session_dbg=0x20 session_frame=1 session_frames=4 ===
 [   17.122983] apple-pmgr-pwrstate 28e080000.power-management:power-controller@270: sync_state() pending due to 287080000.avd
  SUBSYSTEM=platform
  DEVICE=+platform:28e080000.power-management:power-cont

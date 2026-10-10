@@ -1,4 +1,4 @@
-=== f84-rc-r2-idr30 2026-09-24T15:51:42+01:00 commit 4fc35ea: insmod driver/apple-ave.ko session_selftest=1 session_frame=1 session_frames=300 session_diag=0 session_bitrate=300000 session_idr_period=30 ===
+=== f84-rc-r2-idr30 2026-09-24T15:51:42+01:00 commit 67d74bb: insmod driver/apple-ave.ko session_selftest=1 session_frame=1 session_frames=300 session_diag=0 session_bitrate=300000 session_idr_period=30 ===
 === applying overlay variant=4 ===
 [   15.029935] === applying overlay variant=4 ===
 [   15.062808] ave_overlay: loading out-of-tree module taints kernel.

@@ -1,4 +1,4 @@
-=== f81-pmp-read 2026-09-24T15:42:09+01:00 commit a61a7ec: insmod driver/apple-ave.ko perf_dump=1 ===
+=== f81-pmp-read 2026-09-24T15:42:09+01:00 commit e5a9c86: insmod driver/apple-ave.ko perf_dump=1 ===
 === applying overlay variant=4 ===
 [   14.257984] === applying overlay variant=4 ===
 [   14.294135] ave_overlay: loading out-of-tree module taints kernel.

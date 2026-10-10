@@ -1,4 +1,4 @@
-=== n3-handshake2 2026-09-13T19:35:37+01:00 commit fd62696: insmod driver/apple-ave.ko stop_after=16 fw_map_data=1 fw_map_text=2 ===
+=== n3-handshake2 2026-09-13T19:35:37+01:00 commit 775d6e7: insmod driver/apple-ave.ko stop_after=16 fw_map_data=1 fw_map_text=2 ===
 [   71.360029] apple-ave 40d100000.video-encoder: probe: staged bring-up, stop_after=16 (max 16)
  SUBSYSTEM=platform
  DEVICE=+platform:40d100000.video-encoder

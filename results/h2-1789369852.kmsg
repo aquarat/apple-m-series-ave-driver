@@ -1,4 +1,4 @@
-=== h2 2026-09-14T08:10:52+01:00 commit ad89724 ===
+=== h2 2026-09-14T08:10:52+01:00 commit a1479a5 ===
 === load 1: stop_after=16 fw_map_data=1 fw_map_text=2 session_selftest=1 session_config_only=1 fw_halt=1
 === load 2: stop_after=16 fw_map_data=1 fw_map_text=2 session_selftest=1 session_config_only=1 fw_halt=1 fw_restore_data=1
 === load 1: insmod stop_after=16 fw_map_data=1 fw_map_text=2 session_selftest=1 session_config_only=1 fw_halt=1 ===

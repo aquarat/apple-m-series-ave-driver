@@ -1,4 +1,4 @@
-=== h4c-hevc-rc-qpmod 2026-09-24T20:30:07+01:00 commit 779ae79: insmod driver/apple-ave.ko session_selftest=1 session_codec=1 session_qp=30 session_dbg=0x20 session_frame=1 session_frames=4 session_bitrate=8000000 session_fps=30 session_hevc_qpmod=1 ===
+=== h4c-hevc-rc-qpmod 2026-09-24T20:30:07+01:00 commit 3990aee: insmod driver/apple-ave.ko session_selftest=1 session_codec=1 session_qp=30 session_dbg=0x20 session_frame=1 session_frames=4 session_bitrate=8000000 session_fps=30 session_hevc_qpmod=1 ===
 [   16.794009] apple-pmgr-pwrstate 28e080000.power-management:power-controller@270: sync_state() pending due to 287080000.avd
  SUBSYSTEM=platform
  DEVICE=+platform:28e080000.power-management:power-cont

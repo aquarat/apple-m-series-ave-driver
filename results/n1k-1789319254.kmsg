@@ -1,4 +1,4 @@
-=== n1k 2026-09-13T18:07:34+01:00 commit 9d5ef43: insmod driver/apple-ave.ko stop_after=6 step_ms=1500 dapf_dump=1 dapf_early=2 dapf_set=control dapf_quiesce=0 fw_map_text=2 ===
+=== n1k 2026-09-13T18:07:34+01:00 commit 4edec79: insmod driver/apple-ave.ko stop_after=6 step_ms=1500 dapf_dump=1 dapf_early=2 dapf_set=control dapf_quiesce=0 fw_map_text=2 ===
 [  285.997313] apple-ave 40d100000.video-encoder: probe: staged bring-up, stop_after=6 (max 16)
  SUBSYSTEM=platform
  DEVICE=+platform:40d100000.video-encoder

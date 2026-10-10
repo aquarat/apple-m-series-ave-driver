@@ -1,4 +1,4 @@
-=== t8103-C1 2026-10-01T13:25:52+02:00 commit 0e37f6f: insmod driver/apple-ave.ko stop_after=6 step_ms=100 ===
+=== t8103-C1 2026-10-01T13:25:52+02:00 commit 0096aab: insmod driver/apple-ave.ko stop_after=6 step_ms=100 ===
 === applying overlay variant=8  ===
 [  533.762688] === applying overlay variant=8  ===
 [  533.789003] ave-overlay: variant=8 - t8103 (M1), variant=4's shape, untested

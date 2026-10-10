@@ -386,7 +386,7 @@ a reboot, and no file outside `results/` is written.
 
 ---
 
-## Integration (done, commit after 09d20e9)
+## Integration (done, commit after 09cc445)
 
 Wired into `ave_drv.c`: `ave_dapf_dump()` at stage 8 and again after the
 stage-15 liveness sample (both self-gated by `dapf_dump`), and
@@ -451,7 +451,7 @@ Overlay `variant=2` (no DART bound), `stop_after=8 dapf_dump=1`.
   insmod; `results/e2-v2-repeat-*.log`), apart from the ERROR address. With
   E1 this means the state is retained across gating and nobody has written
   it since cold reset. No TEXT admission from iBoot survives. **Confirmed.**
-- Consequently E3 was changed (commit after 01d36f1): write **all 16 slots**
+- Consequently E3 was changed (commit after acee97b): write **all 16 slots**
   in a fixed ISP-like layout (slot 0 TEXT or cleared, slot 1 window, then
   MMIO, rest cleared; a cleared slot gets r0 written first), store ends
   already masked, use **r0 `0x11`** for TEXT, and drop the stale-slot
@@ -466,7 +466,7 @@ Overlay `variant=2` (no DART bound), `stop_after=8 dapf_dump=1`.
   garbage was the same on those earlier boots, as it was across E2's power
   cycle.
 - Each slot is now disabled (r0 = 0) before being rewritten, enabled slots
-  included (review of 8958777).
+  included (review of 9c1ebd6).
 
 ### E3a, attempt 1 — 2026-09-13, `results/e3a-*.log`: kernel oops, aborted
 
@@ -519,7 +519,7 @@ power-off that was needed here, minus the unsynced writes.
 ### E3a, attempts 2 and 3 — 2026-09-13: the first DAPF write resets the machine
 
 Attempt 2 (13:09) crashed within about a second and left nothing: no pstore
-backend, journald lag, and the runner lived in `/tmp`. Commit e6497f4 added
+backend, journald lag, and the runner lived in `/tmp`. Commit a18d199 added
 `step_ms=` markers, an fsync-per-line `/dev/kmsg` capture
 (`tools/kmsg_capture.py`) and an in-repo runner (`tools/e3-run.sh`).
 

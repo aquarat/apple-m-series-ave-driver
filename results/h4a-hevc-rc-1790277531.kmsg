@@ -1,4 +1,4 @@
-=== h4a-hevc-rc 2026-09-24T20:18:51+01:00 commit 1615e57: insmod driver/apple-ave.ko session_selftest=1 session_codec=1 session_qp=30 session_dbg=0x20 session_frame=1 session_frames=4 session_bitrate=8000000 session_fps=30 ===
+=== h4a-hevc-rc 2026-09-24T20:18:51+01:00 commit e21e2f5: insmod driver/apple-ave.ko session_selftest=1 session_codec=1 session_qp=30 session_dbg=0x20 session_frame=1 session_frames=4 session_bitrate=8000000 session_fps=30 ===
 === applying overlay variant=4 ===
 [   16.388004] === applying overlay variant=4 ===
 [   16.423980] ave_overlay: loading out-of-tree module taints kernel.

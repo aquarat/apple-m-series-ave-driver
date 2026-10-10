@@ -130,7 +130,7 @@ User space seeds it once in `AVE_SetEncoderDefault`, and the kext's `AVC_Slice` 
 
 ## 2. The groups (`session_macos`, bits)
 
-`session_macos` is a module parameter, uint, **0644**, default 0. It is latched per stream at Start_AVC and applied to H.264 only, in both the self-test and V4L2. One log line at Start lists the groups: `session: Start_AVC: session_macos 0x3ff: macOS groups applied: GOP PARAMS SH ...`. The value 0 builds exactly what 6231977 built: `abi_selftest` hashes the bs1 Start_AVC, IDR and P commands against that commit's builder.
+`session_macos` is a module parameter, uint, **0644**, default 0. It is latched per stream at Start_AVC and applied to H.264 only, in both the self-test and V4L2. One log line at Start lists the groups: `session: Start_AVC: session_macos 0x3ff: macOS groups applied: GOP PARAMS SH ...`. The value 0 builds exactly what 96999b3 built: `abi_selftest` hashes the bs1 Start_AVC, IDR and P commands against that commit's builder.
 
 The constants are in `ave_macos_start_avc_13_5[]` / `ave_macos_process_avc_13_5[]` (`driver/ave_abi.h`). Values that depend on the session are in `ave_cmd_build_start_avc()` / `_process_avc()`. On 26.6.2 there are no tables, and any bit is refused.
 

@@ -1,4 +1,4 @@
-=== h2-hevc-idr 2026-09-24T18:08:02+01:00 commit 709c084: insmod driver/apple-ave.ko session_selftest=1 session_codec=1 session_qp=30 session_dbg=0x20 session_frame=1 ===
+=== h2-hevc-idr 2026-09-24T18:08:02+01:00 commit 0fff62c: insmod driver/apple-ave.ko session_selftest=1 session_codec=1 session_qp=30 session_dbg=0x20 session_frame=1 ===
 === applying overlay variant=4 ===
 [   14.978165] === applying overlay variant=4 ===
 [   15.013786] ave_overlay: loading out-of-tree module taints kernel.

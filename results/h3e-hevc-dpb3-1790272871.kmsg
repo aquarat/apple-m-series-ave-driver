@@ -1,4 +1,4 @@
-=== h3e-hevc-dpb3 2026-09-24T19:01:11+01:00 commit 41791ae: insmod driver/apple-ave.ko session_selftest=1 session_codec=1 session_qp=30 session_dbg=0x20 session_frame=1 session_frames=4 session_dpb=3 ===
+=== h3e-hevc-dpb3 2026-09-24T19:01:11+01:00 commit 9944d8d: insmod driver/apple-ave.ko session_selftest=1 session_codec=1 session_qp=30 session_dbg=0x20 session_frame=1 session_frames=4 session_dpb=3 ===
 === applying overlay variant=4 ===
 [   21.416463] === applying overlay variant=4 ===
 [   21.457612] ave_overlay: loading out-of-tree module taints kernel.

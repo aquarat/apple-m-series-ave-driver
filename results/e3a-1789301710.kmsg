@@ -1,4 +1,4 @@
-=== e3a 2026-09-13T13:15:10+01:00 commit e6497f4: insmod driver/apple-ave.ko stop_after=12 step_ms=1500 dapf_dump=1 dapf_set=control fw_map_data=1 fw_map_text=2 ===
+=== e3a 2026-09-13T13:15:10+01:00 commit a18d199: insmod driver/apple-ave.ko stop_after=12 step_ms=1500 dapf_dump=1 dapf_set=control fw_map_data=1 fw_map_text=2 ===
 [  304.690226] apple-ave 40d100000.video-encoder: probe: staged bring-up, stop_after=12 (max 16)
  SUBSYSTEM=platform
  DEVICE=+platform:40d100000.video-encoder

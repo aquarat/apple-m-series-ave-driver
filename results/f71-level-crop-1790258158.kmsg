@@ -1,4 +1,4 @@
-=== f71-level-crop 2026-09-24T14:55:58+01:00 commit eb119ed: insmod driver/apple-ave.ko  ===
+=== f71-level-crop 2026-09-24T14:55:58+01:00 commit 208eca4: insmod driver/apple-ave.ko  ===
 === applying overlay variant=4 ===
 [   16.482052] === applying overlay variant=4 ===
 [   16.510004] ave_overlay: loading out-of-tree module taints kernel.

@@ -1,4 +1,4 @@
-=== h3f-hevc-allidr 2026-09-24T19:49:04+01:00 commit d6d0934: insmod driver/apple-ave.ko session_selftest=1 session_codec=1 session_qp=30 session_dbg=0x20 session_frame=1 session_frames=4 session_dpb=1 ===
+=== h3f-hevc-allidr 2026-09-24T19:49:04+01:00 commit 5fa80dc: insmod driver/apple-ave.ko session_selftest=1 session_codec=1 session_qp=30 session_dbg=0x20 session_frame=1 session_frames=4 session_dpb=1 ===
 === applying overlay variant=4 ===
 [   16.897325] === applying overlay variant=4 ===
 [   16.935554] ave_overlay: loading out-of-tree module taints kernel.

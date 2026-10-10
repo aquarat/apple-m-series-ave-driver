@@ -493,7 +493,7 @@ AVE_MACOS=13.5 python3 tools/disas.py --kext --addr 0xfffffe0008eb0bd8 -n 0x138 
 §Q3's "the kext also fills a 4x16 table at PICMGMT `+0xA00..+0xBF8` that we
 leave zero" is partly out of date: that range is `EncCommParams.encoder_addr_entropy`
 (docs/54), and the driver has written its `[i][0]` entries for i < 4 since
-`f0806f1` (F3 onwards, `session: entropy: 4 buffers of 960 KiB`). The
+`1ca8885` (F3 onwards, `session: entropy: 4 buffers of 960 KiB`). The
 remaining `[i][1..3]` and rows 4..15 are still zero. Its consumer is the
 Transcode stage, which has not started in any run, so it cannot explain a
 Pipe stall; kept as a note rather than a cause.

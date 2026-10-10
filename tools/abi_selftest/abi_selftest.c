@@ -1332,9 +1332,9 @@ static void test_macos(void)
 	/*
 	 * The control: groups 0 builds exactly what the driver sent before
 	 * session_macos existed. The hashes were taken from the builder at
-	 * 6231977 (the commit before docs/85) on these same inputs.
+	 * 96999b3 (the commit before docs/85) on these same inputs.
 	 */
-	begin("macos 0 is byte-identical to 6231977");
+	begin("macos 0 is byte-identical to 96999b3");
 	memset(buf, 0, sizeof(buf));
 	expect_int(ave_cmd_build_start_avc(a, buf, sizeof(buf), &CTX, &s), 0x10e10,
 		   "bs1 Start_AVC size");

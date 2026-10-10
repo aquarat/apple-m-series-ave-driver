@@ -2741,7 +2741,7 @@ static void ave_remove(struct platform_device *pdev)
 	 * 20:37), so after a Process timeout the core can still be writing the
 	 * session buffers; unmapping them then gives a DART fault storm and
 	 * costs a reboot. Leak them in that case - the memory comes back on the
-	 * next boot. (Review of 19b9d93, finding 4.)
+	 * next boot. (Review of d071815, finding 4.)
 	 */
 	if (ave->powered && ave->bank[AVE_BANK_ASC].base) {
 		u32 st = ave_read(ave, AVE_BANK_ASC, AVE_ASC_CPU_STATUS);

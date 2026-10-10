@@ -1,7 +1,7 @@
 # The F5 `PIPE HANG`: what the heartbeat says, what completes the pipe, and why it does not complete
 
 Static analysis prompted by `results/f5-1789392104.kmsg` (2026-09-14 14:21,
-commit `74ba0ff`): Config/Open/Start_AVC/Process accepted, datapath DMA mapped
+commit `c071f1d`): Config/Open/Start_AVC/Process accepted, datapath DMA mapped
 on both DARTs, **no DART/SMMU fault, no AXI error**, then
 `Uncompress Ref is not supported` (kmsg l.1000 area, right after Process) and,
 every second from +2 s, `Controller Heart Beat ERROR: PIPE HANG: 1, 1`,

@@ -1,4 +1,4 @@
-=== f23 2026-09-20T10:35:39+01:00 commit efa19fc: insmod driver/apple-ave.ko stop_after=16 fw_map_data=1 fw_map_text=2 dapf_dump=1 smmu_watch=1 session_selftest=1 session_frame=1 session_lsb=1 power_me1=1 dpe_tunables=1 session_coloc=1 session_entropy_size=1 session_flat_luma=200 session_src_bit3=1 ===
+=== f23 2026-09-20T10:35:39+01:00 commit 5d13ab3: insmod driver/apple-ave.ko stop_after=16 fw_map_data=1 fw_map_text=2 dapf_dump=1 smmu_watch=1 session_selftest=1 session_frame=1 session_lsb=1 power_me1=1 dpe_tunables=1 session_coloc=1 session_entropy_size=1 session_flat_luma=200 session_src_bit3=1 ===
 === applying overlay variant=5 ===
 [  255.093681] ave_overlay: loading out-of-tree module taints kernel.
 [  255.093687] ave_overlay: module verification failed: signature and/or required key missing - tainting kernel

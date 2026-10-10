@@ -510,7 +510,7 @@ provoke a stop is not part of this: macOS never does it
 
 ## 9. First hardware run (2026-09-14): Halt before Config crashes the firmware
 
-`results/h1-1789369083.kmsg`, commit `73de91d`. Fresh boot, patched m1n1,
+`results/h1-1789369083.kmsg`, commit `ec8d422`. Fresh boot, patched m1n1,
 overlay `variant=3`. Load 1 `stop_after=16 fw_map_data=1 fw_map_text=2
 fw_halt=1` — handshake complete, **no Config sent**. `rmmod` sent the Halt.
 
@@ -565,7 +565,7 @@ the same boot.
 
 ## 10. Second hardware run (2026-09-14 08:10): Halt works; restart does not
 
-`results/h2-1789369852.kmsg`, commit `ad89724`. Fresh boot, overlay
+`results/h2-1789369852.kmsg`, commit `a1479a5`. Fresh boot, overlay
 `variant=3`, both loads `session_selftest=1 session_config_only=1 fw_halt=1`,
 load 2 adds `fw_restore_data=1`.
 
@@ -615,7 +615,7 @@ a second firmware start in the same boot.
 
 ## 11. R1 (2026-09-14 08:25): the block reset on a halted core keeps the DAPF
 
-`results/r1-1789370719.kmsg`, commit `db259ea`, the same boot as §10 (core
+`results/r1-1789370719.kmsg`, commit `49023cb`, the same boot as §10 (core
 halted, `CPU_STATUS 0x2e`, no fault storm). `stop_after=13 core_reset=2
 core_reset_only=1` - pulse and report, never start.
 
@@ -645,7 +645,7 @@ Halt.
 
 ## 12. R2 (2026-09-14 08:39): the reset restarts the core, and the restarted firmware dies before message 1
 
-`results/r2-1789371544.kmsg`, commit `feec90e`, same boot as §10-§11. Both
+`results/r2-1789371544.kmsg`, commit `6432751`, same boot as §10-§11. Both
 loads: `core_reset=2 fw_restore_data=1 session_selftest=1
 session_config_only=1 fw_halt=1`.
 
@@ -691,7 +691,7 @@ on hardware by the restore, so it is no longer unexplored memory.
 
 ## 13. R3 (2026-09-14 11:04): root cause - the reset wiped scratch 0, and the firmware booted into its UART console
 
-`results/r3-1789380356.kmsg`, commit `b771580`. Fresh boot.
+`results/r3-1789380356.kmsg`, commit `07651ec`. Fresh boot.
 
 **Step 1 - cold full dump before any start** (`physdump full=1`,
 `data/blobs/r3-cold-full.bin`, gitignored). Cold DATA vs the pristine blob:
@@ -756,7 +756,7 @@ now reports itself in one line instead of a six-second silence.
 
 ## 14. R4 (2026-09-14 11:16): restart without a reboot works
 
-`results/r4-1789381015.kmsg`, commit `1742cfa`, same boot as §13 (core left
+`results/r4-1789381015.kmsg`, commit `5021eaf`, same boot as §13 (core left
 crashed at `0x28` by R3). Both loads `core_reset=2 fw_restore_data=1
 session_selftest=1 session_config_only=1 fw_halt=1`; load 1 adds
 `fw_restore_stkg=<this boot's cold cookie>`, load 2 uses the blob's.

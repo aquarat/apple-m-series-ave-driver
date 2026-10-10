@@ -216,7 +216,7 @@ load, so it was never addressing the registers this document describes.
 
 ## Run of 2026-09-08, first with a non-zero I/O base
 
-Kernel `7.1.13-401.asahi.vrr1`, commit `3aa5493` plus the tag-stride fix.
+Kernel `7.1.13-401.asahi.vrr1`, commit `bd29a73` plus the tag-stride fix.
 Logs: `results/handshake-20260908-2116*.log`.
 
 **No hang, no crash, no reset.** Stages 1-15 all completed and the module
@@ -450,7 +450,7 @@ correctly.
 
 ## Run 2026-09-13: liveness with controls, and what is in the window
 
-Log: `results/handshake-20260913-102149-c4e58389.log`, commit `03a66c4`,
+Log: `results/handshake-20260913-102149-c4e58389.log`, commit `25145b0`,
 overlay variant 0 (DART, DMA domain).
 
 ### CPU_STATUS discriminates, and says "not running"
@@ -894,7 +894,7 @@ Scanning the 13.5 firmware for stores to that offset explains why
 ```
 
 `setRefPointers` **overwrites** PICMGMT+0xC20 from the DPB entry before
-`setPipe`/`setLRME` reads it - the same pattern the review of 19b9d93 found
+`setPipe`/`setLRME` reads it - the same pattern the review of d071815 found
 for the recon pointers (finding 3), which is why writing the per-frame field
 changes nothing. **Confirmed.**
 
@@ -912,7 +912,7 @@ docs/15-19) carries the low-res surface per recon buffer. The per-frame
 
 ## 2026-09-14 07:58 — Halt reaches the firmware; without Config it crashes instead of halting
 
-`results/h1-1789369083.kmsg`, commit `73de91d`. The firmware received command
+`results/h1-1789369083.kmsg`, commit `ec8d422`. The firmware received command
 14 and took a NULL data abort at `0x10D48`: `ProcessPowerDown` calls a
 controller at `CmdProcessor+0x7A10` that only `ProcessConfig` creates, and this
 run sent no Config. Scratch 0 stayed 0 (the poll correctly said no), unload was
@@ -923,7 +923,7 @@ fresh boot.
 
 ## 2026-09-14 08:10 — Halt confirmed; DATA restore writes; restart after Halt does not take
 
-`results/h2-1789369852.kmsg`, commit `ad89724`. With Config sent first, Halt
+`results/h2-1789369852.kmsg`, commit `a1479a5`. With Config sent first, Halt
 works: scratch 0 `0x08042006` within 0.5 ms, `CPU_STATUS 0x2e` STOPPED, clean
 unload. Load 2's DATA restore passed every gate and wrote 0x134000 bytes
 (301006 drifted), read-back verified - Linux can write the firmware DRAM. But
@@ -1007,7 +1007,7 @@ heartbeats, so a repeat is attributable. F6's changes (`session_lsb`,
 ## 2026-09-15 — F6c: the overlay reset reproduces; the driver never loads again
 
 `results/f6c-1789483860.kmsg`, run by the operator's agent on explicit
-instruction: a faithful replication of f6b at the same commit (`9ab1894`,
+instruction: a faithful replication of f6b at the same commit (`e7dc8b4`,
 modules rebuilt for `vrr3` — same source). **The machine reset ~31 s after
 the overlay was applied, inside the captured window, before load 1.** That is
 three consecutive deaths at 10–31 s after `ave-overlay variant=4` on boots
@@ -1041,7 +1041,7 @@ DART IRQ identically in the F4 and F5 boots, which survived, and F4 left the
 same overlay idle for 9 minutes.
 
 **What is new on that path (I):** F6* use `core_reset=2` (a pulse even on a
-cold core) **and** commit `923b52b`'s datapath-DART handling, which reads
+cold core) **and** commit `883ce9b`'s datapath-DART handling, which reads
 DART1 in the post-pulse dump and then writes its TTBR/TCR
 (`ave_dart_restore_datapath`) immediately after `reset_control_reset()`.
 F4 pulsed a cold core and read the CPUDART, DAPF and SVE straight after without

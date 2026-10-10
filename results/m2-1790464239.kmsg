@@ -1,4 +1,4 @@
-=== m2 2026-09-27T00:10:39+01:00 commit 3f9315c: insmod driver/apple-ave.ko session_selftest=1 session_codec=1 session_qp=30 session_dbg=0x20 session_frame=1 session_frames=4 session_src_bitdepth=10 ===
+=== m2 2026-09-27T00:10:39+01:00 commit 035bc79: insmod driver/apple-ave.ko session_selftest=1 session_codec=1 session_qp=30 session_dbg=0x20 session_frame=1 session_frames=4 session_src_bitdepth=10 ===
 === applying overlay variant=4 ===
 [   14.376666] === applying overlay variant=4 ===
 [   14.406758] ave_overlay: loading out-of-tree module taints kernel.

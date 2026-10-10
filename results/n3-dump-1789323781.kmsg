@@ -1,4 +1,4 @@
-=== n3-dump 2026-09-13T19:23:01+01:00 commit 1aab95e: insmod driver/apple-ave.ko stop_after=8 dapf_dump=1 ===
+=== n3-dump 2026-09-13T19:23:01+01:00 commit 4a3e68b: insmod driver/apple-ave.ko stop_after=8 dapf_dump=1 ===
 [   69.216554] apple-ave 40d100000.video-encoder: probe: staged bring-up, stop_after=8 (max 16)
  SUBSYSTEM=platform
  DEVICE=+platform:40d100000.video-encoder

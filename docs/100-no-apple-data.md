@@ -35,11 +35,11 @@ hardware (register offsets, bit layouts, command formats), which stays;
 | buffer-size formulas (`AVE_CalcBufSize*`) | `ave_session.c`, `ave_cmd.h` | (b) | Formulas the firmware enforces; interop facts. |
 | register address lists for diagnostics (`ch[]`, `ie[]`, `rl[]`, `mcpu[]`) | `ave_session.c` | (b) | Register addresses. |
 | strings `"AppleAVE2FW/Firmware"`, `"CmdProcessor"` | `ave_fw.c` (`probe_diag` only) | (c) | Two names used to find landmarks in diagnostics; not data in any useful sense. |
-| symbol tables (`kext-symbols`, `symbols`, `types`, `commands`, ...) | `data/derived/` (repository, never packaged) | (a) | Removed from the tree by the licensing merge (54bb01f); the tools write them to `data/blobs/derived/`. |
+| symbol tables (`kext-symbols`, `symbols`, `types`, `commands`, ...) | `data/derived/` (repository, never packaged) | (a) | Removed from the tree by the licensing merge (b5ef678); the tools write them to `data/blobs/derived/`. |
 
-What the public history holds: `driver/ave_dpe_tables.h` from 2f81a3a
-(Castor_6000), ecc7e46 (Acis_8103) and d3a2b79 (Atlas_8112) until this
-change, and the eight `data/derived/` symbol tables until 54bb01f. No
+What the public history holds: `driver/ave_dpe_tables.h` from 0ef449f
+(Castor_6000), 916938a (Acis_8103) and becb4d0 (Atlas_8112) until this
+change, and the eight `data/derived/` symbol tables until b5ef678. No
 firmware image, IPSW member or RAM dump was ever committed (`*.bin`,
 `*.im4p` are ignored). The history is not rewritten here.
 
@@ -70,7 +70,7 @@ file fails the probe with a message naming the fetch tool.
 
 **Identity check.** The three sets were generated from each of the three
 13.5 kernelcaches (mac13j, mac13g, mac14g) and compared with the tables in
-`driver/ave_dpe_tables.h` as of 3315d70, encoded the same way: all nine are
+`driver/ave_dpe_tables.h` as of 6efeb76, encoded the same way: all nine are
 byte-identical to the header (sha256 Castor_6000 `4995da8c…`, Acis_8103
 `6fea4436…`, Atlas_8112 `43bef746…`). The AppleAVE2 kext is the same in
 every 13.5 kernelcache, so the machine's own kernelcache always suffices.

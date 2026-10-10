@@ -1,4 +1,4 @@
-=== f6c 2026-09-15T15:51:00+01:00 commit 9ab1894 ===
+=== f6c 2026-09-15T15:51:00+01:00 commit e7dc8b4 ===
 === load 1: stop_after=16 fw_map_data=1 fw_map_text=2 core_reset=2 fw_restore_data=1 session_selftest=1 session_frame=1 fw_halt=1 smmu_watch=1 session_lsb=1
 === load 2: stop_after=16 fw_map_data=1 fw_map_text=2 core_reset=2 fw_restore_data=1 session_selftest=1 session_frame=1 fw_halt=1 smmu_watch=1 session_lsb=1 session_sve_ungate=1
 === applying overlay variant=4 ===

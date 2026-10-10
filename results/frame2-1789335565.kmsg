@@ -1,4 +1,4 @@
-=== frame2 2026-09-13T22:39:25+01:00 commit 61565ee: insmod driver/apple-ave.ko stop_after=16 fw_map_data=1 fw_map_text=2 session_selftest=1 session_frame=1 ===
+=== frame2 2026-09-13T22:39:25+01:00 commit 5eb6c6b: insmod driver/apple-ave.ko stop_after=16 fw_map_data=1 fw_map_text=2 session_selftest=1 session_frame=1 ===
 [   98.215787] apple-ave 40d100000.video-encoder: probe: staged bring-up, stop_after=16 (max 16)
  SUBSYSTEM=platform
  DEVICE=+platform:40d100000.video-encoder

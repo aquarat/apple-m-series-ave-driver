@@ -1,4 +1,4 @@
-=== t8103-D2 2026-10-01T16:32:36+02:00 commit a7a92c6: insmod driver/apple-ave.ko stop_after=16 step_ms=0 pm_sleep=1 ===
+=== t8103-D2 2026-10-01T16:32:36+02:00 commit 9e31c32: insmod driver/apple-ave.ko stop_after=16 step_ms=0 pm_sleep=1 ===
 === insmod driver/apple-ave.ko stop_after=16 step_ms=0 pm_sleep=1 ===
 [ 2448.528901] === insmod driver/apple-ave.ko stop_after=16 step_ms=0 pm_sleep=1 ===
 [ 2448.555057] apple-ave 267100000.video-encoder: probe: SoC row t8103 (encoder 0)

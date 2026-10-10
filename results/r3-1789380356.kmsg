@@ -1,4 +1,4 @@
-=== r3 2026-09-14T11:05:56+01:00 commit b771580 ===
+=== r3 2026-09-14T11:05:56+01:00 commit 07651ec ===
 === load 1: stop_after=16 fw_map_data=1 fw_map_text=2 session_selftest=1 session_config_only=1 fw_halt=1
 === load 2: stop_after=16 fw_map_data=1 fw_map_text=2 core_reset=2 fw_restore_data=1 fw_restore_stkg=0x6e14c23b2faec5 session_selftest=1 session_config_only=1 fw_halt=1
 === load 1: insmod stop_after=16 fw_map_data=1 fw_map_text=2 session_selftest=1 session_config_only=1 fw_halt=1 ===

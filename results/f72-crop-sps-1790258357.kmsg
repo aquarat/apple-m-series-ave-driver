@@ -1,4 +1,4 @@
-=== f72-crop-sps 2026-09-24T14:59:17+01:00 commit eb119ed: insmod driver/apple-ave.ko  ===
+=== f72-crop-sps 2026-09-24T14:59:17+01:00 commit 208eca4: insmod driver/apple-ave.ko  ===
 === applying overlay variant=4 ===
 [   16.295493] === applying overlay variant=4 ===
 [   16.324646] ave_overlay: loading out-of-tree module taints kernel.

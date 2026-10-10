@@ -62,7 +62,7 @@ tell.
 `test/Makefile` built `ave_overlay_dtbo.h` from `ave-overlay.dts` — the
 DART-inclusive overlay — not from `ave-overlay-nodart.dts`. Decoding the
 committed header at each commit shows the DART node silently returning from
-commit `c2a48a9` onward, so from the fourth attempt every run applied a DART at
+commit `5a0c0dc` onward, so from the fourth attempt every run applied a DART at
 a hole address, whose driver programs registers asynchronously after `insmod`
 returns.
 
