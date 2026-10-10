@@ -127,7 +127,7 @@ concurrent encode sessions look like a first-class design point.
 
 ## ABI type names
 
-`data/derived/types.txt` has all 167. The ones that will matter for the
+`data/blobs/derived/types.txt` has all 167. The ones that will matter for the
 shared-memory ABI:
 
 ```

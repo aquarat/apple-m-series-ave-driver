@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0-only
 """Group AppleAVE2 kext symbols into a class -> method map.
 
 The kext is the HOST side of the AVE protocol. Its class layout shows how
 Apple's driver is decomposed, which is the closest thing to a specification
 a Linux driver author is going to get.
 
-Usage: kext_classmap.py <kext-symbols.txt> [--out data/derived/kext-classmap.txt]
+Usage: kext_classmap.py <kext-symbols.txt> [--out data/blobs/derived/kext-classmap.txt]
 """
-import argparse, re
+import argparse, os, re
 
 def parse(m):
     """Split Itanium __ZN<len><name>...E into its components."""
@@ -26,7 +27,7 @@ def parse(m):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("symbols")
-    ap.add_argument("--out", default="data/derived/kext-classmap.txt")
+    ap.add_argument("--out", default="data/blobs/derived/kext-classmap.txt")
     ap.add_argument("--prefix", default="AVE", help="only classes starting with this")
     a = ap.parse_args()
     classes = {}
@@ -40,6 +41,7 @@ def main():
             continue
         cls, meth = p[0], "::".join(p[1:])
         classes.setdefault(cls, {}).setdefault(meth, int(va, 16))
+    os.makedirs(os.path.dirname(a.out) or ".", exist_ok=True)
     with open(a.out, "w") as f:
         f.write("# AppleAVE2.kext class -> method map (host side of the protocol).\n")
         f.write("# Extracted from the kernelcache symbol table; addresses are kernel VAs.\n\n")

@@ -129,7 +129,7 @@ spending a reboot**: the QP was in the bitstream all along.
 | `tools/modedec_costs.py` | models the ModeDec/IntraEst configuration registers from the blob (docs/73) |
 | `tools/data_blob_from_image.py` | `validate`, `fills IMAGE`, `build --soc S`, `dump-check`: a pristine DATA blob from the image plus iBoot's fills (docs/89 §6) |
 | `tools/fetch_userspace.py` | range-reads macOS 13.5's user-space encoder out of the IPSW (docs/72) |
-| `tools/abi_selftest/`, `tools/session_selftest/` | `make && ./abi_selftest`: 1630 and 253 checks (AVC and HEVC). Both Makefiles delete the binary before rebuilding, because a stale binary once passed three times in one day |
+| `tools/abi_selftest/`, `tools/session_selftest/` | `make && ./abi_selftest`: 1954 and 301 checks (AVC and HEVC). Both Makefiles delete the binary before rebuilding, because a stale binary once passed three times in one day |
 
 Module parameters worth knowing: defaults are the working configuration
 (since f68) and `v4l2` is on; `session_selftest=1` runs the probe-time

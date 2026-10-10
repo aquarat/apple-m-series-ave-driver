@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0-only
 """Find and decode RTKit boot-argument tag lists in a memory dump or image.
 
 An RTKit firmware's DATA segment carries a packed list of tags that the loader

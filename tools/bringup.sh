@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: GPL-2.0-only
 # Staged AVE bring-up with crash attribution, for a machine with no console.
 #
 # Before each attempt the stage number is written to a marker file and synced.

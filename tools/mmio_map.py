@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0-only
 """Whole-image MMIO access map of the macOS 13.5 AVE firmware (docs/74).
 
 Every str/ldr (all widths, pair and register-offset forms) whose base resolves

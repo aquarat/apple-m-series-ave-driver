@@ -772,7 +772,7 @@ python3 tools/disas.py --fw   --addr 0x4e69c -n 0x10    # "rate control flag ...
 python3 tools/disas.py --fw   --addr 0x43ad0 -n 0x20    # AVE_CBR_InsertFiller
 python3 tools/disas.py --fw   --addr 0x43ca4 -n 0x20    # AVE_DRL_UpdateBitrate
 for p in VBV DecideLevel MaxBitRate CheckResolution; do
-  grep -c "$p" data/derived/kext-symbols.txt data/blobs/macos-13.5/derived/kext-symbols.txt
+  grep -c "$p" data/blobs/derived/kext-symbols.txt data/blobs/macos-13.5/derived/kext-symbols.txt
 done
 
 # --- GOP / frame type ---------------------------------------------------

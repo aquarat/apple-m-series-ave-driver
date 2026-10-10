@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0-only
 """Append /dev/kmsg to a file durably, and NEVER lose a record silently.
 
 There is no pstore backend on this machine, so after a hard crash the only

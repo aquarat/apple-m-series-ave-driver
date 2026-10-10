@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0-only
 """Addresses and messages for AVE's SoC performance request to the PMP (docs/75).
 
 Reads only the ADT. Computes, for ave0 and (where the SoC has one) ave1:

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0-only
 """Pull single files out of a macOS restore IPSW's filesystem DMG, by range request.
 
 The macOS 13.5 system volume (096-63007-081.dmg, 7.5 GB) is *stored*, not

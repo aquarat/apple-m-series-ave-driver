@@ -436,7 +436,9 @@ gate is only held open inside `SetTranscode`. **[C]**
 
 ---
 
-## 8. Corrections to earlier documents (not edited here)
+## 8. Corrections to earlier documents
+
+The first one below has since been applied to docs/70; the others have not.
 
 - **[70](70-intraest.md) §1.2**, line `26a`: the mask is `0x00080001` (bits 0
   and 19), not `0x08000001`. Bit 19 requires `chroma_format_idc == 0`, so the

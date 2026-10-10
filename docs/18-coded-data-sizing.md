@@ -97,7 +97,7 @@ read directly out of an instruction is marked **inferred** or **unknown**.
 
 ## 1. Function inventory
 
-Everything matching `Coded` in `data/derived/kext-symbols.txt` that is a sizing
+Everything matching `Coded` in `data/blobs/derived/kext-symbols.txt` that is a sizing
 or counting routine:
 
 | VA | Symbol | Shape |
@@ -441,7 +441,9 @@ client[16552]` (an explicit override), `a2 = client[6016]`, `a5 =
 client[15316]`, `a6 = client[15512]`, `a8 = client[15312]`, `a10 =
 client[5892]`, `a11 = client[5480]`, `a1`/`a9` from the `_S_AVE_DLB_Unit`
 (`[+24]`, `[+20]`). The meaning of those client fields is **unknown**; what is
-certain is the hard bound: `1 <= count <= 30`. The result is stored to the
+certain is the hard bound `count <= 30`, and `count >= 1` whenever `a0 >= 0`,
+`a2 >= 0` and `a5` is 1 or 2. Other values can drive it to 0 or below (a
+negative override `a0`, for one). The result is stored to the
 InfoSet at `[infoset+360]` (`0xca9dcc`) and the size to `[infoset+364]`
 (`0xca9e24`) — entry 8 (`CodedData`) `+0x18` and `+0x1c`, matching
 [16](16-encode-surface-set.md) §1.
@@ -496,12 +498,13 @@ table):
 | 4:2:0 / mono, non-lossless | `3 * Wa * H` |
 | any chroma format, non-lossless, `!bMaxBufSize` | `3.2 * Wa * H` (`2 x 1.6 x 1.5`) |
 | `bMaxBufSize` allowed | `6 * Wa * H` (`2 x 3`) |
-| lossless allowed | `8.4 * Wa * H` (`2.8 x 3`) |
+| lossless allowed | `8.4 * Wa * H` (`2.8 x 3`) up to 720p, `7.5 * Wa * H` (`2.5 x 3`) above |
 | any bit depth `> 8` | multiply the above by `(bitDepth + 7) / 8` |
 
 The absolute maximum the function can return, over its entire input domain and
-excluding the `bufSize` override, is `2.8 * 3 * ceil(bd/8) * ALIGN(W,32) * H`.
-At 4K 10-bit that is 124,416,000 bytes — which is why you should pin the
+excluding the `bufSize` override, is `ALIGN(k * 3 * ceil(bd/8) * ALIGN(W,32) * H, 4096)`
+with `k = 2.8` up to 720p (`W*H < 921601`) and `k = 2.5` above: the lossless
+factor of §3. At 4K 10-bit that is 124,416,000 bytes — which is why you should pin the
 parameters rather than provision for the worst case.
 
 ### 7.3 Recommendation

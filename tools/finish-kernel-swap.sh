@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: GPL-2.0-only
 # Run this AFTER rebooting into 7.1.6. It removes the 7.0.13 kernel and its
 # devel package, then rebuilds the modules against the running kernel.
 #

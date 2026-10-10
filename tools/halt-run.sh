@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: GPL-2.0-only
 # Two firmware starts in one boot, with a Halt in between (docs/55).
 #
 #   tools/halt-run.sh NAME "load-1 params" "load-2 params"

@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: GPL-2.0-only
 # Load the AVE H.264 encoder on the target, outside the lab harness:
 # the V4L2 core modules, the device-tree overlay (the Asahi DT has no AVE
 # node yet), then apple-ave with its defaults, which register /dev/videoN.

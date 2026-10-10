@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0-only
 """Embed a .dtbo as a C array (xxd -i replacement)."""
 import sys
 data = open(sys.argv[1], "rb").read()

@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0-only
 """Recover AVE's host<->firmware protocol from the firmware's own symbols.
 
 Apple shipped AppleAVE2FW with its symbol table and C++ source paths intact,
 so a large part of the command interface can be reconstructed statically,
-before any hypervisor tracing. This regenerates data/derived/*.
+before any hypervisor tracing. The output is generated locally and not
+committed: it lands next to the blobs, in data/blobs/derived/ (docs/05).
 
-Usage: extract_protocol.py <unwrapped-firmware.bin> [--out data/derived]
+Usage: extract_protocol.py <unwrapped-firmware.bin> [--out data/blobs/derived]
 """
 import argparse, os, re, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -31,7 +33,7 @@ def cstrings(m):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("firmware")
-    ap.add_argument("--out", default="data/derived")
+    ap.add_argument("--out", default="data/blobs/derived")
     a = ap.parse_args()
     m = MachO(open(a.firmware, "rb").read())
     syms = sorted(m.symbols(), key=lambda s: s[1])

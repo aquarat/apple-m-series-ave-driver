@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0-only
 """Find what the AVE firmware wrote into its DATA segment, and any crash text in it.
 
 A failed restart leaves no log: before the handshake there is no TERMINAL

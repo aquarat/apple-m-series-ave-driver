@@ -403,7 +403,7 @@ Where `CHM+0x34` is set was **not** traced. It is presumably filled from the
 Both *do* appear in the H13C firmware, so [06-kext.md](06-kext.md)'s remark
 that they are "not visible in the firmware strings" is wrong:
 
-- `data/derived/symbols.txt` (firmware) contains
+- `data/blobs/derived/symbols.txt` (firmware) contains
   `_gc_sAVE_DevCap_DPMMap_GGM_Erebus` at firmware `0x10719c`.
 - `strings data/blobs/ave_h13c.bin` contains
   `"%s::%s:%d msc %d enc %d | %d %d | %d %d %d | %d"`.

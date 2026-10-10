@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0-only
 """Full-frame PSNR of every decoded frame against the driver's own source.
 
 check_frame.py grades against the 256 KiB input_luma debugfs dump, one

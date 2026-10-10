@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: GPL-2.0-only
 # On the target, with apple-ave loaded v4l2=1: encode N frames of a test
 # pattern through the V4L2 node and grade the result against the input.
 #   [CODEC=h264|hevc] [W=1920 H=1088] [CROP_H=1080] [FFARGS="-b:v 8M"] \

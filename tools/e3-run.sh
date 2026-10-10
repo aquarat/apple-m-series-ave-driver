@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: GPL-2.0-only
 # One E3 step with crash-surviving capture (docs/48).
 #   tools/e3-run.sh NAME insmod-params...
 # Refuses if an IRQ was disabled or apple_ave is already loaded.
