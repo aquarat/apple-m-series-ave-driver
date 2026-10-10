@@ -35,22 +35,23 @@ the **M2** (`t8112`, Mac mini `j473`) as the first outside the M1 family
 | `t6002` M1 Ultra | Mac Studio (`j375d`) | 4: two per die (`apple-ave-enc`, `apple-ave1-enc`, `apple-ave2-enc`, `apple-ave3-enc`) | `AppleAVE2FW_H13D` → `apple/ave_h13d.bin` | `VARIANT=11` (ave0), `12` (die 0), `13` (ave0 + ave2), `14` (all four) | **works, all four encoders** (2026-10-04, docs/98 §11): stock m1n1 and DTB; the iBoot placement read from the live ADT (docs/98 U0) and compiled in (per machine); output identical to the M1 Pro's, B frames included; no PMP vote (the stock DT has the PMP off): 57 fps per encoder at 1080p, ~230 fps with all four |
 | others (M2 Pro/Max, M3…) | | | | | not ported: docs/79 is the checklist |
 
-Each SoC needs its firmware variant's Mach-O and its **pristine DATA blob**
-(`apple/ave-13.5-data-pristine.bin` for H13C,
-`apple/ave-13.5-h13s-data-pristine.bin` for H13S,
-`apple/ave-13.5-h13g-data-pristine.bin` for H13G,
-`apple/ave-13.5-h14g-data-pristine.bin` for H14G,
-`apple/ave-13.5-h13d-data-pristine.bin` for H13D, made by
-`tools/t6002_placement.py`) in `/lib/firmware`. The
-blob is iBoot's DATA segment as left before the encoder's first start,
-taken from a cold boot with the read-only `test/physdump.ko` (docs/51,
-docs/87 §3), or built from the image plus the bytes iBoot fills in with
-`tools/data_blob_from_image.py` (byte-identical to the dumps for H13S and
-H14G; for H13G the tunables need a dump or a choice, docs/89 §6). The driver
-checks its sha256 and only needs it to reload in the same boot, or, where
-iBoot's DATA lies in Linux's RAM (an M1 Mac mini on stock m1n1), to build the
-core's DATA itself. Only macOS 13.5 stub firmware (`asahi,os-fw-version`) has
-been mapped.
+Each SoC needs, in `/lib/firmware/apple/`, its firmware variant's Mach-O
+(`ave_<variant>.bin`) and the AVE_DPE register tables
+(`ave-13.5-dpe-<set>.bin`). Neither is in this repository: since docs/100
+the source carries no data taken from Apple's files.
+`tools/ave_fwgen.py` (or the packaging's `apple-ave-fetch-firmware`) makes
+the tables from the user's own macOS 13.5 kernelcache, byte-identical to
+the tables the driver used to compile in.
+
+For a reload in the same boot the driver also needs the **pristine DATA
+blob**, iBoot's DATA segment as left before the encoder's first start
+(docs/51). The driver now copies it itself at the first start of each boot,
+checks it against the image, and offers it in debugfs
+(`apple_ave[N]_iboot_data`) to be kept on disk (docs/100 §3). The M1 builds
+its own DATA from the image instead (`tools/data_blob_from_image.py build
+--soc t8103 --tunables none`, docs/89 §6). The firmware placement comes
+from the live ADT that m1n1 publishes (docs/99). Only macOS 13.5 stub
+firmware (`asahi,os-fw-version`) has been mapped.
 
 ## Benchmarks (2026-10-03; B frames, 2-pass, M1 and M1 Ultra 2026-10-04)
 

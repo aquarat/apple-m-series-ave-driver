@@ -100,6 +100,10 @@ pass without a U0 step.
 
 ## 6. What the ADT does not give: the pristine DATA blob
 
+(Superseded by docs/100 §3: the driver now copies the cold DATA itself at
+the first start of a boot, on every SoC where DATA is in place, t6002's
+four encoders included. The paragraph below is the state before that.)
+
 The blob is only needed to restart a core in the same boot (a reload or a
 hang recovery) and for driver-owned DATA. `tools/data_blob_from_image.py`
 builds it from the image for H13S, H13C and H14G byte for byte, and for
