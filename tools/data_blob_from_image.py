@@ -30,19 +30,19 @@ and the table at TUNS (TUNZ bytes, __rtk_platform_asc_tunables_block): a header
 entries of {u32 offset, u64 mask, u64 value}. The image ships it with count 0
 and h 0xffffffff; iBoot writes count, h and the entries. H14G's TUNZ holds a
 second table (version 3) that iBoot leaves empty. Nothing else in DATA differs
-from the image, and DATA past the file-backed part is zero [C for H13S, H14G:
-`validate`].
+from the image, and DATA past the file-backed part is zero [C for H13S, H13C,
+H14G: `validate`]. H13C's (t6001) table is H13S's 21 entries with h 0x11.
 
 Subcommands
 -----------
   fills IMAGE                 the fill set of an image, from its own tag list
   diff IMAGE PRISTINE         decode a real pristine blob's fills; fail if any
                               other byte differs from the image
-  validate                    rebuild the H13S and H14G blobs from their images
+  validate                    rebuild the H13S, H13C and H14G blobs from their images
                               and the recorded values below; must equal the real
                               blobs byte for byte (and differ only in STKG when
                               STKG is not carried over); plus negative controls
-  build --soc S ...           write a blob for SoC S (t6000, t8112, t8103)
+  build --soc S ...           write a blob for SoC S (t6000, t6001, t8112, t8103)
   dump-check --soc S DUMP     which fill pages of a (partly overwritten) DATA
                               dump survived, and what they hold
 
@@ -118,6 +118,9 @@ TUN_H14G = (0x10, [   # [C] ave-13.5-h14g-data-pristine.bin (j473 cold dump, doc
     (0x14a008, 0xff0ffff, 0x2520),
     (0x14a010, 0xff0ffff, 0x3002520),
 ])
+# [C] ave-13.5-data-pristine.bin (j314c cold dump, docs/51): the same 21
+# entries as H13S, with header h 0x11 instead of 0x20.
+TUN_H13C = (0x11, TUN_H13S[1])
 
 SOCS = {
     "t6000": dict(
@@ -143,6 +146,18 @@ SOCS = {
         stkg=(0x0C975400_35E6C44B, "C: the dump's boot"),
         tunables=(TUN_H14G, "C"),
         pinned="fe2d5ec1b2f92798e5847e0fc066fc95dbbdd5e3526651ba00216b45b7839f3d",
+    ),
+    "t6001": dict(
+        variant="H13C",
+        image=["macos-13.5/ave_h13c.bin", "macos-13.5-j314c/ave_h13c.bin", "ave_h13c.bin"],
+        pristine=["ave-13.5-data-pristine.bin", "macos-13.5-j314c/ave-13.5-data-pristine.bin"],
+        out="ave-13.5-data-pristine.bin",
+        # ave0's banks; ave1 runs on a driver-owned copy with its own tags (docs/82)
+        tags={"SOC_": (0x6001, "C"), "SOCR": (0x11, "C"), "CpAd": (0x40D800000, "C"),
+              "WrAd": (0x40DC00000, "C"), "IOBA": (0x40C000000, "C")},
+        stkg=(0x816EA533007323BC, "C: the dump's boot"),
+        tunables=(TUN_H13C, "C"),
+        pinned="f1af1ef42be04a7d607b0bc1a27dfda57268b476fecf1d92c8c13c760c71a103",
     ),
     "t8103": dict(
         variant="H13G",
@@ -330,10 +345,19 @@ def cmd_diff(a):
 
 def cmd_validate(a):
     ok = True
-    for soc in ("t6000", "t8112"):
+    skipped = []
+    for soc in ("t6000", "t6001", "t8112"):
         s = SOCS[soc]
-        img = open(find_blob(a.blobs, s["image"], f"{s['variant']} image"), "rb").read()
-        real = open(find_blob(a.blobs, s["pristine"], f"{s['variant']} pristine blob"), "rb").read()
+        paths = [next((os.path.join(a.blobs, c) for c in cands
+                       if os.path.exists(os.path.join(a.blobs, c))), None)
+                 for cands in (s["image"], s["pristine"])]
+        if None in paths:
+            print(f"\n{soc} ({s['variant']}): SKIPPED - its image or real pristine blob "
+                  f"is not under {a.blobs}")
+            skipped.append(soc)
+            continue
+        img = open(paths[0], "rb").read()
+        real = open(paths[1], "rb").read()
         f = Fills(img)
         print(f"\n{soc} ({s['variant']}): pristine sha256 {sha(real)[:16]}..., "
               f"pinned {s['pinned'][:16]}...: {'same' if sha(real) == s['pinned'] else 'DIFFERENT'}")
@@ -354,7 +378,7 @@ def cmd_validate(a):
               f"{'all in STKG' if r2 else 'NOT ONLY STKG'}")
         ok &= r1 and r2
         # 4. negative controls: the test must be able to say no
-        wrong = TUN_H14G if s["tunables"][0] is TUN_H13S else TUN_H13S
+        wrong = TUN_H14G if s["tunables"][0] is not TUN_H14G else TUN_H13S
         c1 = build(f, tags, s["stkg"][0], wrong) != real
         t2 = dict(tags, CpAd=tags["CpAd"] + 0x1000)
         c2 = build(f, t2, s["stkg"][0], s["tunables"][0]) != real
@@ -385,7 +409,11 @@ def cmd_validate(a):
                   f"the pinned j313 blob")
         print("   -> H13G's tunables are not H13S's (given the tags, STKG and a zero bss); "
               "they stay UNKNOWN [U]")
-    print("\n" + ("VALIDATE: ALL PASS" if ok else "VALIDATE: FAILED"))
+    if skipped and len(skipped) == 3:
+        ok = False
+        print("\nnothing to validate: no image with its real pristine blob was found")
+    print("\n" + ("VALIDATE: ALL PASS" if ok else "VALIDATE: FAILED")
+          + (f" (skipped: {', '.join(skipped)})" if skipped else ""))
     return 0 if ok else 1
 
 

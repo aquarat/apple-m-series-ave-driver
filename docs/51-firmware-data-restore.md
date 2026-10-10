@@ -443,3 +443,16 @@ registers, or the `0x1f0` window mapping) — record it in
   blobs byte for byte from their images plus those values (`validate`), so a
   dump is needed only for values the tool does not hold: H13C's tunables (in
   the t6001 dump, not transcribed) and H13G's (unknown, docs/89 §6.3).
+- **2026-10-10, H13C transcribed.** `diff` on the t6001 dump: 147 bytes
+  inside the fill set, 0 outside; `SOC_` 0x6001, `SOCR` 0x11, ave0's
+  `CpAd`/`WrAd`/`IOBA`, and a tunables table with H13S's 21 entries under
+  header `h` 0x11 (H13S: 0x20). With those values and the dump's `STKG`,
+  `build --soc t6001` writes `ave-13.5-data-pristine.bin` byte for byte
+  (sha256 `f1af1ef4…`, the pinned one), so a t6001 needs no RAM dump any
+  more; `validate` covers it, with the same negative controls. Not
+  checked: that every M1 Max has `SOCR` 0x11. iBoot writes the revision of
+  the chip it runs on, and the blob carries the lab machine's. On a chip
+  of another revision, a reload, and ave1's driver-owned DATA (built from
+  this blob at every probe, docs/82), would carry one byte that iBoot would
+  have written differently. The same holds for the H13S and H14G values
+  (one machine each).
