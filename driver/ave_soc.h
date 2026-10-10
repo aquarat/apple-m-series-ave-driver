@@ -15,7 +15,12 @@
 
 #include "ave_version.h"
 
-/* AVE_DPE tunables, one kext CfgSet (ave_dpe_tables.h, docs/58 5.1) */
+/*
+ * AVE_DPE tunables, one kext CfgSet (docs/58 5.1). The values are not in
+ * the source: tools/ave_fwgen.py makes them from the user's macOS 13.5
+ * kernelcache at install time, and the driver loads that file
+ * (ave_soc.dpe_fw, docs/100).
+ */
 struct ave_dpe_tunable {
 	u16	off;
 	u32	clear;
@@ -27,7 +32,7 @@ struct ave_dpe_tunable {
 #define AVE_DPE_CAC_BASE	0xdc400
 
 struct ave_dpe_set {
-	const char			*name;	/* the kext's, "Castor_6000" */
+	const char			*name;	/* the file's, "apple/ave-13.5-dpe-..." */
 	const struct ave_dpe_tunable	*cat_default;
 	unsigned int			n_cat_default;
 	const struct ave_dpe_tunable	*cac_default;
@@ -36,9 +41,12 @@ struct ave_dpe_set {
 	unsigned int			n_cac_8bit;
 };
 
-extern const struct ave_dpe_set ave_dpe_set_castor_6000;
-extern const struct ave_dpe_set ave_dpe_set_acis_8103;
-extern const struct ave_dpe_set ave_dpe_set_atlas_8112;
+/* The generated file: "AVEDPE01", u32 counts (CAT Default, CAC Default,
+ * CAC 8-bit, 0), then {u32 off, u32 clear, u32 set} per entry, LE. */
+#define AVE_DPE_FILE_MAGIC	"AVEDPE01"
+#define AVE_DPE_FW_CASTOR_6000	"apple/ave-13.5-dpe-castor_6000.bin"
+#define AVE_DPE_FW_ACIS_8103	"apple/ave-13.5-dpe-acis_8103.bin"
+#define AVE_DPE_FW_ATLAS_8112	"apple/ave-13.5-dpe-atlas_8112.bin"
 
 /* One row of the kext's AVE_DevInfo table, as sent in the boot handshake */
 struct ave_soc_devrow {
@@ -63,8 +71,8 @@ struct ave_soc {
 	phys_addr_t	dpe_phys;
 	u8		inst;
 
-	/* AVE_DPE tunables for this SoC; NULL = unknown, dpe_tunables is refused */
-	const struct ave_dpe_set *dpe;
+	/* AVE_DPE tunables file for this SoC (AVE_DPE_FW_*); NULL = unknown */
+	const char	*dpe_fw;
 
 	/*
 	 * The session diagnostics read pipe registers (AVE_DPE +0x10140,
@@ -140,6 +148,12 @@ struct ave_soc {
 		 */
 		u64		tag_cpad, tag_wrad, tag_ioba;
 		u32		tag_soc;
+		/*
+		 * docs/100: the tags the pristine blob itself carries, where
+		 * they are another encoder's (t6001's ave1 builds its DATA
+		 * from ave0's blob). 0 = the tags above.
+		 */
+		u64		blob_tag_cpad, blob_tag_wrad, blob_tag_ioba;
 		/*
 		 * Owned DATA only: also accept a pristine blob that is not the
 		 * pinned fw_pristine_sha256 if it verifies against fw_name's

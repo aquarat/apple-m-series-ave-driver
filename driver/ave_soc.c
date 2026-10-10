@@ -6,7 +6,6 @@
 #include <linux/kernel.h>
 
 #include "ave_soc.h"
-#include "ave_dpe_tables.h"
 
 /*
  * t6001, M1 Max (MacBookPro18,2/18,4), macOS 13.5 firmware. Every value
@@ -16,7 +15,7 @@
 const struct ave_soc ave_soc_t6001 = {
 	.name			= "t6001",
 	.pipe_diag		= true,
-	.dpe			= &ave_dpe_set_castor_6000,
+	.dpe_fw		= AVE_DPE_FW_CASTOR_6000,
 	.dpe_phys		= 0x40d100000ULL,
 	.inst			= 0,
 	.fw_name		= "apple/ave_h13c.bin",
@@ -86,6 +85,11 @@ const struct ave_soc ave_soc_t6001 = {
 		.data_size	= 0x134000ULL,
 		.data_dva	= 0xec000ULL,
 		.data_literal	= 0x1f0000ec000ULL,
+		/* docs/100: what a pristine blob of this encoder must carry */
+		.tag_cpad	= 0x40d800000ULL,	/* the ASC bank */
+		.tag_wrad	= 0x40dc00000ULL,
+		.tag_ioba	= 0x40c000000ULL,	/* the fabric bank */
+		.tag_soc	= 0x6001,
 	},
 
 	.me1_node		= "/soc/power-management@28e580000/power-controller@8020",
@@ -116,7 +120,7 @@ const struct ave_soc ave_soc_t6001 = {
 const struct ave_soc ave_soc_t6001_ave1 = {
 	.name			= "t6001-ave1",
 	.pipe_diag		= true,
-	.dpe			= &ave_dpe_set_castor_6000,
+	.dpe_fw		= AVE_DPE_FW_CASTOR_6000,
 	.dpe_phys		= 0x507100000ULL,
 	.inst			= 1,
 	.fw_name		= "apple/ave_h13c.bin",
@@ -181,6 +185,10 @@ const struct ave_soc ave_soc_t6001_ave1 = {
 		.tag_cpad	= 0x507800000ULL,
 		.tag_wrad	= 0x507c00000ULL,
 		.tag_ioba	= 0x506000000ULL,
+		/* the blob is ave0's (docs/100) */
+		.blob_tag_cpad	= 0x40d800000ULL,
+		.blob_tag_wrad	= 0x40dc00000ULL,
+		.blob_tag_ioba	= 0x40c000000ULL,
 	},
 
 	.me1_node		= "/soc/power-management@28e680000/power-controller@8020",
@@ -204,7 +212,7 @@ const struct ave_soc_set ave_soc_set_t6001 = {
  */
 const struct ave_soc ave_soc_t8103 = {
 	.name			= "t8103",
-	.dpe			= &ave_dpe_set_acis_8103,
+	.dpe_fw		= AVE_DPE_FW_ACIS_8103,
 	.dpe_phys		= 0x267100000ULL,
 	.inst			= 0,
 	/* AppleAVE2FW_H13G.im4p, 13.5 (22G74), 1327864 bytes unwrapped */
@@ -355,7 +363,7 @@ const struct ave_soc_set ave_soc_set_t8103 = {
 const struct ave_soc ave_soc_t6000 = {
 	.name			= "t6000",
 	.pipe_diag		= true,		/* t6001's ave0 hardware */
-	.dpe			= &ave_dpe_set_castor_6000,	/* DevID 14, as t6001 sends */
+	.dpe_fw		= AVE_DPE_FW_CASTOR_6000,	/* DevID 14, as t6001 sends */
 	.dpe_phys		= 0x40d100000ULL,
 	.inst			= 0,
 	.fw_name		= "apple/ave_h13s.bin",
@@ -386,6 +394,11 @@ const struct ave_soc ave_soc_t6000 = {
 		.data_size	= 0x128000ULL,
 		.data_dva	= 0xd0000ULL,
 		.data_literal	= 0x1f0000d0000ULL,
+		/* docs/100: what a pristine blob of this encoder must carry */
+		.tag_cpad	= 0x40d800000ULL,
+		.tag_wrad	= 0x40dc00000ULL,
+		.tag_ioba	= 0x40c000000ULL,
+		.tag_soc	= 0x6000,
 	},
 	.fw_pristine_sha256	= {
 		0x36, 0xd8, 0x28, 0x53, 0xea, 0x46, 0x48, 0xab,
@@ -437,8 +450,8 @@ const struct ave_soc_set ave_soc_set_t6000 = {
  *
  * AppleAVE2FW_H14G (same build tag as H13x), TEXT 0xd0000 / DATA vm 0xd0000
  * +0x128000 like H13S, STKG at DATA+0x35d8; device row 18/15/10 from the
- * 13.5 kext table; AVE_DPE tunables Atlas_8112 from the M2's own
- * kernelcache; the same MMIO, DART and power-domain addresses as t8103.
+ * 13.5 kext table; AVE_DPE tunables Atlas_8112 (generated at install
+ * time, docs/100); the same MMIO, DART and power-domain addresses as t8103.
  *
  * What differs (docs/90 §3): dart-ave is a "dart,t8110" (dart_t8110), and
  * the core fetches its firmware through it. RVBAR holds 0x800000000, the
@@ -449,7 +462,7 @@ const struct ave_soc_set ave_soc_set_t6000 = {
  */
 const struct ave_soc ave_soc_t8112 = {
 	.name			= "t8112",
-	.dpe			= &ave_dpe_set_atlas_8112,
+	.dpe_fw		= AVE_DPE_FW_ATLAS_8112,
 	.pipe_diag		= false,	/* pipe register map not checked on t8112 */
 	.dpe_phys		= 0x267100000ULL,
 	.inst			= 0,
@@ -504,6 +517,11 @@ const struct ave_soc ave_soc_t8112 = {
 		.data_dva	= 0x8000d0000ULL,
 		.data_literal	= 0x8000d0000ULL,
 		.translated	= true,
+		/* docs/100: what a pristine blob of this encoder must carry */
+		.tag_cpad	= 0x267800000ULL,
+		.tag_wrad	= 0x267c00000ULL,
+		.tag_ioba	= 0,
+		.tag_soc	= 0x8112,
 	},
 
 	/* As on t8103: neither ME domain has a phandle; siblings under pipe4 + pipe5 */
@@ -636,7 +654,7 @@ const struct ave_soc_set ave_soc_set_t8112 = {
 static const struct ave_soc ave_soc_t6002_ave0 = {
 	.name			= "t6002",
 	.pipe_diag		= true,		/* t6001's ave0 hardware */
-	.dpe			= &ave_dpe_set_castor_6000,	/* DevID 14-16 share it */
+	.dpe_fw		= AVE_DPE_FW_CASTOR_6000,	/* DevID 14-16 share it */
 	.dpe_phys		= 0x40d100000ULL,
 	.inst			= 0,
 	.fw_name		= "apple/ave_h13d.bin",
@@ -656,8 +674,9 @@ static const struct ave_soc ave_soc_t6002_ave0 = {
 	.dapf_mmio_adt		= { 0x506000000ULL, 0x507c6c000ULL },	/* ave1's span */
 	.dapf_by_driver		= true,
 
-	/* iBoot's own DATA; the tags are only used for owned DATA */
-	.iboot = T6002_IBOOT(T6002_AVE0_TEXT_PHYS, T6002_AVE0_DATA_PHYS, 0, 0, 0),
+	/* iBoot's own DATA; the tags are what a pristine blob must carry */
+	.iboot = T6002_IBOOT(T6002_AVE0_TEXT_PHYS, T6002_AVE0_DATA_PHYS,
+			     0x40d800000ULL, 0x40dc00000ULL, 0x40c000000ULL),
 
 	.me1_node		= "/soc@200000000/power-management@28e580000/power-controller@8020",
 	.me1_label		= "venc_me1",
@@ -675,7 +694,7 @@ static const struct ave_soc ave_soc_t6002_ave0 = {
 static const struct ave_soc ave_soc_t6002_ave1 = {
 	.name			= "t6002-ave1",
 	.pipe_diag		= true,
-	.dpe			= &ave_dpe_set_castor_6000,
+	.dpe_fw		= AVE_DPE_FW_CASTOR_6000,
 	.dpe_phys		= 0x507100000ULL,
 	.inst			= 1,
 	.fw_name		= "apple/ave_h13d.bin",
@@ -711,7 +730,7 @@ static const struct ave_soc ave_soc_t6002_ave1 = {
 static const struct ave_soc ave_soc_t6002_ave2 = {
 	.name			= "t6002-ave2",
 	.pipe_diag		= true,
-	.dpe			= &ave_dpe_set_castor_6000,
+	.dpe_fw		= AVE_DPE_FW_CASTOR_6000,
 	.dpe_phys		= 0x240d100000ULL,
 	.inst			= 2,
 	.fw_name		= "apple/ave_h13d.bin",
@@ -742,7 +761,7 @@ static const struct ave_soc ave_soc_t6002_ave2 = {
 static const struct ave_soc ave_soc_t6002_ave3 = {
 	.name			= "t6002-ave3",
 	.pipe_diag		= true,
-	.dpe			= &ave_dpe_set_castor_6000,
+	.dpe_fw		= AVE_DPE_FW_CASTOR_6000,
 	.dpe_phys		= 0x2507100000ULL,
 	.inst			= 3,
 	.fw_name		= "apple/ave_h13d.bin",

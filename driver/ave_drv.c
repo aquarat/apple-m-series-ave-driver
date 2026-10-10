@@ -14,6 +14,7 @@
 
 #include <linux/array_size.h>
 #include <linux/delay.h>
+#include <linux/firmware.h>
 #include <linux/iopoll.h>
 #include <linux/dma-mapping.h>
 #include <linux/kernel.h>
@@ -28,6 +29,7 @@
 #include <linux/reset.h>
 #include <linux/slab.h>
 #include <linux/suspend.h>
+#include <linux/unaligned.h>
 
 #include "ave.h"
 #include "ave_dapf.h"
@@ -234,8 +236,9 @@ MODULE_PARM_DESC(pmp_vote_always,
  * AVE_HwC::PowerOn -> ResetDPE -> AVE_DPE::Reset applies the Castor_6000 CAT and
  * CAC Default tables, then CAC 8-bit and AVE_DPE::Enable. The firmware never
  * touches the block and neither did this driver, so the pipe has run with it
- * at reset defaults. dpe_tunables=1 applies exactly those tables, generated
- * from the kext (ave_dpe_tables.h).
+ * at reset defaults. dpe_tunables=1 applies exactly those tables, from the
+ * file the fetch tool generates from the user's kernelcache (soc->dpe_fw,
+ * docs/100).
  */
 /* Default on since f68: every working encode needed it (docs/53). */
 static bool dpe_tunables = true;
@@ -600,19 +603,91 @@ static void ave_dpe_apply(struct ave_device *ave, u32 base,
  * 0x40D1DC400 |= 3, 0x40D1DC000 |= 1 (0x48e0..0x4908, 0x4b50..0x4b78).
  * Every value is read back against the table.
  */
+/*
+ * docs/100: the CfgSet as tools/ave_fwgen.py writes it from the user's
+ * kernelcache. Checked for shape only: every offset a 32-bit register inside
+ * the 0x400-byte CAT/CAC window, the counts what the kext's tables hold at
+ * most. Loaded once; the copy lives as long as the device.
+ */
+static int ave_dpe_load(struct ave_device *ave)
+{
+	const char *name = ave->soc->dpe_fw;
+	const struct firmware *fw;
+	struct ave_dpe_tunable *t;
+	u32 n[3], i, total;
+	const u8 *e;
+	int ret;
+
+	if (ave->dpe_loaded)
+		return 0;
+	ret = request_firmware(&fw, name, ave->dev);
+	if (ret) {
+		dev_err(ave->dev,
+			"dpe: cannot load %s (%d): it is generated on this machine from Apple's macOS 13.5 kernelcache; run apple-ave-fetch-firmware (docs/100)\n",
+			name, ret);
+		return ret;
+	}
+	ret = -EINVAL;
+	if (fw->size < 24 || memcmp(fw->data, AVE_DPE_FILE_MAGIC, 8))
+		goto bad;
+	total = 0;
+	for (i = 0; i < 3; i++) {
+		n[i] = get_unaligned_le32(fw->data + 8 + 4 * i);
+		if (n[i] > 512)
+			goto bad;
+		total += n[i];
+	}
+	if (fw->size != 24 + 12 * (size_t)total || !total)
+		goto bad;
+	t = devm_kcalloc(ave->dev, total, sizeof(*t), GFP_KERNEL);
+	if (!t) {
+		ret = -ENOMEM;
+		goto out;
+	}
+	for (i = 0, e = fw->data + 24; i < total; i++, e += 12) {
+		u32 off = get_unaligned_le32(e);
+
+		if (off >= 0x400 || off & 3)
+			goto bad;
+		t[i].off = off;
+		t[i].clear = get_unaligned_le32(e + 4);
+		t[i].set = get_unaligned_le32(e + 8);
+	}
+	ave->dpe.name = name;
+	ave->dpe.cat_default = t;
+	ave->dpe.n_cat_default = n[0];
+	ave->dpe.cac_default = t + n[0];
+	ave->dpe.n_cac_default = n[1];
+	ave->dpe.cac_8bit = t + n[0] + n[1];
+	ave->dpe.n_cac_8bit = n[2];
+	ave->dpe_loaded = true;
+	ret = 0;
+	goto out;
+bad:
+	dev_err(ave->dev, "dpe: %s is not an AVE DPE tunables file (%zu bytes); regenerate it with apple-ave-fetch-firmware\n",
+		name, fw->size);
+out:
+	release_firmware(fw);
+	return ret;
+}
+
 static int ave_dpe_program(struct ave_device *ave)
 {
-	const struct ave_dpe_set *set = ave->soc->dpe;
+	const struct ave_dpe_set *set = &ave->dpe;
 	unsigned int i, bad = 0;
+	int ret;
 
 	if (!dpe_tunables)
 		return 0;
 	/* Another SoC's table is not a default: t6001's fails read-back on t8103 */
-	if (!set) {
+	if (!ave->soc->dpe_fw) {
 		dev_warn(ave->dev, "dpe: no AVE_DPE tunables known for %s; block left at reset defaults\n",
 			 ave->soc->name);
 		return 0;
 	}
+	ret = ave_dpe_load(ave);
+	if (ret)
+		return ret;
 
 	ave_dpe_log(ave, "before");
 	ave_dpe_apply(ave, AVE_DPE_CAT_BASE, set->cat_default, set->n_cat_default);
@@ -2149,6 +2224,8 @@ iop_config_done:
 		 * (docs/31 2026-09-13, docs/45 row 32). Without it the second
 		 * start in a boot is silent. No-op unless fw_restore_data=1.
 		 */
+		/* docs/100: keep this boot's cold DATA, before anything writes it */
+		ave_fw_capture_cold(ave);
 		ret = ave_fw_restore_data(ave);
 		if (ret)
 			return dev_err_probe(dev, ret, "stage-13 DATA restore\n");

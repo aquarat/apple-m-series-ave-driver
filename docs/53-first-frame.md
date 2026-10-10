@@ -4373,3 +4373,13 @@ Plan and the "no" of each run: docs/99 §5. d1 and d2 are the same run
 (repeat before believing); d3 (`iboot_adt=0`) is the control; d4 (stock
 m1n1) needs the operator's decision to swap m1n1; d5 is the docs/84 soak
 and `v4l2-compliance` on this build.
+
+## c1-c4 (planned 2026-10-10, not run): generated DPE tables, captured pristine DATA (docs/100)
+
+The driver no longer carries the AVE_DPE tables (it loads
+`apple/ave-13.5-dpe-<set>.bin`, generated from the kernelcache) and keeps
+this boot's cold DATA itself (`fw_capture`, debugfs
+`apple_ave[N]_iboot_data`). Compiled, not loaded. c1: the first load reads
+back the generated tables and captures DATA equal to the reference dump
+except STKG; c2 repeats it; c3 reloads from the captured blob; c4 recovers
+a forced hang from the in-memory copy. Each run's "no": docs/100 §6.

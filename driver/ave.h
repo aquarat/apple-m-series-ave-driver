@@ -10,6 +10,7 @@
 #ifndef __AVE_H__
 #define __AVE_H__
 
+#include <linux/debugfs.h>
 #include <linux/delay.h>
 #include <linux/device.h>
 #include <linux/io.h>
@@ -155,6 +156,21 @@ struct ave_device {
 	 * unload.
 	 */
 	u8			*iboot_data_pristine;
+	/*
+	 * AVE_DPE tunables from soc->dpe_fw, loaded at the first power-on
+	 * (ave_dpe_load) and kept for every later one (reload, resume).
+	 */
+	struct ave_dpe_set	dpe;
+	bool			dpe_loaded;
+	/*
+	 * docs/100: this boot's DATA as iBoot left it, copied at the first
+	 * start of a boot and checked against the image; exposed read-only
+	 * in debugfs (apple_ave[N]_iboot_data) so that the fetch tool can keep
+	 * it as the pristine blob for reloads in later boots.
+	 */
+	u8			*iboot_data_cold;
+	struct debugfs_blob_wrapper	cold_blob;
+	struct dentry		*cold_dentry;
 	/* dart-ave0 SMMU, read-only fault watch (ave_smmu.c, smmu_watch). */
 	void __iomem		*smmu;
 	int			smmu_irq;
@@ -346,6 +362,7 @@ int ave_fw_map_text_mode(void);
 int ave_fw_restore_data(struct ave_device *ave);
 int ave_fw_data_ran(struct ave_device *ave);
 int ave_fw_placement_from_adt(struct ave_device *ave);
+void ave_fw_capture_cold(struct ave_device *ave);
 
 /* ave_ipc.c */
 int ave_boot_config(struct ave_device *ave);

@@ -28,6 +28,7 @@
  */
 
 #include <linux/crc32.h>
+#include <linux/debugfs.h>
 #include <linux/dma-mapping.h>
 #include <linux/unaligned.h>
 #include <linux/firmware.h>
@@ -1076,11 +1077,13 @@ static const struct macho_seg *ave_fw_find_seg(const struct firmware *fw,
  *   - the tunables region starts with the file's table header (version,
  *     kind, capacity) and a count no larger than the capacity;
  *   - CpAd/WrAd/IOBA hold this row's tags and SOC_ its SoC id.
- * What it cannot prove is that iBoot's tunable VALUES are right; the tool
- * that builds the blob states where they came from
- * (tools/data_blob_from_image.py).
- * The in-place path never takes such a blob: there the blob is compared with
- * and written over iBoot's live DATA, and only the pinned dump is trusted.
+ * What it cannot prove is that iBoot's tunable VALUES are right. docs/100:
+ * they come from this machine - the blob is the cold DATA the driver copied
+ * at the first start of a boot (ave_fw_capture_cold), kept by the fetch
+ * tool - or, for t8103's owned DATA, the image's own empty table. Since
+ * docs/100 the in-place path takes such a blob too: the driver source pins
+ * no Apple data, and a blob of this machine differs from iBoot's DATA of
+ * this boot only in STKG, which is random per boot.
  */
 static int ave_fw_blob_by_image(struct ave_device *ave, const u8 *blob)
 {
@@ -1178,9 +1181,9 @@ static int ave_fw_blob_by_image(struct ave_device *ave, const u8 *blob)
 			8, blob + tun_off);
 		goto out;
 	}
-	if (get_unaligned_le64(blob + foff[3]) != ib->tag_cpad ||
-	    get_unaligned_le64(blob + foff[4]) != ib->tag_wrad ||
-	    get_unaligned_le64(blob + foff[5]) != ib->tag_ioba ||
+	if (get_unaligned_le64(blob + foff[3]) != (ib->blob_tag_cpad ?: ib->tag_cpad) ||
+	    get_unaligned_le64(blob + foff[4]) != (ib->blob_tag_cpad ? ib->blob_tag_wrad : ib->tag_wrad) ||
+	    get_unaligned_le64(blob + foff[5]) != (ib->blob_tag_cpad ? ib->blob_tag_ioba : ib->tag_ioba) ||
 	    (ib->tag_soc && get_unaligned_le32(blob + foff[1]) != ib->tag_soc)) {
 		dev_err(ave->dev, "pristine by image: REFUSING - the blob's SOC_ %#x CpAd %#llx WrAd %#llx IOBA %#llx are not %s's\n",
 			get_unaligned_le32(blob + foff[1]),
@@ -1228,8 +1231,8 @@ static int ave_fw_load_pristine(struct ave_device *ave)
 	ret = request_firmware(&fw, path, ave->dev);
 	if (ret) {
 		dev_err(ave->dev,
-			"fw_restore_data: no pristine blob at %s (%d). Build it with "
-			"tools/make_ave_data_blob.py and install at /lib/firmware/%s\n",
+			"fw_restore_data: no pristine blob at %s (%d). The first start of a boot keeps one "
+			"(docs/100: apple-ave-fetch-firmware --capture installs it at /lib/firmware/%s)\n",
 			path, ret, ave->soc->fw_pristine_name);
 		return ret;
 	}
@@ -1242,22 +1245,18 @@ static int ave_fw_load_pristine(struct ave_device *ave)
 	}
 
 	sha256(fw->data, fw->size, dig);
-	if (memcmp(dig, ave->soc->fw_pristine_sha256, sizeof(dig)) &&
-	    ave->soc->iboot.blob_by_image && ave_fw_data_owned(ave)) {
+	/*
+	 * docs/100: the reference dump's sha256 is only a shortcut. Any other
+	 * blob - this machine's, kept by the fetch tool - is checked byte for
+	 * byte against the image, in place and owned alike.
+	 */
+	if (memcmp(dig, ave->soc->fw_pristine_sha256, sizeof(dig))) {
 		dev_info(ave->dev,
-			 "fw_restore_data: %s sha256 %*phN is not the pinned blob; verifying it against the image (owned DATA)\n",
+			 "fw_restore_data: %s sha256 %*phN is not the reference dump's; verifying it against the image\n",
 			 path, (int)sizeof(dig), dig);
 		ret = ave_fw_blob_by_image(ave, fw->data);
 		if (ret)
 			goto out;
-	} else if (memcmp(dig, ave->soc->fw_pristine_sha256, sizeof(dig))) {
-		dev_err(ave->dev,
-			"fw_restore_data: REFUSING - %s sha256 %*phN, expected %*phN\n",
-			path, (int)sizeof(dig), dig,
-			(int)sizeof(ave->soc->fw_pristine_sha256),
-			ave->soc->fw_pristine_sha256);
-		ret = -EINVAL;
-		goto out;
 	}
 
 	buf = vmalloc(ave->soc->iboot.data_size);
@@ -1282,6 +1281,76 @@ static int ave_fw_load_pristine(struct ave_device *ave)
 out:
 	release_firmware(fw);
 	return ret;
+}
+
+/*
+ * docs/100: this boot's pristine DATA, from the machine itself.
+ *
+ * Called at stage 13, before the core starts and before any restore. Where
+ * the core runs on iBoot's DATA in place, copy that DATA (a read through a
+ * cacheable mapping of memory Linux does not own; no register is touched)
+ * and keep it only if ave_fw_blob_by_image() accepts it: every byte outside
+ * iBoot's fill set equal to the image, this encoder's tags. A core that has
+ * run on it rewrites ~300 000 bytes (docs/84 §4), so a second start in the
+ * same boot is never mistaken for a cold one.
+ *
+ * The copy then serves as the pristine DATA for this module's life (hang
+ * recovery, resume), and debugfs exposes it as apple_ave[N]_iboot_data
+ * (root, read-only) for apple-ave-fetch-firmware --capture, which keeps it
+ * for reloads in later boots. Never fatal.
+ */
+static bool fw_capture = true;
+module_param(fw_capture, bool, 0444);
+MODULE_PARM_DESC(fw_capture,
+		 "copy this boot's cold firmware DATA before the first start, check it against the image, and offer it in debugfs as the pristine blob (default 1; docs/100)");
+
+void ave_fw_capture_cold(struct ave_device *ave)
+{
+	const typeof(ave->soc->iboot) *ib = &ave->soc->iboot;
+	bool as_pristine = false;
+	char name[32];
+	u8 *copy;
+	void *p;
+
+	if (!fw_capture || ave->iboot_data_cold || ave_fw_data_owned(ave) ||
+	    !ib->data_phys || ave->fw_abi != AVE_ABI_MACOS_13_5)
+		return;
+	if (ave_fw_check_iboot_placement(ave))
+		return;
+	copy = vmalloc(ib->data_size);
+	if (!copy)
+		return;
+	p = memremap(ib->data_phys, ib->data_size, ARCH_MEMREMAP_PMEM);
+	if (!p) {
+		vfree(copy);
+		return;
+	}
+	memcpy(copy, p, ib->data_size);
+	memunmap(p);
+	if (ave_fw_blob_by_image(ave, copy)) {
+		dev_info(ave->dev, "capture: DATA not kept: not this image's cold DATA (has a core run on it this boot? see above)\n");
+		vfree(copy);
+		return;
+	}
+	ave->iboot_data_cold = copy;
+	if (!ave->iboot_data_pristine) {
+		ave->iboot_data_pristine = vmalloc(ib->data_size);
+		if (ave->iboot_data_pristine) {
+			memcpy(ave->iboot_data_pristine, copy, ib->data_size);
+			as_pristine = true;
+		}
+	}
+	ave->cold_blob.data = copy;
+	ave->cold_blob.size = ib->data_size;
+	if (ave->soc->inst)
+		snprintf(name, sizeof(name), "apple_ave%u_iboot_data", ave->soc->inst);
+	else
+		snprintf(name, sizeof(name), "apple_ave_iboot_data");
+	ave->cold_dentry = debugfs_create_blob(name, 0400, NULL, &ave->cold_blob);
+	dev_info(ave->dev, "capture: this boot's cold DATA kept (%#llx bytes, STKG %#llx)%s; /sys/kernel/debug/%s\n",
+		 ib->data_size, get_unaligned_le64(copy + ave->soc->data_stkg_off),
+		 as_pristine ? ", the pristine DATA for this load" : "",
+		 name);
 }
 
 /*
@@ -1782,6 +1851,13 @@ void ave_fw_unload(struct ave_device *ave)
 	if (ave->iboot_data_pristine) {
 		vfree(ave->iboot_data_pristine);
 		ave->iboot_data_pristine = NULL;
+	}
+	/* docs/100: the debugfs file first, then the bytes it points at */
+	debugfs_remove(ave->cold_dentry);
+	ave->cold_dentry = NULL;
+	if (ave->iboot_data_cold) {
+		vfree(ave->iboot_data_cold);
+		ave->iboot_data_cold = NULL;
 	}
 
 	if (!ave->fw.cpu)
