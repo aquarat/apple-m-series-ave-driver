@@ -67,6 +67,15 @@ const struct ave_soc ave_soc_t6001 = {
 	.dapf_window		= { 0x1f000000000ULL, 0x1f0fffffffcULL },
 	.dapf_mmio_own		= { 0x40d050000ULL, 0x40dc69000ULL },
 	.dapf_mmio_adt		= { 0x506000000ULL, 0x507c6c000ULL },
+	/*
+	 * Stock m1n1 does not program dart-ave0's DAPF; the lab machine's
+	 * patched m1n1 does (docs/50). The driver writes the same three
+	 * ranges itself, as on t6000 and t6002's ave0, the same hardware
+	 * (docs/84 §3: non-posted writes take effect and m1n1 sets no
+	 * lock). Behind the patched m1n1 this rewrites what m1n1 wrote, in
+	 * another slot order. Not yet run on t6001 (docs/53, d1-d3).
+	 */
+	.dapf_by_driver		= true,
 
 	/* This machine's iBoot, 13.5 image (docs/43, docs/44 §2.4) */
 	.iboot = {
