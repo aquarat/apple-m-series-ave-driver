@@ -1,5 +1,5 @@
 From 1ae6361a69df2c699eff5a65c0350f3d87c05b77 Mon Sep 17 00:00:00 2001
-From: apple-ave-driver <blue@aquarat.co.uk>
+From: aquarat <3090997+aquarat@users.noreply.github.com>
 Date: Sun, 13 Sep 2026 18:26:27 +0100
 Subject: [PATCH] dapf: program dart-ave0 and append the AVE TEXT entry if
  missing
