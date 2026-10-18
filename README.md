@@ -4,7 +4,9 @@ This repository is almost entirely AI-generated (Claude Opus models specifically
 
 This driver is alpha work and has been used on an M1 Max, an M1 Pro, an M2 Mac mini and (by a fork's author) an M1 machine so far. Before using it, make sure it's right for you.
 
-As per the documents the work has been tested extensively (several hours now), but has some specific shortcomings that I _largely_ don't care about.
+As per the documents the work has been tested extensively (several hundred hours of encoding now), but has some specific shortcomings that I _largely_ don't care about. Specific shortcomings are around quality, which is due to the hardware rather than this driver. If you need lower efficiency HEVC/H.264 encoding, this driver is fantastic, but if you need high quality encoding for archive purposes, libx265 is the way to go.
+
+Contributions here are very welcome ❤️
 
 And now... over to the machine (largely):
 
