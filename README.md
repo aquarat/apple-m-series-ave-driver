@@ -2,11 +2,11 @@
 
 This repository is almost entirely AI-generated (Claude Opus models specifically, some Fable). The purpose of this work is to produce a working H.264 and HEVC Apple Video Encoder hardware driver for Linux running on M-series machines. This work was created in the interests of interoperability and allowing open source software to run efficiently on ageing hardware.
 
-This driver is alpha work and has been used on an M1 Max, two M1 Pros (Fedora and Arch Linux ARM), an M2 Mac mini and (by a fork's author) an M1 machine so far. Before using it, make sure it's right for you.
+This driver is beta work and has been used on an M1 Max, an M1 Pro, an M2 Mac mini and (by a fork's author) an M1 machine so far. Before using it, make sure it's right for you.
 
-As per the documents the work has been tested extensively (several hundred hours of encoding now), but has some specific shortcomings that I _largely_ don't care about. Specific shortcomings are around quality, which is due to the hardware rather than this driver. If you need lower efficiency HEVC/H.264 encoding, this driver is fantastic, but if you need high quality encoding for archive purposes, libx265 is the way to go.
+Although "beta" this work has been tested and used extensively (several hundred hours of encoding now), but has some specific shortcomings that I _largely_ don't care about. Specific shortcomings are around quality, which is due to the hardware rather than this driver. If you need lower efficiency (bitrate-wise) HEVC/H.264 encoding (but very energy efficient), this driver is fantastic, but if you need high quality encoding for archive purposes, libx265 is the way to go.
 
-Contributions here are very welcome ❤️
+Contributions here are very welcome, and they can be vibe-coded, but should ideally be self-reviewed and tested. Don't be shy ❤️
 
 And now... over to the machine (largely):
 
