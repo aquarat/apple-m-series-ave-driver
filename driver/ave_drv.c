@@ -1464,8 +1464,13 @@ static int ave_core_reset(struct ave_device *ave, bool *pulsed, bool resume)
 	 * not past a DAPF entry, and iBoot leaves that DAPF empty; what must
 	 * hold there is only that the reset did not change it.
 	 */
-	if (after != before || (!admits && !ave->soc->iboot.translated)) {
+	if (after != before) {
 		dev_err(dev, "core reset: the DAPF changed; not starting the core - Linux cannot put those entries back (docs/49), only a reboot can\n");
+		return -ENODEV;
+	}
+	if (!admits && !ave->soc->iboot.translated) {
+		/* issue #5: a DAPF that survived but was never programmed */
+		dev_err(dev, "core reset: the DAPF survived but does not admit the TEXT fetch (nothing has programmed it yet this boot); not starting the core\n");
 		return -ENODEV;
 	}
 	if (!(st & AVE_ASC_ST_STOPPED)) {
@@ -2692,7 +2697,18 @@ static void ave_remove(struct platform_device *pdev)
 	if (ave_session_close_client(ave))
 		clean_teardown = false;
 
-	if (ave_session_halt_requested()) {
+	/*
+	 * Issue #5: a staged load that stopped before stage 13 (stop_after
+	 * <= 12) never released the core, so there is nothing to halt.
+	 * Asking anyway failed (Halt needs Config, which never ran), marked
+	 * the teardown unclean and leaked the DATA mapping, and the next
+	 * full load in that boot refused with -EEXIST. A core released at
+	 * stage 13 still goes through Halt, and still leaks if it fails.
+	 */
+	if (ave_session_halt_requested() && !ave->asc_started) {
+		dev_info(ave->dev,
+			 "remove: the core was never started (staged load); nothing to halt\n");
+	} else if (ave_session_halt_requested()) {
 		int hret = ave_session_halt(ave);
 
 		if (hret) {
