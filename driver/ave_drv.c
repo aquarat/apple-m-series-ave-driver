@@ -2692,7 +2692,18 @@ static void ave_remove(struct platform_device *pdev)
 	if (ave_session_close_client(ave))
 		clean_teardown = false;
 
-	if (ave_session_halt_requested()) {
+	/*
+	 * Issue #5: a staged load that stopped before stage 13 (stop_after
+	 * <= 12) never released the core, so there is nothing to halt.
+	 * Asking anyway failed (Halt needs Config, which never ran), marked
+	 * the teardown unclean and leaked the DATA mapping, and the next
+	 * full load in that boot refused with -EEXIST. A core released at
+	 * stage 13 still goes through Halt, and still leaks if it fails.
+	 */
+	if (ave_session_halt_requested() && !ave->asc_started) {
+		dev_info(ave->dev,
+			 "remove: the core was never started (staged load); nothing to halt\n");
+	} else if (ave_session_halt_requested()) {
 		int hret = ave_session_halt(ave);
 
 		if (hret) {

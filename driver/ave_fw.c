@@ -1446,15 +1446,17 @@ static u64 ave_fw_diff_pristine(struct ave_device *ave, const u8 *live,
  */
 /*
  * docs/84 §4: has a core run on this boot's DATA? iBoot's image differs
- * from the pristine blob only in STKG (random per boot, docs/31 R3); a run
- * rewrites ~300 000 bytes. Read-only. 1 = it ran, 0 = cold, < 0 = cannot
- * tell (no blob, placement not this machine's) - treat as cold.
+ * from the pristine blob only in STKG (random per boot, docs/31 R3) when the
+ * blob is this machine's, and in some of iBoot's fill bytes when it is not
+ * (issue #5); a run rewrites ~300 000 bytes. Read-only towards the block.
+ * 1 = it ran, 0 = cold, < 0 = cannot tell (no blob, placement not this
+ * machine's) - treat as cold.
  */
 int ave_fw_data_ran(struct ave_device *ave)
 {
 	u64 bytes = 0;
 	size_t off;
-	u8 *p;
+	u8 *p, *live;
 	int ret;
 
 	/*
@@ -1483,10 +1485,48 @@ int ave_fw_data_ran(struct ave_device *ave)
 		if (p[off] != ave->iboot_data_pristine[off] &&
 		    (off < ave->soc->data_stkg_off || off >= ave->soc->data_stkg_off + 8))
 			bytes++;
+	/*
+	 * iBoot's fills are 32 bytes of tags plus the 488-byte tunables
+	 * region (docs/89 §6.3); anything past a page of drift is a run.
+	 */
+	if (!bytes || bytes > SZ_4K) {
+		memunmap(p);
+		dev_info(ave->dev, "reload: DATA differs from pristine in %llu byte(s) besides STKG: %s\n",
+			 bytes, bytes ? "a core has run on this boot" : "cold");
+		return bytes ? 1 : 0;
+	}
+
+	/*
+	 * Issue #5: a blob whose iBoot fills are not this machine's (built
+	 * with --tunables none, or another unit's tags) differs from cold
+	 * DATA too - by 124 bytes on a j293, all of them tunables. A run
+	 * rewrites ~291 600 bytes outside the fills (docs/84 §4), so ask the
+	 * question ave_fw_capture_cold() asks: is live DATA still the image
+	 * plus iBoot's fills? If so the core has not run, and live DATA is
+	 * this boot's exact pristine, so it replaces the file's for any
+	 * restore later in this module's life.
+	 */
+	dev_info(ave->dev, "reload: DATA differs from pristine in %llu byte(s) besides STKG; checking live DATA against the image (after a run this refuses)\n",
+		 bytes);
+	live = vmalloc(ave->soc->iboot.data_size);
+	if (!live) {
+		memunmap(p);
+		return 1;	/* as before: drift means "has run" */
+	}
+	memcpy(live, p, ave->soc->iboot.data_size);
 	memunmap(p);
-	dev_info(ave->dev, "reload: DATA differs from pristine in %llu byte(s) besides STKG: %s\n",
-		 bytes, bytes ? "a core has run on this boot" : "cold");
-	return bytes ? 1 : 0;
+	if (ave_fw_blob_by_image(ave, live)) {
+		vfree(live);
+		dev_info(ave->dev, "reload: live DATA is not the image's: a core has run on this boot\n");
+		return 1;
+	}
+	dev_warn(ave->dev, "reload: cold - live DATA is the image's, so the %llu byte(s) are the pristine blob's own fills (tunables or tags) that are not this machine's. Rebuild it with tools/data_blob_from_image.py --tunables dump from a fresh physdump (docs/89 §7), or let apple-ave-fetch-firmware --capture keep this boot's (docs/100). Using live DATA as pristine for this load\n",
+		 bytes);
+	if (fw_restore_stkg)
+		put_unaligned_le64(fw_restore_stkg, live + ave->soc->data_stkg_off);
+	vfree(ave->iboot_data_pristine);
+	ave->iboot_data_pristine = live;
+	return 0;
 }
 
 int ave_fw_restore_data(struct ave_device *ave)
