@@ -134,7 +134,7 @@ time, all made by the fetch tool on the user's machine.
 Install the built modules under `/lib/modules/<kernel>/extra/` (DKMS does),
 not `/usr/local/lib`: on Fedora with SELinux enforcing, a service that
 `insmod`s a module labelled `lib_t` is denied `module_load`, while `extra/`
-gives `modules_object_t` (docs/89 §10.4, issue #5).
+gives `modules_object_t` (docs/89 §10.5, issue #5).
 
 ## 5. Unchanged
 
