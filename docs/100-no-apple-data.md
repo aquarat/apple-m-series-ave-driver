@@ -117,7 +117,7 @@ Per SoC:
 |---|---|
 | t6000, t8112, t6002 (all four) | captured at the first start of a boot; not needed for that boot's first load |
 | t6001 | captured from ave0; ave1 (driver-owned DATA) needs it, so ave1 comes up from the boot after the capture |
-| t8103 | iBoot's DATA lies in Linux's RAM on stock m1n1 (docs/89 §6), so nothing can be captured; built from the image with the empty tunables table, as before (`544d57d7…`) |
+| t8103 | where iBoot's DATA lies in Linux's RAM on stock m1n1 (the j274, docs/89 §6) nothing can be captured, so the blob is built from the image with the empty tunables table, as before (`544d57d7…`). Where DATA stays in place (a j293, docs/89 §10) that blob differs from live DATA in the tunables; the driver recognises this as cold and uses live DATA (issue #5). An exact blob for such a machine comes from `data_blob_from_image.py --tunables dump` |
 
 **Identity check, offline.** `check_pristine` (Python) accepts the t6001
 reference dump as a capture of ave0 and refuses it for ave1's own tags,
@@ -130,6 +130,11 @@ Nothing from Apple. `make -C driver` builds without any generated header;
 the module asks for `apple/ave_<variant>.bin`,
 `apple/ave-13.5-dpe-<set>.bin` and (for reloads) the pristine blob at run
 time, all made by the fetch tool on the user's machine.
+
+Install the built modules under `/lib/modules/<kernel>/extra/` (DKMS does),
+not `/usr/local/lib`: on Fedora with SELinux enforcing, a service that
+`insmod`s a module labelled `lib_t` is denied `module_load`, while `extra/`
+gives `modules_object_t` (docs/89 §10.4, issue #5).
 
 ## 5. Unchanged
 

@@ -1464,8 +1464,13 @@ static int ave_core_reset(struct ave_device *ave, bool *pulsed, bool resume)
 	 * not past a DAPF entry, and iBoot leaves that DAPF empty; what must
 	 * hold there is only that the reset did not change it.
 	 */
-	if (after != before || (!admits && !ave->soc->iboot.translated)) {
+	if (after != before) {
 		dev_err(dev, "core reset: the DAPF changed; not starting the core - Linux cannot put those entries back (docs/49), only a reboot can\n");
+		return -ENODEV;
+	}
+	if (!admits && !ave->soc->iboot.translated) {
+		/* issue #5: a DAPF that survived but was never programmed */
+		dev_err(dev, "core reset: the DAPF survived but does not admit the TEXT fetch (nothing has programmed it yet this boot); not starting the core\n");
 		return -ENODEV;
 	}
 	if (!(st & AVE_ASC_ST_STOPPED)) {

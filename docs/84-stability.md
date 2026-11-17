@@ -67,7 +67,11 @@ is not given, `ave_fw_data_ran()` compares this boot's DATA with the
 pristine blob, ignoring STKG (random per boot). Cold: 0 bytes, nothing
 pulsed. After a run: ~291 600 bytes, so pulse + restore (`recover_halted`).
 CPU_STATUS alone cannot tell cold (0x2a) from halted (0x2e) reliably, which
-is how s2-9 pulsed a cold core.
+is how s2-9 pulsed a cold core. Since issue #5 a small drift (at most a
+page) is first checked against the image: a pristine blob whose fill bytes
+are not this machine's (an image-built `--tunables none` blob over in-place
+DATA) differs from cold DATA by a few hundred bytes, and is now reported as
+cold instead of reset (docs/89 §10.3).
 
 **R6** (five `ave-load.sh` / encode / `ave-load.sh unload` cycles in one
 boot, default parameters): load 1 "cold", loads 2-5 reset and restore.
